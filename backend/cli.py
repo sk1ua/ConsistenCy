@@ -28,6 +28,9 @@ from src.baselines import (
     HeuristicBaseline,
     ThresholdBaseline,
 )
+from src.project_selector import ProjectSelector, ProjectCriteria, CommitSampler
+from src.kappa_calculator import KappaCalculator
+from src.annotation_tool import AnnotationTool
 from src.commit_pipeline import (
     CommitMiner,
     Neo4jGraphStore,
@@ -972,6 +975,207 @@ def generate_cases(repo_path, commits, top_n):
         console.print(f"\n生成了 {len(result['cases'])} 个高风险案例")
     else:
         console.print("[red]❌ 案例生成失败[/red]")
+
+
+# ===========================================================================
+# M4 命令组：标注数据准备流水线
+# ===========================================================================
+
+@cli.group(name='m4')
+def m4_group():
+    """M4 标注数据准备流水线（项目选择 → 提交采样 → 人工标注 → Kappa 验证）"""
+    pass
+
+
+@m4_group.command(name='select-projects')
+@click.option('--n', default=10, show_default=True, help='目标项目数量')
+@click.option('--min-stars', default=200, show_default=True, help='最低 star 数')
+@click.option('--min-contributors', default=3, show_default=True, help='最低贡献者数')
+@click.option('--min-age-months', default=12, show_default=True, help='项目最小年龄（月）')
+@click.option('--token', envvar='GITHUB_ACCESS_TOKEN', default=None,
+              help='GitHub 个人访问令牌（也可通过 GITHUB_ACCESS_TOKEN 环境变量传入）')
+@click.option('--output', default=None,
+              type=click.Path(), help='输出 JSON 路径（默认 data/projects/selected_projects.json）')
+def m4_select_projects(n, min_stars, min_contributors, min_age_months, token, output):
+    """
+    M4.1: 从 GitHub 自动筛选待标注的 Python 开源项目
+
+    示例：
+
+      \b
+      # 搜索 10 个项目（需设置 GITHUB_ACCESS_TOKEN）
+      python cli.py m4 select-projects --n 10 --min-stars 500
+
+    需要 GITHUB_ACCESS_TOKEN 以提高 API 限速上限（可选：无 token 限 60 req/h）。
+    """
+    console.print(Panel.fit("🔍  M4.1 项目选择 (ProjectSelector)", style="bold cyan"))
+
+    criteria = ProjectCriteria(
+        min_stars=min_stars,
+        min_contributors=min_contributors,
+        min_age_months=min_age_months,
+    )
+    selector = ProjectSelector(criteria=criteria, token=token)
+    try:
+        projects = selector.select(n=n)
+    except RuntimeError as exc:
+        console.print(f"[red]❌ GitHub API 错误: {exc}[/red]")
+        console.print("[yellow]提示: 请设置环境变量 GITHUB_ACCESS_TOKEN[/yellow]")
+        raise SystemExit(1)
+
+    out_path = selector.save(projects, output_path=output)
+
+    table = Table(title=f"已选定 {len(projects)} 个项目")
+    table.add_column("项目", style="cyan")
+    table.add_column("⭐ Stars", justify="right")
+    table.add_column("描述")
+    for p in projects:
+        table.add_row(p.full_name, str(p.stars), p.description[:60])
+    console.print(table)
+    console.print(f"\n[green]✅ 已保存 → {out_path}[/green]")
+
+
+@m4_group.command(name='sample-commits')
+@click.argument('repo_path', type=click.Path(exists=True))
+@click.argument('project_name')
+@click.option('--n', default=50, show_default=True, help='采样提交数量')
+@click.option('--max-per-author', default=5, show_default=True, help='每作者最多采样数')
+@click.option('--seed', default=42, show_default=True, help='随机种子')
+@click.option('--output', default=None, type=click.Path(),
+              help='输出 JSONL 路径（默认 data/annotations/batches/<project>_batch.jsonl）')
+def m4_sample_commits(repo_path, project_name, n, max_per_author, seed, output):
+    """
+    M4.2: 从本地 Git 仓库中分层采样提交，生成标注批次
+
+    \b
+    REPO_PATH:    已 clone 的本地仓库路径
+    PROJECT_NAME: 项目标识名（用于输出文件命名）
+
+    示例：
+
+      \b
+      git clone https://github.com/pallets/flask /tmp/flask
+      python cli.py m4 sample-commits /tmp/flask flask --n 50
+    """
+    console.print(Panel.fit(f"📦  M4.2 提交采样: {project_name}", style="bold cyan"))
+
+    sampler = CommitSampler(repo_path=repo_path, project_name=project_name)
+    shas = sampler.sample(n=n, max_per_author=max_per_author, seed=seed)
+
+    if not shas:
+        console.print("[red]❌ 未采样到任何提交，请检查仓库路径或过滤条件[/red]")
+        raise SystemExit(1)
+
+    out_path = sampler.save_batch(shas, output_path=output)
+    console.print(f"[green]✅ 采样 {len(shas)} 个提交 → {out_path}[/green]")
+    console.print("\n下一步: 将批次文件交给标注员，运行:\n"
+                  f"  python cli.py m4 annotate {repo_path} <output_dir> <annotator_id>")
+
+
+@m4_group.command(name='annotate')
+@click.argument('repo_path', type=click.Path(exists=True))
+@click.argument('output_dir', type=click.Path())
+@click.argument('annotator_id')
+@click.option('--batch', default=None, type=click.Path(exists=True),
+              help='批次 JSONL 文件路径（由 sample-commits 生成）；留空则手动输入 SHA')
+@click.option('--limit', default=0, help='最多标注数量（0 = 全部）')
+def m4_annotate(repo_path, output_dir, annotator_id, batch, limit):
+    """
+    M4.3: 交互式人工标注工具
+
+    \b
+    REPO_PATH:    本地仓库路径
+    OUTPUT_DIR:   标注结果输出目录
+    ANNOTATOR_ID: 标注员 ID（如 annotator_001）
+
+    示例：
+
+      \b
+      python cli.py m4 annotate /tmp/flask ./data/annotations/flask annotator_001 \\
+          --batch ./data/annotations/batches/flask_batch.jsonl
+    """
+    console.print(Panel.fit(f"✏️   M4.3 人工标注: {annotator_id}", style="bold cyan"))
+    console.print("[yellow]标注参考: data/annotations/ANNOTATION_GUIDELINE.md[/yellow]\n")
+
+    tool = AnnotationTool(
+        repo_path=repo_path,
+        output_dir=output_dir,
+        annotator_id=annotator_id,
+    )
+
+    if batch:
+        # 从批次文件读取 SHA 列表
+        shas = []
+        with open(batch, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                    shas.append(rec["commit_sha"])
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        if limit > 0:
+            shas = shas[:limit]
+        console.print(f"[cyan]批次文件: {len(shas)} 个提交[/cyan]\n")
+
+        already_done = tool.get_annotated_commits()
+        pending = [s for s in shas if s not in already_done]
+        console.print(f"已标注: {len(already_done)}  待标注: {len(pending)}\n")
+
+        for sha in pending:
+            result = tool.annotate_commit(sha)
+            if result is None:
+                break  # 用户中止
+    else:
+        console.print("[yellow]未指定批次文件，请手动输入提交 SHA（Ctrl-C 退出）[/yellow]")
+        while True:
+            try:
+                sha = input("输入 commit SHA: ").strip()
+                if sha:
+                    tool.annotate_commit(sha)
+            except KeyboardInterrupt:
+                break
+
+    console.print(f"\n[green]✅ 标注完成。共 {len(tool.annotations)} 条记录[/green]")
+    console.print(f"输出目录: {tool.output_dir}")
+
+
+@m4_group.command(name='calc-kappa')
+@click.argument('annotations_dir', type=click.Path(exists=True))
+@click.option('--output', default=None, type=click.Path(),
+              help='报告输出路径（默认 data/annotations/kappa_report.json）')
+@click.option('--min-kappa', default=0.70, show_default=True,
+              help='通过阈值（M5 验收标准）')
+def m4_calc_kappa(annotations_dir, output, min_kappa):
+    """
+    M5: 计算标注员间一致性（Cohen/Fleiss Kappa），验证 M5 标准（≥ 0.70）
+
+    \b
+    ANNOTATIONS_DIR: 包含 annotations_<id>.jsonl 文件的目录
+
+    示例：
+
+      \b
+      python cli.py m4 calc-kappa ./data/annotations/flask/
+    """
+    console.print(Panel.fit("📐  M5 一致性检验 (Kappa)", style="bold cyan"))
+
+    calculator = KappaCalculator(annotations_dir=annotations_dir)
+    report = calculator.generate_report()
+    calculator.print_summary(report)
+
+    out_path = calculator.save_report(report, output_path=output)
+
+    summary = report.get("summary", {})
+    mean_k = summary.get("mean_kappa", 0.0)
+    if mean_k >= min_kappa:
+        console.print(f"[green]✅ 平均 Kappa {mean_k:.4f} ≥ {min_kappa}，"
+                      f"通过 M5 验收标准！[/green]")
+        console.print("下一步: 进入 M6 全量标注阶段")
+    else:
+        console.print(f"[red]❌ 平均 Kappa {mean_k:.4f} < {min_kappa}，"
+                      f"未通过 M5 标准[/red]")
+        console.print("[yellow]建议: 召开标注校准会议，重点讨论 top_disagreements 中的提交[/yellow]")
+        console.print(f"分歧报告: {out_path}")
 
 
 if __name__ == '__main__':
