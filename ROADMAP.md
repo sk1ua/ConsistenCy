@@ -35,14 +35,19 @@
 ### Phase 1: 人工标注 (Week 1-10)
 
 #### M4: 标注准备 (Week 1-2)
-- [ ] 编写标注指南
-- [ ] 构建标注工具
-- [ ] 选择 10 个项目
-- [ ] 招募 2-3 名标注员
+- [x] 编写标注指南 → `data/annotations/ANNOTATION_GUIDELINE.md`
+- [x] 构建标注工具 → `backend/src/annotation_tool.py`
+- [x] 构建项目选择器 → `backend/src/project_selector.py`
+- [x] 构建提交采样器 → `backend/src/project_selector.py::CommitSampler`
+- [x] 预选 10 个项目 → `data/projects/selected_projects.json`
+- [x] CLI 流水线 → `python cli.py m4 select-projects / sample-commits / annotate`
+- [ ] 招募 2-3 名标注员（人工环节）
 
 #### M5: Pilot 标注 (Week 3-4)
-- [ ] 标注 50 pilot 样本
-- [ ] Cohen's Kappa ≥ 0.70
+- [ ] 标注 50 pilot 样本（使用 `python cli.py m4 annotate`）
+- [x] Cohen's Kappa 计算器 → `backend/src/kappa_calculator.py`
+- [x] CLI 验收命令 → `python cli.py m4 calc-kappa <annotations_dir>`
+- [ ] 执行 Pilot：Kappa ≥ 0.70
 - [ ] 迭代优化指南
 
 产出：小规模高一致性标注集与标注流程基线。
@@ -56,9 +61,11 @@
 ### Phase 2: 评估重构 (Week 11-13)
 
 #### M7: 新框架实现
-- [ ] `HumanLabeledEvaluator` - 消除循环论证
-- [ ] `AblationStudyV2` - 真实消融
-- [ ] 基线对比 + 显著性检验
+- [x] `HumanLabeledEvaluator` - 消除循环论证 → `backend/src/human_labeled_evaluator.py`
+- [x] `AblationStudyV2` - 真实消融 → `backend/src/ablation_study_v2.py`
+- [x] 基线对比 + 显著性检验 → `backend/src/baselines.py`
+- [x] 跨项目评估 → `backend/src/cross_project_evaluator.py`
+- [x] CLI 命令 → `eval-human / ablation-v2 / compare-baselines-v2 / dataset-stats`
 
 产出：独立测试集评估报告与可复现实验脚本。
 
@@ -86,8 +93,8 @@
 
 | 指标 | 目标 | 状态 |
 |------|------|------|
-| 标注样本 | ≥ 500 | 🔄 0 |
-| Kappa | ≥ 0.70 | 🔄 待计算 |
+| 标注样本 | ≥ 500 | 🔄 0（M4 工具已就绪）|
+| Kappa | ≥ 0.70 | 🔄 待执行（计算器已就绪）|
 | Test F1 | ≥ 0.65 | ⏳ 待评估 |
 | 优于基线 | p < 0.05 | ⏳ 待对比 |
 | 跨项目降幅 | < 20% | ⏳ 待测试 |

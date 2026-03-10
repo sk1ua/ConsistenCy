@@ -18,6 +18,11 @@ Evaluation modules (v2):
 - ablation_study_v2: 真实消融分析
 - baselines: 基线对比
 - cross_project_evaluator: 跨项目评估
+
+Annotation pipeline (M4):
+- project_selector: 项目选择 + 提交采样
+- kappa_calculator: 标注一致性计算
+- annotation_tool: 人工标注 CLI 工具
 """
 
 __version__ = "0.2.0-alpha"
@@ -62,7 +67,14 @@ try:
     from .baselines import BaselineComparison
     from .cross_project_evaluator import CrossProjectEvaluator
 except ImportError:
-    # V2 modules may not be available in all environments
+    pass
+
+# Annotation pipeline (M4)
+try:
+    from .project_selector import ProjectSelector, ProjectCriteria, CommitSampler
+    from .kappa_calculator import KappaCalculator
+    from .annotation_tool import AnnotationTool
+except ImportError:
     pass
 
 __all__ = [
