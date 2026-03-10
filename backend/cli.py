@@ -3,19 +3,31 @@
 CLI工具
 命令行接口
 """
+import json
 import sys
 import click
+import numpy as np
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.syntax import Syntax
 
+import config
+
 from src.parser import CodeParser
 from src.extractor import KnowledgeExtractor
 from src.storage import CodeStorage
 from src.checker import ConsistencyChecker
 from src.ml_naming_model import NamingStyleModel
+from src.human_labeled_evaluator import HumanLabeledEvaluator, DatasetStatistics
+from src.ablation_study_v2 import AblationStudyV2
+from src.baselines import (
+    BaselineComparison,
+    RandomBaseline,
+    HeuristicBaseline,
+    ThresholdBaseline,
+)
 from src.commit_pipeline import (
     CommitMiner,
     Neo4jGraphStore,
@@ -485,6 +497,197 @@ def eval_weak(repo_path, samples, max_commits, neo4j_uri, neo4j_user, neo4j_pass
     console.print(table)
 
     console.print(f"\n数据集文件: [yellow]{result['dataset_path']}[/yellow]")
+
+
+@cli.command(name='dataset-stats')
+@click.argument('dataset_path', type=click.Path(exists=True))
+def dataset_stats(dataset_path):
+    """
+    V2: 查看人工标注数据集统计信息
+
+    DATASET_PATH: 标注数据集路径（JSONL）
+    """
+    console.print(Panel.fit(
+        "📊 数据集统计 (V2)",
+        style="bold blue"
+    ))
+
+    try:
+        stats = DatasetStatistics.analyze_dataset(dataset_path)
+    except Exception as exc:
+        console.print(f"[red]❌ 统计失败: {exc}[/red]")
+        return
+
+    table = Table(title="Dataset Statistics")
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="magenta")
+
+    table.add_row("total_samples", str(stats.get("total_samples", 0)))
+    table.add_row("class_balance", f"{stats.get('class_balance', 0):.4f}")
+    table.add_row("label_distribution", str(stats.get("label_distribution", {})))
+
+    for key in ["style_risk_mean", "style_risk_std", "structure_risk_mean", "structure_risk_std", "logic_risk_mean", "logic_risk_std"]:
+        if key in stats:
+            table.add_row(key, f"{stats[key]:.4f}")
+
+    console.print(table)
+
+
+@cli.command(name='eval-human')
+@click.argument('dataset_path', type=click.Path(exists=True))
+@click.option('--train-ratio', default=0.6, show_default=True, help='训练集比例')
+@click.option('--valid-ratio', default=0.2, show_default=True, help='验证集比例')
+@click.option('--test-ratio', default=0.2, show_default=True, help='测试集比例')
+@click.option('--seed', default=42, show_default=True, help='随机种子')
+@click.option('--bootstrap', default=300, show_default=True, help='Bootstrap 重采样次数')
+@click.option('--save-splits-dir', default='', help='可选：保存 train/valid/test 划分目录')
+@click.option('--save-metrics', default='', help='可选：保存评估结果 JSON 路径')
+def eval_human(dataset_path, train_ratio, valid_ratio, test_ratio, seed, bootstrap, save_splits_dir, save_metrics):
+    """
+    V2: 基于人工标注数据集进行严格评估
+
+    DATASET_PATH: 标注数据集路径（JSONL）
+    """
+    console.print(Panel.fit(
+        "🧪 人工标注评估 (V2)",
+        style="bold green"
+    ))
+
+    try:
+        evaluator = HumanLabeledEvaluator(dataset_path)
+        split = evaluator.split_data(
+            train_ratio=train_ratio,
+            valid_ratio=valid_ratio,
+            test_ratio=test_ratio,
+            seed=seed,
+            stratify=True,
+        )
+        model = evaluator.train_baseline_model(random_state=seed)
+        metrics = evaluator.evaluate_on_test(model, bootstrap_iterations=bootstrap)
+    except Exception as exc:
+        console.print(f"[red]❌ 评估失败: {exc}[/red]")
+        return
+
+    table = Table(title="Human-Labeled Eval Metrics")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="magenta")
+    table.add_row("train_size", str(split.get("train", 0)))
+    table.add_row("valid_size", str(split.get("valid", 0)))
+    table.add_row("test_size", str(metrics.get("test_size", split.get("test", 0))))
+    table.add_row("precision", f"{metrics.get('precision', 0):.4f}")
+    table.add_row("recall", f"{metrics.get('recall', 0):.4f}")
+    table.add_row("f1", f"{metrics.get('f1', 0):.4f}")
+    table.add_row("accuracy", f"{metrics.get('accuracy', 0):.4f}")
+    if "auc_roc" in metrics:
+        table.add_row("auc_roc", f"{metrics['auc_roc']:.4f}")
+    console.print(table)
+
+    ci = metrics.get("confidence_intervals_95", {})
+    if ci:
+        console.print(
+            f"95% CI | F1={ci.get('f1', ('n/a', 'n/a'))}, "
+            f"Precision={ci.get('precision', ('n/a', 'n/a'))}, "
+            f"Recall={ci.get('recall', ('n/a', 'n/a'))}"
+        )
+
+    if save_splits_dir:
+        evaluator.save_splits(save_splits_dir)
+
+    output_path = save_metrics or str(config.DATA_DIR / "experiments" / "human_eval_metrics_v2.json")
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2, ensure_ascii=False)
+    console.print(f"\n[green]💾 评估结果保存至: {output_file}[/green]")
+
+
+@cli.command(name='ablation-v2')
+@click.argument('dataset_path', type=click.Path(exists=True))
+@click.option('--components', default='vector,graph,message_signals,rules', show_default=True, help='消融组件列表（逗号分隔）')
+@click.option('--seed', default=42, show_default=True, help='随机种子')
+@click.option('--output', default='', help='可选：输出 JSON 路径')
+def ablation_v2(dataset_path, components, seed, output):
+    """
+    V2: 真实消融实验（移除组件后重新训练）
+
+    DATASET_PATH: 标注数据集路径（JSONL）
+    """
+    console.print(Panel.fit(
+        "🔬 真实消融实验 (V2)",
+        style="bold green"
+    ))
+
+    component_list = [c.strip() for c in components.split(',') if c.strip()]
+
+    try:
+        evaluator = HumanLabeledEvaluator(dataset_path)
+        evaluator.split_data(train_ratio=0.6, valid_ratio=0.2, test_ratio=0.2, seed=seed, stratify=True)
+
+        ablation = AblationStudyV2(evaluator)
+        ablation.run_ablation(components=component_list, random_state=seed)
+        console.print(ablation.generate_summary_report())
+
+        output_path = output or str(config.DATA_DIR / "experiments" / "ablation_study_v2.json")
+        ablation.save_results(output_path)
+    except Exception as exc:
+        console.print(f"[red]❌ 消融实验失败: {exc}[/red]")
+
+
+@cli.command(name='compare-baselines-v2')
+@click.argument('dataset_path', type=click.Path(exists=True))
+@click.option('--seed', default=42, show_default=True, help='随机种子')
+@click.option('--output', default='', help='可选：输出 JSON 路径')
+def compare_baselines_v2(dataset_path, seed, output):
+    """
+    V2: 与随机和启发式基线进行对比
+
+    DATASET_PATH: 标注数据集路径（JSONL）
+    """
+    console.print(Panel.fit(
+        "⚖️ 基线对比 (V2)",
+        style="bold green"
+    ))
+
+    try:
+        evaluator = HumanLabeledEvaluator(dataset_path)
+        evaluator.split_data(train_ratio=0.6, valid_ratio=0.2, test_ratio=0.2, seed=seed, stratify=True)
+
+        feature_keys = ["style_risk", "structure_risk", "logic_risk"]
+        model = evaluator.train_baseline_model(feature_keys=feature_keys, random_state=seed)
+        X_test = np.array([
+            [row.get(k, 0.0) for k in feature_keys]
+            for row in evaluator.test_data
+        ])
+        y_pred_model = model.predict(X_test)
+
+        comparison = BaselineComparison(evaluator)
+        comparison.add_baseline(RandomBaseline(seed=seed))
+        comparison.add_baseline(HeuristicBaseline("changed_files"))
+        comparison.add_baseline(HeuristicBaseline("commit_message_length"))
+        comparison.add_baseline(ThresholdBaseline("overall_risk", threshold=0.5))
+        comparison.add_model_results("ConsistenCy (Full Model)", y_pred_model)
+
+        y_pred_random = RandomBaseline(seed=seed).predict(evaluator.test_data)
+        significance = comparison.mcnemar_test(
+            "ConsistenCy (Full Model)",
+            "Random Baseline",
+            y_pred_model,
+            y_pred_random,
+        )
+
+        console.print(comparison.generate_comparison_table())
+        if "error" in significance:
+            console.print(f"[yellow]⚠️ 显著性检验失败: {significance['error']}[/yellow]")
+        else:
+            console.print(
+                f"显著性检验: {significance.get('conclusion', 'N/A')} "
+                f"(p={significance.get('p_value', 1.0):.4f})"
+            )
+
+        output_path = output or str(config.DATA_DIR / "experiments" / "baseline_comparison_v2.json")
+        comparison.save_results(output_path)
+    except Exception as exc:
+        console.print(f"[red]❌ 基线对比失败: {exc}[/red]")
 
 @cli.command(name='tune-weights')
 @click.argument('dataset_path', type=click.Path(exists=True))

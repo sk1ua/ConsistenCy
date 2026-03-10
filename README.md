@@ -74,10 +74,13 @@ Main components:
 │       ├── storage.py
 │       ├── checker.py
 │       ├── commit_pipeline.py
+│       ├── annotation_tool.py
 │       ├── human_labeled_evaluator.py
 │       ├── ablation_study_v2.py
 │       ├── baselines.py
-│       └── cross_project_evaluator.py
+│       ├── cross_project_evaluator.py
+│       ├── interfaces.py
+│       └── types.py
 ├── data/
 │   ├── rules.json
 │   ├── annotations/
@@ -166,6 +169,22 @@ python cli.py commit-mvp ../../python-patterns <commit_sha> --topk 3
 
 ```bash
 python cli.py eval-weak ../../python-patterns --samples 60 --max-commits 220
+```
+
+V2 evaluation workflow (human-labeled dataset):
+
+```bash
+# 查看数据集统计
+python cli.py dataset-stats ../data/annotations/labeled_dataset_v1.jsonl
+
+# 严格评估（train/valid/test + CI）
+python cli.py eval-human ../data/annotations/labeled_dataset_v1.jsonl --bootstrap 300
+
+# 真实消融实验
+python cli.py ablation-v2 ../data/annotations/labeled_dataset_v1.jsonl --components vector,graph,message_signals,rules
+
+# 基线对比与显著性检验
+python cli.py compare-baselines-v2 ../data/annotations/labeled_dataset_v1.jsonl
 ```
 
 ---
