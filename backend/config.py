@@ -50,6 +50,14 @@ VECTOR_DB_CONFIG = {
     "default_n_results": 5,
 }
 
+# 提交级管线配置（v0.2.1-dev）
+COMMIT_PIPELINE_CONFIG = {
+    "default_eval_seed": 42,
+    "default_eval_rev": "HEAD",
+    "min_eval_samples": 20,
+    "neutral_logic_penalty_when_no_evidence": 0.5,
+}
+
 ML_CONFIG["model_dir"].mkdir(exist_ok=True)
 
 # 支持的文件类型

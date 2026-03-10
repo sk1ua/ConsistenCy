@@ -10,10 +10,11 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from git import Repo
 from sklearn.linear_model import LogisticRegression
@@ -25,6 +26,8 @@ from .parser import CodeParser
 from .storage import CodeStorage
 from .utils import detect_naming_style
 
+# Git 空树哈希常量：表示仓库初始提交前的虚拟空树
+NULL_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 HUNK_RE = re.compile(r"@@ -(?P<o_start>\d+)(?:,(?P<o_count>\d+))? \+(?P<n_start>\d+)(?:,(?P<n_count>\d+))? @@")
 
@@ -36,6 +39,7 @@ class CommitContext:
     message: str
     changed_files: List[str]
     changed_functions: List[Dict[str, Any]]
+    deleted_files: List[str]
 
 
 class CommitMiner:
@@ -50,8 +54,9 @@ class CommitMiner:
         commit = self.repo.commit(commit_sha)
         parent = commit.parents[0] if commit.parents else None
 
-        changed_files = []
+        changed_files: List[str] = []
         changed_functions: List[Dict[str, Any]] = []
+        deleted_files: List[str] = []
 
         if parent:
             diffs = parent.diff(commit, create_patch=True)
@@ -59,11 +64,19 @@ class CommitMiner:
             diffs = commit.diff(NULL_TREE, create_patch=True)  # type: ignore[name-defined]
 
         for diff in diffs:
-            file_path = diff.b_path or diff.a_path
+            old_path = diff.a_path
+            new_path = diff.b_path
+            file_path = new_path or old_path
             if not file_path or not file_path.endswith(".py"):
                 continue
 
             changed_files.append(file_path)
+
+            # 删除文件不在当前提交树中，记录删除证据后跳过源码解析。
+            if old_path and not new_path:
+                deleted_files.append(old_path)
+                continue
+
             source = self._read_file_from_commit(commit, file_path)
             if source is None:
                 continue
@@ -72,7 +85,9 @@ class CommitMiner:
             if not parsed:
                 continue
 
-            changed_lines = self._extract_changed_lines(diff.diff.decode("utf-8", errors="ignore"))
+            changed_lines = self._extract_changed_lines(self._decode_patch(diff.diff))
+            if not changed_lines:
+                continue
             for fn in parsed.get("functions", []):
                 if self._function_touched(fn, changed_lines):
                     fn_copy = dict(fn)
@@ -87,11 +102,12 @@ class CommitMiner:
             message=commit.message.strip(),
             changed_files=sorted(set(changed_files)),
             changed_functions=changed_functions,
+            deleted_files=sorted(set(deleted_files)),
         )
 
-    def list_recent_commits(self, max_count: int = 300) -> List[str]:
+    def list_recent_commits(self, max_count: int = 300, rev: str = "HEAD") -> List[str]:
         commits = []
-        for c in self.repo.iter_commits(max_count=max_count):
+        for c in self.repo.iter_commits(rev=rev, max_count=max_count):
             if len(c.parents) > 1:
                 continue
             commits.append(c.hexsha)
@@ -103,6 +119,13 @@ class CommitMiner:
             return blob.data_stream.read().decode("utf-8", errors="ignore")
         except Exception:
             return None
+
+    def _decode_patch(self, patch_blob: Any) -> str:
+        if patch_blob is None:
+            return ""
+        if isinstance(patch_blob, bytes):
+            return patch_blob.decode("utf-8", errors="ignore")
+        return str(patch_blob)
 
     def _extract_changed_lines(self, patch_text: str) -> List[int]:
         lines: List[int] = []
@@ -270,13 +293,23 @@ class CommitRiskScorer:
 
     def score(self, context: CommitContext, top_k: int = 3) -> Dict[str, Any]:
         if not context.changed_functions:
+            structure_risk = min(1.0, 0.2 * len(context.deleted_files)) if context.deleted_files else 0.0
+            overall = 0.3 * structure_risk
             return {
                 "commit": context.commit_id,
+                "author": context.author,
+                "changed_files": len(context.changed_files),
+                "changed_functions": 0,
+                "deleted_files": len(context.deleted_files),
                 "style_risk": 0.0,
-                "structure_risk": 0.0,
+                "structure_risk": round(structure_risk, 4),
                 "logic_risk": 0.0,
-                "overall_risk": 0.0,
-                "evidence": {"functions": []},
+                "overall_risk": round(overall, 4),
+                "weak_label": 1 if overall >= 0.55 else 0,
+                "evidence": {
+                    "functions": [],
+                    "deleted_files": context.deleted_files,
+                },
             }
 
         naming_rules = self.storage.get_naming_patterns() or config.CHECK_CONFIG["naming"]
@@ -285,6 +318,7 @@ class CommitRiskScorer:
         structure_penalty = 0.0
         logic_penalty = 0.0
         evidence = []
+        neutral_logic_penalty = config.COMMIT_PIPELINE_CONFIG["neutral_logic_penalty_when_no_evidence"]
 
         for fn in context.changed_functions:
             expected = naming_rules.get("function", "snake_case")
@@ -302,8 +336,13 @@ class CommitRiskScorer:
             structure_penalty += min(1.0, structure_bad)
 
             hits = self.retriever.retrieve(fn, top_k=top_k)
-            best_score = hits[0]["score"] if hits else 0.0
-            logic_bad = 1.0 - best_score
+            if hits:
+                best_score = max(0.0, min(1.0, float(hits[0].get("score", 0.0))))
+                logic_bad = 1.0 - best_score
+                evidence_state = "retrieved"
+            else:
+                logic_bad = neutral_logic_penalty
+                evidence_state = "no_evidence"
             logic_penalty += logic_bad
 
             evidence.append(
@@ -312,6 +351,8 @@ class CommitRiskScorer:
                     "file": fn.get("file_path"),
                     "line": fn.get("lineno"),
                     "style": {"expected": expected, "actual": actual},
+                    "logic_penalty": round(logic_bad, 4),
+                    "evidence_state": evidence_state,
                     "top_hits": hits,
                 }
             )
@@ -321,18 +362,30 @@ class CommitRiskScorer:
         structure_risk = structure_penalty / n
         logic_risk = logic_penalty / n
         overall = 0.4 * style_risk + 0.3 * structure_risk + 0.3 * logic_risk
+        ranked_evidence = sorted(
+            evidence,
+            key=lambda item: (
+                item.get("logic_penalty", 0.0),
+                1 if item.get("style", {}).get("expected") != item.get("style", {}).get("actual") else 0,
+            ),
+            reverse=True,
+        )
 
         return {
             "commit": context.commit_id,
             "author": context.author,
             "changed_files": len(context.changed_files),
             "changed_functions": len(context.changed_functions),
+            "deleted_files": len(context.deleted_files),
             "style_risk": round(style_risk, 4),
             "structure_risk": round(structure_risk, 4),
             "logic_risk": round(logic_risk, 4),
             "overall_risk": round(overall, 4),
             "weak_label": 1 if overall >= 0.55 else 0,
-            "evidence": {"functions": evidence[:top_k]},
+            "evidence": {
+                "functions": ranked_evidence[:top_k],
+                "deleted_files": context.deleted_files,
+            },
         }
 
 
@@ -345,17 +398,33 @@ class WeakEvalRunner:
         self.output_dir = config.DATA_DIR / "eval"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def run(self, samples: int = 80, max_commits: int = 300) -> Dict[str, Any]:
-        commit_shas = self.miner.list_recent_commits(max_count=max_commits)
+    def run(
+        self,
+        samples: int = 80,
+        max_commits: int = 300,
+        seed: int = config.COMMIT_PIPELINE_CONFIG["default_eval_seed"],
+        rev: str = config.COMMIT_PIPELINE_CONFIG["default_eval_rev"],
+    ) -> Dict[str, Any]:
+        random.seed(seed)
+        commit_shas = self.miner.list_recent_commits(max_count=max_commits, rev=rev)
         rows: List[Dict[str, Any]] = []
+        skipped_commits = 0
+        error_examples: List[str] = []
 
         for sha in commit_shas:
             if len(rows) >= samples:
                 break
-            ctx = self.miner.get_commit(sha)
-            if not ctx.changed_functions:
+            try:
+                ctx = self.miner.get_commit(sha)
+                if not ctx.changed_functions and not ctx.deleted_files:
+                    continue
+                scored = self.scorer.score(ctx, top_k=3)
+            except Exception as exc:
+                skipped_commits += 1
+                if len(error_examples) < 3:
+                    error_examples.append(f"{sha[:10]}: {exc}")
                 continue
-            scored = self.scorer.score(ctx, top_k=3)
+
             rows.append(
                 {
                     "commit": scored["commit"],
@@ -366,11 +435,16 @@ class WeakEvalRunner:
                 }
             )
 
-        if len(rows) < 20:
+        min_samples = config.COMMIT_PIPELINE_CONFIG["min_eval_samples"]
+        if len(rows) < min_samples:
             return {
                 "ok": False,
-                "message": f"样本不足，至少20条，当前{len(rows)}条",
+            "message": f"样本不足，至少{min_samples}条，当前{len(rows)}条",
                 "samples": len(rows),
+                "skipped_commits": skipped_commits,
+                "seed": seed,
+                "rev": rev,
+                "errors": error_examples,
             }
 
         # 使用分位数阈值生成弱监督标签，避免标签单一导致指标退化。
@@ -388,11 +462,25 @@ class WeakEvalRunner:
         X = [[r["style_risk"], r["structure_risk"], r["logic_risk"], r["overall_risk"]] for r in rows]
         y = [r["label"] for r in rows]
 
+        if len(set(y)) < 2:
+            return {
+                "ok": False,
+                "message": "弱标签分布单一，无法训练评估模型",
+                "samples": len(rows),
+                "skipped_commits": skipped_commits,
+                "seed": seed,
+                "rev": rev,
+            }
+
         x_train, x_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.3, random_state=42, stratify=y if len(set(y)) > 1 else None
+            X,
+            y,
+            test_size=0.3,
+            random_state=seed,
+            stratify=y if len(set(y)) > 1 else None,
         )
 
-        model = LogisticRegression(max_iter=300)
+        model = LogisticRegression(max_iter=300, random_state=seed)
         model.fit(x_train, y_train)
         y_pred = model.predict(x_test)
 
@@ -405,11 +493,11 @@ class WeakEvalRunner:
             "samples": len(rows),
             "weak_label_threshold": round(float(threshold), 4),
             "dataset_path": str(dataset_path),
+            "seed": seed,
+            "rev": rev,
+            "skipped_commits": skipped_commits,
             "precision": round(float(p), 4),
             "recall": round(float(r), 4),
             "f1": round(float(f1), 4),
+            "errors": error_examples,
         }
-
-
-# GitPython 在无 parent 的场景中需要该常量
-NULL_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
