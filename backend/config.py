@@ -58,7 +58,34 @@ COMMIT_PIPELINE_CONFIG = {
     "neutral_logic_penalty_when_no_evidence": 0.5,
 }
 
+# M2: 图谱与融合检索配置（v0.3.0-dev）
+GRAPH_CONFIG = {
+    "neo4j_batch_size": 50,
+    "neo4j_retry_attempts": 3,
+    "neo4j_timeout_seconds": 30,
+    "enable_function_call_edges": False,  # 未来扩展
+}
+
+HYBRID_RETRIEVAL_CONFIG = {
+    "vector_weight": 0.6,
+    "graph_weight": 0.4,
+    "fusion_method": "weighted_sum",  # weighted_sum | rrf | linear_combination
+    "rrf_k": 60,  # Reciprocal Rank Fusion 参数
+    "min_confidence_threshold": 0.3,
+}
+
+RISK_SCORING_CONFIG = {
+    "default_weights": {
+        "style": 0.4,
+        "structure": 0.3,
+        "logic": 0.3,
+    },
+    "auto_tune_enabled": False,
+    "tuned_weights_file": DATA_DIR / "models" / "tuned_risk_weights.json",
+}
+
 ML_CONFIG["model_dir"].mkdir(exist_ok=True)
+RISK_SCORING_CONFIG["tuned_weights_file"].parent.mkdir(exist_ok=True)
 
 # 支持的文件类型
 SUPPORTED_EXTENSIONS = {

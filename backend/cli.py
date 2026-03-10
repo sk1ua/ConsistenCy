@@ -22,6 +22,8 @@ from src.commit_pipeline import (
     HybridRetriever,
     CommitRiskScorer,
     WeakEvalRunner,
+    RiskWeightTuner,
+    RetrievalComparer,
 )
 
 console = Console()
@@ -460,7 +462,163 @@ def eval_weak(repo_path, samples, max_commits, neo4j_uri, neo4j_user, neo4j_pass
     console.print(table)
 
     console.print(f"\n数据集文件: [yellow]{result['dataset_path']}[/yellow]")
+@cli.command(name='tune-weights')
+@click.argument('dataset_path', type=click.Path(exists=True))
+@click.option('--grid-step', default=0.1, help='网格搜索步长')
+def tune_weights(dataset_path, grid_step):
+    """
+    M2: 基于评估数据集自动调优风险权重
+    
+    DATASET_PATH: 弱监督数据集路径（通常是 data/eval/weak_eval_dataset.jsonl）
+    """
+    console.print(Panel.fit(
+        "⚙️  风险权重自动调优 (M2)",
+        style="bold cyan"
+    ))
 
+    tuner = RiskWeightTuner(dataset_path=dataset_path)
+    result = tuner.tune(grid_step=grid_step)
+
+    if not result.get('ok'):
+        console.print(f"[red]❌ {result.get('message', '调优失败')}[/red]")
+        return
+
+    console.print(f"\n[green]✅ 调优完成！[/green]")
+    
+    table = Table(title="最优权重")
+    table.add_column("维度", style="cyan")
+    table.add_column("权重", style="magenta")
+    
+    weights = result['best_weights']
+    table.add_row("style", f"{weights['style']:.2f}")
+    table.add_row("structure", f"{weights['structure']:.2f}")
+    table.add_row("logic", f"{weights['logic']:.2f}")
+    
+    console.print(table)
+    console.print(f"\n最优 F1: [yellow]{result['best_f1']:.4f}[/yellow]")
+    console.print(f"候选数: {result['candidates_tested']}")
+    console.print(f"输出文件: [yellow]{result['output_file']}[/yellow]")
+
+
+@cli.command(name='compare-retrieval')
+@click.argument('repo_path', type=click.Path(exists=True))
+@click.argument('commit_sha')
+@click.option('--topk', default=3, help='检索结果数量')
+@click.option('--neo4j-uri', default='', help='Neo4j URI（可选）')
+@click.option('--neo4j-user', default='', help='Neo4j 用户名（可选）')
+@click.option('--neo4j-password', default='', help='Neo4j 密码（可选）')
+def compare_retrieval(repo_path, commit_sha, topk, neo4j_uri, neo4j_user, neo4j_password):
+    """
+    M2: 对比向量/图/融合检索效果
+    
+    REPO_PATH: Git 仓库路径
+    COMMIT_SHA: 提交哈希（支持HEAD等）
+    """
+    console.print(Panel.fit(
+        "🔬 检索方法对比 (M2)",
+        style="bold cyan"
+    ))
+
+    storage = CodeStorage()
+    _ensure_knowledge_base(repo_path, storage)
+
+    graph = Neo4jGraphStore(
+        uri=neo4j_uri or None,
+        user=neo4j_user or None,
+        password=neo4j_password or None,
+    )
+    
+    try:
+        comparer = RetrievalComparer(
+            repo_path=repo_path,
+            storage=storage,
+            graph_store=graph if graph.enabled else None,
+        )
+        result = comparer.compare(commit_sha=commit_sha, top_k=topk)
+    finally:
+        graph.close()
+
+    if not result.get('ok'):
+        console.print(f"[red]❌ {result.get('message', '对比失败')}[/red]")
+        return
+
+    console.print(f"\n提交: [yellow]{result['commit']}[/yellow]")
+    console.print(f"图谱可用: {'✅' if result['graph_available'] else '❌'}")
+
+    for comp in result['comparisons']:
+        console.print(f"\n[bold]函数: {comp['function']}[/bold]")
+        
+        table = Table()
+        table.add_column("检索方法", style="cyan")
+        table.add_column("结果数", style="magenta")
+        table.add_column("最高分", style="green")
+        
+        table.add_row(
+            "向量检索",
+            str(comp['vector_only']['count']),
+            f"{comp['vector_only']['top_score']:.3f}"
+        )
+        table.add_row(
+            "图检索",
+            str(comp['graph_only']['count']),
+            f"{comp['graph_only']['top_score']:.3f}"
+        )
+        table.add_row(
+            "融合(加权)",
+            str(comp['hybrid_weighted']['count']),
+            f"{comp['hybrid_weighted']['top_score']:.3f}"
+        )
+        table.add_row(
+            "融合(RRF)",
+            str(comp['hybrid_rrf']['count']),
+            f"{comp['hybrid_rrf']['top_score']:.3f}"
+        )
+        
+        console.print(table)
+
+
+@cli.command(name='graph-stats')
+@click.option('--neo4j-uri', required=True, help='Neo4j URI')
+@click.option('--neo4j-user', required=True, help='Neo4j 用户名')
+@click.option('--neo4j-password', required=True, help='Neo4j 密码')
+def graph_stats(neo4j_uri, neo4j_user, neo4j_password):
+    """
+    M2: 显示Neo4j图谱统计信息
+    """
+    console.print(Panel.fit(
+        "📊 图谱统计 (M2)",
+        style="bold cyan"
+    ))
+
+    graph = Neo4jGraphStore(uri=neo4j_uri, user=neo4j_user, password=neo4j_password)
+    
+    try:
+        stats = graph.get_stats()
+        
+        if not stats.get('enabled'):
+            console.print("[red]❌ Neo4j 未启用[/red]")
+            return
+
+        if 'error' in stats:
+            console.print(f"[red]❌ 查询失败: {stats['error']}[/red]")
+            return
+
+        table = Table(title="图谱实体统计")
+        table.add_column("实体类型", style="cyan")
+        table.add_column("数量", style="magenta")
+        
+        table.add_row("Authors", str(stats.get('authors', 0)))
+        table.add_row("Commits", str(stats.get('commits', 0)))
+        table.add_row("Files", str(stats.get('files', 0)))
+        table.add_row("Functions", str(stats.get('functions', 0)))
+        
+        console.print(table)
+    finally:
+        graph.close()
+
+
+if __name__ == '__main__':
+    cli()
 
 if __name__ == '__main__':
     cli()
