@@ -1,0 +1,7 @@
+{
+  "naming_patterns": {
+    "function": "snake_case",
+    "class": "PascalCase"
+  },
+  "design_patterns": []
+}

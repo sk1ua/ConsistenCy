@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ChromaDB数据
+chroma_db/
+*.db
+
+# 配置文件
+.env
+config.local.py
+
+# 日志
+*.log
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 文档
+ARCHITECTURE.md
+ROADMAP.md
+ROADMAP.md
