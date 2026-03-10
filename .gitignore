@@ -54,6 +54,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# 文档
-ARCHITECTURE.md
-ROADMAP.md
+# Spec-driven docs
+.specify/

@@ -2,57 +2,62 @@
 
 Code consistency analysis toolkit for multi-contributor repositories.
 
-It provides repository scan, commit-level risk scoring, hybrid retrieval (vector + graph), and weak-supervision evaluation.
+A framework for commit-level consistency analysis that helps teams detect style drift, structural drift, and logic drift in evolving Python projects.
 
 ---
 
 ## Overview
 
-ConsistenCy is designed to detect context inconsistency caused by long-term multi-commit collaboration.
-It helps teams identify style drift, structural drift, and logic drift at commit level.
+ConsistenCy focuses on long-term codebase consistency in collaborative development.
+It provides a practical pipeline to scan repositories, analyze commits, and generate explainable risk scores with supporting evidence.
+
+The project exists to make consistency issues measurable and actionable, rather than relying only on manual review intuition.
 
 ---
 
 ## Features
 
-* Repository scan and consistency checks
-* Commit-level scoring (style / structure / logic)
-* Vector retrieval with Chroma
-* Graph retrieval with Neo4j PoC
-* Weak-supervision evaluation (P/R/F1)
-* CLI for end-to-end workflow
+* Commit-level consistency scoring (style / structure / logic)
+* Hybrid retrieval (vector + graph evidence)
+* Explainable evidence output (Top-K similar code)
+* CLI workflow for scan and analysis
+* Configurable rules and scoring weights
+* Research-ready V2 evaluation modules (human labels, ablation, baselines)
 
 ---
 
 ## Architecture
 
+The system is built as a modular analysis pipeline:
+
 ```text
-Developer / CI
-   |
-   v
+User / CI
+  │
+  ▼
 CLI
-   |
-   +-- Scan Pipeline
-   |     +-- Parser (AST)
-   |     +-- Extractor
-   |     `-- Storage (Vector DB)
-   |
-   `-- Commit MVP Pipeline
-         +-- Commit Miner (Git)
-         +-- Graph Store (Neo4j)
-         +-- Hybrid Retriever
-         `-- Risk Scorer + Evidence
+  │
+  ├── Scan Pipeline
+  │     ├── Parser (AST)
+  │     ├── Extractor
+  │     └── Storage (Vector DB)
+  │
+  └── Commit Pipeline
+        ├── Commit Miner (Git)
+        ├── Retriever (Vector + Graph)
+        ├── Risk Scorer
+        └── Evidence Report
 ```
 
-| Component | Description |
-| --- | --- |
-| CLI | Entry point for scanning, checking, scoring, evaluation |
-| Parser/Extractor | Parses Python code and extracts structured features |
-| Storage | Stores and retrieves semantic code vectors |
-| Commit Pipeline | Mines changed functions and computes risk scores |
-| Graph Store | Stores author/commit/file/function graph for path evidence |
+Main components:
 
-Summary: the scan stage builds knowledge; the commit stage fuses vector and graph evidence for risk scoring.
+| Component | Description |
+| --------- | ----------- |
+| CLI | Entry point for scan, check, and evaluation commands |
+| Parser / Extractor | Parses Python files and extracts structural knowledge |
+| Storage | Stores and retrieves semantic code vectors |
+| Commit Miner | Builds commit context from Git history and diff |
+| Retriever | Combines vector and optional graph retrieval |
+| Risk Scorer | Computes style / structure / logic risk scores |
 
 ---
 
@@ -61,18 +66,25 @@ Summary: the scan stage builds knowledge; the commit stage fuses vector and grap
 ```text
 .
 ├── backend/
-│   ├── cli.py
-│   ├── config.py
-│   ├── requirements.txt
+│   ├── cli.py                 # command line entry
+│   ├── config.py              # global config
 │   └── src/
 │       ├── parser.py
 │       ├── extractor.py
 │       ├── storage.py
 │       ├── checker.py
-│       ├── ml_naming_model.py
-│       └── commit_pipeline.py
+│       ├── commit_pipeline.py
+│       ├── human_labeled_evaluator.py
+│       ├── ablation_study_v2.py
+│       ├── baselines.py
+│       └── cross_project_evaluator.py
 ├── data/
+│   ├── rules.json
+│   ├── annotations/
+│   └── eval/
 ├── tests/
+├── ARCHITECTURE.md
+├── ROADMAP.md
 └── README.md
 ```
 
@@ -80,15 +92,21 @@ Summary: the scan stage builds knowledge; the commit stage fuses vector and grap
 
 ## Installation
 
-Clone and install:
+Clone the repository:
 
 ```bash
 git clone https://github.com/sk1ua/ConsistenCy.git
-cd ConsistenCy/backend
+cd ConsistenCy
+```
+
+Install dependencies:
+
+```bash
+cd backend
 pip install -r requirements.txt
 ```
 
-Optional: start Neo4j for graph evidence:
+Optional Neo4j setup for graph evidence:
 
 ```bash
 docker run -d --name consistency-neo4j -p 7474:7474 -p 7687:7687 \
@@ -99,28 +117,54 @@ docker run -d --name consistency-neo4j -p 7474:7474 -p 7687:7687 \
 
 ## Configuration
 
-Configuration file:
+Edit configuration in:
 
 ```text
 backend/config.py
 ```
 
-Main configurable items:
+Example snippet:
 
-* Naming rules and thresholds
-* Vector DB settings
-* Lightweight model settings
+```python
+CHECK_CONFIG = {
+    "naming": {
+        "function": "snake_case",
+        "class": "PascalCase",
+        "variable": "snake_case",
+    },
+    "max_function_length": 100,
+    "max_line_length": 120,
+}
+
+RISK_SCORING_CONFIG = {
+    "weights": {
+        "style": 0.4,
+        "structure": 0.3,
+        "logic": 0.3,
+    }
+}
+```
 
 ---
 
 ## Usage
 
-Three-command quick reproduction (scan -> commit-mvp -> eval-weak):
+Start with repository scan:
 
 ```bash
 cd backend
 python cli.py scan ../../python-patterns --clear
-python cli.py commit-mvp ../../python-patterns 39708b9d59b49e371c508b2cd5fc42bb2b692221 --topk 3 --neo4j-uri bolt://localhost:7687 --neo4j-user neo4j --neo4j-password test123456
+```
+
+Run commit-level analysis:
+
+```bash
+python cli.py commit-mvp ../../python-patterns <commit_sha> --topk 3
+```
+
+(Optional) run evaluation command:
+
+```bash
 python cli.py eval-weak ../../python-patterns --samples 60 --max-commits 220
 ```
 
@@ -128,20 +172,25 @@ python cli.py eval-weak ../../python-patterns --samples 60 --max-commits 220
 
 ## Example
 
-Input: repository path + commit SHA
+Minimal flow:
 
-System: returns style/structure/logic risk scores and evidence list
-
-Output: overall_risk + Top-K evidence
+```text
+input: repository path + commit SHA
+system: mines diff, retrieves evidence, computes risks
+output: style_risk / structure_risk / logic_risk / overall_risk + Top-K evidence
+```
 
 ---
 
 ## Roadmap
 
-* [x] Commit-level MVP
-* [x] Neo4j PoC integration
-* [x] Hybrid retrieval
-* [ ] Strongly-labeled benchmark set
+Planned features:
+
+* [x] Commit-level MVP pipeline
+* [x] Hybrid retrieval (vector + graph)
+* [ ] Human-labeled benchmark dataset
+* [ ] Robust baseline comparison and statistical testing
+* [ ] Cross-project generalization evaluation
 * [ ] Rich PR report generation
 
 ---
@@ -150,9 +199,12 @@ Output: overall_risk + Top-K evidence
 
 Contributions are welcome.
 
+Steps:
+
 1. Fork the repository
-2. Create a feature branch
-3. Open a pull request
+2. Create a new branch
+3. Add your changes and tests
+4. Submit a pull request
 
 ---
 
