@@ -84,8 +84,50 @@ RISK_SCORING_CONFIG = {
     "tuned_weights_file": DATA_DIR / "models" / "tuned_risk_weights.json",
 }
 
+# M3: 多模态信号配置（v0.4.0-dev）
+MULTIMODAL_CONFIG = {
+    "enable_commit_message_analysis": True,
+    "enable_pr_context": False,  # 需要 GitHub API
+    "enable_review_comments": False,  # 需要 GitHub API
+    "message_keywords": {
+        "high_risk": ["hack", "workaround", "temporary", "quick fix", "todo", "fixme"],
+        "refactor": ["refactor", "cleanup", "reorganize", "restructure"],
+        "breaking": ["breaking", "backward incompatible", "api change"],
+    },
+    "message_max_length": 500,
+    "risk_adjustments": {
+        "high_risk_keywords": {"style": 0.0, "structure": 0.05, "logic": 0.12},
+        "breaking_keywords": {"style": 0.0, "structure": 0.12, "logic": 0.08},
+        "too_short": {"style": 0.08, "structure": 0.0, "logic": 0.05},
+        "too_long": {"style": 0.0, "structure": 0.04, "logic": 0.02},
+        "refactor_hint": {"style": -0.05, "structure": -0.05, "logic": -0.03},
+    },
+}
+
+# M3: 规则推理配置
+RULE_ENGINE_CONFIG = {
+    "enable_rule_inference": True,
+    "rules_file": DATA_DIR / "rules.json",
+    "rule_confidence_threshold": 0.7,
+    "combine_with_ml": True,  # 规则 + ML 融合
+    "ml_weight": 0.6,
+    "rule_weight": 0.4,
+}
+
+# M3: 实验框架配置
+EXPERIMENT_CONFIG = {
+    "output_dir": DATA_DIR / "experiments",
+    "enable_ablation_study": True,
+    "baseline_methods": ["vector_only", "graph_only", "hybrid_weighted", "hybrid_rrf"],
+    "metrics": ["precision", "recall", "f1", "accuracy"],
+    "cross_validation_folds": 5,
+    "random_seeds": [42, 123, 456],
+    "case_top_n_default": 5,
+}
+
 ML_CONFIG["model_dir"].mkdir(exist_ok=True)
 RISK_SCORING_CONFIG["tuned_weights_file"].parent.mkdir(exist_ok=True)
+EXPERIMENT_CONFIG["output_dir"].mkdir(exist_ok=True)
 
 # 支持的文件类型
 SUPPORTED_EXTENSIONS = {

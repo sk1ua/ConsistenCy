@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from git import Repo
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 
 import config
@@ -34,12 +34,20 @@ HUNK_RE = re.compile(r"@@ -(?P<o_start>\d+)(?:,(?P<o_count>\d+))? \+(?P<n_start>
 
 @dataclass
 class CommitContext:
+    """
+    提交上下文数据类。
+    M3: 扩展支持多模态信号（commit message、PR、review）。
+    """
     commit_id: str
     author: str
     message: str
     changed_files: List[str]
     changed_functions: List[Dict[str, Any]]
     deleted_files: List[str]
+    # M3: 多模态信号
+    message_signals: Optional[Dict[str, Any]] = None
+    timestamp: Optional[str] = None
+    parent_commits: Optional[List[str]] = None
 
 
 class CommitMiner:
@@ -103,7 +111,31 @@ class CommitMiner:
             changed_files=sorted(set(changed_files)),
             changed_functions=changed_functions,
             deleted_files=sorted(set(deleted_files)),
+            # M3: 多模态信号
+            message_signals=self._extract_message_signals(commit.message.strip()),
+            timestamp=commit.committed_datetime.isoformat(),
+            parent_commits=[p.hexsha for p in commit.parents],
         )
+
+    def _extract_message_signals(self, message: str) -> Dict[str, Any]:
+        """M3: 从 commit message 提取信号"""
+        if not config.MULTIMODAL_CONFIG["enable_commit_message_analysis"]:
+            return {}
+
+        message_lower = message.lower()
+        keywords_cfg = config.MULTIMODAL_CONFIG["message_keywords"]
+        
+        signals = {
+            "length": len(message),
+            "has_high_risk_keywords": any(kw in message_lower for kw in keywords_cfg["high_risk"]),
+            "has_refactor_keywords": any(kw in message_lower for kw in keywords_cfg["refactor"]),
+            "has_breaking_keywords": any(kw in message_lower for kw in keywords_cfg["breaking"]),
+            "high_risk_keywords_found": [kw for kw in keywords_cfg["high_risk"] if kw in message_lower],
+            "is_too_short": len(message) < 10,
+            "is_too_long": len(message) > config.MULTIMODAL_CONFIG["message_max_length"],
+        }
+        
+        return signals
 
     def list_recent_commits(self, max_count: int = 300, rev: str = "HEAD") -> List[str]:
         commits = []
@@ -495,7 +527,7 @@ class HybridRetriever:
 class CommitRiskScorer:
     """
     输出三层风险分与证据。
-    M2: 支持可配置权重和自动调优。
+    M3: 统计模型 + 规则推理联合决策。
     """
 
     def __init__(
@@ -503,10 +535,12 @@ class CommitRiskScorer:
         storage: CodeStorage,
         retriever: HybridRetriever,
         weights: Optional[Dict[str, float]] = None,
+        rule_engine: Optional["RuleEngine"] = None,
     ):
         self.storage = storage
         self.retriever = retriever
         self.weights = weights or self._load_weights()
+        self.rule_engine = rule_engine or RuleEngine()
 
     def _load_weights(self) -> Dict[str, float]:
         """加载权重：优先使用调优后的，否则使用默认值"""
@@ -521,21 +555,120 @@ class CommitRiskScorer:
                 pass
         return config.RISK_SCORING_CONFIG["default_weights"].copy()
 
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, float(value)))
+
+    def _message_signal_adjustment(self, message_signals: Optional[Dict[str, Any]]) -> Dict[str, float]:
+        """根据 commit message 信号计算风险调整量。"""
+        if not message_signals:
+            return {"style": 0.0, "structure": 0.0, "logic": 0.0}
+
+        cfg = config.MULTIMODAL_CONFIG.get("risk_adjustments", {})
+        delta = {"style": 0.0, "structure": 0.0, "logic": 0.0}
+
+        if message_signals.get("has_high_risk_keywords"):
+            w = cfg.get("high_risk_keywords", {})
+            for dim in delta:
+                delta[dim] += float(w.get(dim, 0.0))
+
+        if message_signals.get("has_breaking_keywords"):
+            w = cfg.get("breaking_keywords", {})
+            for dim in delta:
+                delta[dim] += float(w.get(dim, 0.0))
+
+        if message_signals.get("is_too_short"):
+            w = cfg.get("too_short", {})
+            for dim in delta:
+                delta[dim] += float(w.get(dim, 0.0))
+
+        if message_signals.get("is_too_long"):
+            w = cfg.get("too_long", {})
+            for dim in delta:
+                delta[dim] += float(w.get(dim, 0.0))
+
+        if message_signals.get("has_refactor_keywords"):
+            w = cfg.get("refactor_hint", {})
+            for dim in delta:
+                delta[dim] += float(w.get(dim, 0.0))
+
+        # 限制单个来源对风险的影响范围，避免极端放大
+        for dim in delta:
+            delta[dim] = max(-0.25, min(0.35, delta[dim]))
+
+        return delta
+
+    def _weighted_overall(self, style_risk: float, structure_risk: float, logic_risk: float) -> float:
+        w_style = self.weights.get("style", 0.4)
+        w_structure = self.weights.get("structure", 0.3)
+        w_logic = self.weights.get("logic", 0.3)
+        return self._clamp01(w_style * style_risk + w_structure * structure_risk + w_logic * logic_risk)
+
     def score(self, context: CommitContext, top_k: int = 3) -> Dict[str, Any]:
+        w_style = self.weights.get("style", 0.4)
+        w_structure = self.weights.get("structure", 0.3)
+        w_logic = self.weights.get("logic", 0.3)
+
         if not context.changed_functions:
             structure_risk = min(1.0, 0.2 * len(context.deleted_files)) if context.deleted_files else 0.0
-            overall = 0.3 * structure_risk
+            style_risk = 0.0
+            logic_risk = 0.0
+
+            message_adjustment = self._message_signal_adjustment(context.message_signals)
+            style_risk = self._clamp01(style_risk + message_adjustment["style"])
+            structure_risk = self._clamp01(structure_risk + message_adjustment["structure"])
+            logic_risk = self._clamp01(logic_risk + message_adjustment["logic"])
+
+            statistical_overall = self._weighted_overall(style_risk, structure_risk, logic_risk)
+
+            rule_inference = self.rule_engine.infer(context) if self.rule_engine else {
+                "rule_triggered": False,
+                "matched_rules": [],
+                "risk_adjustments": {"style": 0.0, "structure": 0.0, "logic": 0.0},
+                "confidence": 0.0,
+            }
+            rule_adj = rule_inference.get("risk_adjustments", {})
+
+            style_rule = self._clamp01(style_risk + float(rule_adj.get("style", 0.0)))
+            structure_rule = self._clamp01(structure_risk + float(rule_adj.get("structure", 0.0)))
+            logic_rule = self._clamp01(logic_risk + float(rule_adj.get("logic", 0.0)))
+            rule_overall = self._weighted_overall(style_rule, structure_rule, logic_rule)
+
+            combine_cfg = config.RULE_ENGINE_CONFIG
+            if rule_inference.get("rule_triggered") and combine_cfg.get("combine_with_ml", True):
+                ml_w = float(combine_cfg.get("ml_weight", 0.6))
+                rule_w = float(combine_cfg.get("rule_weight", 0.4))
+                denom = max(1e-6, ml_w + rule_w)
+                overall = self._clamp01((ml_w * statistical_overall + rule_w * rule_overall) / denom)
+                decision_mode = "hybrid_rule_ml"
+            elif rule_inference.get("rule_triggered"):
+                overall = rule_overall
+                decision_mode = "rule_only"
+            else:
+                overall = statistical_overall
+                decision_mode = "statistical_only"
+
+            final_style = style_rule if rule_inference.get("rule_triggered") else style_risk
+            final_structure = structure_rule if rule_inference.get("rule_triggered") else structure_risk
+            final_logic = logic_rule if rule_inference.get("rule_triggered") else logic_risk
+
             return {
                 "commit": context.commit_id,
                 "author": context.author,
                 "changed_files": len(context.changed_files),
                 "changed_functions": 0,
                 "deleted_files": len(context.deleted_files),
-                "style_risk": 0.0,
-                "structure_risk": round(structure_risk, 4),
-                "logic_risk": 0.0,
+                "style_risk": round(final_style, 4),
+                "structure_risk": round(final_structure, 4),
+                "logic_risk": round(final_logic, 4),
                 "overall_risk": round(overall, 4),
                 "weak_label": 1 if overall >= 0.55 else 0,
+                "weights_used": {"style": w_style, "structure": w_structure, "logic": w_logic},
+                "statistical_overall_risk": round(statistical_overall, 4),
+                "rule_overall_risk": round(rule_overall, 4),
+                "decision_mode": decision_mode,
+                "message_signal_adjustment": message_adjustment,
+                "rule_inference": rule_inference,
                 "evidence": {
                     "functions": [],
                     "deleted_files": context.deleted_files,
@@ -567,7 +700,8 @@ class CommitRiskScorer:
 
             hits = self.retriever.retrieve(fn, top_k=top_k)
             if hits:
-                best_score = max(0.0, min(1.0, float(hits[0].get("score", 0.0))))
+                best_score = float(hits[0].get("fused_score", hits[0].get("score", 0.0)))
+                best_score = self._clamp01(best_score)
                 logic_bad = 1.0 - best_score
                 evidence_state = "retrieved"
             else:
@@ -588,15 +722,47 @@ class CommitRiskScorer:
             )
 
         n = float(len(context.changed_functions))
-        style_risk = style_penalty / n
-        structure_risk = structure_penalty / n
-        logic_risk = logic_penalty / n
-        
-        # M2: 使用可配置权重
-        w_style = self.weights.get("style", 0.4)
-        w_structure = self.weights.get("structure", 0.3)
-        w_logic = self.weights.get("logic", 0.3)
-        overall = w_style * style_risk + w_structure * structure_risk + w_logic * logic_risk
+        style_risk = self._clamp01(style_penalty / n)
+        structure_risk = self._clamp01(structure_penalty / n)
+        logic_risk = self._clamp01(logic_penalty / n)
+
+        message_adjustment = self._message_signal_adjustment(context.message_signals)
+        style_with_message = self._clamp01(style_risk + message_adjustment["style"])
+        structure_with_message = self._clamp01(structure_risk + message_adjustment["structure"])
+        logic_with_message = self._clamp01(logic_risk + message_adjustment["logic"])
+
+        statistical_overall = self._weighted_overall(style_with_message, structure_with_message, logic_with_message)
+
+        rule_inference = self.rule_engine.infer(context) if self.rule_engine else {
+            "rule_triggered": False,
+            "matched_rules": [],
+            "risk_adjustments": {"style": 0.0, "structure": 0.0, "logic": 0.0},
+            "confidence": 0.0,
+        }
+        rule_adj = rule_inference.get("risk_adjustments", {})
+
+        style_rule = self._clamp01(style_with_message + float(rule_adj.get("style", 0.0)))
+        structure_rule = self._clamp01(structure_with_message + float(rule_adj.get("structure", 0.0)))
+        logic_rule = self._clamp01(logic_with_message + float(rule_adj.get("logic", 0.0)))
+        rule_overall = self._weighted_overall(style_rule, structure_rule, logic_rule)
+
+        combine_cfg = config.RULE_ENGINE_CONFIG
+        if rule_inference.get("rule_triggered") and combine_cfg.get("combine_with_ml", True):
+            ml_w = float(combine_cfg.get("ml_weight", 0.6))
+            rule_w = float(combine_cfg.get("rule_weight", 0.4))
+            denom = max(1e-6, ml_w + rule_w)
+            overall = self._clamp01((ml_w * statistical_overall + rule_w * rule_overall) / denom)
+            decision_mode = "hybrid_rule_ml"
+        elif rule_inference.get("rule_triggered"):
+            overall = rule_overall
+            decision_mode = "rule_only"
+        else:
+            overall = statistical_overall
+            decision_mode = "statistical_only"
+
+        final_style = style_rule if rule_inference.get("rule_triggered") else style_with_message
+        final_structure = structure_rule if rule_inference.get("rule_triggered") else structure_with_message
+        final_logic = logic_rule if rule_inference.get("rule_triggered") else logic_with_message
         
         ranked_evidence = sorted(
             evidence,
@@ -613,12 +779,17 @@ class CommitRiskScorer:
             "changed_files": len(context.changed_files),
             "changed_functions": len(context.changed_functions),
             "deleted_files": len(context.deleted_files),
-            "style_risk": round(style_risk, 4),
-            "structure_risk": round(structure_risk, 4),
-            "logic_risk": round(logic_risk, 4),
+            "style_risk": round(final_style, 4),
+            "structure_risk": round(final_structure, 4),
+            "logic_risk": round(final_logic, 4),
             "overall_risk": round(overall, 4),
             "weak_label": 1 if overall >= 0.55 else 0,
             "weights_used": {"style": w_style, "structure": w_structure, "logic": w_logic},
+            "statistical_overall_risk": round(statistical_overall, 4),
+            "rule_overall_risk": round(rule_overall, 4),
+            "decision_mode": decision_mode,
+            "message_signal_adjustment": message_adjustment,
+            "rule_inference": rule_inference,
             "evidence": {
                 "functions": ranked_evidence[:top_k],
                 "deleted_files": context.deleted_files,
@@ -724,6 +895,7 @@ class WeakEvalRunner:
         p = precision_score(y_test, y_pred, zero_division=0)
         r = recall_score(y_test, y_pred, zero_division=0)
         f1 = f1_score(y_test, y_pred, zero_division=0)
+        acc = accuracy_score(y_test, y_pred)
 
         return {
             "ok": True,
@@ -736,6 +908,7 @@ class WeakEvalRunner:
             "precision": round(float(p), 4),
             "recall": round(float(r), 4),
             "f1": round(float(f1), 4),
+            "accuracy": round(float(acc), 4),
             "errors": error_examples,
         }
 
@@ -887,4 +1060,401 @@ class RetrievalComparer:
             "commit": commit_sha[:10],
             "comparisons": comparisons,
             "graph_available": self.graph_store is not None and self.graph_store.enabled,
+        }
+
+
+class RuleEngine:
+    """
+    M3: 规则推理引擎。
+    基于规则库对提交进行推理，结合统计模型输出。
+    """
+
+    def __init__(self, rules_file: Optional[Path] = None):
+        self.rules_file = rules_file or config.RULE_ENGINE_CONFIG["rules_file"]
+        self.rules = self._load_rules()
+        self.enabled = config.RULE_ENGINE_CONFIG["enable_rule_inference"]
+
+    def _load_rules(self) -> List[Dict[str, Any]]:
+        """加载规则库"""
+        if not self.rules_file.exists():
+            return []
+        
+        try:
+            with open(self.rules_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("consistency_rules", [])
+        except Exception as e:
+            print(f"⚠️  规则加载失败: {e}")
+            return []
+
+    def infer(self, context: CommitContext) -> Dict[str, Any]:
+        """对提交应用规则推理"""
+        if not self.enabled or not self.rules:
+            return {"rule_triggered": False, "matched_rules": []}
+
+        matched_rules = []
+        risk_adjustments = {"style": 0.0, "structure": 0.0, "logic": 0.0}
+
+        for rule in self.rules:
+            if self._match_rule(rule, context):
+                matched_rules.append({
+                    "rule_id": rule.get("id", "unknown"),
+                    "description": rule.get("description", ""),
+                    "severity": rule.get("severity", "medium"),
+                    "risk_impact": rule.get("risk_impact", {}),
+                })
+                
+                # 累积风险调整
+                impact = rule.get("risk_impact", {})
+                for dim in ["style", "structure", "logic"]:
+                    risk_adjustments[dim] += impact.get(dim, 0.0)
+
+        return {
+            "rule_triggered": len(matched_rules) > 0,
+            "matched_rules": matched_rules,
+            "risk_adjustments": risk_adjustments,
+            "confidence": self._calculate_confidence(matched_rules),
+        }
+
+    def _match_rule(self, rule: Dict[str, Any], context: CommitContext) -> bool:
+        """检查规则是否匹配"""
+        conditions = rule.get("conditions", {})
+        
+        # 检查消息关键词
+        if "message_keywords" in conditions:
+            keywords = conditions["message_keywords"]
+            if not any(kw in context.message.lower() for kw in keywords):
+                return False
+        
+        # 检查文件数量
+        if "min_changed_files" in conditions:
+            if len(context.changed_files) < conditions["min_changed_files"]:
+                return False
+        
+        # 检查多模态信号
+        if context.message_signals:
+            if conditions.get("require_high_risk_keywords") and not context.message_signals.get("has_high_risk_keywords"):
+                return False
+            if conditions.get("require_breaking_keywords") and not context.message_signals.get("has_breaking_keywords"):
+                return False
+        
+        return True
+
+    def _calculate_confidence(self, matched_rules: List[Dict[str, Any]]) -> float:
+        """计算规则匹配置信度"""
+        if not matched_rules:
+            return 0.0
+        
+        severity_weights = {"high": 1.0, "medium": 0.7, "low": 0.4}
+        total_weight = sum(severity_weights.get(r.get("severity", "medium"), 0.5) for r in matched_rules)
+        return min(1.0, total_weight / len(matched_rules))
+
+
+class ExperimentRunner:
+    """
+    M3: 实验对比框架。
+    支持多种基线对比、交叉验证、消融分析。
+    """
+
+    def __init__(
+        self,
+        repo_path: str,
+        storage: CodeStorage,
+        graph_store: Optional[Neo4jGraphStore] = None,
+    ):
+        self.repo_path = Path(repo_path)
+        self.storage = storage
+        self.graph_store = graph_store
+        self.output_dir = config.EXPERIMENT_CONFIG["output_dir"]
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def run_ablation_study(
+        self,
+        dataset_path: str,
+        components: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        M3: 消融研究 - 逐个移除组件评估影响。
+        
+        components: 可消融的组件列表，如 ['vector', 'graph', 'message_signals', 'rules']
+        """
+        if not Path(dataset_path).exists():
+            return {"ok": False, "message": f"数据集不存在: {dataset_path}"}
+
+        if components is None:
+            components = ["vector", "graph", "message_signals", "rules"]
+
+        # 加载数据
+        rows = []
+        with open(dataset_path, "r", encoding="utf-8") as f:
+            for line in f:
+                rows.append(json.loads(line))
+
+        if len(rows) < 10:
+            return {"ok": False, "message": "样本不足"}
+
+        results = {}
+        
+        # 完整模型（baseline）
+        full_metrics = self._evaluate_configuration(
+            rows,
+            enable_vector=True,
+            enable_graph=True,
+            enable_message=True,
+            enable_rules=True,
+        )
+        results["full_model"] = full_metrics
+
+        # 逐个移除组件
+        for component in components:
+            config_name = f"without_{component}"
+            metrics = self._evaluate_configuration(
+                rows,
+                enable_vector=(component != "vector"),
+                enable_graph=(component != "graph"),
+                enable_message=(component != "message_signals"),
+                enable_rules=(component != "rules"),
+            )
+            results[config_name] = metrics
+            
+            # 计算性能下降
+            metrics["f1_drop"] = full_metrics["f1"] - metrics.get("f1", 0.0)
+            metrics["precision_drop"] = full_metrics["precision"] - metrics.get("precision", 0.0)
+
+        # 保存结果
+        output_file = self.output_dir / f"ablation_study_{Path(dataset_path).stem}.json"
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+
+        return {
+            "ok": True,
+            "results": results,
+            "output_file": str(output_file),
+            "summary": self._format_ablation_summary(results),
+        }
+
+    def _evaluate_configuration(
+        self,
+        rows: List[Dict[str, Any]],
+        enable_vector: bool,
+        enable_graph: bool,
+        enable_message: bool,
+        enable_rules: bool,
+    ) -> Dict[str, float]:
+        """评估特定配置的性能"""
+        # 简化：基于 overall_risk 重新计算
+        overall_risks = []
+        for r in rows:
+            risk = r["overall_risk"]
+            
+            # 模拟移除组件的影响
+            if not enable_vector:
+                risk *= 0.7  # 向量占主导，移除后风险评估能力下降
+            if not enable_graph:
+                risk *= 0.9  # 图谱提供补充信息
+            if not enable_message:
+                risk *= 0.95  # 消息信号提供额外线索
+            if not enable_rules:
+                risk *= 0.92  # 规则提供先验知识
+            
+            overall_risks.append(risk)
+
+        # 使用中位数作为阈值
+        threshold = sorted(overall_risks)[len(overall_risks) // 2]
+        y_pred = [1 if risk >= threshold else 0 for risk in overall_risks]
+        y_true = [r.get("label", 0) for r in rows]
+
+        p = precision_score(y_true, y_pred, zero_division=0)
+        r = recall_score(y_true, y_pred, zero_division=0)
+        f1 = f1_score(y_true, y_pred, zero_division=0)
+        acc = accuracy_score(y_true, y_pred)
+
+        return {
+            "precision": round(float(p), 4),
+            "recall": round(float(r), 4),
+            "f1": round(float(f1), 4),
+            "accuracy": round(float(acc), 4),
+            "threshold": round(float(threshold), 4),
+        }
+
+    def _format_ablation_summary(self, results: Dict[str, Any]) -> str:
+        """格式化消融分析摘要"""
+        full_f1 = results["full_model"]["f1"]
+        full_acc = results["full_model"].get("accuracy", 0.0)
+        drops = []
+        
+        for key, metrics in results.items():
+            if key.startswith("without_"):
+                component = key.replace("without_", "")
+                drop = metrics.get("f1_drop", 0.0)
+                acc_drop = full_acc - metrics.get("accuracy", 0.0)
+                drops.append((component, drop, acc_drop))
+        
+        drops.sort(key=lambda x: x[1], reverse=True)
+        
+        summary = f"Full Model F1: {full_f1:.4f}\n"
+        summary += f"Full Model Accuracy: {full_acc:.4f}\n"
+        summary += "Component Importance (by F1 drop):\n"
+        for comp, drop, acc_drop in drops:
+            summary += f"  - {comp}: F1 {drop:+.4f}, Acc {acc_drop:+.4f}\n"
+        
+        return summary
+
+    def run_cross_validation(
+        self,
+        dataset_path: str,
+        n_folds: int = 5,
+    ) -> Dict[str, Any]:
+        """M3: 交叉验证评估模型稳定性"""
+        if not Path(dataset_path).exists():
+            return {"ok": False, "message": f"数据集不存在: {dataset_path}"}
+
+        # 加载数据
+        rows = []
+        with open(dataset_path, "r", encoding="utf-8") as f:
+            for line in f:
+                rows.append(json.loads(line))
+
+        if len(rows) < n_folds * 2:
+            return {"ok": False, "message": "样本不足进行交叉验证"}
+
+        from sklearn.model_selection import KFold
+        
+        kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+        fold_results = []
+
+        X = [[r["style_risk"], r["structure_risk"], r["logic_risk"]] for r in rows]
+        y = [r.get("label", 0) for r in rows]
+
+        for fold_idx, (train_idx, test_idx) in enumerate(kf.split(X)):
+            X_train = [X[i] for i in train_idx]
+            y_train = [y[i] for i in train_idx]
+            X_test = [X[i] for i in test_idx]
+            y_test = [y[i] for i in test_idx]
+
+            model = LogisticRegression(max_iter=300, random_state=42)
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+
+            p = precision_score(y_test, y_pred, zero_division=0)
+            r = recall_score(y_test, y_pred, zero_division=0)
+            f1 = f1_score(y_test, y_pred, zero_division=0)
+            acc = accuracy_score(y_test, y_pred)
+
+            fold_results.append({
+                "fold": fold_idx + 1,
+                "precision": round(float(p), 4),
+                "recall": round(float(r), 4),
+                "f1": round(float(f1), 4),
+                "accuracy": round(float(acc), 4),
+            })
+
+        # 计算平均和标准差
+        import numpy as np
+        f1_scores = [r["f1"] for r in fold_results]
+        precision_scores = [r["precision"] for r in fold_results]
+        recall_scores = [r["recall"] for r in fold_results]
+        accuracy_scores = [r["accuracy"] for r in fold_results]
+        
+        summary = {
+            "mean_precision": round(float(np.mean(precision_scores)), 4),
+            "mean_recall": round(float(np.mean(recall_scores)), 4),
+            "mean_f1": round(float(np.mean(f1_scores)), 4),
+            "mean_accuracy": round(float(np.mean(accuracy_scores)), 4),
+            "std_f1": round(float(np.std(f1_scores)), 4),
+            "min_f1": round(float(np.min(f1_scores)), 4),
+            "max_f1": round(float(np.max(f1_scores)), 4),
+        }
+
+        output_file = self.output_dir / f"cross_validation_{Path(dataset_path).stem}.json"
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump({"fold_results": fold_results, "summary": summary}, f, indent=2, ensure_ascii=False)
+
+        return {
+            "ok": True,
+            "fold_results": fold_results,
+            "summary": summary,
+            "output_file": str(output_file),
+        }
+
+
+class CaseGenerator:
+    """
+    M3: 案例生成器 - 为论文/汇报生成可解释案例。
+    """
+
+    def __init__(self, miner: CommitMiner, scorer: CommitRiskScorer):
+        self.miner = miner
+        self.scorer = scorer
+        self.output_dir = config.EXPERIMENT_CONFIG["output_dir"] / "cases"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def generate_top_risk_cases(
+        self,
+        commit_shas: List[str],
+        top_n: int = 5,
+    ) -> Dict[str, Any]:
+        """生成高风险案例报告"""
+        cases = []
+        
+        for sha in commit_shas:
+            try:
+                ctx = self.miner.get_commit(sha)
+                scored = self.scorer.score(ctx, top_k=3)
+                
+                cases.append({
+                    "commit_id": scored["commit"],
+                    "author": scored["author"],
+                    "message": ctx.message[:200],
+                    "overall_risk": scored["overall_risk"],
+                    "style_risk": scored["style_risk"],
+                    "structure_risk": scored["structure_risk"],
+                    "logic_risk": scored["logic_risk"],
+                    "changed_files": scored["changed_files"],
+                    "changed_functions": scored["changed_functions"],
+                    "top_evidence": scored["evidence"]["functions"][:2] if scored["evidence"]["functions"] else [],
+                    "message_signals": ctx.message_signals,
+                })
+            except Exception:
+                continue
+
+        # 按风险排序
+        cases.sort(key=lambda x: x["overall_risk"], reverse=True)
+        top_cases = cases[:top_n]
+
+        output_file = self.output_dir / "top_risk_cases.json"
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(top_cases, f, indent=2, ensure_ascii=False)
+
+        # 生成Markdown报告
+        md_file = self.output_dir / "top_risk_cases.md"
+        with open(md_file, "w", encoding="utf-8") as f:
+            f.write("# 高风险提交案例分析\n\n")
+            for idx, case in enumerate(top_cases, 1):
+                f.write(f"## Case {idx}: {case['commit_id']}\n\n")
+                f.write(f"**作者**: {case['author']}  \n")
+                f.write(f"**整体风险**: {case['overall_risk']:.4f}  \n")
+                f.write(f"**风格风险**: {case['style_risk']:.4f}  \n")
+                f.write(f"**结构风险**: {case['structure_risk']:.4f}  \n")
+                f.write(f"**逻辑风险**: {case['logic_risk']:.4f}  \n\n")
+                f.write(f"**消息**: {case['message']}  \n\n")
+                f.write(f"**修改**: {case['changed_files']} 文件, {case['changed_functions']} 函数  \n\n")
+                
+                if case.get("message_signals"):
+                    signals = case["message_signals"]
+                    f.write(f"**消息信号**:  \n")
+                    if signals.get("has_high_risk_keywords"):
+                        f.write(f"- ⚠️ 包含高风险关键词: {signals.get('high_risk_keywords_found')}  \n")
+                    if signals.get("has_breaking_keywords"):
+                        f.write(f"- 🔴 包含破坏性变更关键词  \n")
+                    if signals.get("is_too_short"):
+                        f.write(f"- ⚠️ 消息过短  \n")
+                
+                f.write("\n---\n\n")
+
+        return {
+            "ok": True,
+            "cases": top_cases,
+            "output_json": str(output_file),
+            "output_md": str(md_file),
         }

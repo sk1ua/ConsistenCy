@@ -24,6 +24,9 @@ from src.commit_pipeline import (
     WeakEvalRunner,
     RiskWeightTuner,
     RetrievalComparer,
+    RuleEngine,
+    ExperimentRunner,
+    CaseGenerator,
 )
 
 console = Console()
@@ -394,12 +397,29 @@ def commit_mvp(repo_path, commit_sha, topk, neo4j_uri, neo4j_user, neo4j_passwor
     table.add_row("structure_risk", str(result['structure_risk']))
     table.add_row("logic_risk", str(result['logic_risk']))
     table.add_row("overall_risk", str(result['overall_risk']))
+    if 'statistical_overall_risk' in result:
+        table.add_row("statistical_overall", str(result['statistical_overall_risk']))
+    if 'rule_overall_risk' in result:
+        table.add_row("rule_overall", str(result['rule_overall_risk']))
     table.add_row("weak_label", str(result['weak_label']))
     console.print(table)
 
     console.print(f"\n提交作者: [yellow]{result.get('author', 'unknown')}[/yellow]")
     console.print(f"修改文件数: [yellow]{result.get('changed_files', 0)}[/yellow]")
     console.print(f"修改函数数: [yellow]{result.get('changed_functions', 0)}[/yellow]")
+    if result.get('decision_mode'):
+        console.print(f"决策模式: [yellow]{result.get('decision_mode')}[/yellow]")
+
+    msg_adj = result.get('message_signal_adjustment')
+    if msg_adj:
+        console.print(
+            f"消息信号调整: style={msg_adj.get('style', 0):+.3f}, "
+            f"structure={msg_adj.get('structure', 0):+.3f}, logic={msg_adj.get('logic', 0):+.3f}"
+        )
+
+    rule_inf = result.get('rule_inference', {})
+    if rule_inf.get('rule_triggered'):
+        console.print(f"触发规则数: [yellow]{len(rule_inf.get('matched_rules', []))}[/yellow]")
 
     funcs = result.get('evidence', {}).get('functions', [])
     if funcs:
@@ -409,9 +429,10 @@ def commit_mvp(repo_path, commit_sha, topk, neo4j_uri, neo4j_user, neo4j_passwor
             style = fn.get('style', {})
             console.print(f"   style: expected={style.get('expected')} actual={style.get('actual')}")
             for h in fn.get('top_hits', []):
+                hit_score = h.get('fused_score', h.get('score', 0))
                 console.print(
                     f"   - [{h.get('source')}] {h.get('function_name', '')}"
-                    f" score={h.get('score', 0):.3f} file={h.get('file_path', '')}"
+                    f" score={hit_score:.3f} file={h.get('file_path', '')}"
                 )
 
 
@@ -459,9 +480,12 @@ def eval_weak(repo_path, samples, max_commits, neo4j_uri, neo4j_user, neo4j_pass
     table.add_row("precision", str(result['precision']))
     table.add_row("recall", str(result['recall']))
     table.add_row("f1", str(result['f1']))
+    if 'accuracy' in result:
+        table.add_row("accuracy", str(result['accuracy']))
     console.print(table)
 
     console.print(f"\n数据集文件: [yellow]{result['dataset_path']}[/yellow]")
+
 @cli.command(name='tune-weights')
 @click.argument('dataset_path', type=click.Path(exists=True))
 @click.option('--grid-step', default=0.1, help='网格搜索步长')
@@ -617,8 +641,135 @@ def graph_stats(neo4j_uri, neo4j_user, neo4j_password):
         graph.close()
 
 
-if __name__ == '__main__':
-    cli()
+@cli.command(name='run-experiments')
+@click.argument('repo-path', type=click.Path(exists=True))
+@click.option('--dataset', type=click.Path(exists=True), required=True, help='评估数据集路径 (.jsonl)')
+@click.option('--cv-folds', default=5, help='交叉验证折数 (默认5)')
+@click.option('--neo4j-uri', envvar='NEO4J_URI', default='', help='Neo4j URI（可选）')
+@click.option('--neo4j-user', envvar='NEO4J_USER', default='', help='Neo4j 用户名（可选）')
+@click.option('--neo4j-password', envvar='NEO4J_PASSWORD', default='', help='Neo4j 密码（可选）')
+def run_experiments(repo_path, dataset, cv_folds, neo4j_uri, neo4j_user, neo4j_password):
+    """
+    M3: 运行交叉验证实验
+    
+    REPO_PATH: 仓库路径
+    """
+    console.print(Panel.fit(
+        "🧪 运行交叉验证实验 (M3)",
+        style="bold cyan"
+    ))
+
+    storage = CodeStorage()
+    graph = Neo4jGraphStore(
+        uri=neo4j_uri or None,
+        user=neo4j_user or None,
+        password=neo4j_password or None,
+    )
+    runner = ExperimentRunner(repo_path, storage, graph if graph.enabled else None)
+
+    try:
+        result = runner.run_cross_validation(dataset, n_folds=cv_folds)
+        
+        if result["ok"]:
+            console.print(f"\n[green]✅ 实验完成[/green]")
+            console.print(f"输出文件: {result['output_file']}")
+            
+            summary = result["summary"]
+            table = Table(title="交叉验证结果")
+            table.add_column("指标", style="cyan")
+            table.add_column("值", style="magenta")
+            
+            table.add_row("平均 Precision", f"{summary.get('mean_precision', 0.0):.4f}")
+            table.add_row("平均 Recall", f"{summary.get('mean_recall', 0.0):.4f}")
+            table.add_row("平均 F1", f"{summary['mean_f1']:.4f}")
+            table.add_row("平均 Accuracy", f"{summary.get('mean_accuracy', 0.0):.4f}")
+            table.add_row("标准差", f"{summary['std_f1']:.4f}")
+            table.add_row("最小 F1", f"{summary['min_f1']:.4f}")
+            table.add_row("最大 F1", f"{summary['max_f1']:.4f}")
+            
+            console.print(table)
+        else:
+            console.print(f"[red]❌ {result['message']}[/red]")
+    finally:
+        graph.close()
+
+
+@cli.command(name='ablation-study')
+@click.argument('repo-path', type=click.Path(exists=True))
+@click.option('--dataset', type=click.Path(exists=True), required=True, help='评估数据集路径 (.jsonl)')
+@click.option('--components', default='vector,graph,message_signals,rules', help='消融组件列表（逗号分隔）')
+@click.option('--neo4j-uri', envvar='NEO4J_URI', default='', help='Neo4j URI（可选）')
+@click.option('--neo4j-user', envvar='NEO4J_USER', default='', help='Neo4j 用户名（可选）')
+@click.option('--neo4j-password', envvar='NEO4J_PASSWORD', default='', help='Neo4j 密码（可选）')
+def ablation_study(repo_path, dataset, components, neo4j_uri, neo4j_user, neo4j_password):
+    """
+    M3: 运行消融实验分析各组件贡献
+    
+    REPO_PATH: 仓库路径
+    """
+    console.print(Panel.fit(
+        "🔬 消融实验 (M3)",
+        style="bold cyan"
+    ))
+
+    storage = CodeStorage()
+    graph = Neo4jGraphStore(
+        uri=neo4j_uri or None,
+        user=neo4j_user or None,
+        password=neo4j_password or None,
+    )
+    runner = ExperimentRunner(repo_path, storage, graph if graph.enabled else None)
+
+    component_list = [c.strip() for c in components.split(',')]
+
+    try:
+        result = runner.run_ablation_study(dataset, components=component_list)
+        
+        if result["ok"]:
+            console.print(f"\n[green]✅ 消融实验完成[/green]")
+            console.print(f"输出文件: {result['output_file']}")
+            console.print(f"\n{result['summary']}")
+        else:
+            console.print(f"[red]❌ {result['message']}[/red]")
+    finally:
+        graph.close()
+
+
+@cli.command(name='generate-cases')
+@click.argument('repo-path', type=click.Path(exists=True))
+@click.option('--commits', help='提交SHA列表 (逗号分隔)', required=True)
+@click.option('--top-n', default=5, help='生成TOP N案例 (默认5)')
+def generate_cases(repo_path, commits, top_n):
+    """
+    M3: 生成高风险提交案例报告
+    
+    REPO_PATH: 仓库路径
+    """
+    console.print(Panel.fit(
+        "📝 生成案例报告 (M3)",
+        style="bold cyan"
+    ))
+
+    storage = CodeStorage()
+    miner = CommitMiner(repo_path)
+    scorer = CommitRiskScorer(
+        storage=storage,
+        retriever=HybridRetriever(storage, fusion_method='weighted_sum'),
+    )
+    generator = CaseGenerator(miner, scorer)
+
+    commit_list = [c.strip() for c in commits.split(',')]
+
+    result = generator.generate_top_risk_cases(commit_list, top_n=top_n)
+
+    if result["ok"]:
+        console.print(f"\n[green]✅ 案例生成完成[/green]")
+        console.print(f"JSON 输出: {result['output_json']}")
+        console.print(f"Markdown 输出: {result['output_md']}")
+        console.print(f"\n生成了 {len(result['cases'])} 个高风险案例")
+    else:
+        console.print("[red]❌ 案例生成失败[/red]")
+
 
 if __name__ == '__main__':
     cli()

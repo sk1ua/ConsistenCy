@@ -42,6 +42,9 @@ config.local.py
 # 日志
 *.log
 
+# 实验输出
+data/experiments/
+
 # 测试
 .pytest_cache/
 .coverage

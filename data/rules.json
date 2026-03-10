@@ -3,5 +3,49 @@
     "function": "snake_case",
     "class": "PascalCase"
   },
-  "design_patterns": []
+  "design_patterns": [],
+  "consistency_rules": [
+    {
+      "id": "M3-R001",
+      "description": "高风险关键词提交需要提高逻辑风险",
+      "conditions": {
+        "message_keywords": ["hack", "workaround", "quick fix", "temporary"],
+        "require_high_risk_keywords": true
+      },
+      "severity": "high",
+      "risk_impact": {
+        "style": 0.02,
+        "structure": 0.05,
+        "logic": 0.18
+      }
+    },
+    {
+      "id": "M3-R002",
+      "description": "破坏性变更关键词提高结构与逻辑风险",
+      "conditions": {
+        "message_keywords": ["breaking", "api change", "backward incompatible"],
+        "require_breaking_keywords": true
+      },
+      "severity": "high",
+      "risk_impact": {
+        "style": 0.0,
+        "structure": 0.15,
+        "logic": 0.12
+      }
+    },
+    {
+      "id": "M3-R003",
+      "description": "大范围重构提交提高结构风险",
+      "conditions": {
+        "message_keywords": ["refactor", "restructure", "cleanup"],
+        "min_changed_files": 6
+      },
+      "severity": "medium",
+      "risk_impact": {
+        "style": 0.0,
+        "structure": 0.1,
+        "logic": 0.04
+      }
+    }
+  ]
 }
