@@ -44,6 +44,7 @@ config.local.py
 
 # 实验输出
 data/experiments/
+data/cache/*.json
 
 # 测试
 .pytest_cache/
@@ -56,3 +57,7 @@ Thumbs.db
 
 # Spec-driven docs
 .specify/
+
+# Internal docs (not published to GitHub)
+ARCHITECTURE.md
+ROADMAP.md

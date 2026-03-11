@@ -1,23 +1,23 @@
-# 代码解析
-tree-sitter==0.21.3
-tree-sitter-python==0.21.0
-
-# 向量数据库
-chromadb==0.4.22
-numpy<2
-
-# AI模型
-openai==1.12.0
-
-# 工具库
+# ── Core analysis ──────────────────────────────────────────────
 click==8.1.7
 rich==13.7.0
-pyyaml==6.0.1
 GitPython==3.1.43
-neo4j==5.26.0
+flask>=3.0.0
 
-# 代码分析
+# ── Code parsing & metrics ─────────────────────────────────────
+# (stdlib ast + tokenize are used; tree-sitter kept as optional)
 astroid==3.0.3
 
-# 轻量机器学习（v0.2.0）
+# ── ML helpers ─────────────────────────────────────────────────
 scikit-learn==1.5.2
+numpy>=1.26,<3
+
+# ── LLM integration (DeepSeek / OpenAI-compatible) ────────────
+# Pin to 1.x: httpx 0.28+ removed 'proxies'; openai>=1.52 uses 'transport'
+openai>=1.52.0,<2.0.0
+
+# ── .env support ─────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Misc ───────────────────────────────────────────────────────
+pyyaml==6.0.1
