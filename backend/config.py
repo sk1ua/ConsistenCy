@@ -15,10 +15,9 @@ DATA_DIR.mkdir(exist_ok=True)
 
 # ─── 分析器权重（与 RiskScoringAgent 默认值保持一致）─────────────────────────
 RISK_WEIGHTS = {
-    "style":      0.25,
-    "structural": 0.35,
-    "semantic":   0.30,
-    "evolution":  0.10,
+    "style":      0.28,
+    "structural": 0.39,
+    "semantic":   0.33,
 }
 
 # ─── Pipeline 参数 ───────────────────────────────────────────────────────────
@@ -27,12 +26,16 @@ PIPELINE_CONFIG = {
     "default_baseline_commits": 50,
     # file_summary / hotspot_data 时每次最多分析多少个文件
     "max_files_per_commit": 20,
+    # weekly_history 每个 commit 最多分析多少个文件
+    "max_files_per_weekly_commit": 5,
     # weekly_history 最多回溯多少个 commit
     "weekly_history_max_commits": 200,
     # hotspot_data 最多回溯多少个 commit
     "hotspot_max_commits": 100,
     # 返回热点文件的上限
     "hotspot_top_n": 30,
+    # PR report 中最多分析多少个顶部风险文件用于 LLM review
+    "llm_review_top_files": 5,
 }
 
 # ─── 支持的文件类型 ───────────────────────────────────────────────────────────

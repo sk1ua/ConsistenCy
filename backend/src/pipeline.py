@@ -14,6 +14,7 @@ import hashlib
 import os
 import statistics
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -35,12 +36,22 @@ from .agents import (
     StyleAgent,
 )
 from .agents.base_agent import AgentResult
+from .agents.structural_agent import _build_class_bases_map
 from .baseline_strategy import (
     detect_file_scenario,
     select_baseline_strategy,
     get_template_baseline,
 )
 from .baseline_storage import BaselineStorage
+
+try:
+    from config import PIPELINE_CONFIG as _PCFG
+except ImportError:
+    _PCFG = {}
+
+_MAX_FILES_PER_COMMIT = _PCFG.get("max_files_per_commit", 20)
+_MAX_FILES_PER_WEEKLY = _PCFG.get("max_files_per_weekly_commit", 5)
+_LLM_REVIEW_TOP = _PCFG.get("llm_review_top_files", 5)
 
 _parser = ParserAgent()
 _style = StyleAgent()
@@ -101,17 +112,44 @@ def _score_to_level(score: float) -> str:
 # Source-level analysis (no git required)
 # ---------------------------------------------------------------------------
 
-def analyze_sources(source_now: str, source_base: str) -> dict[str, Any]:
+def analyze_sources(
+    source_now: str,
+    source_base: str,
+    project_class_bases: dict[str, list[str]] | None = None,
+    aggregated_baseline: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Run all code-level agents on two source strings.
+
+    Parameters
+    ----------
+    source_now : str
+        Current version of the file.
+    source_base : str
+        Baseline version of the file.
+    project_class_bases : dict | None
+        Cross-file class hierarchy map {class_name: [base_names]} built
+        from the full project.  Passed to StructuralAgent for accurate
+        inheritance depth analysis.
+    aggregated_baseline : dict | None
+        When provided, this pre-parsed/aggregated snapshot dict is used
+        as the baseline instead of parsing *source_base* fresh.  This
+        enables multi-version statistical baselines.
 
     Returns a dict with per-agent scores and the final risk score.
     """
-    snapshot_base = _parser.parse(source_base)
     snapshot_now = _parser.parse(source_now)
-
-    # Merge parsed data into snapshot / baseline dicts
     snapshot_now["source"] = source_now
-    snapshot_base["source"] = source_base
+
+    # Use aggregated baseline if available, otherwise parse single source
+    if aggregated_baseline is not None:
+        snapshot_base = aggregated_baseline
+    else:
+        snapshot_base = _parser.parse(source_base)
+        snapshot_base["source"] = source_base
+
+    # Cross-file class map for StructuralAgent
+    if project_class_bases:
+        snapshot_now["project_class_bases"] = project_class_bases
 
     results: dict[str, AgentResult] = {
         "ParserAgent": _parser.run(snapshot_now, snapshot_base),
@@ -243,6 +281,75 @@ class AnalysisPipeline:
         )
         return versions[best_idx]
 
+    @staticmethod
+    def _aggregate_baseline_snapshot(versions: list[str]) -> dict[str, Any] | None:
+        """Parse multiple historical versions and aggregate their metrics.
+
+        Returns a synthetic baseline snapshot dict where numeric metrics
+        represent the median across all versions, and set-valued metrics
+        (imports, api calls) represent the union.  This gives a more
+        statistically stable baseline than picking a single version.
+
+        Returns None if fewer than 2 valid versions (in that case, fall
+        back to the single-version path).
+        """
+        if len(versions) < 2:
+            return None
+
+        parsed: list[dict[str, Any]] = []
+        for src in versions:
+            snap = _parser.parse(src)
+            if "error" not in snap:
+                snap["source"] = src
+                parsed.append(snap)
+
+        if len(parsed) < 2:
+            return None
+
+        # --- Aggregate numeric metrics via median ---
+        cc_vals = [p.get("cyclomatic_avg", 0.0) for p in parsed]
+        halsteads = [p.get("halstead", {}) for p in parsed]
+
+        agg: dict[str, Any] = {}
+        agg["cyclomatic_avg"] = statistics.median(cc_vals)
+
+        # Halstead: median of each sub-metric
+        hal_keys = ("n1", "n2", "N1", "N2", "volume", "difficulty", "effort")
+        agg_hal: dict[str, float] = {}
+        for k in hal_keys:
+            vals = [h.get(k, 0.0) for h in halsteads]
+            agg_hal[k] = statistics.median(vals)
+        agg["halstead"] = agg_hal
+
+        # LOC: median
+        loc_keys = ("total", "code", "blank", "comment")
+        agg_loc: dict[str, int] = {}
+        for k in loc_keys:
+            vals = [p.get("loc", {}).get(k, 0) for p in parsed]
+            agg_loc[k] = int(statistics.median(vals))
+        agg["loc"] = agg_loc
+
+        # --- Set-valued metrics: frequency-weighted union ---
+        # Imports: keep imports that appear in >50% of versions
+        from collections import Counter as _Counter
+        import_counter: _Counter[str] = _Counter()
+        for p in parsed:
+            for imp in p.get("imports", []):
+                import_counter[imp] += 1
+        threshold = len(parsed) / 2
+        agg["imports"] = [imp for imp, cnt in import_counter.items() if cnt >= threshold]
+
+        # Use the representative source (median LOC) for AST-dependent analysis
+        rep_src = AnalysisPipeline._select_representative_baseline(versions)
+        agg["source"] = rep_src
+
+        # Functions/classes from representative version (for docstring ratio etc.)
+        rep_snap = _parser.parse(rep_src)
+        agg["functions"] = rep_snap.get("functions", [])
+        agg["classes"] = rep_snap.get("classes", [])
+
+        return agg
+
     def _baseline_source_from_window(
         self,
         filepath: str,
@@ -268,13 +375,7 @@ class AnalysisPipeline:
             self._cache_stats["persistent_miss"] += 1
 
         self._cache_stats["baseline_miss"] += 1
-        versions: list[str] = []
-        for commit in commits:
-            src = self._source_at_commit(commit, filepath)
-            if src:
-                versions.append(src)
-            if len(versions) >= max_versions:
-                break
+        versions = self._collect_versions(filepath, commits, max_versions)
 
         # Detect file scenario and adjust strategy
         if not versions:
@@ -321,6 +422,54 @@ class AnalysisPipeline:
             )
         
         return baseline
+
+    def _collect_versions(
+        self,
+        filepath: str,
+        commits: list,
+        max_versions: int = 8,
+    ) -> list[str]:
+        """Collect up to *max_versions* historical source strings for a file."""
+        versions: list[str] = []
+        for commit in commits:
+            src = self._source_at_commit(commit, filepath)
+            if src:
+                versions.append(src)
+            if len(versions) >= max_versions:
+                break
+        return versions
+
+    def _get_aggregated_baseline(
+        self,
+        filepath: str,
+        commits: list,
+        max_versions: int = 8,
+    ) -> dict[str, Any] | None:
+        """Try to build a multi-version aggregated baseline snapshot.
+
+        Returns an aggregated snapshot dict if ≥ 2 valid versions exist,
+        otherwise None (caller should fall back to single-version path).
+        """
+        versions = self._collect_versions(filepath, commits, max_versions)
+        if len(versions) < 2:
+            return None
+        return self._aggregate_baseline_snapshot(versions)
+
+    def _build_project_class_map(self, commit) -> dict[str, list[str]]:
+        """Build a project-wide class-to-bases map for cross-file inheritance.
+
+        Scans all .py files at *commit* and merges their class definitions
+        into a single lookup table used by StructuralAgent.
+        """
+        merged: dict[str, list[str]] = {}
+        for item in commit.tree.traverse():
+            path = getattr(item, "path", "")
+            if not path.endswith(".py"):
+                continue
+            src = self._source_at_commit(commit, path)
+            if src:
+                merged.update(_build_class_bases_map(src))
+        return merged
 
     def cache_stats(self) -> dict[str, int]:
         """Expose current in-memory and persistent cache usage metrics."""
@@ -402,7 +551,12 @@ class AnalysisPipeline:
         file_results: dict[str, dict] = {}
         all_risk_scores: list[float] = []
 
-        for filepath in py_files[:20]:  # cap for performance
+        # Build project-wide class hierarchy for cross-file inheritance
+        project_class_bases = self._build_project_class_map(target)
+
+        # Pre-fetch sources (I/O) sequentially, then analyse in parallel
+        file_pairs: list[tuple[str, str, str, dict | None]] = []
+        for filepath in py_files[:_MAX_FILES_PER_COMMIT]:
             src_now = self._source_at_commit(target, filepath)
             src_base = self._baseline_source_from_window(
                 filepath=filepath,
@@ -411,9 +565,34 @@ class AnalysisPipeline:
             )
             if not src_now or not src_base:
                 continue
-            analysis = analyze_sources(src_now, src_base)
-            file_results[filepath] = analysis
-            all_risk_scores.append(analysis["risk_score"])
+            # Try multi-version aggregated baseline
+            agg = self._get_aggregated_baseline(
+                filepath, baseline_commits_raw, max_versions=8,
+            )
+            file_pairs.append((filepath, src_now, src_base, agg))
+
+        # Parallel agent execution per file
+        if len(file_pairs) > 1:
+            with ThreadPoolExecutor(max_workers=min(len(file_pairs), 4)) as pool:
+                futures = {
+                    pool.submit(
+                        analyze_sources, src_now, src_base,
+                        project_class_bases, agg_snap,
+                    ): filepath
+                    for filepath, src_now, src_base, agg_snap in file_pairs
+                }
+                for future in as_completed(futures):
+                    filepath = futures[future]
+                    analysis = future.result()
+                    file_results[filepath] = analysis
+                    all_risk_scores.append(analysis["risk_score"])
+        else:
+            for filepath, src_now, src_base, agg_snap in file_pairs:
+                analysis = analyze_sources(
+                    src_now, src_base, project_class_bases, agg_snap,
+                )
+                file_results[filepath] = analysis
+                all_risk_scores.append(analysis["risk_score"])
 
         # Aggregate risk including evolution
         mean_code_risk = (
@@ -553,7 +732,7 @@ class AnalysisPipeline:
                 )[1:]
                 py_files = [f for f in commit.stats.files if f.endswith(".py")]
                 file_scores: list[float] = []
-                for filepath in py_files[:5]:  # max 5 files per commit
+                for filepath in py_files[:_MAX_FILES_PER_WEEKLY]:
                     src_now = self._source_at_commit(commit, filepath)
                     src_base = self._baseline_source_from_window(
                         filepath=filepath,
@@ -774,7 +953,7 @@ class AnalysisPipeline:
         head_commit = commits[-1] if commits else None
         if head_commit and top_risky_files:
             from src.llm_ready_snippets import prepare_code_for_llm
-            for item in top_risky_files[:5]:
+            for item in top_risky_files[:_LLM_REVIEW_TOP]:
                 src = self._source_at_commit(head_commit, item["file"])
                 if src:
                     code_snippets.append(

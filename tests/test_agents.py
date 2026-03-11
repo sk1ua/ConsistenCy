@@ -202,6 +202,27 @@ def test_structural_same_zero():
     assert result.score < 0.15
 
 
+def test_structural_cross_file_inheritance():
+    """Cross-file class map should resolve deeper inheritance chains."""
+    from src.agents.structural_agent import _inheritance_depths
+
+    # File A defines Base → Child
+    # File B defines GrandChild(Child) — but Child is not defined in file B
+    file_b = "class GrandChild(Child):\n    pass\n"
+
+    # Without project map, GrandChild depth = 1 (Child is external)
+    depths_local = _inheritance_depths(file_b)
+    assert max(depths_local) == 1
+
+    # With project map, GrandChild → Child → Base = depth 3
+    project_map = {
+        "Base": [],
+        "Child": ["Base"],
+    }
+    depths_cross = _inheritance_depths(file_b, project_class_bases=project_map)
+    assert max(depths_cross) == 3
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SemanticAgent
 # ─────────────────────────────────────────────────────────────────────────────
@@ -262,7 +283,6 @@ def test_risk_aggregation_zero():
         "StyleAgent":      AgentResult("StyleAgent",      0.0),
         "StructuralAgent": AgentResult("StructuralAgent", 0.0),
         "SemanticAgent":   AgentResult("SemanticAgent",   0.0),
-        "EvolutionAgent":  AgentResult("EvolutionAgent",  0.0),
         "DuplicationAgent":AgentResult("DuplicationAgent",0.0),
     }
     result = agent.aggregate(fake)
@@ -276,7 +296,6 @@ def test_risk_aggregation_high():
         "StyleAgent":      AgentResult("StyleAgent",      1.0),
         "StructuralAgent": AgentResult("StructuralAgent", 1.0),
         "SemanticAgent":   AgentResult("SemanticAgent",   1.0),
-        "EvolutionAgent":  AgentResult("EvolutionAgent",  1.0),
         "DuplicationAgent":AgentResult("DuplicationAgent",1.0),
     }
     result = agent.aggregate(fake)
@@ -288,8 +307,10 @@ def test_risk_breakdown_keys():
     agent = RiskScoringAgent()
     result = agent.aggregate({})
     bd = result.details["breakdown"]
-    for k in ("style", "structural", "semantic", "evolution", "duplication"):
+    for k in ("style", "structural", "semantic", "duplication"):
         assert k in bd
+    # evolution is NOT in breakdown — it is blended at commit level only
+    assert "evolution" not in bd
 
 
 # ─────────────────────────────────────────────────────────────────────────────
