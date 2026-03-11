@@ -35,7 +35,7 @@ jobs:
         run: |
           pytest tests -q
 
-      # ── PR Risk Analysis (only on pull_request events) ─────────────────
+      # PR Risk Analysis (only on pull_request events)
       - name: ConsistenCy PR Risk Analysis
         if: github.event_name == 'pull_request'
         env:
@@ -51,16 +51,16 @@ jobs:
             || echo '{"commit_count":0,"avg_risk":0,"max_risk":0,"high_risk_commits":0,"commits":[],"top_risky_files":[],"security_findings":[]}' > /tmp/pr_report.json
           # Generate PR comment; --use-llm flag enables AI review when DEEPSEEK_API_KEY is set
           python - <<'PYEOF'
-import json, os, sys
-sys.path.insert(0, 'backend')
-from src.review_suggestions import generate_review_comment
-with open('/tmp/pr_report.json') as f:
-    report = json.load(f)
-use_llm = bool(os.environ.get('DEEPSEEK_API_KEY', '').strip())
-comment = generate_review_comment(report, use_llm=use_llm)
-with open('/tmp/pr_comment.md', 'w') as f:
-    f.write(comment)
-PYEOF
+            import json, os, sys
+            sys.path.insert(0, 'backend')
+            from src.review_suggestions import generate_review_comment
+            with open('/tmp/pr_report.json') as f:
+              report = json.load(f)
+            use_llm = bool(os.environ.get('DEEPSEEK_API_KEY', '').strip())
+            comment = generate_review_comment(report, use_llm=use_llm)
+            with open('/tmp/pr_comment.md', 'w') as f:
+              f.write(comment)
+            PYEOF
 
       - name: Post ConsistenCy Review Comment
         if: github.event_name == 'pull_request'
