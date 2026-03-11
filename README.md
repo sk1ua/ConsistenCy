@@ -1,232 +1,193 @@
-# ConsistenCy
+<div align="center">
 
-Code consistency analysis toolkit for multi-contributor repositories.
+# ⬡ ConsistenCy
 
-A framework for commit-level consistency analysis that helps teams detect style drift, structural drift, and logic drift in evolving Python projects.
+**Multi-agent code consistency & security analysis for Python repos**
 
----
+Catch style drift · Find security flaws · Spot tech debt hotspots · Auto-review PRs
 
-## Overview
+[![CI](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml/badge.svg)](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-ConsistenCy focuses on long-term codebase consistency in collaborative development.
-It provides a practical pipeline to scan repositories, analyze commits, and generate explainable risk scores with supporting evidence.
-
-The project exists to make consistency issues measurable and actionable, rather than relying only on manual review intuition.
-
----
-
-## Features
-
-* Commit-level consistency scoring (style / structure / logic)
-* Hybrid retrieval (vector + graph evidence)
-* Explainable evidence output (Top-K similar code)
-* CLI workflow for scan and analysis
-* Configurable rules and scoring weights
-* Research-ready V2 evaluation modules (human labels, ablation, baselines)
+</div>
 
 ---
 
-## Architecture
+## Why ConsistenCy?
 
-The system is built as a modular analysis pipeline:
+In projects with many contributors (especially AI-assisted "vibe coding"), code consistency silently degrades: naming conventions drift, dangerous functions creep in, and PRs get rubber-stamped. **ConsistenCy** automatically detects these problems by comparing every commit against the project's own historical patterns.
 
-```text
-User / CI
-  │
-  ▼
-CLI
-  │
-  ├── Scan Pipeline
-  │     ├── Parser (AST)
-  │     ├── Extractor
-  │     └── Storage (Vector DB)
-  │
-  └── Commit Pipeline
-        ├── Commit Miner (Git)
-        ├── Retriever (Vector + Graph)
-        ├── Risk Scorer
-        └── Evidence Report
+**Core capabilities:**
+
+- 🔍 **Consistency drift detection** — quantify how far new code deviates from existing style, structure, and semantics
+- 🛡️ **Security scanning** — hardcoded credentials, `eval()`/`exec()`, SQL injection, unsafe YAML
+- 📊 **Tech debt hotspots** — high-churn × high-complexity files visualized in a dashboard
+- 🤖 **AI code review** — DeepSeek LLM reads actual source code and generates natural-language feedback
+- 💬 **GitHub PR automation** — CI posts Markdown risk reports as PR comments
+
+---
+
+## Quick Start
+
+### 1. Install
+
+```bash
+git clone https://github.com/sk1ua/ConsistenCy.git
+cd ConsistenCy
+pip install -r backend/requirements.txt
 ```
 
-Main components:
+### 2. Scan a repo
 
-| Component | Description |
-| --------- | ----------- |
-| CLI | Entry point for scan, check, and evaluation commands |
-| Parser / Extractor | Parses Python files and extracts structural knowledge |
-| Storage | Stores and retrieves semantic code vectors |
-| Commit Miner | Builds commit context from Git history and diff |
-| Retriever | Combines vector and optional graph retrieval |
-| Risk Scorer | Computes style / structure / logic risk scores |
+```bash
+cd backend
+python cli.py scan /path/to/your/repo
+```
+
+### 3. Analyze a single commit
+
+```bash
+python cli.py analyze-commit --repo /path/to/repo --commit abc1234
+```
+
+That's it — you'll see a color-coded risk report in your terminal.
+
+---
+
+## All Commands
+
+| Command | Description |
+|---------|-------------|
+| `scan <path>` | Build a baseline snapshot for the repo |
+| `analyze-commit --repo <path> --commit <sha>` | Full multi-agent analysis on one commit |
+| `analyze-range --repo <path> --weeks 8` | Batch analysis over a time range |
+| `pr-report --repo <path> --base main --head feature` | PR-level risk report |
+| `analyze-file new.py old.py` | Compare two files directly (no Git needed) |
+| `web-ui --port 8000` | Launch the web dashboard |
+| `export-by-file --repo <path>` | Export file-level data to JSON/CSV |
+
+### PR Report with AI Review
+
+```bash
+# Basic report
+python cli.py pr-report --repo . --base main --head feature-branch
+
+# With AI review (requires API key)
+python cli.py pr-report --repo . --base main --head feature-branch --llm-review
+
+# JSON output for CI pipelines
+python cli.py pr-report --repo . --base main --head feature-branch --json-output
+```
+
+### Web Dashboard
+
+```bash
+python cli.py web-ui --port 8000
+```
+
+Open `http://localhost:8000`, enter a local repo path, click **Analyze**.
+
+The dashboard shows: risk timeline, agent radar, file risk bars, author profiles, tech debt scatter plot, and a full evidence chain.
+
+---
+
+## AI Review Setup (Optional)
+
+ConsistenCy can call [DeepSeek](https://platform.deepseek.com) to generate natural-language code review comments. Without a key, everything else works normally — only the AI section is skipped.
+
+```bash
+cp .env.example .env
+# Edit .env:
+# DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+---
+
+## GitHub PR Automation
+
+Add the included CI workflow to get automatic risk reports on every pull request:
+
+1. Copy `.github/workflows/ci.yml` to your project
+2. (Optional) Add `DEEPSEEK_API_KEY` as a repository secret for AI comments
+3. Every PR will receive:
+   - Full multi-agent analysis
+   - Security vulnerability report (CRITICAL findings suggest blocking merge)
+   - Markdown risk summary posted as a PR comment
+   - AI review paragraph (if API key is set)
+
+---
+
+## How It Works
+
+ConsistenCy runs **8 specialized agents** on every commit:
+
+| Agent | What it analyzes |
+|-------|-----------------|
+| **ParserAgent** | AST parsing, Halstead metrics, cyclomatic complexity |
+| **StyleAgent** | Naming conventions, docstrings, formatting drift |
+| **StructuralAgent** | Import dependencies, coupling, inheritance depth |
+| **SemanticAgent** | AST n-gram similarity, API usage, control flow |
+| **EvolutionAgent** | Code churn, Shannon entropy, hotspots, bus factor |
+| **DuplicationAgent** | Clone detection, duplication ratio |
+| **SecurityAgent** | Hardcoded secrets, dangerous calls, injection risks |
+| **RiskScoringAgent** | Weighted aggregation with security overrides |
+
+Each file gets a risk score from 0 to 1:
+
+| Score | Level | Meaning |
+|-------|-------|---------|
+| 0.00 – 0.24 | 🟢 GREEN | Consistent |
+| 0.25 – 0.49 | 🟡 YELLOW | Minor Drift |
+| 0.50 – 0.74 | 🟠 ORANGE | Significant Drift |
+| 0.75 – 1.00 | 🔴 RED | High Risk |
+
+Security findings override scores: a CRITICAL finding forces RED (≥ 0.75), HIGH forces ORANGE (≥ 0.50).
 
 ---
 
 ## Project Structure
 
-```text
-.
+```
+ConsistenCy/
 ├── backend/
-│   ├── cli.py                 # command line entry
-│   ├── config.py              # global config
+│   ├── cli.py                     # CLI entry point
+│   ├── requirements.txt
 │   └── src/
-│       ├── parser.py
-│       ├── extractor.py
-│       ├── storage.py
-│       ├── checker.py
-│       ├── commit_pipeline.py
-│       ├── annotation_tool.py
-│       ├── human_labeled_evaluator.py
-│       ├── ablation_study_v2.py
-│       ├── baselines.py
-│       ├── cross_project_evaluator.py
-│       ├── interfaces.py
-│       └── types.py
-├── data/
-│   ├── rules.json
-│   ├── annotations/
-│   └── eval/
-├── tests/
-├── ARCHITECTURE.md
-├── ROADMAP.md
-└── README.md
+│       ├── agents/                # 8 analysis agents
+│       ├── pipeline.py            # Core analysis pipeline
+│       ├── review_suggestions.py  # PR comment formatter
+│       ├── llm_reviewer.py        # DeepSeek AI review
+│       ├── llm_ready_snippets.py  # Code snippet extraction for LLM
+│       ├── exporter.py            # JSON / CSV / SQLite export
+│       ├── baseline_strategy.py   # File scenario classification
+│       └── baseline_storage.py    # SQLite baseline cache
+├── frontend/
+│   ├── app.py                     # Flask server
+│   ├── templates/index.html       # Dashboard HTML
+│   └── static/                    # CSS + JS
+├── .github/workflows/ci.yml       # CI + PR automation
+├── .env.example                   # Environment variable template
+└── tests/                         # 46 tests
 ```
 
 ---
 
-## Installation
-
-Clone the repository:
+## Running Tests
 
 ```bash
-git clone https://github.com/sk1ua/ConsistenCy.git
-cd ConsistenCy
-```
-
-Install dependencies:
-
-```bash
-cd backend
-pip install -r requirements.txt
-```
-
-Optional Neo4j setup for graph evidence:
-
-```bash
-docker run -d --name consistency-neo4j -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/test123456 neo4j:5.26
+PYTHONPATH=backend pytest tests -q
 ```
 
 ---
 
-## Configuration
+## Limitations
 
-Edit configuration in:
-
-```text
-backend/config.py
-```
-
-Example snippet:
-
-```python
-CHECK_CONFIG = {
-    "naming": {
-        "function": "snake_case",
-        "class": "PascalCase",
-        "variable": "snake_case",
-    },
-    "max_function_length": 100,
-    "max_line_length": 120,
-}
-
-RISK_SCORING_CONFIG = {
-    "weights": {
-        "style": 0.4,
-        "structure": 0.3,
-        "logic": 0.3,
-    }
-}
-```
-
----
-
-## Usage
-
-Start with repository scan:
-
-```bash
-cd backend
-python cli.py scan ../../python-patterns --clear
-```
-
-Run commit-level analysis:
-
-```bash
-python cli.py commit-mvp ../../python-patterns <commit_sha> --topk 3
-```
-
-(Optional) run evaluation command:
-
-```bash
-python cli.py eval-weak ../../python-patterns --samples 60 --max-commits 220
-```
-
-V2 evaluation workflow (human-labeled dataset):
-
-```bash
-# 查看数据集统计
-python cli.py dataset-stats ../data/annotations/labeled_dataset_v1.jsonl
-
-# 严格评估（train/valid/test + CI）
-python cli.py eval-human ../data/annotations/labeled_dataset_v1.jsonl --bootstrap 300
-
-# 真实消融实验
-python cli.py ablation-v2 ../data/annotations/labeled_dataset_v1.jsonl --components vector,graph,message_signals,rules
-
-# 基线对比与显著性检验
-python cli.py compare-baselines-v2 ../data/annotations/labeled_dataset_v1.jsonl
-```
-
----
-
-## Example
-
-Minimal flow:
-
-```text
-input: repository path + commit SHA
-system: mines diff, retrieves evidence, computes risks
-output: style_risk / structure_risk / logic_risk / overall_risk + Top-K evidence
-```
-
----
-
-## Roadmap
-
-Planned features:
-
-* [x] Commit-level MVP pipeline
-* [x] Hybrid retrieval (vector + graph)
-* [ ] Human-labeled benchmark dataset
-* [ ] Robust baseline comparison and statistical testing
-* [ ] Cross-project generalization evaluation
-* [ ] Rich PR report generation
-
----
-
-## Contributing
-
-Contributions are welcome.
-
-Steps:
-
-1. Fork the repository
-2. Create a new branch
-3. Add your changes and tests
-4. Submit a pull request
+- **Python only** — all analysis uses `ast.parse()` (other languages are on the roadmap)
+- **Local repos** — requires a cloned Git repository path
 
 ---
 
 ## License
 
-MIT License
+[MIT](LICENSE)

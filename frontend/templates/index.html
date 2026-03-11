@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ConsistenCy • Code Consistency Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <link rel="stylesheet" href="/static/css/dashboard.css" />
+</head>
+<body>
+
+<!-- ===================== HEADER ===================== -->
+<header>
+  <div class="logo">
+    <span class="logo-icon" aria-hidden="true">⬡</span>
+    <h1 class="logo-text">ConsistenCy</h1>
+    <span class="logo-sub">Multi-Agent Code Analysis</span>
+  </div>
+  <div class="repo-form">
+    <label for="repoInput" class="sr-only">Repository path</label>
+    <input id="repoInput" type="text" placeholder="Absolute path to local Git repo…" />
+    <button id="analyzeBtn">Analyze</button>
+  </div>
+</header>
+
+<!-- ===================== RISK BANNER ===================== -->
+<section id="riskBanner" class="risk-banner hidden" role="status" aria-live="polite">
+  <div class="risk-label" id="riskLabel">—</div>
+  <div class="risk-score" id="riskScore">0.000</div>
+  <div class="risk-meta" id="riskMeta"></div>
+</section>
+
+<!-- ===================== GRID ===================== -->
+<main class="grid" id="mainGrid">
+
+  <!-- Row 1: sparkline + radar -->
+  <div class="card span2" id="cardTimeline">
+    <h2>Risk Score Timeline <span class="hint">(weekly average)</span></h2>
+    <div id="chartTimeline" class="chart-area" role="img" aria-label="Risk score timeline chart"></div>
+  </div>
+
+  <div class="card" id="cardRadar">
+    <h2>Agent Breakdown <span class="hint">(latest commit)</span></h2>
+    <div id="chartRadar" class="chart-area" role="img" aria-label="Agent breakdown radar chart"></div>
+  </div>
+
+  <!-- Row 2: file table + author bars -->
+  <div class="card span2" id="cardFiles">
+    <h2>File Risk Summary</h2>
+    <div id="chartFiles" class="chart-area tall" role="img" aria-label="File risk bar chart"></div>
+  </div>
+
+  <div class="card" id="cardAuthors">
+    <h2>Author Risk Profile</h2>
+    <div id="chartAuthors" class="chart-area" role="img" aria-label="Author risk bar chart"></div>
+  </div>
+
+  <!-- Row 3: hotspot scatter -->
+  <div class="card span3" id="cardHotspots">
+    <h2>Technical Debt Hotspots <span class="hint">(churn × complexity)</span></h2>
+    <div id="chartHotspots" class="chart-area" role="img" aria-label="Hotspot scatter chart"></div>
+  </div>
+
+  <!-- Row 4: evidence log -->
+  <div class="card span3" id="cardEvidence">
+    <h2>Evidence Chain</h2>
+    <ul id="evidenceList" class="evidence-list" aria-label="Analysis evidence">
+      <li class="placeholder">Run an analysis to see findings here.</li>
+    </ul>
+  </div>
+
+</main>
+
+<!-- ===================== LOADING OVERLAY ===================== -->
+<div id="overlay" class="overlay hidden" role="alert" aria-busy="true" aria-label="Loading">
+  <div class="spinner" aria-hidden="true"></div>
+  <p>Running multi-agent analysis…</p>
+</div>
+
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
