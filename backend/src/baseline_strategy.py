@@ -153,21 +153,114 @@ def select_baseline_strategy(
 
 def get_template_baseline(filepath: str) -> str:
     """
-    Get a template baseline for new files based on file type.
+    Get a template baseline for new files based on file type and naming pattern.
     
-    This is used as fallback when a file has no history.
-    In real usage, this could come from project templates or similar files.
+    Provides a sensible baseline so that new files are compared against typical
+    Python code rather than an empty string (which would flag 100% drift).
     
     Parameters
     ----------
     filepath : str
-        The file path
+        The file path (used for heuristic pattern matching)
     
     Returns
     -------
     str
-        Template source code (empty by default)
+        Template source code matching the detected file category
     """
-    # TODO: In a real system, this could load from project templates
-    # or from similar existing files. For now, return empty string.
-    return ""
+    name = filepath.rsplit("/", 1)[-1].lower() if "/" in filepath else filepath.lower()
+
+    # --- Test file ---
+    if name.startswith("test_") or name.startswith("tests_") or name.endswith("_test.py"):
+        return _TEMPLATE_TEST
+
+    # --- CLI / entrypoint ---
+    if name in ("cli.py", "main.py", "__main__.py", "manage.py"):
+        return _TEMPLATE_CLI
+
+    # --- Flask / web ---
+    if name in ("app.py", "wsgi.py", "views.py", "routes.py"):
+        return _TEMPLATE_FLASK
+
+    # --- Config ---
+    if name in ("config.py", "settings.py", "conf.py"):
+        return _TEMPLATE_CONFIG
+
+    # --- Package init ---
+    if name == "__init__.py":
+        return _TEMPLATE_INIT
+
+    # --- Default: generic module ---
+    return _TEMPLATE_MODULE
+
+
+# ---------------------------------------------------------------------------
+# Template source strings
+# ---------------------------------------------------------------------------
+
+_TEMPLATE_TEST = '''\
+import pytest
+
+
+class TestExample:
+    def test_basic(self):
+        assert True
+
+    def test_edge_case(self):
+        pass
+'''
+
+_TEMPLATE_CLI = '''\
+import click
+
+
+@click.group()
+def cli():
+    pass
+
+
+@cli.command()
+def run():
+    pass
+
+
+if __name__ == "__main__":
+    cli()
+'''
+
+_TEMPLATE_FLASK = '''\
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def index():
+    return jsonify({"status": "ok"})
+
+
+if __name__ == "__main__":
+    app.run()
+'''
+
+_TEMPLATE_CONFIG = '''\
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+
+DEBUG = False
+'''
+
+_TEMPLATE_INIT = '''\
+"""Package init."""
+'''
+
+_TEMPLATE_MODULE = '''\
+from __future__ import annotations
+
+from typing import Any
+
+
+def main() -> None:
+    pass
+'''

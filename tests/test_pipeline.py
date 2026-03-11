@@ -205,3 +205,71 @@ def test_config_risk_weights_sum():
     import config
     total = sum(config.RISK_WEIGHTS.values())
     assert abs(total - 1.0) < 1e-6, f"RISK_WEIGHTS should sum to 1.0, got {total}"
+
+
+# ─── baseline_strategy (template baselines) ──────────────────────────────────
+
+def test_template_baseline_test_file():
+    from src.baseline_strategy import get_template_baseline
+    tmpl = get_template_baseline("tests/test_foo.py")
+    assert "import pytest" in tmpl
+
+
+def test_template_baseline_cli():
+    from src.baseline_strategy import get_template_baseline
+    tmpl = get_template_baseline("cli.py")
+    assert "click" in tmpl
+
+
+def test_template_baseline_flask():
+    from src.baseline_strategy import get_template_baseline
+    tmpl = get_template_baseline("frontend/app.py")
+    assert "Flask" in tmpl
+
+
+def test_template_baseline_init():
+    from src.baseline_strategy import get_template_baseline
+    tmpl = get_template_baseline("src/__init__.py")
+    assert len(tmpl) > 0
+
+
+def test_template_baseline_module():
+    from src.baseline_strategy import get_template_baseline
+    tmpl = get_template_baseline("src/my_module.py")
+    assert "def main" in tmpl
+
+
+def test_template_baseline_config():
+    from src.baseline_strategy import get_template_baseline
+    tmpl = get_template_baseline("config.py")
+    assert "Path" in tmpl
+
+
+# ─── multi-version baseline aggregation ──────────────────────────────────────
+
+def test_aggregate_baseline_snapshot():
+    """Multi-version aggregation should return median metrics."""
+    pipeline = _get_pipeline()
+    if pipeline is None:
+        pytest.skip("Git repo not available")
+
+    v1 = "import os\ndef f(x):\n    return x + 1\n"
+    v2 = "import os\nimport sys\ndef f(x):\n    if x > 0:\n        return x + 1\n    return 0\n"
+    v3 = "import os\ndef f(x, y):\n    return x + y\n"
+
+    agg = pipeline._aggregate_baseline_snapshot([v1, v2, v3])
+    assert agg is not None
+    assert "cyclomatic_avg" in agg
+    assert "imports" in agg
+    assert "source" in agg
+    # 'os' appears in all 3 versions → above threshold
+    assert "os" in agg["imports"]
+
+
+def test_aggregate_baseline_too_few_versions():
+    pipeline = _get_pipeline()
+    if pipeline is None:
+        pytest.skip("Git repo not available")
+
+    agg = pipeline._aggregate_baseline_snapshot(["def f(): pass\n"])
+    assert agg is None  # Need at least 2 versions

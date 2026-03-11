@@ -8,11 +8,13 @@ evidence chain.
 
 Scoring formula (default weights)
 ----------------------------------
-    consistency_risk =
-        0.25 · style_drift
-        + 0.35 · structural_drift
-        + 0.30 · semantic_drift
-        + 0.10 · evolution_anomaly
+    file_risk =
+        0.28 · style_drift
+        + 0.39 · structural_drift
+        + 0.33 · semantic_drift
+
+    (Evolution is blended at commit-level only:
+     final = 0.90 · mean(file_risks) + 0.10 · evolution_anomaly)
 
 Optional duplication bonus: if dup_score > 0.05, the final score
 receives a small boost to reflect technical-debt accumulation.
@@ -36,10 +38,9 @@ from typing import Any
 from .base_agent import AgentBase, AgentResult
 
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "style": 0.25,
-    "structural": 0.35,
-    "semantic": 0.30,
-    "evolution": 0.10,
+    "style": 0.28,
+    "structural": 0.39,
+    "semantic": 0.33,
 }
 
 RISK_LEVELS = [
@@ -90,15 +91,16 @@ class RiskScoringAgent(AgentBase):
         style_score = _find("style")
         structural_score = _find("structural")
         semantic_score = _find("semantic")
-        evolution_score = _find("evolution")
         dup_score = _find("duplication")
         security_score = _find("security")
 
+        # Evolution is NOT included here — it is blended at commit level
+        # in AnalysisPipeline.analyze_commit() as:
+        #   final = 0.90 * mean(file_scores) + 0.10 * evolution_score
         raw = (
-            self.weights.get("style", 0.25) * style_score
-            + self.weights.get("structural", 0.35) * structural_score
-            + self.weights.get("semantic", 0.30) * semantic_score
-            + self.weights.get("evolution", 0.10) * evolution_score
+            self.weights.get("style", 0.28) * style_score
+            + self.weights.get("structural", 0.39) * structural_score
+            + self.weights.get("semantic", 0.33) * semantic_score
         )
 
         # Optional duplication boost
@@ -120,7 +122,7 @@ class RiskScoringAgent(AgentBase):
 
         # Collect all evidence strings in priority order
         all_evidence: list[str] = []
-        for prefix in ("structural", "semantic", "style", "evolution", "duplication"):
+        for prefix in ("structural", "semantic", "style", "duplication"):
             for key, res in agent_results.items():
                 if key.lower().startswith(prefix):
                     all_evidence.extend(res.evidence[:2])
@@ -130,7 +132,6 @@ class RiskScoringAgent(AgentBase):
                 "style": round(style_score, 4),
                 "structural": round(structural_score, 4),
                 "semantic": round(semantic_score, 4),
-                "evolution": round(evolution_score, 4),
                 "duplication": round(dup_score, 4),
                 "security": round(security_score, 4),
             },

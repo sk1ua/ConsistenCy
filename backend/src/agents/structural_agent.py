@@ -48,41 +48,66 @@ def _fan_out(imports: list[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Inheritance depth per class
+# Inheritance depth per class (supports cross-file resolution)
 # ---------------------------------------------------------------------------
 
-def _inheritance_depths(source: str) -> list[int]:
-    """Compute inheritance depth for each class in *source*.
-
-    Depth = longest chain from the class to a root with no in-module bases.
-    Classes that only inherit from names not defined in the file get depth 1.
-    """
+def _build_class_bases_map(source: str) -> dict[str, list[str]]:
+    """Return {class_name: [base_class_names]} from a single source file."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return []
-
-    # Build a map of class-name → list-of-base-names (within this module)
-    class_names: set[str] = set()
-    class_bases: dict[str, list[str]] = {}
+        return {}
+    result: dict[str, list[str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            class_names.add(node.name)
-            class_bases[node.name] = [
+            bases = [
                 base.id if isinstance(base, ast.Name) else ""
                 for base in node.bases
             ]
+            result[node.name] = [b for b in bases if b]
+    return result
+
+
+def _inheritance_depths(
+    source: str,
+    project_class_bases: dict[str, list[str]] | None = None,
+) -> list[int]:
+    """Compute inheritance depth for each class in *source*.
+
+    Depth = longest chain from the class to a root with no known bases.
+
+    Parameters
+    ----------
+    source : str
+        The source code of the file being analysed.
+    project_class_bases : dict | None
+        Optional cross-file class-to-bases map built from all project files.
+        When provided, inheritance chains that cross file boundaries are
+        resolved correctly.  When *None*, only in-module chains are resolved
+        (original behaviour).
+    """
+    local_map = _build_class_bases_map(source)
+    if not local_map:
+        return [0]
+
+    # Merge: project-wide map + local overrides (local file wins for same name)
+    all_bases: dict[str, list[str]] = {}
+    if project_class_bases:
+        all_bases.update(project_class_bases)
+    all_bases.update(local_map)  # local definitions take precedence
+
+    all_known = set(all_bases.keys())
 
     def _depth(name: str, seen: set[str]) -> int:
-        if name in seen or name not in class_bases:
+        if name in seen or name not in all_bases:
             return 0
         seen.add(name)
-        local_bases = [b for b in class_bases[name] if b in class_names]
-        if not local_bases:
+        resolvable = [b for b in all_bases[name] if b in all_known]
+        if not resolvable:
             return 1  # root class (bases are external or empty)
-        return 1 + max(_depth(b, seen) for b in local_bases)
+        return 1 + max(_depth(b, set(seen)) for b in resolvable)
 
-    return [_depth(name, set()) for name in class_bases] or [0]
+    return [_depth(name, set()) for name in local_map] or [0]
 
 
 # ---------------------------------------------------------------------------
@@ -117,8 +142,9 @@ class StructuralAgent(AgentBase):
         # Inheritance depth -----------------------------------------------
         src_now = snapshot.get("source", "")
         src_base = baseline.get("source", "")
-        depths_now = _inheritance_depths(src_now)
-        depths_base = _inheritance_depths(src_base)
+        project_class_bases = snapshot.get("project_class_bases")
+        depths_now = _inheritance_depths(src_now, project_class_bases)
+        depths_base = _inheritance_depths(src_base, project_class_bases)
         avg_depth_now = sum(depths_now) / len(depths_now) if depths_now else 0.0
         avg_depth_base = sum(depths_base) / len(depths_base) if depths_base else 0.0
         depth_drift = self.clamp(abs(avg_depth_now - avg_depth_base) / max(avg_depth_base, 1))
