@@ -36,6 +36,8 @@ PIPELINE_CONFIG = {
     "hotspot_top_n": 30,
     # PR report 中最多分析多少个顶部风险文件用于 LLM review
     "llm_review_top_files": 5,
+    # weekly_history: True = 对每个 commit 运行真实多 Agent 分析（不使用 churn 代理）
+    "weekly_full_analysis": True,
 }
 
 # ─── 支持的文件类型 ───────────────────────────────────────────────────────────

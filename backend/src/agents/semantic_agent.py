@@ -9,7 +9,7 @@ Dimensions scored
 -----------------
 ast_edit_distance   : Normalised tree-edit distance between AST
                       representations (Zhang-Shasha approximation
-                      via node-type n-gram difference).
+                      via subtree hash fingerprinting, O(n)).
 api_usage_drift     : Jaccard distance between called function names.
 control_flow_drift  : Change in branching-statement profile
                       (if/for/while/try distributions).
@@ -22,6 +22,7 @@ Score formula:
 from __future__ import annotations
 
 import ast
+import hashlib
 from collections import Counter
 from typing import Any
 
@@ -29,30 +30,59 @@ from .base_agent import AgentBase, AgentResult
 
 
 # ---------------------------------------------------------------------------
-# AST node-type sequence distance (approx tree-edit distance)
+# Subtree hash fingerprinting (true tree-edit distance approximation)
 # ---------------------------------------------------------------------------
 
-def _node_type_sequence(tree: ast.AST) -> list[str]:
-    """Linearise the AST into a depth-first list of node type names."""
-    return [type(node).__name__ for node in ast.walk(tree)]
+def _subtree_fingerprints(tree: ast.AST) -> set[str]:
+    """Compute an MD5 hash for every subtree, bottom-up.
+
+    Each unique subtree structure+leaf-values maps to one hash.  The
+    resulting set is used for Jaccard-based structural comparison:
+    identical subtrees shared between two trees cancel out, leaving
+    only the differing portions.
+
+    Compared to flat n-gram sequences this preserves nesting structure
+    so a change deep inside a loop is not diluted by unchanged outer
+    context.
+    """
+    fingerprints: set[str] = set()
+
+    def _hash(node: ast.AST) -> str:
+        child_hashes = sorted(_hash(c) for c in ast.iter_child_nodes(node))
+        if isinstance(node, ast.Name):
+            parts = f"Name:{node.id}|{','.join(child_hashes)}"
+        elif isinstance(node, ast.Constant):
+            parts = f"Const:{type(node.value).__name__}:{node.value}|"
+        elif isinstance(node, ast.arg):
+            parts = f"arg:{node.arg}|{','.join(child_hashes)}"
+        else:
+            parts = f"{type(node).__name__}|{','.join(child_hashes)}"
+        h = hashlib.md5(parts.encode()).hexdigest()
+        fingerprints.add(h)
+        return h
+
+    _hash(tree)
+    return fingerprints
 
 
-def _ngrams(seq: list[str], n: int = 3) -> Counter:
-    return Counter(
-        tuple(seq[i : i + n]) for i in range(len(seq) - n + 1)
-    )
+def _subtree_edit_distance(tree_a: ast.AST, tree_b: ast.AST) -> float:
+    """Jaccard distance on subtree fingerprint sets.
 
-
-def _ngram_distance(seq_a: list[str], seq_b: list[str], n: int = 3) -> float:
-    """Normalised n-gram distance between two AST node sequences."""
-    if not seq_a and not seq_b:
+    Returns 0.0 for identical trees and ≈1.0 for completely different
+    trees.  This is an O(n) approximation of Zhang-Shasha tree-edit
+    distance.
+    """
+    fps_a = _subtree_fingerprints(tree_a)
+    fps_b = _subtree_fingerprints(tree_b)
+    if not fps_a and not fps_b:
         return 0.0
-    ng_a = _ngrams(seq_a, n)
-    ng_b = _ngrams(seq_b, n)
-    all_keys = set(ng_a) | set(ng_b)
-    overlap = sum(min(ng_a[k], ng_b[k]) for k in all_keys)
-    total = sum(ng_a.values()) + sum(ng_b.values())
-    return 1.0 - 2 * overlap / total if total else 0.0
+    union = len(fps_a | fps_b)
+    return 1.0 - len(fps_a & fps_b) / union if union > 0 else 0.0
+
+
+def _node_type_sequence(tree: ast.AST) -> list[str]:
+    """Linearise the AST into a depth-first list of node type names (kept for compatibility)."""
+    return [type(node).__name__ for node in ast.walk(tree)]
 
 
 # ---------------------------------------------------------------------------
@@ -134,10 +164,8 @@ class SemanticAgent(AgentBase):
         except SyntaxError:
             tree_base = ast.parse("")
 
-        # AST sequence distance -----------------------------------------
-        seq_now = _node_type_sequence(tree_now)
-        seq_base = _node_type_sequence(tree_base)
-        ast_dist = _ngram_distance(seq_now, seq_base)
+        # AST subtree-fingerprint distance (tree-edit approximation) ------
+        ast_dist = _subtree_edit_distance(tree_now, tree_base)
 
         # API usage drift -----------------------------------------------
         api_now = _called_names(tree_now)
@@ -160,7 +188,7 @@ class SemanticAgent(AgentBase):
         evidence: list[str] = []
         if ast_dist > 0.15:
             evidence.append(
-                f"AST structure diverged significantly (n-gram dist={ast_dist:.3f})"
+                f"AST structure diverged significantly (subtree edit dist={ast_dist:.3f})"
             )
         added_api = api_now - api_base
         removed_api = api_base - api_now

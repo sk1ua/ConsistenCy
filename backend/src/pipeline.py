@@ -52,6 +52,7 @@ except ImportError:
 _MAX_FILES_PER_COMMIT = _PCFG.get("max_files_per_commit", 20)
 _MAX_FILES_PER_WEEKLY = _PCFG.get("max_files_per_weekly_commit", 5)
 _LLM_REVIEW_TOP = _PCFG.get("llm_review_top_files", 5)
+_WEEKLY_FULL = _PCFG.get("weekly_full_analysis", True)
 
 _parser = ParserAgent()
 _style = StyleAgent()
@@ -697,14 +698,15 @@ class AnalysisPipeline:
 
         Strategy
         --------
-        For each week bucket:
-        - Pick up to *full_analysis_per_week* representative commits and run the
-          real multi-agent analysis on their Python files.  These produce an
-          ``is_estimated=False`` data point.
-        - All remaining commits in the week contribute a lightweight churn-based
-          proxy score so the time-series stays populated without being slow.
-        The final ``avg_risk`` for a week is the mean of all data points (real +
-        proxy).  ``real_sample_count`` tells the caller how many were real runs.
+        When ``weekly_full_analysis`` is **True** (the default, set in
+        ``config.PIPELINE_CONFIG``), *every* commit in every week bucket
+        receives a real multi-agent analysis on its Python files.  This
+        eliminates the lightweight churn-based proxy that was used for
+        all-but-one commits per week.
+
+        When ``weekly_full_analysis`` is **False**, only the first
+        *full_analysis_per_week* commits per week receive real analysis;
+        the remainder fall back to a churn-based proxy score.
         """
         since = datetime.now(tz=timezone.utc) - timedelta(weeks=weeks)
 
@@ -725,8 +727,16 @@ class AnalysisPipeline:
             scores: list[float] = []
             real_sample_count = 0
 
-            # --- Real analysis for up to full_analysis_per_week commits ---
-            for commit in commits_in_week[:full_analysis_per_week]:
+            # Decide which commits get real analysis
+            if _WEEKLY_FULL:
+                real_commits = commits_in_week
+                proxy_commits: list = []
+            else:
+                real_commits = commits_in_week[:full_analysis_per_week]
+                proxy_commits = commits_in_week[full_analysis_per_week:]
+
+            # --- Real multi-agent analysis ---
+            for commit in real_commits:
                 baseline_commits = list(
                     self.repo.iter_commits(rev=commit.hexsha, max_count=31)
                 )[1:]
@@ -746,12 +756,12 @@ class AnalysisPipeline:
                     scores.append(statistics.mean(file_scores))
                     real_sample_count += 1
                 else:
-                    # No analysable Python files → fall back to churn proxy
+                    # No analysable Python files → lightweight churn fallback
                     diff = _commit_diff_stats(commit)
                     scores.append(min((diff["additions"] + diff["deletions"]) / 500, 1.0))
 
-            # --- Proxy scores for remaining commits ---
-            for commit in commits_in_week[full_analysis_per_week:]:
+            # --- Proxy scores for remaining commits (legacy / non-full mode) ---
+            for commit in proxy_commits:
                 diff = _commit_diff_stats(commit)
                 churn = diff["additions"] + diff["deletions"]
                 scores.append(min(churn / 500, 1.0))
