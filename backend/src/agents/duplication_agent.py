@@ -16,7 +16,8 @@ Algorithm (rolling-hash fingerprinting)
    similarity.  Pairs with similarity ≥ 0.80 are clones.
 
 Compared to the previous O(n²) pairwise approach:
-  - Building the index is O(Σ tokens) ≈ O(n).
+    - Building the index is near-linear in the number of token windows
+        (rolling polynomial hash with fixed window size).
   - Shared-window counting is O(n) for typical code (most windows are
     unique); worst-case is O(n²) only if all functions are identical.
   - Natural extension to **cross-file clone detection**: functions from
@@ -40,6 +41,7 @@ where HIGH_DUP_THRESHOLD = 0.20  (≥20 % duplication → score 1.0)
 from __future__ import annotations
 
 import ast
+import hashlib
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -99,17 +101,28 @@ def _canonical_tokens(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list
 def _extract_functions(
     source: str,
     filename: str = _PRIMARY_FILE,
-) -> list[tuple[str, str, list[str]]]:
-    """Return (filename, funcname, canonical_tokens) for every function."""
+) -> list[tuple[str, str, int, list[str]]]:
+    """Return (filename, funcname, lineno, canonical_tokens) for each function."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return []
-    result: list[tuple[str, str, list[str]]] = []
+    result: list[tuple[str, str, int, list[str]]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            result.append((filename, node.name, _canonical_tokens(node)))
+            result.append((
+                filename,
+                node.name,
+                int(getattr(node, "lineno", 0)),
+                _canonical_tokens(node),
+            ))
     return result
+
+
+def _func_label(filename: str, funcname: str, lineno: int) -> str:
+    """Return a stable label for one function (with line disambiguator)."""
+    core = f"{funcname}@L{lineno}"
+    return f"{filename}:{core}" if filename else core
 
 
 # ---------------------------------------------------------------------------
@@ -125,32 +138,49 @@ class ClonePair:
 
 
 def _rolling_hash_clones(
-    all_functions: list[tuple[str, str, list[str]]],
+    all_functions: list[tuple[str, str, int, list[str]]],
     min_tokens: int = MIN_TOKENS,
     threshold: float = 0.80,
 ) -> list[ClonePair]:
     """Detect clone pairs using rolling-window fingerprinting.
 
-    Builds a window_hash → {(file, func)} inverted index in O(Σ tokens)
+    Builds a window_hash → {(file, func, lineno)} inverted index in O(Σ tokens)
     time, then counts shared windows per pair to compute similarity.
     """
-    # Build inverted index: window_hash → set of (file, func) keys
-    window_index: dict[int, set[tuple[str, str]]] = defaultdict(set)
-    func_window_count: dict[tuple[str, str], int] = {}
+    # Build inverted index: window_hash → set of (file, func, lineno) keys
+    window_index: dict[int, set[tuple[str, str, int]]] = defaultdict(set)
+    func_window_count: dict[tuple[str, str, int], int] = {}
 
-    for filename, funcname, tokens in all_functions:
+    base = 1_000_003
+    mod = (1 << 64) - 59
+
+    def _token_to_int(token: str) -> int:
+        digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+        return int.from_bytes(digest, "little") % mod
+
+    for filename, funcname, lineno, tokens in all_functions:
         if len(tokens) < min_tokens:
             continue
-        key = (filename, funcname)
+        key = (filename, funcname, lineno)
         n_windows = len(tokens) - min_tokens + 1
         func_window_count[key] = n_windows
-        for i in range(n_windows):
-            # tuple is hashable and uses Python's fast built-in hash
-            wh = hash(tuple(tokens[i : i + min_tokens]))
-            window_index[wh].add(key)
+
+        token_vals = [_token_to_int(token) for token in tokens]
+        power = pow(base, min_tokens - 1, mod)
+
+        rolling_hash = 0
+        for value in token_vals[:min_tokens]:
+            rolling_hash = (rolling_hash * base + value) % mod
+        window_index[rolling_hash].add(key)
+
+        for idx in range(min_tokens, len(token_vals)):
+            left = token_vals[idx - min_tokens]
+            rolling_hash = (rolling_hash - (left * power) % mod) % mod
+            rolling_hash = (rolling_hash * base + token_vals[idx]) % mod
+            window_index[rolling_hash].add(key)
 
     # Count shared windows per pair of functions
-    shared: dict[tuple[tuple[str, str], tuple[str, str]], int] = defaultdict(int)
+    shared: dict[tuple[tuple[str, str, int], tuple[str, str, int]], int] = defaultdict(int)
     for funcs in window_index.values():
         if len(funcs) < 2:
             continue
@@ -170,10 +200,10 @@ def _rolling_hash_clones(
         total_b = func_window_count.get(key_b, 1)
         similarity = 2 * match_count / (total_a + total_b)
         if similarity >= threshold:
-            file_a, func_a = key_a
-            file_b, func_b = key_b
-            label_a = f"{file_a}:{func_a}" if file_a else func_a
-            label_b = f"{file_b}:{func_b}" if file_b else func_b
+            file_a, func_a, line_a = key_a
+            file_b, func_b, line_b = key_b
+            label_a = _func_label(file_a, func_a, line_a)
+            label_b = _func_label(file_b, func_b, line_b)
             clones.append(ClonePair(
                 func_a=label_a,
                 func_b=label_b,
@@ -203,12 +233,15 @@ class DuplicationAgent(AgentBase):
 
         # Cross-file functions (optional project-wide pool)
         project_sources: dict[str, str] = snapshot.get("project_sources", {})
-        cross_funcs: list[tuple[str, str, list[str]]] = []
+        cross_funcs: list[tuple[str, str, int, list[str]]] = []
         for filepath, fsource in project_sources.items():
             cross_funcs.extend(_extract_functions(fsource, filepath))
 
         all_funcs = primary_funcs + cross_funcs
-        primary_keys = {(_PRIMARY_FILE, f[1]) for f in primary_funcs}
+        primary_labels = {
+            _func_label(_PRIMARY_FILE, funcname, lineno)
+            for _, funcname, lineno, _ in primary_funcs
+        }
 
         if len(all_funcs) < 2:
             return AgentResult(
@@ -223,22 +256,26 @@ class DuplicationAgent(AgentBase):
         # Score based on clones involving the primary file's functions
         primary_clones = [
             cp for cp in clones
-            if any(
-                cp.func_a == (f"{k[0]}:{k[1]}" if k[0] else k[1])
-                or cp.func_b == (f"{k[0]}:{k[1]}" if k[0] else k[1])
-                for k in primary_keys
-            )
+            if cp.func_a in primary_labels or cp.func_b in primary_labels
         ]
 
         # Estimate duplicated line fraction for the primary file
-        total_tokens_by_func = {
-            f[1]: len(f[2]) for f in primary_funcs
+        total_tokens_by_label = {
+            _func_label(_PRIMARY_FILE, funcname, lineno): len(tokens)
+            for _, funcname, lineno, tokens in primary_funcs
         }
         loc_total = len([ln for ln in source.splitlines() if ln.strip()])
 
+        primary_involved_labels: set[str] = set()
+        for clone_pair in primary_clones:
+            if clone_pair.func_a in primary_labels:
+                primary_involved_labels.add(clone_pair.func_a)
+            if clone_pair.func_b in primary_labels:
+                primary_involved_labels.add(clone_pair.func_b)
+
         duplicated_token_count = sum(
-            total_tokens_by_func.get(cp.func_a.split(":")[-1], 0)
-            for cp in primary_clones
+            total_tokens_by_label.get(label, 0)
+            for label in primary_involved_labels
         )
         dup_fraction = min(
             duplicated_token_count / max(loc_total * 5, 1),  # ~5 tokens/line heuristic
@@ -253,7 +290,6 @@ class DuplicationAgent(AgentBase):
 
         evidence: list[str] = []
         if clones:
-            intra = len(clones) - cross_file_count
             msg = f"Detected {len(clones)} clone pair(s) with ≥80% token similarity"
             if cross_file_count:
                 msg += f" ({cross_file_count} cross-file)"

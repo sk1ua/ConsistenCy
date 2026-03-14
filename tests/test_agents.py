@@ -243,6 +243,21 @@ def test_semantic_detects_api_change():
     assert any("api" in ev.lower() or "call" in ev.lower() for ev in result.evidence)
 
 
+def test_semantic_ast_distance_identical_zero():
+    agent = SemanticAgent()
+    src = "def f(x):\n    if x > 0:\n        return x\n    return 0\n"
+    result = agent.run({"source": src}, {"source": src})
+    assert result.details.get("ast_distance", 1.0) == 0.0
+
+
+def test_semantic_ast_distance_structure_change_positive():
+    agent = SemanticAgent()
+    src_a = "def f(x):\n    if x > 0:\n        return x\n    return 0\n"
+    src_b = "def f(x):\n    while x > 0:\n        x -= 1\n    return x\n"
+    result = agent.run({"source": src_b}, {"source": src_a})
+    assert result.details.get("ast_distance", 0.0) > 0.0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DuplicationAgent
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,6 +278,43 @@ def test_duplication_detects_clone():
     # At minimum the pair count should capture the similarity
     assert isinstance(result.score, float)
     assert 0.0 <= result.score <= 1.0
+
+
+def test_duplication_detects_cross_file_clone():
+    agent = DuplicationAgent()
+    func_body = "    " + "\n    ".join(f"x{i} = {i}" for i in range(35))
+    primary_src = f"def local_func():\n{func_body}\n    return 0\n"
+    other_src = f"def external_func():\n{func_body}\n    return 0\n"
+
+    result = agent.run(
+        {
+            "source": primary_src,
+            "project_sources": {"other.py": other_src},
+        },
+        {"source": ""},
+    )
+
+    assert result.details.get("clone_pair_count", 0) >= 1
+    assert result.details.get("cross_file_clone_count", 0) >= 1
+
+
+def test_duplication_primary_score_excludes_non_primary_clones():
+    agent = DuplicationAgent()
+    body = "    " + "\n    ".join(f"v{i} = {i}" for i in range(35))
+
+    result = agent.run(
+        {
+            "source": "def primary_entry():\n    return 1\n",
+            "project_sources": {
+                "a.py": f"def same_a():\n{body}\n    return 0\n",
+                "b.py": f"def same_b():\n{body}\n    return 0\n",
+            },
+        },
+        {"source": ""},
+    )
+
+    assert result.details.get("clone_pair_count", 0) >= 1
+    assert result.score == 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -138,7 +138,18 @@ def test_pipeline_pr_risk_report_shape():
     assert "avg_risk" in report
     assert "commits" in report
     assert "top_risky_files" in report
+    assert "risk_composition" in report
+    assert "evidence_summary" in report
+    assert "commit_trend" in report
+    assert "file_deep_dive" in report
     assert "cache" in report
+
+    if report["top_risky_files"]:
+        f = report["top_risky_files"][0]
+        assert "churn_lines" in f
+        assert "complexity" in f
+        assert "owner" in f
+        assert "risk_breakdown" in f
 
 
 def test_pipeline_cache_stats_keys():
