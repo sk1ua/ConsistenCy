@@ -52,13 +52,17 @@ jobs:
             echo "LLM enabled: false (set repository secret DEEPSEEK_API_KEY to enable AI review)"
           fi
 
-          python backend/cli.py pr-report \
+          # Run PR analysis - failures will fail the CI step (no silent fallback)
+          if ! python backend/cli.py pr-report \
             --repo . \
             --base ${{ github.event.pull_request.base.sha }} \
             --head ${{ github.event.pull_request.head.sha }} \
             --max-commits 20 \
-            --json-output > /tmp/pr_report.json 2>/dev/null \
-            || echo '{"commit_count":0,"avg_risk":0,"max_risk":0,"high_risk_commits":0,"commits":[],"top_risky_files":[],"security_findings":[]}' > /tmp/pr_report.json
+            --json-output > /tmp/pr_report.json 2>&1; then
+            echo "ERROR: PR analysis failed" >&2
+            cat /tmp/pr_report.json >&2
+            exit 1
+          fi
           # Generate PR comment; --use-llm flag enables AI review when DEEPSEEK_API_KEY is set
           python - <<'PYEOF'
           import json, os, sys

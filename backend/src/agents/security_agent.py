@@ -98,6 +98,18 @@ _DANGEROUS_BUILTINS: dict[str, tuple[str, str]] = {
     "compile":    ("MEDIUM", "compile() with untrusted input enables code injection"),
 }
 
+# JavaScript/TypeScript dangerous functions (regex-based detection)
+_JS_DANGEROUS_PATTERNS: list[tuple[str, str, str]] = [
+    # (pattern, severity, description)
+    (r'\beval\s*\(', "HIGH", "eval() executes arbitrary JavaScript code"),
+    (r'new\s+Function\s*\(', "HIGH", "Function constructor executes code from string"),
+    (r'setTimeout\s*\(\s*["\']', "MEDIUM", "setTimeout with string argument is like eval"),
+    (r'setInterval\s*\(\s*["\']', "MEDIUM", "setInterval with string argument is like eval"),
+    (r'document\.write\s*\(', "MEDIUM", "document.write can lead to XSS vulnerabilities"),
+    (r'\.innerHTML\s*=', "MEDIUM", "innerHTML assignment can lead to XSS vulnerabilities"),
+    (r'\.outerHTML\s*=', "MEDIUM", "outerHTML assignment can lead to XSS vulnerabilities"),
+]
+
 # ---------------------------------------------------------------------------
 # Dangerous module.attr calls detected via AST Attribute nodes
 # ---------------------------------------------------------------------------
@@ -163,7 +175,9 @@ class SecurityAgent(AgentBase):
                 evidence=["No source to scan."],
             )
 
-        findings = self._scan(source)
+        # Detect language from snapshot
+        language = snapshot.get("language", "python")
+        findings = self._scan(source, language)
         score = self._score(findings)
 
         criticals = [f for f in findings if f.severity == "CRITICAL"]
@@ -209,10 +223,16 @@ class SecurityAgent(AgentBase):
     # Scanning helpers
     # ------------------------------------------------------------------
 
-    def _scan(self, source: str) -> list[SecurityFinding]:
+    def _scan(self, source: str, language: str = "python") -> list[SecurityFinding]:
         findings: list[SecurityFinding] = []
         findings.extend(self._scan_credentials(source))
-        findings.extend(self._scan_ast(source))
+        
+        # Language-specific scanning
+        if language in ("javascript", "typescript"):
+            findings.extend(self._scan_js_patterns(source))
+        else:
+            findings.extend(self._scan_ast(source))
+        
         return self._deduplicate(findings)
 
     # --- Credential scanning (regex, line-by-line) ---
@@ -222,13 +242,36 @@ class SecurityAgent(AgentBase):
         findings: list[SecurityFinding] = []
         for lineno, line in enumerate(source.splitlines(), 1):
             stripped = line.strip()
-            if stripped.startswith("#"):
+            # Skip comments (Python #, JS //)
+            if stripped.startswith("#") or stripped.startswith("//"):
                 continue
             for pattern, description in _CREDENTIAL_PATTERNS:
                 if pattern.search(line):
                     findings.append(SecurityFinding(
                         severity="CRITICAL",
                         category="Hardcoded Credential",
+                        description=description,
+                        line=lineno,
+                    ))
+        return findings
+
+    # --- JavaScript/TypeScript pattern scanning ---
+
+    @staticmethod
+    def _scan_js_patterns(source: str) -> list[SecurityFinding]:
+        """Scan JavaScript/TypeScript for dangerous patterns."""
+        findings: list[SecurityFinding] = []
+        for lineno, line in enumerate(source.splitlines(), 1):
+            stripped = line.strip()
+            # Skip comments
+            if stripped.startswith("//") or stripped.startswith("/*") or stripped.startswith("*"):
+                continue
+            
+            for pattern, severity, description in _JS_DANGEROUS_PATTERNS:
+                if re.search(pattern, line):
+                    findings.append(SecurityFinding(
+                        severity=severity,
+                        category="Dangerous JS/TS Pattern",
                         description=description,
                         line=lineno,
                     ))

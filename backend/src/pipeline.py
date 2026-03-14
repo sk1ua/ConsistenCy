@@ -44,6 +44,13 @@ from .baseline_strategy import (
 )
 from .baseline_storage import BaselineStorage
 
+# Multi-language support
+try:
+    from .parsers import get_supported_extensions, is_supported_file
+    _SUPPORTED_EXTS = get_supported_extensions()
+except ImportError:
+    _SUPPORTED_EXTS = [".py"]  # Fallback to Python only
+
 try:
     from config import PIPELINE_CONFIG as _PCFG
 except ImportError:
@@ -72,6 +79,28 @@ _risk = RiskScoringAgent()
 
 
 # ---------------------------------------------------------------------------
+# Multi-language helpers
+# ---------------------------------------------------------------------------
+
+def _is_analyzable_file(filepath: str) -> bool:
+    """Check if file extension is supported for analysis."""
+    return any(filepath.lower().endswith(ext) for ext in _SUPPORTED_EXTS)
+
+
+def _get_file_language(filepath: str) -> str:
+    """Detect programming language from file extension."""
+    ext = Path(filepath).suffix.lower()
+    lang_map = {
+        ".py": "python",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+    }
+    return lang_map.get(ext, "unknown")
+
+
+# ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
 
@@ -85,13 +114,13 @@ def _file_source(commit, path: str) -> str:
 
 
 def _commit_diff_stats(commit) -> dict[str, Any]:
-    """Return Python-file churn, touched files, and commit metadata."""
+    """Return supported-file churn, touched files, and commit metadata."""
     additions = deletions = 0
     files: list[str] = []
     file_churn_map: dict[str, int] = {}
     try:
         for filepath, diff in commit.stats.files.items():
-            if not filepath.endswith(".py"):
+            if not _is_analyzable_file(filepath):
                 continue
 
             ins = diff.get("insertions", 0)
@@ -135,6 +164,7 @@ def analyze_sources(
     source_base: str,
     project_class_bases: dict[str, list[str]] | None = None,
     aggregated_baseline: dict[str, Any] | None = None,
+    filepath: str | None = None,
 ) -> dict[str, Any]:
     """Run all code-level agents on two source strings.
 
@@ -152,17 +182,26 @@ def analyze_sources(
         When provided, this pre-parsed/aggregated snapshot dict is used
         as the baseline instead of parsing *source_base* fresh.  This
         enables multi-version statistical baselines.
+    filepath : str | None
+        File path for language detection (enables multi-language support)
 
     Returns a dict with per-agent scores and the final risk score.
     """
-    snapshot_now = _parser.parse(source_now)
+    # Use multi-language parser if filepath provided
+    if filepath:
+        snapshot_now = _parser.parse_file(source_now, filepath)
+    else:
+        snapshot_now = _parser.parse(source_now)
     snapshot_now["source"] = source_now
 
     # Use aggregated baseline if available, otherwise parse single source
     if aggregated_baseline is not None:
         snapshot_base = aggregated_baseline
     else:
-        snapshot_base = _parser.parse(source_base)
+        if filepath:
+            snapshot_base = _parser.parse_file(source_base, filepath)
+        else:
+            snapshot_base = _parser.parse(source_base)
         snapshot_base["source"] = source_base
 
     # Cross-file class map for StructuralAgent
@@ -373,8 +412,21 @@ class AnalysisPipeline:
         filepath: str,
         commits: list,
         max_versions: int = 8,
+        target_commit: Any | None = None,
     ) -> str:
-        """Return aggregated baseline source using file+commit-window cache with scenario detection."""
+        """Return aggregated baseline source using file+commit-window cache with scenario detection.
+        
+        Parameters
+        ----------
+        filepath : str
+            Path to file
+        commits : list
+            List of baseline commits
+        max_versions : int
+            Maximum versions to collect
+        target_commit : Any | None
+            Target commit for scenario detection (uses HEAD if None)
+        """
         window_fp = self._commit_window_fingerprint(commits)
         cache_key = f"{filepath}|{window_fp}|v{max_versions}"
 
@@ -393,10 +445,13 @@ class AnalysisPipeline:
             self._cache_stats["persistent_miss"] += 1
 
         self._cache_stats["baseline_miss"] += 1
-        versions = self._collect_versions(filepath, commits, max_versions)
+        
+        # Temporarily collect versions with default max to detect scenario
+        # We'll recollect with strategy-adjusted max_versions after scenario detection
+        temp_versions = self._collect_versions(filepath, commits, max_versions)
 
         # Detect file scenario and adjust strategy
-        if not versions:
+        if not temp_versions:
             template = get_template_baseline(filepath)
             self._baseline_window_cache[cache_key] = template
             if self._persistent_cache:
@@ -405,12 +460,22 @@ class AnalysisPipeline:
                 )
             return template
         
-        # Get current version for scenario detection
-        head = self.repo.head.commit
-        current_src = self._source_at_commit(head, filepath)
+        # Get current version for scenario detection (use target_commit if provided)
+        if target_commit is None:
+            target_commit = self.repo.head.commit
+        current_src = self._source_at_commit(target_commit, filepath)
         
-        scenario = detect_file_scenario(filepath, current_src, list(reversed(versions)))
+        scenario = detect_file_scenario(filepath, current_src, list(reversed(temp_versions)))
         strategy = select_baseline_strategy(scenario, default_window=max_versions)
+        
+        # Use strategy-driven max_versions (not hardcoded 8)
+        strategy_max_versions = strategy.get("max_versions", max_versions)
+        
+        # Recollect versions if strategy specifies fewer
+        if strategy_max_versions < len(temp_versions):
+            versions = temp_versions[:strategy_max_versions]
+        else:
+            versions = temp_versions
         
         # For NEW_FILE scenario with no versions, try template fallback
         if scenario.scenario_type == "NEW_FILE" and strategy["use_template_fallback"]:
@@ -482,7 +547,7 @@ class AnalysisPipeline:
         merged: dict[str, list[str]] = {}
         for item in commit.tree.traverse():
             path = getattr(item, "path", "")
-            if not path.endswith(".py"):
+            if not _is_analyzable_file(path):
                 continue
             src = self._source_at_commit(commit, path)
             if src:
@@ -565,7 +630,7 @@ class AnalysisPipeline:
         evol_result = _evolution.run(evol_snapshot, evol_baseline)
 
         # Per-file code analysis
-        py_files = [f for f in target.stats.files if f.endswith(".py")]
+        py_files = [f for f in target.stats.files if _is_analyzable_file(f)]
         file_results: dict[str, dict] = {}
         all_risk_scores: list[float] = []
 
@@ -580,6 +645,7 @@ class AnalysisPipeline:
                 filepath=filepath,
                 commits=baseline_commits_raw,
                 max_versions=8,
+                target_commit=target,
             )
             if not src_now or not src_base:
                 continue
@@ -595,7 +661,7 @@ class AnalysisPipeline:
                 futures = {
                     pool.submit(
                         analyze_sources, src_now, src_base,
-                        project_class_bases, agg_snap,
+                        project_class_bases, agg_snap, filepath,
                     ): filepath
                     for filepath, src_now, src_base, agg_snap in file_pairs
                 }
@@ -607,7 +673,7 @@ class AnalysisPipeline:
         else:
             for filepath, src_now, src_base, agg_snap in file_pairs:
                 analysis = analyze_sources(
-                    src_now, src_base, project_class_bases, agg_snap,
+                    src_now, src_base, project_class_bases, agg_snap, filepath,
                 )
                 file_results[filepath] = analysis
                 all_risk_scores.append(analysis["risk_score"])
@@ -621,6 +687,19 @@ class AnalysisPipeline:
             0.90 * mean_code_risk + 0.10 * evol_result.score, 4
         )
 
+        # Convert file_results dict to list format for API consistency
+        file_results_list = [
+            {
+                "file": filepath,
+                "risk_score": analysis["risk_score"],
+                "risk_level": analysis["risk_level"],
+                "breakdown": analysis.get("breakdown", {}),
+            }
+            for filepath, analysis in file_results.items()
+        ]
+        # Sort by risk score descending
+        file_results_list.sort(key=lambda x: x["risk_score"], reverse=True)
+
         return {
             "commit": _commit_diff_stats(target),
             "final_risk_score": final_risk,
@@ -628,8 +707,8 @@ class AnalysisPipeline:
             "evolution_score": round(evol_result.score, 4),
             "evolution_details": evol_result.details,
             "evolution_evidence": evol_result.evidence,
-            "files_analyzed": len(file_results),
-            "file_results": file_results,
+            "files_analyzed": len(file_results_list),
+            "file_results": file_results_list,
         }
 
     # ------------------------------------------------------------------
@@ -758,7 +837,7 @@ class AnalysisPipeline:
                 baseline_commits = list(
                     self.repo.iter_commits(rev=commit.hexsha, max_count=31)
                 )[1:]
-                py_files = [f for f in commit.stats.files if f.endswith(".py")]
+                py_files = [f for f in commit.stats.files if _is_analyzable_file(f)]
                 file_scores: list[float] = []
                 for filepath in py_files[:_MAX_FILES_PER_WEEKLY]:
                     src_now = self._source_at_commit(commit, filepath)
@@ -766,9 +845,10 @@ class AnalysisPipeline:
                         filepath=filepath,
                         commits=baseline_commits,
                         max_versions=8,
+                        target_commit=commit,
                     )
                     if src_now and src_base:
-                        analysis = analyze_sources(src_now, src_base)
+                        analysis = analyze_sources(src_now, src_base, filepath=filepath)
                         file_scores.append(analysis["risk_score"])
                 if file_scores:
                     scores.append(statistics.mean(file_scores))
@@ -805,20 +885,22 @@ class AnalysisPipeline:
         baseline_commits = list(self.repo.iter_commits(max_count=20))[1:]
 
         for item in head.tree.traverse():
-            if not getattr(item, "path", "").endswith(".py"):
+            item_path = getattr(item, "path", "")
+            if not item_path or not _is_analyzable_file(item_path):
                 continue
             src_now = self._source_at_commit(head, item.path)
             src_base = self._baseline_source_from_window(
                 filepath=item.path,
                 commits=baseline_commits,
                 max_versions=8,
+                target_commit=head,
             )
             if not src_now:
                 continue
             if not src_base:
                 src_base = ""  # new file — compare against empty baseline
 
-            analysis = analyze_sources(src_now, src_base)
+            analysis = analyze_sources(src_now, src_base, filepath=item.path)
             results.append({
                 "file": item.path,
                 "risk_score": analysis["risk_score"],
@@ -868,7 +950,7 @@ class AnalysisPipeline:
                     max_count=_AUTHOR_BASELINE_COMMITS + 1,
                 )
             )[1:]
-            py_files = [f for f in commit.stats.files if f.endswith(".py")]
+            py_files = [f for f in commit.stats.files if _is_analyzable_file(f)]
 
             file_scores: list[float] = []
             for filepath in py_files[:_AUTHOR_MAX_FILES_PER_COMMIT]:
@@ -877,9 +959,10 @@ class AnalysisPipeline:
                     filepath=filepath,
                     commits=baseline_commits,
                     max_versions=8,
+                    target_commit=commit,
                 )
                 if src_now and src_base:
-                    analysis = analyze_sources(src_now, src_base)
+                    analysis = analyze_sources(src_now, src_base, filepath=filepath)
                     file_scores.append(analysis["risk_score"])
 
             if file_scores:
@@ -918,7 +1001,7 @@ class AnalysisPipeline:
 
         for commit in self.repo.iter_commits(max_count=100):
             for filepath, stats in commit.stats.files.items():
-                if filepath.endswith(".py"):
+                if _is_analyzable_file(filepath):
                     file_churn[filepath] += (
                         stats.get("insertions", 0) + stats.get("deletions", 0)
                     )
@@ -1006,7 +1089,11 @@ class AnalysisPipeline:
                 "evolution_evidence": res.get("evolution_evidence", []),
             })
 
-            for filepath, file_res in res.get("file_results", {}).items():
+            # file_results is now a list format
+            for file_res in res.get("file_results", []):
+                filepath = file_res.get("file", "")
+                if not filepath:
+                    continue
                 risk_score = float(file_res.get("risk_score", 0.0))
                 file_scores[filepath].append(risk_score)
 
