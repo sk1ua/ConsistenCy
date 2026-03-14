@@ -94,7 +94,17 @@ class TreeSitterParser(BaseParser):
             return False
         
         self._parser = TSParser()
-        self._parser.set_language(lang)
+        # Handle different tree-sitter API versions
+        try:
+            # New API (tree-sitter >= 0.22)
+            self._parser.language = lang
+        except (AttributeError, TypeError):
+            try:
+                # Old API (tree-sitter < 0.22)
+                self._parser.set_language(lang)
+            except AttributeError:
+                # Fallback: some versions use language as constructor param
+                self._parser = TSParser(language=lang)
         self._language = lang_name
         return True
     
