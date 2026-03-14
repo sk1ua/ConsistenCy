@@ -2,7 +2,7 @@
 
 # ⬡ ConsistenCy
 
-**Multi-agent code consistency & security analysis for Python repos**
+**Multi-agent code consistency & security analysis for Python, JavaScript, and TypeScript**
 
 Catch style drift · Find security flaws · Spot tech debt hotspots · Auto-review PRs
 
@@ -122,16 +122,16 @@ Add the included CI workflow to get automatic risk reports on every pull request
 
 ConsistenCy runs **8 specialized agents** on every commit:
 
-| Agent | What it analyzes |
-|-------|-----------------|
-| **ParserAgent** | AST parsing, Halstead metrics, cyclomatic complexity |
-| **StyleAgent** | Naming conventions, docstrings, formatting drift |
-| **StructuralAgent** | Import dependencies, coupling, inheritance depth |
-| **SemanticAgent** | Subtree-structure similarity, API usage, control flow |
-| **EvolutionAgent** | Code churn, Shannon entropy, hotspots, bus factor |
-| **DuplicationAgent** | Clone detection, duplication ratio |
-| **SecurityAgent** | Hardcoded secrets, dangerous calls, injection risks (f-string / `.format()` / `%`) |
-| **RiskScoringAgent** | Weighted aggregation with security overrides |
+| Agent | What it analyzes | Languages |
+|-------|-----------------|-----------|
+| **ParserAgent** | AST parsing, Halstead metrics, cyclomatic complexity | Python (native ast), JS/TS (tree-sitter) |
+| **StyleAgent** | Naming conventions, docstrings, formatting drift | Python, JS/TS |
+| **StructuralAgent** | Import dependencies, coupling, inheritance depth | Python, JS/TS |
+| **SemanticAgent** | Subtree-structure similarity, API usage, control flow | Python, JS/TS |
+| **EvolutionAgent** | Code churn, Shannon entropy, hotspots, bus factor | Git-based (language agnostic) |
+| **DuplicationAgent** | Clone detection, duplication ratio | Python, JS/TS |
+| **SecurityAgent** | Hardcoded secrets, dangerous calls, SQL/XSS injection | Python, JS/TS |
+| **RiskScoringAgent** | Weighted aggregation with security overrides | All |
 
 Each file gets a risk score from 0 to 1:
 
@@ -183,9 +183,9 @@ PYTHONPATH=backend pytest tests -q
 
 ## Limitations
 
-- **Python only** — all analysis uses `ast.parse()` (other languages are on the roadmap)
-- **Local repos** — requires a cloned Git repository path
-- **Author view has configurable fallback** — `author_breakdown()` defaults to real multi-agent risk (`avg_risk`), and falls back to churn proxy for commits without analysable Python files
+- **Python best supported** — Full Halstead metrics only available for Python. JavaScript/TypeScript supported via tree-sitter with basic metrics and security rules.
+- **Local repos for CLI** — requires a cloned Git repository path. GitHub App mode provides remote access.
+- **Go/Java not yet supported** — Tree-sitter grammars available but rules not implemented (planned for v2.5)
 
 ---
 

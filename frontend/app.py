@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -148,6 +149,32 @@ def _error(message: str, code: str, status: int):
     return jsonify({"error": message, "code": code}), status
 
 
+def _handle_exception(exc: Exception, operation: str) -> tuple:
+    """Sanitized exception handler - logs details, returns safe error to client.
+    
+    Parameters
+    ----------
+    exc : Exception
+        The caught exception
+    operation : str
+        Description of the operation that failed (e.g., "analyze", "export")
+        
+    Returns
+    -------
+    tuple
+        Flask response tuple (jsonify, status_code)
+    """
+    import logging
+    # Log full exception details server-side
+    logging.error(f"{operation} failed: {exc}", exc_info=True)
+    # Return sanitized error to client (no internal details exposed)
+    return _error(
+        f"{operation.capitalize()} failed. Please try again or contact support.",
+        f"{operation.upper()}_FAILED",
+        500
+    )
+
+
 def _validate_repo_path(repo_path: str, required_message: str = "repo_path is required"):
     """Validate repo_path presence and directory existence."""
     if not repo_path:
@@ -189,6 +216,12 @@ def index():
 # ---------------------------------------------------------------------------
 # API endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.route("/api/health")
+def health():
+    """Health check endpoint."""
+    return jsonify({"status": "ok", "version": "2.4.0"})
 
 
 @app.route("/api/analyze", methods=["POST"])
@@ -235,7 +268,10 @@ def analyze():
         _cache_set(cache_key, result)
         return jsonify(result)
     except Exception as exc:  # noqa: BLE001
-        return _error(str(exc), "INTERNAL_ERROR", 500)
+        import logging
+        logging.error(f"Analysis failed: {exc}")
+        # Sanitized error - don't expose internal details
+        return _error("Analysis failed. Check server logs.", "ANALYSIS_FAILED", 500)
 
 
 @app.route("/api/repo/history")
@@ -268,7 +304,7 @@ def repo_history():
         _cache_set(cache_key, history)
         return jsonify(history)
     except Exception as exc:  # noqa: BLE001
-        return _error(str(exc), "INTERNAL_ERROR", 500)
+        return _handle_exception(exc, "history")
 
 
 @app.route("/api/repo/files")
@@ -290,7 +326,7 @@ def repo_files():
         _cache_set(cache_key, files)
         return jsonify(files)
     except Exception as exc:  # noqa: BLE001
-        return _error(str(exc), "INTERNAL_ERROR", 500)
+        return _handle_exception(exc, "files")
 
 
 @app.route("/api/repo/authors")
@@ -312,7 +348,7 @@ def repo_authors():
         _cache_set(cache_key, authors)
         return jsonify(authors)
     except Exception as exc:  # noqa: BLE001
-        return _error(str(exc), "INTERNAL_ERROR", 500)
+        return _handle_exception(exc, "authors")
 
 
 @app.route("/api/repo/hotspots")
@@ -334,7 +370,63 @@ def repo_hotspots():
         _cache_set(cache_key, hotspots)
         return jsonify(hotspots)
     except Exception as exc:  # noqa: BLE001
-        return _error(str(exc), "INTERNAL_ERROR", 500)
+        return _handle_exception(exc, "hotspots")
+
+
+@app.route("/api/analyze-range", methods=["POST"])
+def analyze_range():
+    """Analyze risk over a time range.
+    
+    Request JSON
+    ------------
+    {
+      "repo_path": "/path/to/repo",
+      "weeks": 12,
+      "baseline_commits": 50,
+      "max_commits": 40
+    }
+    """
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    repo_path = body.get("repo_path", "")
+    repo_err = _validate_repo_path(repo_path)
+    if repo_err:
+        return repo_err
+
+    weeks, weeks_err = _parse_int_arg("weeks", body.get("weeks", 12), 1, 52)
+    if weeks_err:
+        return weeks_err
+
+    baseline_n, baseline_err = _parse_int_arg(
+        "baseline_commits", body.get("baseline_commits", 50), 1, 500
+    )
+    if baseline_err:
+        return baseline_err
+
+    max_commits, max_err = _parse_int_arg(
+        "max_commits", body.get("max_commits", 40), 1, 200
+    )
+    if max_err:
+        return max_err
+
+    cache_key = _cache_key(
+        endpoint="analyze_range",
+        repo_path=repo_path,
+        params={"weeks": weeks, "baseline_commits": baseline_n, "max_commits": max_commits},
+    )
+
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return jsonify(cached)
+
+    try:
+        pipeline = AnalysisPipeline(repo_path)
+        report = pipeline.analyze_range(
+            weeks=weeks, baseline_n=baseline_n, max_commits=max_commits
+        )
+        _cache_set(cache_key, report)
+        return jsonify(report)
+    except Exception as exc:
+        return _handle_exception(exc, "range")
 
 
 @app.route("/api/pr/report", methods=["POST"])
@@ -406,8 +498,78 @@ def pr_report():
         )
         _cache_set(cache_key, report)
         return jsonify(report)
-    except Exception as exc:  # noqa: BLE001
-        return _error(str(exc), "INTERNAL_ERROR", 500)
+    except Exception as exc:
+        return _handle_exception(exc, "pr_report")
+
+
+@app.route("/api/export", methods=["POST"])
+def export_data():
+    """Export analysis data in various formats.
+    
+    Request JSON
+    ------------
+    {
+      "repo_path": "/path/to/repo",
+      "format": "json",  # json, csv, markdown
+      "weeks": 12
+    }
+    """
+    body: dict[str, Any] = request.get_json(silent=True) or {}
+    repo_path = body.get("repo_path", "")
+    repo_err = _validate_repo_path(repo_path)
+    if repo_err:
+        return repo_err
+
+    fmt = body.get("format", "json")
+    weeks = body.get("weeks", 12)
+
+    try:
+        pipeline = AnalysisPipeline(repo_path)
+        
+        # Get all data
+        history = pipeline.weekly_history(weeks=weeks)
+        files = pipeline.file_summary()
+        authors = pipeline.author_breakdown()
+        hotspots = pipeline.hotspot_data()
+        
+        # Get latest commit analysis
+        latest = pipeline.analyze_commit()
+
+        export_data = {
+            "repo_path": repo_path,
+            "export_time": datetime.now(timezone.utc).isoformat(),
+            "format": fmt,
+            "summary": {
+                "avg_risk": latest.get("final_risk_score", 0),
+                "risk_level": latest.get("risk_level", "unknown"),
+                "files_analyzed": latest.get("files_analyzed", 0),
+            },
+            "history": history,
+            "files": files,
+            "authors": authors,
+            "hotspots": hotspots,
+        }
+
+        if fmt == "json":
+            return jsonify(export_data)
+        elif fmt == "csv":
+            # Return files as CSV
+            return jsonify({
+                "format": "csv",
+                "data": files,
+                "filename": f"consistency-export-{datetime.now().strftime('%Y%m%d')}.csv"
+            })
+        elif fmt == "markdown":
+            return jsonify({
+                "format": "markdown",
+                "data": export_data,
+                "filename": f"consistency-report-{datetime.now().strftime('%Y%m%d')}.md"
+            })
+        else:
+            return _error(f"Unsupported format: {fmt}", "INVALID_FORMAT", 400)
+            
+    except Exception as exc:
+        return _handle_exception(exc, "export")
 
 
 # ---------------------------------------------------------------------------
@@ -416,4 +578,6 @@ def pr_report():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    # Debug mode controlled by environment, default False for security
+    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() in ("true", "1", "yes")
+    app.run(host="0.0.0.0", port=port, debug=debug_mode)

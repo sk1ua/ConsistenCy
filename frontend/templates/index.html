@@ -1,82 +1,1251 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ConsistenCy • Code Consistency Dashboard</title>
-  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-  <link rel="stylesheet" href="/static/css/dashboard.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConsistenCy Dashboard</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Plotly -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    
+
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'slide-in': 'slideIn 0.3s ease-out',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideIn: {
+                            '0%': { transform: 'translateX(-100%)' },
+                            '100%': { transform: 'translateX(0)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .dark .glass {
+            background: rgba(17, 24, 39, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .card-hover {
+            transition: all 0.2s ease;
+        }
+        
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .dark .card-hover:hover {
+            box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .scroll-hide::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .scroll-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        .loading-dots:after {
+            content: '.';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60% { content: '...'; }
+            80%, 100% { content: ''; }
+        }
+        
+        .risk-low { background: linear-gradient(135deg, #10b981, #059669); }
+        .risk-medium { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .risk-high { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .risk-critical { background: linear-gradient(135deg, #7c3aed, #dc2626); }
+    </style>
 </head>
-<body>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        {% raw %}
+        const { useState, useEffect, useCallback, useMemo } = React;
+        
+        // Simple SVG Icon components (no external dependencies)
+        const Icons = {
+            Activity: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
+            AlertCircle: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+            BarChart3: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
+            CheckCircle: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+            ChevronRight: () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>,
+            Clock: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+            Code: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>,
+            Download: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
+            FileText: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
+            Folder: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>,
+            GitBranch: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>,
+            GitCommit: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+            GitPullRequest: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>,
+            History: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+            LayoutDashboard: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>,
+            Loader: () => <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>,
+            Menu: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>,
+            Moon: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>,
+            Search: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
+            Shield: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>,
+            Sun: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
+            TrendingUp: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>,
+            Users: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
+            X: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>,
+            Zap: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
+        };
+        
+        // API service
+        const API = {
+            async analyze(repoPath, commitSha = null, baselineCommits = 50) {
+                const res = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        repo_path: repoPath, 
+                        commit_sha: commitSha,
+                        baseline_commits: baselineCommits 
+                    })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            },
+            
+            async analyzeRange(repoPath, weeks = 12) {
+                const res = await fetch('/api/analyze-range', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ repo_path: repoPath, weeks })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            },
+            
+            async prReport(repoPath, baseRef, headRef = 'HEAD') {
+                const res = await fetch('/api/pr/report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        repo_path: repoPath, 
+                        base_ref: baseRef, 
+                        head_ref: headRef 
+                    })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            },
+            
+            async export(repoPath, format = 'json', weeks = 12) {
+                const res = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ repo_path: repoPath, format, weeks })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            },
+            
+            async getHistory(repoPath, weeks = 12) {
+                const res = await fetch(`/api/repo/history?repo_path=${encodeURIComponent(repoPath)}&weeks=${weeks}`);
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            },
+            
+            async getFiles(repoPath) {
+                const res = await fetch(`/api/repo/files?repo_path=${encodeURIComponent(repoPath)}`);
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            },
+            
+            async getAuthors(repoPath) {
+                const res = await fetch(`/api/repo/authors?repo_path=${encodeURIComponent(repoPath)}`);
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            },
+            
+            async getHotspots(repoPath) {
+                const res = await fetch(`/api/repo/hotspots?repo_path=${encodeURIComponent(repoPath)}`);
+                if (!res.ok) throw new Error(await res.text());
+                return res.json();
+            }
+        };
+        
+        // Utility components
+        const Card = ({ children, className = '', onClick }) => (
+            <div 
+                onClick={onClick}
+                className={`bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm card-hover ${className}`}
+            >
+                {children}
+            </div>
+        );
+        
+        const CardHeader = ({ children, className = '' }) => (
+            <div className={`px-6 py-4 border-b border-gray-200 dark:border-gray-700 ${className}`}>
+                {children}
+            </div>
+        );
+        
+        const CardContent = ({ children, className = '' }) => (
+            <div className={`p-6 ${className}`}>
+                {children}
+            </div>
+        );
+        
+        const Button = ({ 
+            children, 
+            variant = 'primary', 
+            size = 'md', 
+            disabled = false,
+            loading = false,
+            onClick,
+            className = ''
+        }) => {
+            const variants = {
+                primary: 'bg-primary-600 hover:bg-primary-700 text-white',
+                secondary: 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100',
+                outline: 'border-2 border-gray-300 dark:border-gray-600 hover:border-primary-500 dark:hover:border-primary-500 text-gray-700 dark:text-gray-300',
+                ghost: 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300',
+                danger: 'bg-red-600 hover:bg-red-700 text-white'
+            };
+            
+            const sizes = {
+                sm: 'px-3 py-1.5 text-sm',
+                md: 'px-4 py-2 text-sm',
+                lg: 'px-6 py-3 text-base'
+            };
+            
+            return (
+                <button
+                    onClick={onClick}
+                    disabled={disabled || loading}
+                    className={`
+                        inline-flex items-center justify-center gap-2 rounded-lg font-medium
+                        transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
+                        ${variants[variant]} ${sizes[size]} ${className}
+                    `}
+                >
+                    {loading && <Icons.Loader />}
+                    {children}
+                </button>
+            );
+        };
+        
+        const Badge = ({ children, variant = 'default' }) => {
+            const variants = {
+                default: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300',
+                success: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+                warning: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400',
+                danger: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400',
+                primary: 'bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
+            };
+            
+            return (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${variants[variant]}`}>
+                    {children}
+                </span>
+            );
+        };
+        
+        const ProgressBar = ({ value, max = 1, color = 'primary' }) => {
+            const percentage = Math.min((value / max) * 100, 100);
+            const colors = {
+                primary: 'bg-primary-600',
+                success: 'bg-green-500',
+                warning: 'bg-yellow-500',
+                danger: 'bg-red-500',
+                gradient: 'bg-gradient-to-r from-primary-500 to-purple-500'
+            };
+            
+            return (
+                <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                        className={`h-full rounded-full transition-all duration-500 ${colors[color]}`}
+                        style={{ width: `${percentage}%` }}
+                    />
+                </div>
+            );
+        };
+        
+        // Risk Score Gauge
+        const RiskGauge = ({ score, size = 'md' }) => {
+            const getColor = (s) => {
+                if (s < 0.3) return '#10b981';
+                if (s < 0.5) return '#f59e0b';
+                if (s < 0.7) return '#ef4444';
+                return '#7c3aed';
+            };
+            
+            const getLevel = (s) => {
+                if (s < 0.3) return 'Low';
+                if (s < 0.5) return 'Medium';
+                if (s < 0.7) return 'High';
+                return 'Critical';
+            };
+            
+            const sizes = {
+                sm: { width: 80, height: 40, fontSize: 14 },
+                md: { width: 120, height: 60, fontSize: 20 },
+                lg: { width: 180, height: 90, fontSize: 28 }
+            };
+            
+            const { width, height, fontSize } = sizes[size];
+            const color = getColor(score);
+            const percentage = score * 100;
+            
+            useEffect(() => {
+                const data = [
+                    {
+                        domain: { x: [0, 1], y: [0, 1] },
+                        value: percentage,
+                        type: 'indicator',
+                        mode: 'gauge+number',
+                        gauge: {
+                            axis: { range: [0, 100], tickwidth: 1 },
+                            bar: { color, thickness: 0.75 },
+                            bgcolor: 'transparent',
+                            borderwidth: 0,
+                            steps: [
+                                { range: [0, 30], color: 'rgba(16, 185, 129, 0.1)' },
+                                { range: [30, 50], color: 'rgba(245, 158, 11, 0.1)' },
+                                { range: [50, 70], color: 'rgba(239, 68, 68, 0.1)' },
+                                { range: [70, 100], color: 'rgba(124, 58, 237, 0.1)' }
+                            ],
+                            threshold: {
+                                line: { color, width: 2 },
+                                value: percentage
+                            }
+                        },
+                        number: { suffix: '%', font: { size: fontSize, color } }
+                    }
+                ];
+                
+                const layout = {
+                    width,
+                    height,
+                    margin: { t: 10, b: 10, l: 10, r: 10 },
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    font: { color: 'inherit' }
+                };
+                
+                const config = { displayModeBar: false, staticPlot: true };
+                
+                Plotly.newPlot(`gauge-${size}-${score}`, data, layout, config);
+            }, [score, size, width, height, fontSize, color]);
+            
+            return (
+                <div className="flex flex-col items-center">
+                    <div id={`gauge-${size}-${score}`} />
+                    <span className={`text-sm font-semibold mt-1 ${
+                        score < 0.3 ? 'text-green-600 dark:text-green-400' :
+                        score < 0.5 ? 'text-yellow-600 dark:text-yellow-400' :
+                        score < 0.7 ? 'text-red-600 dark:text-red-400' :
+                        'text-purple-600 dark:text-purple-400'
+                    }`}>
+                        {getLevel(score)}
+                    </span>
+                </div>
+            );
+        };
+        
+        // Sidebar component
+        const Sidebar = ({ activeTab, setActiveTab, collapsed, setCollapsed }) => {
+            const navItems = [
+                { id: 'dashboard', label: 'Dashboard', icon: Icons.LayoutDashboard },
+                { id: 'scan', label: 'Quick Scan', icon: Icons.Zap },
+                { id: 'history', label: 'History', icon: Icons.History },
+                { id: 'files', label: 'Files', icon: Icons.FileText },
+                { id: 'authors', label: 'Authors', icon: Icons.Users },
+                { id: 'pr', label: 'PR Analysis', icon: Icons.GitPullRequest },
+                { id: 'export', label: 'Export', icon: Icons.Download },
+            ];
+            
+            return (
+                <aside 
+                    className={`fixed left-0 top-0 z-40 h-screen transition-all duration-300 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 ${
+                        collapsed ? 'w-16' : 'w-64'
+                    }`}
+                >
+                    <div className="flex items-center justify-between h-16 px-4 border-b border-gray-200 dark:border-gray-800">
+                        {!collapsed && (
+                            <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center">
+                                    <Icons.Shield />
+                                </div>
+                                <span className="font-bold text-lg gradient-text">ConsistenCy</span>
+                            </div>
+                        )}
+                        {collapsed && (
+                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center mx-auto">
+                                <Icons.Shield />
+                            </div>
+                        )}
+                        <button 
+                            onClick={() => setCollapsed(!collapsed)}
+                            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 lg:block hidden"
+                        >
+                            <Icons.Menu />
+                        </button>
+                    </div>
+                    
+                    <nav className="p-3 space-y-1">
+                        {navItems.map(item => (
+                            <button
+                                key={item.id}
+                                onClick={() => setActiveTab(item.id)}
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                    activeTab === item.id 
+                                        ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-400' 
+                                        : 'text-gray-700 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                }`}
+                            >
+                                <item.icon />
+                                {!collapsed && <span>{item.label}</span>}
+                            </button>
+                        ))}
+                    </nav>
+                    
+                    {!collapsed && (
+                        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 dark:border-gray-800">
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                                <p>ConsistenCy v2.4.0</p>
+                                <p className="mt-1">8 Agents Active</p>
+                            </div>
+                        </div>
+                    )}
+                </aside>
+            );
+        };
+        
+        // Header component
+        const Header = ({ repoPath, setRepoPath, onAnalyze, loading, darkMode, setDarkMode }) => {
+            const [inputPath, setInputPath] = useState(repoPath);
+            
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                setRepoPath(inputPath);
+                onAnalyze(inputPath);
+            };
+            
+            return (
+                <header className="h-16 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-6 sticky top-0 z-30">
+                    <form onSubmit={handleSubmit} className="flex-1 max-w-2xl flex gap-2">
+                        <div className="relative flex-1">
+                            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                                <Icons.Folder />
+                            </div>
+                            <input
+                                type="text"
+                                value={inputPath}
+                                onChange={(e) => setInputPath(e.target.value)}
+                                placeholder="Enter repository path..."
+                                className="w-full pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            />
+                        </div>
+                        <Button 
+                            type="submit" 
+                            loading={loading}
+                            disabled={!inputPath || loading}
+                        >
+                            <Icons.Search />
+                            Analyze
+                        </Button>
+                    </form>
+                    
+                    <div className="flex items-center gap-2 ml-4">
+                        <button
+                            onClick={() => setDarkMode(!darkMode)}
+                            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        >
+                            {darkMode ? <Icons.Sun /> : <Icons.Moon />}
+                        </button>
+                    </div>
+                </header>
+            );
+        };
+        
+        // Dashboard View
+        const DashboardView = ({ data, repoPath, loading, analysisProgress }) => {
+            const [historyLoading, setHistoryLoading] = useState(false);
+            
+            useEffect(() => {
+                if (!repoPath || !data) return;
+                
+                let chartEl = null;
+                
+                // Delay chart rendering to avoid blocking UI
+                const timer = setTimeout(() => {
+                    setHistoryLoading(true);
+                    chartEl = document.getElementById('timeline-chart');
+                    
+                    API.getHistory(repoPath, 12).then(history => {
+                        if (!chartEl) return;
+                        
+                        const weeks = history.map(h => h.week);
+                        const scores = history.map(h => h.avg_risk * 100);
+                        
+                        const trace = {
+                            x: weeks,
+                            y: scores,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            fill: 'tozeroy',
+                            line: { color: '#3b82f6', width: 2 },
+                            marker: { size: 6 },
+                            fillcolor: 'rgba(59, 130, 246, 0.1)'
+                        };
+                        
+                        const layout = {
+                            margin: { t: 20, r: 20, b: 40, l: 50 },
+                            paper_bgcolor: 'transparent',
+                            plot_bgcolor: 'transparent',
+                            xaxis: { 
+                                title: 'Week',
+                                gridcolor: 'rgba(128, 128, 128, 0.1)',
+                                tickangle: -45
+                            },
+                            yaxis: { 
+                                title: 'Risk Score (%)',
+                                gridcolor: 'rgba(128, 128, 128, 0.1)',
+                                range: [0, 100]
+                            },
+                            font: { color: 'inherit' }
+                        };
+                        
+                        const config = { responsive: true, displayModeBar: false };
+                        
+                        // Use requestAnimationFrame for smoother rendering
+                        requestAnimationFrame(() => {
+                            if (chartEl) {
+                                Plotly.newPlot('timeline-chart', [trace], layout, config);
+                            }
+                        });
+                    }).catch(err => {
+                        console.error('Failed to load history:', err);
+                    }).finally(() => {
+                        setHistoryLoading(false);
+                    });
+                }, 200);
+                
+                return () => {
+                    clearTimeout(timer);
+                    // Cleanup chart on unmount - only if element still exists
+                    const el = document.getElementById('timeline-chart');
+                    if (el) {
+                        try {
+                            Plotly.purge('timeline-chart');
+                        } catch (e) {
+                            // Ignore errors if chart doesn't exist
+                        }
+                    }
+                };
+            }, [repoPath, data]);
+            
+            // Loading state with progress
+            if (loading) {
+                const steps = [
+                    { id: 'init', label: 'Initializing analysis...', icon: Icons.Zap },
+                    { id: 'parse', label: 'Parsing source files...', icon: Icons.FileText },
+                    { id: 'style', label: 'Checking style consistency...', icon: Icons.Activity },
+                    { id: 'security', label: 'Scanning for vulnerabilities...', icon: Icons.Shield },
+                    { id: 'semantic', label: 'Analyzing semantic drift...', icon: Icons.Code },
+                    { id: 'structure', label: 'Evaluating architecture...', icon: Icons.BarChart3 },
+                    { id: 'risk', label: 'Computing risk scores...', icon: Icons.TrendingUp },
+                ];
+                
+                const currentStep = (analysisProgress && analysisProgress.step) || 0;
+                const currentFile = (analysisProgress && analysisProgress.currentFile) || '';
+                
+                return (
+                    <div className="flex flex-col items-center justify-center h-[60vh]">
+                        <div className="w-full max-w-md">
+                            <div className="text-center mb-8">
+                                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary-500 to-purple-600 flex items-center justify-center mx-auto mb-4 animate-pulse">
+                                    <Icons.Loader />
+                                </div>
+                                <h3 className="text-xl font-bold">Analyzing Repository</h3>
+                                <p className="text-gray-500 dark:text-gray-400 mt-2 text-sm">
+                                    {currentFile ? `Processing: ${currentFile}` : 'Starting analysis...'}
+                                </p>
+                            </div>
+                            
+                            <div className="space-y-3">
+                                {steps.map((step, idx) => {
+                                    const isActive = idx === currentStep;
+                                    const isComplete = idx < currentStep;
+                                    const Icon = step.icon;
+                                    
+                                    return (
+                                        <div 
+                                            key={step.id}
+                                            className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-300 ${
+                                                isActive ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800' :
+                                                isComplete ? 'bg-green-50 dark:bg-green-900/10' :
+                                                'bg-gray-50 dark:bg-gray-800/50 opacity-50'
+                                            }`}
+                                        >
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                                isActive ? 'bg-primary-500 text-white' :
+                                                isComplete ? 'bg-green-500 text-white' :
+                                                'bg-gray-200 dark:bg-gray-700 text-gray-500'
+                                            }`}>
+                                                {isComplete ? <Icons.CheckCircle /> : <Icon />}
+                                            </div>
+                                            <span className={`text-sm font-medium ${
+                                                isActive ? 'text-primary-700 dark:text-primary-400' :
+                                                isComplete ? 'text-green-700 dark:text-green-400' :
+                                                'text-gray-500'
+                                            }`}>
+                                                {step.label}
+                                            </span>
+                                            {isActive && (
+                                                <div className="ml-auto">
+                                                    <div className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            
+                            <div className="mt-6">
+                                <ProgressBar value={currentStep + 1} max={steps.length} color="gradient" />
+                                <p className="text-center text-xs text-gray-500 mt-2">
+                                    Step {currentStep + 1} of {steps.length}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+            
+            if (!data) {
+                return (
+                    <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+                        <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary-500/20 to-purple-500/20 flex items-center justify-center mb-6">
+                            <Icons.Activity />
+                        </div>
+                        <h2 className="text-2xl font-bold mb-2">Welcome to ConsistenCy</h2>
+                        <p className="text-gray-500 dark:text-gray-400 max-w-md mb-6">
+                            Enter a repository path above to start analyzing code quality, 
+                            architectural drift, and security risks.
+                        </p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-2xl w-full">
+                            {['Parser', 'Style', 'Security', 'Semantic', 'Evolution', 'Structural', 'Risk', 'Review'].map(agent => (
+                                <Card key={agent} className="p-4 text-center">
+                                    <div className="w-10 h-10 rounded-lg bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center mx-auto mb-2">
+                                        <Icons.CheckCircle />
+                                    </div>
+                                    <span className="text-sm font-medium">{agent}Agent</span>
+                                </Card>
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+            
+            const { final_risk_score, risk_level, files_analyzed, file_results, breakdown } = data;
+            
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <Card>
+                            <CardContent>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">Risk Score</p>
+                                        <p className={`text-3xl font-bold mt-1 ${
+                                            final_risk_score < 0.3 ? 'text-green-600 dark:text-green-400' :
+                                            final_risk_score < 0.5 ? 'text-yellow-600 dark:text-yellow-400' :
+                                            final_risk_score < 0.7 ? 'text-red-600 dark:text-red-400' :
+                                            'text-purple-600 dark:text-purple-400'
+                                        }`}>
+                                            {(final_risk_score * 100).toFixed(1)}%
+                                        </p>
+                                        <Badge variant={
+                                            risk_level === 'low' ? 'success' :
+                                            risk_level === 'medium' ? 'warning' :
+                                            risk_level === 'high' ? 'danger' : 'primary'
+                                        }>
+                                            {risk_level}
+                                        </Badge>
+                                    </div>
+                                    <div className="w-16 h-16 rounded-full flex items-center justify-center bg-gradient-to-br from-primary-500/20 to-purple-500/20">
+                                        <Icons.Activity />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        
+                        <Card>
+                            <CardContent>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">Files Analyzed</p>
+                                        <p className="text-3xl font-bold mt-1">{files_analyzed}</p>
+                                        <p className="text-xs text-gray-500 mt-1">Python/JS/TS files</p>
+                                    </div>
+                                    <div className="w-16 h-16 rounded-full flex items-center justify-center bg-green-100 dark:bg-green-900/20">
+                                        <Icons.FileText />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        
+                        <Card>
+                            <CardContent>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">Avg File Risk</p>
+                                        <p className="text-3xl font-bold mt-1">
+                                            {((file_results && file_results.reduce((a, b) => a + b.risk_score, 0)) / ((file_results && file_results.length) || 1) * 100).toFixed(1)}%
+                                        </p>
+                                        <p className="text-xs text-gray-500 mt-1">Per file average</p>
+                                    </div>
+                                    <div className="w-16 h-16 rounded-full flex items-center justify-center bg-yellow-100 dark:bg-yellow-900/20">
+                                        <Icons.TrendingUp />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        
+                        <Card>
+                            <CardContent>
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">High Risk Files</p>
+                                        <p className="text-3xl font-bold mt-1">
+                                            {(file_results && file_results.filter(f => f.risk_score > 0.5).length) || 0}
+                                        </p>
+                                        <p className="text-xs text-gray-500 mt-1">Require attention</p>
+                                    </div>
+                                    <div className="w-16 h-16 rounded-full flex items-center justify-center bg-red-100 dark:bg-red-900/20">
+                                        <Icons.AlertCircle />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                    
+                    {/* Charts Row */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <Card className="lg:col-span-2">
+                            <CardHeader>
+                                <h3 className="font-semibold flex items-center gap-2">
+                                    <Icons.History />
+                                    Risk Trend (12 Weeks)
+                                </h3>
+                            </CardHeader>
+                            <CardContent>
+                                <div id="timeline-chart" className="w-full h-64"></div>
+                            </CardContent>
+                        </Card>
+                        
+                        <Card>
+                            <CardHeader>
+                                <h3 className="font-semibold flex items-center gap-2">
+                                    <Icons.BarChart3 />
+                                    Risk Breakdown
+                                </h3>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="space-y-4">
+                                    {breakdown && Object.entries(breakdown).map(([key, value]) => (
+                                        <div key={key}>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span className="capitalize">{key.replace('_', ' ')}</span>
+                                                <span className="font-medium">{(value * 100).toFixed(1)}%</span>
+                                            </div>
+                                            <ProgressBar value={value} color={
+                                                key.includes('security') ? 'danger' :
+                                                key.includes('style') ? 'warning' :
+                                                key.includes('structure') ? 'primary' : 'success'
+                                            } />
+                                        </div>
+                                    ))}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                    
+                    {/* File Results */}
+                    <Card>
+                        <CardHeader>
+                            <h3 className="font-semibold flex items-center gap-2">
+                                <Icons.FileText />
+                                File Analysis Results
+                            </h3>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-gray-200 dark:border-gray-700">
+                                            <th className="text-left py-3 px-4 font-medium text-gray-500">File</th>
+                                            <th className="text-left py-3 px-4 font-medium text-gray-500">Risk Score</th>
+                                            <th className="text-left py-3 px-4 font-medium text-gray-500">Level</th>
+                                            <th className="text-left py-3 px-4 font-medium text-gray-500">Top Signals</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {file_results && file_results.slice(0, 10).map((file, idx) => (
+                                            <tr key={idx} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                                <td className="py-3 px-4 font-mono text-xs">{file.file}</td>
+                                                <td className="py-3 px-4">
+                                                    <div className="flex items-center gap-2">
+                                                        <ProgressBar value={file.risk_score} max={1} color={
+                                                            file.risk_score < 0.3 ? 'success' :
+                                                            file.risk_score < 0.5 ? 'warning' : 'danger'
+                                                        } className="w-24" />
+                                                        <span className="text-xs">{(file.risk_score * 100).toFixed(0)}%</span>
+                                                    </div>
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    <Badge variant={
+                                                        file.risk_level === 'low' ? 'success' :
+                                                        file.risk_level === 'medium' ? 'warning' :
+                                                        file.risk_level === 'high' ? 'danger' : 'primary'
+                                                    }>
+                                                        {file.risk_level}
+                                                    </Badge>
+                                                </td>
+                                                <td className="py-3 px-4">
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {Object.entries(file.breakdown || {})
+                                                            .sort((a, b) => b[1] - a[1])
+                                                            .slice(0, 3)
+                                                            .map(([k, v]) => (
+                                                                <span key={k} className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded">
+                                                                    {k}: {(v * 100).toFixed(0)}%
+                                                                </span>
+                                                            ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            );
+        };
+        
+        // PR Analysis View
+        const PRAnalysisView = ({ repoPath }) => {
+            const [baseRef, setBaseRef] = useState('origin/main');
+            const [headRef, setHeadRef] = useState('HEAD');
+            const [loading, setLoading] = useState(false);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+            
+            const handleAnalyze = async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                    const data = await API.prReport(repoPath, baseRef, headRef);
+                    setResult(data);
+                } catch (err) {
+                    setError(err.message);
+                }
+                setLoading(false);
+            };
+            
+            return (
+                <div className="space-y-6 animate-fade-in">
+                    <Card>
+                        <CardHeader>
+                            <h3 className="font-semibold flex items-center gap-2">
+                                <Icons.GitPullRequest />
+                                PR Risk Analysis
+                            </h3>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Base Ref</label>
+                                    <input
+                                        type="text"
+                                        value={baseRef}
+                                        onChange={(e) => setBaseRef(e.target.value)}
+                                        className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Head Ref</label>
+                                    <input
+                                        type="text"
+                                        value={headRef}
+                                        onChange={(e) => setHeadRef(e.target.value)}
+                                        className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+                                    />
+                                </div>
+                            </div>
+                            <Button onClick={handleAnalyze} loading={loading} disabled={!repoPath}>
+                                <Icons.GitPullRequest />
+                                Analyze PR
+                            </Button>
+                        </CardContent>
+                    </Card>
+                    
+                    {error && (
+                        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
+                            {error}
+                        </div>
+                    )}
+                    
+                    {result && (
+                        <>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <Card>
+                                    <CardContent>
+                                        <p className="text-sm text-gray-500">PR Risk Score</p>
+                                        <p className={`text-4xl font-bold mt-2 ${
+                                            result.pr_risk_score < 0.3 ? 'text-green-600' :
+                                            result.pr_risk_score < 0.5 ? 'text-yellow-600' :
+                                            result.pr_risk_score < 0.7 ? 'text-red-600' : 'text-purple-600'
+                                        }`}>
+                                            {(result.pr_risk_score * 100).toFixed(1)}%
+                                        </p>
+                                        <Badge variant={
+                                            result.pr_risk_level === 'low' ? 'success' :
+                                            result.pr_risk_level === 'medium' ? 'warning' :
+                                            result.pr_risk_level === 'high' ? 'danger' : 'primary'
+                                        } className="mt-2">
+                                            {result.pr_risk_level}
+                                        </Badge>
+                                    </CardContent>
+                                </Card>
+                                
+                                <Card>
+                                    <CardContent>
+                                        <p className="text-sm text-gray-500">Commits</p>
+                                        <p className="text-4xl font-bold mt-2">{result.commits_analyzed}</p>
+                                        <p className="text-xs text-gray-400 mt-2">Analyzed in range</p>
+                                    </CardContent>
+                                </Card>
+                                
+                                <Card>
+                                    <CardContent>
+                                        <p className="text-sm text-gray-500">Files Changed</p>
+                                        <p className="text-4xl font-bold mt-2">{(result.files && result.files.length) || 0}</p>
+                                        <p className="text-xs text-gray-400 mt-2">Risk assessed</p>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                            
+                            {result.files && result.files.length > 0 && (
+                                <Card>
+                                    <CardHeader>
+                                        <h3 className="font-semibold">Changed Files Risk</h3>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="space-y-3">
+                                            {result.files.map((file, idx) => (
+                                                <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                                    <div className="flex items-center gap-3">
+                                                        <Icons.FileText />
+                                                        <span className="font-mono text-sm">{file.file}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-4">
+                                                        <ProgressBar value={file.risk_score} max={1} className="w-32" />
+                                                        <span className={`font-semibold ${
+                                                            file.risk_score < 0.3 ? 'text-green-600' :
+                                                            file.risk_score < 0.5 ? 'text-yellow-600' :
+                                                            file.risk_score < 0.7 ? 'text-red-600' : 'text-purple-600'
+                                                        }`}>
+                                                            {(file.risk_score * 100).toFixed(0)}%
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </>
+                    )}
+                </div>
+            );
+        };
+        
+        // Export View
+        const ExportView = ({ repoPath }) => {
+            const [format, setFormat] = useState('json');
+            const [loading, setLoading] = useState(false);
+            const [result, setResult] = useState(null);
+            
+            const handleExport = async () => {
+                setLoading(true);
+                try {
+                    const data = await API.export(repoPath, format, 12);
+                    setResult(data);
+                    
+                    // Create download
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = data.filename || `consistency-export-${new Date().toISOString().split('T')[0]}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } catch (err) {
+                    alert('Export failed: ' + err.message);
+                }
+                setLoading(false);
+            };
+            
+            return (
+                <div className="space-y-6 animate-fade-in max-w-2xl">
+                    <Card>
+                        <CardHeader>
+                            <h3 className="font-semibold flex items-center gap-2">
+                                <Icons.Download />
+                                Export Analysis Data
+                            </h3>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Export Format</label>
+                                <div className="flex gap-2">
+                                    {['json', 'csv', 'markdown'].map(f => (
+                                        <button
+                                            key={f}
+                                            onClick={() => setFormat(f)}
+                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                                format === f 
+                                                    ? 'bg-primary-600 text-white' 
+                                                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            {f.toUpperCase()}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            
+                            <Button onClick={handleExport} loading={loading} disabled={!repoPath}>
+                                <Icons.Download />
+                                Export Data
+                            </Button>
+                        </CardContent>
+                    </Card>
+                    
+                    {result && (
+                        <Card>
+                            <CardHeader>
+                                <h3 className="font-semibold">Export Summary</h3>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <p className="text-sm text-gray-500">Format</p>
+                                        <p className="font-medium">{result.format}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-gray-500">Files</p>
+                                        <p className="font-medium">{(result.summary && result.summary.files_analyzed)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-gray-500">Avg Risk</p>
+                                        <p className="font-medium">{((result.summary && result.summary.avg_risk) * 100).toFixed(1)}%</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-gray-500">Risk Level</p>
+                                        <p className="font-medium capitalize">{result.summary && result.summary.risk_level}</p>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+                </div>
+            );
+        };
+        
+        // Main App Component
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+            const [repoPath, setRepoPath] = useState('');
+            const [analysisData, setAnalysisData] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [analysisProgress, setAnalysisProgress] = useState({ step: 0, currentFile: '' });
+            const [darkMode, setDarkMode] = useState(true);
+            
 
-<!-- ===================== HEADER ===================== -->
-<header>
-  <div class="logo">
-    <span class="logo-icon" aria-hidden="true">⬡</span>
-    <h1 class="logo-text">ConsistenCy</h1>
-    <span class="logo-sub">Multi-Agent Code Analysis</span>
-  </div>
-  <div class="repo-form">
-    <label for="repoInput" class="sr-only">Repository path</label>
-    <input id="repoInput" type="text" placeholder="Absolute path to local Git repo…" />
-    <button id="analyzeBtn">Analyze</button>
-  </div>
-</header>
-
-<!-- ===================== RISK BANNER ===================== -->
-<section id="riskBanner" class="risk-banner hidden" role="status" aria-live="polite">
-  <div class="risk-label" id="riskLabel">—</div>
-  <div class="risk-score" id="riskScore">0.000</div>
-  <div class="risk-meta" id="riskMeta"></div>
-</section>
-
-<!-- ===================== GRID ===================== -->
-<main class="grid" id="mainGrid">
-
-  <!-- Row 1: sparkline + radar -->
-  <div class="card span2" id="cardTimeline">
-    <h2>Risk Score Timeline <span class="hint">(weekly average)</span></h2>
-    <div id="chartTimeline" class="chart-area" role="img" aria-label="Risk score timeline chart"></div>
-  </div>
-
-  <div class="card" id="cardRadar">
-    <h2>Agent Breakdown <span class="hint">(latest commit)</span></h2>
-    <div id="chartRadar" class="chart-area" role="img" aria-label="Agent breakdown radar chart"></div>
-  </div>
-
-  <!-- Row 2: file table + author bars -->
-  <div class="card span2" id="cardFiles">
-    <h2>File Risk Summary</h2>
-    <div id="chartFiles" class="chart-area tall" role="img" aria-label="File risk bar chart"></div>
-  </div>
-
-  <div class="card" id="cardAuthors">
-    <h2>Author Risk Profile</h2>
-    <div id="chartAuthors" class="chart-area" role="img" aria-label="Author risk bar chart"></div>
-  </div>
-
-  <!-- Row 3: hotspot scatter -->
-  <div class="card span3" id="cardHotspots">
-    <h2>Technical Debt Hotspots <span class="hint">(churn × complexity)</span></h2>
-    <div id="chartHotspots" class="chart-area" role="img" aria-label="Hotspot scatter chart"></div>
-  </div>
-
-  <!-- Row 4: evidence log -->
-  <div class="card span3" id="cardEvidence">
-    <h2>Evidence Chain</h2>
-    <ul id="evidenceList" class="evidence-list" aria-label="Analysis evidence">
-      <li class="placeholder">Run an analysis to see findings here.</li>
-    </ul>
-  </div>
-
-</main>
-
-<!-- ===================== LOADING OVERLAY ===================== -->
-<div id="overlay" class="overlay hidden" role="alert" aria-busy="true" aria-label="Loading">
-  <div class="spinner" aria-hidden="true"></div>
-  <p>Running multi-agent analysis…</p>
-</div>
-
-<script src="/static/js/dashboard.js"></script>
+            
+            // Dark mode effect
+            useEffect(() => {
+                if (darkMode) {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+            }, [darkMode]);
+            
+            // Simulate progress steps during analysis
+            const simulateProgress = () => {
+                const steps = [
+                    { step: 0, currentFile: '' },
+                    { step: 1, currentFile: 'Scanning repository structure...' },
+                    { step: 2, currentFile: 'Checking code style...' },
+                    { step: 3, currentFile: 'Detecting security issues...' },
+                    { step: 4, currentFile: 'Analyzing semantic patterns...' },
+                    { step: 5, currentFile: 'Evaluating architecture...' },
+                    { step: 6, currentFile: 'Computing final scores...' },
+                ];
+                
+                let currentStep = 0;
+                const interval = setInterval(() => {
+                    if (currentStep < steps.length - 1) {
+                        currentStep++;
+                        setAnalysisProgress(steps[currentStep]);
+                    }
+                }, 800);
+                
+                return () => clearInterval(interval);
+            };
+            
+            const handleAnalyze = async (path) => {
+                if (!path) return;
+                setLoading(true);
+                setAnalysisProgress({ step: 0, currentFile: '' });
+                setAnalysisData(null);
+                
+                const stopProgress = simulateProgress();
+                
+                try {
+                    const data = await API.analyze(path);
+                    setAnalysisProgress({ step: 6, currentFile: 'Complete!' });
+                    await new Promise(r => setTimeout(r, 300)); // Brief pause to show completion
+                    setAnalysisData(data);
+                } catch (err) {
+                    alert('Analysis failed: ' + err.message);
+                } finally {
+                    stopProgress();
+                    setLoading(false);
+                }
+            };
+            
+            const renderContent = () => {
+                switch (activeTab) {
+                    case 'dashboard':
+                        return <DashboardView data={analysisData} repoPath={repoPath} loading={loading} analysisProgress={analysisProgress} />;
+                    case 'scan':
+                        return <DashboardView data={analysisData} repoPath={repoPath} loading={loading} analysisProgress={analysisProgress} />;
+                    case 'pr':
+                        return <PRAnalysisView repoPath={repoPath} />;
+                    case 'export':
+                        return <ExportView repoPath={repoPath} />;
+                    default:
+                        return (
+                            <div className="flex flex-col items-center justify-center h-[60vh]">
+                                <Icons.Clock />
+                                <h2 className="text-xl font-semibold mt-4">Coming Soon</h2>
+                                <p className="text-gray-500">This feature is under development.</p>
+                            </div>
+                        );
+                }
+            };
+            
+            return (
+                <div className="min-h-screen flex">
+                    <Sidebar 
+                        activeTab={activeTab} 
+                        setActiveTab={setActiveTab}
+                        collapsed={sidebarCollapsed}
+                        setCollapsed={setSidebarCollapsed}
+                    />
+                    
+                    <div className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+                        <Header 
+                            repoPath={repoPath}
+                            setRepoPath={setRepoPath}
+                            onAnalyze={handleAnalyze}
+                            loading={loading}
+                            darkMode={darkMode}
+                            setDarkMode={setDarkMode}
+                        />
+                        
+                        <main className="p-6">
+                            {renderContent()}
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+        
+        // Render
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+        {% endraw %}
+    </script>
 </body>
 </html>

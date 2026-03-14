@@ -2,19 +2,20 @@
 """
 Parser Agent
 ============
-Parses a Python source file into rich structural data that feeds every
-downstream agent.
+Parses source files into rich structural data that feeds every
+downstream agent. Supports Python, JavaScript, and TypeScript.
 
 Outputs (snapshot dict keys)
 -----------------------------
-ast_tree            : ast.Module object
+ast_tree            : AST object (language-specific)
 functions           : list of FunctionInfo namedtuples
 classes             : list of ClassInfo namedtuples
 imports             : list of import strings
 tokens              : list of (token_type, string) pairs
-halstead            : HalsteadMetrics dict
+halstead            : HalsteadMetrics dict (Python only)
 cyclomatic_avg      : mean cyclomatic complexity across all functions
 loc                 : dict with total/code/comment/blank line counts
+language            : detected language identifier
 """
 from __future__ import annotations
 
@@ -24,9 +25,18 @@ import math
 import tokenize
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .base_agent import AgentBase, AgentResult
+
+# Multi-language parser support (optional)
+try:
+    from ..parsers import get_parser_for_file, is_supported_file
+    from ..parsers.base_parser import ParseSnapshot
+    HAS_MULTILANG = True
+except ImportError:
+    HAS_MULTILANG = False
 
 # ---------------------------------------------------------------------------
 # Lightweight data containers produced by the parser
@@ -157,7 +167,10 @@ def count_loc(source: str) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 class ParserAgent(AgentBase):
-    """Extract structural metadata from a Python source string.
+    """Extract structural metadata from source strings.
+    
+    Supports Python (primary), JavaScript, and TypeScript via multi-language
+    parser infrastructure.
 
     This agent does *not* produce a drift score by itself — its ``analyze``
     method always returns score=0.  Its purpose is to populate the ``details``
@@ -172,13 +185,49 @@ class ParserAgent(AgentBase):
         return "ParserAgent"
 
     # ------------------------------------------------------------------
-    # Public API: parse a source string into a snapshot dict
+    # Public API: Multi-language parse
+    # ------------------------------------------------------------------
+
+    def parse_file(self, source: str, filepath: str | None = None) -> dict[str, Any]:
+        """Parse source with automatic language detection.
+        
+        Parameters
+        ----------
+        source : str
+            Source code to parse
+        filepath : str | None
+            File path for language detection (e.g., "example.ts")
+            
+        Returns
+        -------
+        dict[str, Any]
+            Parsed snapshot compatible with all agents
+        """
+        # If no filepath or multilang not available, use Python parser
+        if not filepath or not HAS_MULTILANG:
+            return self.parse(source)
+        
+        # Check if supported multi-language file
+        if not is_supported_file(filepath):
+            return self.parse(source)
+        
+        # Use multi-language parser
+        parser = get_parser_for_file(filepath)
+        if parser is None:
+            return self.parse(source)
+        
+        snapshot = parser.parse(source)
+        return snapshot.to_agent_snapshot()
+
+    # ------------------------------------------------------------------
+    # Public API: Python-specific parse (backward compatible)
     # ------------------------------------------------------------------
 
     def parse(self, source: str) -> dict[str, Any]:
-        """Parse *source* and return a full snapshot dict.
+        """Parse Python *source* and return a full snapshot dict.
 
         The snapshot is suitable to pass as-is to all other agents.
+        For multi-language support, use ``parse_file()`` instead.
         """
         snapshot: dict[str, Any] = {}
 
