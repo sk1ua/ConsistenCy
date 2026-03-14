@@ -144,12 +144,25 @@ def test_pipeline_pr_risk_report_shape():
     assert "file_deep_dive" in report
     assert "cache" in report
 
+    rc = report["risk_composition"]
+    assert "contributions_pct" in rc
+    assert "percentile_basis" in rc
+
     if report["top_risky_files"]:
         f = report["top_risky_files"][0]
         assert "churn_lines" in f
         assert "complexity" in f
         assert "owner" in f
         assert "risk_breakdown" in f
+        assert "rank_in_pr" in f
+        assert "review_effort_min" in f
+        assert "review_effort_max" in f
+
+    if report["file_deep_dive"]:
+        d = report["file_deep_dive"][0]
+        assert "estimated_review_effort" in d
+        assert "structural_signals" in d
+        assert "semantic_signals" in d
 
 
 def test_pipeline_cache_stats_keys():
@@ -194,7 +207,14 @@ def test_pipeline_author_breakdown():
         a = authors[0]
         assert "author" in a
         assert "commit_count" in a
+        assert "avg_risk" in a
         assert "avg_risk_proxy" in a
+        assert "analysis_mode" in a
+        assert "real_sample_count" in a
+        assert "proxy_sample_count" in a
+        assert 0.0 <= a["avg_risk"] <= 1.0
+        assert 0.0 <= a["avg_risk_proxy"] <= 1.0
+        assert a["analysis_mode"] in {"full", "proxy"}
 
 
 def test_pipeline_hotspot_data():

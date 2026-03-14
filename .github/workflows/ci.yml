@@ -44,8 +44,14 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           PYTHONPATH: backend
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY || secrets.OPENAI_API_KEY }}
         run: |
+          if [ -n "${DEEPSEEK_API_KEY}" ]; then
+            echo "LLM enabled: true (DEEPSEEK_API_KEY detected in secrets)"
+          else
+            echo "LLM enabled: false (set repository secret DEEPSEEK_API_KEY to enable AI review)"
+          fi
+
           python backend/cli.py pr-report \
             --repo . \
             --base ${{ github.event.pull_request.base.sha }} \
@@ -60,8 +66,9 @@ jobs:
           from src.review_suggestions import generate_review_comment
           with open('/tmp/pr_report.json') as f:
               report = json.load(f)
-          use_llm = bool(os.environ.get('DEEPSEEK_API_KEY', '').strip())
-          comment = generate_review_comment(report, use_llm=use_llm)
+          # Always request the AI section so missing-key status is explicit
+          # in the PR comment when DEEPSEEK_API_KEY is not configured.
+          comment = generate_review_comment(report, use_llm=True)
           with open('/tmp/pr_comment.md', 'w') as f:
               f.write(comment)
           PYEOF

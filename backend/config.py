@@ -38,6 +38,14 @@ PIPELINE_CONFIG = {
     "llm_review_top_files": 5,
     # weekly_history: True = 对每个 commit 运行真实多 Agent 分析（不使用 churn 代理）
     "weekly_full_analysis": True,
+    # author_breakdown: True = 对每个 commit 运行真实多 Agent 分析；False = 使用 churn 代理
+    "author_breakdown_full_analysis": True,
+    # author_breakdown 最多回溯多少个 commit
+    "author_breakdown_max_commits": 100,
+    # author_breakdown 每个 commit 最多分析多少个 Python 文件
+    "max_files_per_author_commit": 5,
+    # author_breakdown 真实分析时，每个 commit 使用多少个历史 commit 作为 baseline
+    "author_breakdown_baseline_commits": 30,
 }
 
 # ─── 支持的文件类型 ───────────────────────────────────────────────────────────

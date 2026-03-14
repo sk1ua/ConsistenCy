@@ -185,7 +185,7 @@ PYTHONPATH=backend pytest tests -q
 
 - **Python only** — all analysis uses `ast.parse()` (other languages are on the roadmap)
 - **Local repos** — requires a cloned Git repository path
-- **Author view uses proxy risk** — `author_breakdown()` currently reports churn-based `avg_risk_proxy`
+- **Author view has configurable fallback** — `author_breakdown()` defaults to real multi-agent risk (`avg_risk`), and falls back to churn proxy for commits without analysable Python files
 
 ---
 

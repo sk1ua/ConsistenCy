@@ -254,15 +254,16 @@ function renderAuthors(authors) {
   if (!authors?.length) return;
   const top = authors.slice(0, 10);
   const labels = top.map(a => a.author);
-  const scores = top.map(a => a.avg_risk_proxy);
+  const scores = top.map(a => Number.isFinite(a.avg_risk) ? a.avg_risk : (a.avg_risk_proxy ?? 0));
   const colours = scores.map(s => COLOUR_MAP[riskColour(s)]);
 
   const trace = {
     y: labels, x: scores,
     type: "bar", orientation: "h",
     marker: { color: colours },
-    hovertemplate: "%{y}<br>Risk proxy: %{x:.3f}<br>Commits: %{customdata}<extra></extra>",
-    customdata: top.map(a => a.commit_count),
+    hovertemplate:
+      "%{y}<br>Risk: %{x:.3f}<br>Proxy: %{customdata[1]:.3f}<br>Commits: %{customdata[0]}<br>Mode: %{customdata[2]}<extra></extra>",
+    customdata: top.map(a => [a.commit_count, a.avg_risk_proxy ?? 0, a.analysis_mode ?? "proxy"]),
   };
 
   const layout = {

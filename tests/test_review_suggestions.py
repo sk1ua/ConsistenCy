@@ -21,6 +21,15 @@ def _sample_report() -> dict:
         "risk_composition": {
             "formula": "commit_risk = 0.90*mean(file_risk) + 0.10*evolution",
             "file_formula": "file_risk = 0.28*style + 0.39*structural + 0.33*semantic + duplication/security adjustments",
+            "contributions_pct": {
+                "semantic": 0.27,
+                "structural": 0.15,
+                "duplication": 0.10,
+                "style": 0.02,
+                "evolution": 0.43,
+                "security": 0.03,
+            },
+            "percentile_basis": "within_pr_files",
             "components_avg": {
                 "style": 0.11,
                 "structural": 0.23,
@@ -90,6 +99,8 @@ def _sample_report() -> dict:
             {
                 "file": "tests/test_security_evolution.py",
                 "risk": 0.651,
+                "rank_in_pr": 1,
+                "total_pr_files": 8,
                 "risk_breakdown": {
                     "style": 0.08,
                     "structural": 0.19,
@@ -98,6 +109,15 @@ def _sample_report() -> dict:
                     "security": 0.0,
                 },
                 "risky_lines": [18, 35],
+                "primary_risk_region": "L18-L35",
+                "estimated_review_effort": "5-8 minutes",
+                "structural_signals": [
+                    "new test module added",
+                    "assertion chain complexity increased",
+                ],
+                "semantic_signals": [
+                    "AST structure diverged significantly",
+                ],
                 "code_excerpt": "  14: def x():\n  15:     return 1",
                 "diff_excerpt": "@@ -1,1 +1,2 @@\n+def x():\n+    return 1",
             }
@@ -111,15 +131,26 @@ def test_review_comment_contains_explainability_sections():
     md = generate_review_comment(report)
 
     assert "Risk Formula" in md
-    assert "Avg Composition" in md
+    assert "Risk Contribution (normalized)" in md
     assert "Highest Risk Files" in md
-    assert "Risk %ile" in md
+    assert "Risk %ile basis" in md
     assert "Commit Risk Trend" in md
     assert "Evidence Chain (deduplicated)" in md
     assert "Top File Deep Dive" in md
+    assert "Risk ranking among PR files" in md
+    assert "Estimated review effort" in md
+    assert "Structural signals" in md
+    assert "Semantic signals" in md
 
 
 def test_review_suggestions_knowledge_risk_not_duplicated():
     report = _sample_report()
     md = generate_review_comment(report)
     assert md.count("Knowledge concentration risk") == 1
+
+
+def test_review_comment_hides_trend_for_single_commit():
+    report = _sample_report()
+    report["commit_trend"] = [{"sha": "11111111", "risk_score": 0.5, "delta": None, "delta_pct": None}]
+    md = generate_review_comment(report)
+    assert "Commit Risk Trend" not in md

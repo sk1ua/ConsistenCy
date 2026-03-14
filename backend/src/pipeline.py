@@ -54,6 +54,10 @@ _MAX_FILES_PER_WEEKLY = _PCFG.get("max_files_per_weekly_commit", 5)
 _LLM_REVIEW_TOP = _PCFG.get("llm_review_top_files", 5)
 _WEEKLY_FULL = _PCFG.get("weekly_full_analysis", True)
 _WEEKLY_MAX_COMMITS = _PCFG.get("weekly_history_max_commits", 200)
+_AUTHOR_FULL = _PCFG.get("author_breakdown_full_analysis", True)
+_AUTHOR_MAX_COMMITS = _PCFG.get("author_breakdown_max_commits", 100)
+_AUTHOR_MAX_FILES_PER_COMMIT = _PCFG.get("max_files_per_author_commit", 5)
+_AUTHOR_BASELINE_COMMITS = _PCFG.get("author_breakdown_baseline_commits", 30)
 _HOTSPOT_MAX_COMMITS = _PCFG.get("hotspot_max_commits", 100)
 _HOTSPOT_TOP_N = _PCFG.get("hotspot_top_n", 30)
 
@@ -830,29 +834,76 @@ class AnalysisPipeline:
     # ------------------------------------------------------------------
 
     def author_breakdown(self) -> list[dict[str, Any]]:
-        """Return per-author aggregated drift statistics."""
-        author_scores: dict[str, list[float]] = defaultdict(list)
-        author_commits: dict[str, int] = defaultdict(int)
+        """Return per-author aggregated drift statistics.
 
-        for commit in self.repo.iter_commits(max_count=_HOTSPOT_MAX_COMMITS):
+        When ``author_breakdown_full_analysis`` is enabled, each commit
+        score is derived from real multi-agent file analysis. Commits with
+        no analysable Python files still fall back to churn proxy.
+        """
+        author_scores: dict[str, list[float]] = defaultdict(list)
+        author_proxy_scores: dict[str, list[float]] = defaultdict(list)
+        author_commits: dict[str, int] = defaultdict(int)
+        author_real_samples: dict[str, int] = defaultdict(int)
+        author_proxy_samples: dict[str, int] = defaultdict(int)
+
+        for commit in self.repo.iter_commits(max_count=_AUTHOR_MAX_COMMITS):
             author = commit.author.name or "unknown"
             author_commits[author] += 1
             churn = sum(
                 v.get("insertions", 0) + v.get("deletions", 0)
                 for v in commit.stats.files.values()
             )
-            author_scores[author].append(min(churn / 500, 1.0))
 
+            proxy_score = min(churn / 500, 1.0)
+            author_proxy_scores[author].append(proxy_score)
+
+            if not _AUTHOR_FULL:
+                author_scores[author].append(proxy_score)
+                author_proxy_samples[author] += 1
+                continue
+
+            baseline_commits = list(
+                self.repo.iter_commits(
+                    rev=commit.hexsha,
+                    max_count=_AUTHOR_BASELINE_COMMITS + 1,
+                )
+            )[1:]
+            py_files = [f for f in commit.stats.files if f.endswith(".py")]
+
+            file_scores: list[float] = []
+            for filepath in py_files[:_AUTHOR_MAX_FILES_PER_COMMIT]:
+                src_now = self._source_at_commit(commit, filepath)
+                src_base = self._baseline_source_from_window(
+                    filepath=filepath,
+                    commits=baseline_commits,
+                    max_versions=8,
+                )
+                if src_now and src_base:
+                    analysis = analyze_sources(src_now, src_base)
+                    file_scores.append(analysis["risk_score"])
+
+            if file_scores:
+                author_scores[author].append(statistics.mean(file_scores))
+                author_real_samples[author] += 1
+            else:
+                author_scores[author].append(proxy_score)
+                author_proxy_samples[author] += 1
+
+        analysis_mode = "full" if _AUTHOR_FULL else "proxy"
         return sorted(
             [
                 {
                     "author": author,
                     "commit_count": author_commits[author],
-                    "avg_risk_proxy": round(statistics.mean(scores), 4),
+                    "avg_risk": round(statistics.mean(scores), 4),
+                    "avg_risk_proxy": round(statistics.mean(author_proxy_scores[author]), 4),
+                    "analysis_mode": analysis_mode,
+                    "real_sample_count": author_real_samples[author],
+                    "proxy_sample_count": author_proxy_samples[author],
                 }
                 for author, scores in author_scores.items()
             ],
-            key=lambda x: x["avg_risk_proxy"],
+            key=lambda x: x["avg_risk"],
             reverse=True,
         )
 
@@ -931,6 +982,9 @@ class AnalysisPipeline:
         file_churn_totals: dict[str, int] = defaultdict(int)
         file_authors: dict[str, Counter] = defaultdict(Counter)
         file_complexities: dict[str, list[float]] = defaultdict(list)
+        file_agent_evidence: dict[str, dict[str, list[str]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
         security_findings: list[dict[str, Any]] = []
 
         for commit in commits:
@@ -972,6 +1026,18 @@ class AnalysisPipeline:
 
                 # Collect security findings for the report
                 for agent_name, adetails in file_res.get("agent_details", {}).items():
+                    lowered = agent_name.lower()
+
+                    if lowered.startswith("structural"):
+                        for ev in adetails.get("evidence", [])[:3]:
+                            if ev and ev not in file_agent_evidence[filepath]["structural"]:
+                                file_agent_evidence[filepath]["structural"].append(ev)
+
+                    if lowered.startswith("semantic"):
+                        for ev in adetails.get("evidence", [])[:3]:
+                            if ev and ev not in file_agent_evidence[filepath]["semantic"]:
+                                file_agent_evidence[filepath]["semantic"].append(ev)
+
                     if "security" in agent_name.lower() and adetails.get("score", 0) > 0:
                         for ev in adetails.get("evidence", []):
                             if ev != "No security issues detected.":
@@ -1032,6 +1098,19 @@ class AnalysisPipeline:
             total_files = len(file_rows)
             for idx, item in enumerate(file_rows):
                 item["risk_percentile"] = round((total_files - idx) / total_files, 4)
+                item["rank_in_pr"] = idx + 1
+                item["total_pr_files"] = total_files
+
+                effort_center = (
+                    3.0
+                    + min(item.get("churn_lines", 0) / 120.0, 8.0)
+                    + min(item.get("complexity", 0.0) / 2.5, 6.0)
+                    + min(item.get("avg_risk", 0.0) * 6.0, 6.0)
+                )
+                effort_min = max(3, int(round(effort_center - 2)))
+                effort_max = max(effort_min + 1, int(round(effort_center + 2)))
+                item["review_effort_min"] = effort_min
+                item["review_effort_max"] = effort_max
 
         top_risky_files = file_rows[:20]
 
@@ -1050,6 +1129,27 @@ class AnalysisPipeline:
         composition_avg["evolution"] = (
             round(statistics.mean(evolution_scores), 4) if evolution_scores else 0.0
         )
+
+        weights_used = getattr(_risk, "weights", {"style": 0.28, "structural": 0.39, "semantic": 0.33})
+        duplication_boost_avg = (
+            0.05 * min(composition_avg["duplication"] / 0.30, 1.0)
+            if composition_avg["duplication"] > 0.05
+            else 0.0
+        )
+        security_boost_avg = composition_avg["security"] * 0.50
+        contribution_raw = {
+            "style": 0.90 * weights_used.get("style", 0.28) * composition_avg["style"],
+            "structural": 0.90 * weights_used.get("structural", 0.39) * composition_avg["structural"],
+            "semantic": 0.90 * weights_used.get("semantic", 0.33) * composition_avg["semantic"],
+            "duplication": 0.90 * duplication_boost_avg,
+            "security": 0.90 * security_boost_avg,
+            "evolution": 0.10 * composition_avg["evolution"],
+        }
+        total_contribution = sum(contribution_raw.values()) or 1.0
+        contribution_pct = {
+            key: round(value / total_contribution, 4)
+            for key, value in contribution_raw.items()
+        }
 
         commit_trend: list[dict[str, Any]] = []
         prev_score: float | None = None
@@ -1137,6 +1237,14 @@ class AnalysisPipeline:
                 for idx in range(start, end + 1)
             )
 
+        def _primary_region(lines: list[int]) -> str:
+            if not lines:
+                return ""
+            window = sorted(lines[:5])
+            start = window[0]
+            end = window[-1]
+            return f"L{start}" if start == end else f"L{start}-L{end}"
+
         deep_dive: list[dict[str, Any]] = []
         for item in top_risky_files[:3]:
             filepath = item["file"]
@@ -1162,11 +1270,49 @@ class AnalysisPipeline:
             except Exception:
                 diff_excerpt = ""
 
+            structural_signals = list(file_agent_evidence.get(filepath, {}).get("structural", []))
+            semantic_signals = list(file_agent_evidence.get(filepath, {}).get("semantic", []))
+
+            imports = code_meta.get("imports", [])
+            functions = code_meta.get("functions", [])
+            classes = code_meta.get("classes", [])
+            risky_snippets = code_meta.get("risky_snippets", [])
+
+            if imports and len(imports) >= 5:
+                msg = f"{len(imports)} imports detected (dependency surface expanded)."
+                if msg not in structural_signals:
+                    structural_signals.append(msg)
+            if classes:
+                msg = f"{len(classes)} class definition(s) touched in this file."
+                if msg not in structural_signals:
+                    structural_signals.append(msg)
+
+            complex_funcs = [f for f in functions if f.get("complexity") in {"moderate", "complex"}]
+            if complex_funcs:
+                msg = f"{len(complex_funcs)} function(s) marked moderate/complex."
+                if msg not in structural_signals:
+                    structural_signals.append(msg)
+
+            risky_reasons = [s.get("reason") for s in risky_snippets if s.get("reason")]
+            for reason in risky_reasons[:3]:
+                if reason not in semantic_signals:
+                    semantic_signals.append(reason)
+
+            primary_region = _primary_region(risky_lines)
+            effort_min = int(item.get("review_effort_min", 3))
+            effort_max = int(item.get("review_effort_max", max(effort_min + 1, 4)))
+
             deep_dive.append({
                 "file": filepath,
                 "risk": item.get("avg_risk", 0.0),
+                "rank_in_pr": item.get("rank_in_pr", 1),
+                "total_pr_files": item.get("total_pr_files", len(file_rows) or 1),
                 "risk_breakdown": item.get("risk_breakdown", {}),
                 "risky_lines": risky_lines,
+                "primary_risk_region": primary_region,
+                "estimated_review_effort": f"{effort_min}-{effort_max} minutes",
+                "structural_signals": structural_signals[:5],
+                "semantic_signals": semantic_signals[:5],
                 "code_excerpt": snippet_text,
                 "diff_excerpt": diff_excerpt,
             })
@@ -1184,6 +1330,8 @@ class AnalysisPipeline:
                 "formula": "commit_risk = 0.90*mean(file_risk) + 0.10*evolution",
                 "file_formula": "file_risk = 0.28*style + 0.39*structural + 0.33*semantic + duplication/security adjustments",
                 "components_avg": composition_avg,
+                "contributions_pct": contribution_pct,
+                "percentile_basis": "within_pr_files",
                 "scale_max": 1.0,
             },
             "evidence_summary": evidence_summary,
