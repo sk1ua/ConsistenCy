@@ -81,7 +81,7 @@ def _subtree_edit_distance(tree_a: ast.AST, tree_b: ast.AST) -> float:
 
 
 def _node_type_sequence(tree: ast.AST) -> list[str]:
-    """Linearise the AST into a depth-first list of node type names (kept for compatibility)."""
+    """Linearise the AST into ast.walk() traversal order (kept for compatibility)."""
     return [type(node).__name__ for node in ast.walk(tree)]
 
 

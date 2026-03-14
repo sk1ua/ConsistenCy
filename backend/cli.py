@@ -324,6 +324,13 @@ def pr_report(
         f"  · baseline-cache-hit={report.get('cache', {}).get('baseline_hit', 0)}\n"
     )
 
+    composition = report.get("risk_composition", {})
+    if composition:
+        console.print(
+            f"  Formula: {composition.get('formula', 'n/a')}\n"
+            f"  File formula: {composition.get('file_formula', 'n/a')}\n"
+        )
+
     commits = report.get("commits", [])
     if commits:
         tbl = Table(title="PR Commit Risk", header_style="bold cyan")
@@ -350,6 +357,9 @@ def pr_report(
         f_tbl.add_column("File", style="cyan")
         f_tbl.add_column("Avg Risk", justify="right")
         f_tbl.add_column("Max Risk", justify="right")
+        f_tbl.add_column("Churn", justify="right")
+        f_tbl.add_column("Complexity", justify="right")
+        f_tbl.add_column("Owner", style="cyan")
         f_tbl.add_column("Hits", justify="right")
         for item in top_files[:15]:
             c = RISK_COLOUR_MAP.get(_risk_colour_str(item["avg_risk"]), "white")
@@ -357,6 +367,9 @@ def pr_report(
                 item["file"],
                 f"[{c}]{item['avg_risk']:.3f}[/{c}]",
                 f"{item['max_risk']:.3f}",
+                str(item.get("churn_lines", 0)),
+                f"{float(item.get('complexity', 0.0)):.2f}",
+                str(item.get("owner", "unknown")),
                 str(item["hits"]),
             )
         console.print(f_tbl)
