@@ -289,12 +289,21 @@ class TreeSitterParser(BaseParser):
                     if child.type in ("identifier", "type_identifier"):
                         if name is None:
                             name = source_bytes[child.start_byte:child.end_byte].decode("utf8")
-                    elif child.type in ("class_heritage", "base_clause", "argument_list"):
-                        # Extract base classes
+                    elif child.type in ("class_heritage", "base_clause", "extends_clause", "argument_list"):
+                        # Extract base classes - handle different AST structures
                         for base in child.children:
                             if base.type in ("identifier", "type_identifier", "member_expression"):
                                 base_name = source_bytes[base.start_byte:base.end_byte].decode("utf8")
                                 bases.append(base_name)
+                            elif base.type == "extends":
+                                # TypeScript: extends keyword, look for next identifier
+                                continue
+                            elif hasattr(base, 'children') and base.children:
+                                # Nested structure - recurse
+                                for sub in base.children:
+                                    if sub.type in ("identifier", "type_identifier"):
+                                        base_name = source_bytes[sub.start_byte:sub.end_byte].decode("utf8")
+                                        bases.append(base_name)
                 
                 # Extract methods
                 methods = []
