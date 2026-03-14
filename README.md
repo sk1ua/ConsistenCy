@@ -57,6 +57,8 @@ That's it — you'll see a color-coded risk report in your terminal.
 
 ## All Commands
 
+### Local Repository Commands
+
 | Command | Description |
 |---------|-------------|
 | `scan <path>` | Build a baseline snapshot for the repo |
@@ -66,6 +68,24 @@ That's it — you'll see a color-coded risk report in your terminal.
 | `analyze-file new.py old.py` | Compare two files directly (no Git needed) |
 | `web-ui --port 8000` | Launch the web dashboard |
 | `export-by-file --repo <path>` | Export file-level data to JSON/CSV |
+
+### Remote Repository Commands (v2.5+)
+
+| Command | Description |
+|---------|-------------|
+| `analyze-remote owner/repo` | Analyze any GitHub repo without cloning |
+| `trend owner/repo --period monthly` | Historical risk trends over time |
+
+```bash
+# Analyze popular repos without cloning
+consistency analyze-remote facebook/react
+consistency analyze-remote microsoft/vscode --since 2024-01-01
+
+# Historical trend analysis
+consistency trend kubernetes/kubernetes --period monthly --months 12
+```
+
+See [docs/REMOTE_ANALYSIS.md](docs/REMOTE_ANALYSIS.md) for detailed guide.
 
 ### PR Report with AI Review
 

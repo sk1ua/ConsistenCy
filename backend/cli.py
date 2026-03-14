@@ -604,6 +604,225 @@ def export_by_author_cmd(repo_path: str, weeks: int, output_dir: str):
 
 
 # ---------------------------------------------------------------------------
+# Remote analysis commands
+# ---------------------------------------------------------------------------
+
+@cli.command("analyze-remote")
+@click.argument("repo", required=True)
+@click.option("--since", help="Start date (YYYY-MM-DD)")
+@click.option("--until", help="End date (YYYY-MM-DD)")
+@click.option("--max-commits", default=50, show_default=True, help="Max commits to analyze")
+@click.option("--token", envvar="GITHUB_TOKEN", help="GitHub token (or set GITHUB_TOKEN env)")
+@click.option("--json-output", is_flag=True, help="Emit JSON instead of Rich output")
+def analyze_remote(repo: str, since: str | None, until: str | None, max_commits: int, token: str | None, json_output: bool):
+    """Analyze a remote GitHub repository without cloning.
+    
+    REPO format: owner/repo (e.g., facebook/react)
+    
+    Examples:
+        consistency analyze-remote facebook/react
+        consistency analyze-remote facebook/react --since 2024-01-01 --max-commits 100
+        consistency analyze-remote facebook/react --json-output > report.json
+    """
+    try:
+        from src.remote import GitHubClient, RemoteAnalysisPipeline
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] Remote analysis requires 'requests' library: {e}")
+        raise SystemExit(1)
+    
+    # Parse owner/repo
+    if "/" not in repo:
+        console.print("[red]Error:[/red] REPO must be in format 'owner/repo'")
+        raise SystemExit(1)
+    
+    owner, repo_name = repo.split("/", 1)
+    
+    # Parse dates
+    since_dt = None
+    until_dt = None
+    if since:
+        from datetime import datetime
+        since_dt = datetime.fromisoformat(since)
+    if until:
+        from datetime import datetime
+        until_dt = datetime.fromisoformat(until)
+    
+    console.print(Panel.fit(
+        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
+        f"Remote analysis [cyan]{owner}/{repo_name}[/cyan]",
+        border_style="blue",
+    ))
+    
+    try:
+        client = GitHubClient(token=token)
+        pipeline = RemoteAnalysisPipeline(client)
+        
+        result = pipeline.analyze_repo(
+            owner=owner,
+            repo=repo_name,
+            since=since_dt,
+            until=until_dt,
+            max_commits=max_commits,
+        )
+    except Exception as exc:
+        if json_output:
+            click.echo(json.dumps({"error": str(exc)}, indent=2))
+        else:
+            console.print(f"[red]Error:[/red] {exc}")
+        raise SystemExit(1) from exc
+    
+    if json_output:
+        # Convert to JSON-serializable format
+        output = {
+            "metadata": {
+                "owner": result.metadata.owner,
+                "name": result.metadata.name,
+                "full_name": result.metadata.full_name,
+                "description": result.metadata.description,
+                "language": result.metadata.language,
+                "stars": result.metadata.stars,
+                "forks": result.metadata.forks,
+            },
+            "analyzed_at": result.analyzed_at.isoformat(),
+            "commits_analyzed": result.commits_analyzed,
+            "overall_risk": result.overall_risk,
+            "risk_level": result.risk_level,
+            "language_breakdown": result.language_breakdown,
+            "top_risky_files": [
+                {
+                    "path": f.path,
+                    "language": f.language,
+                    "risk_score": f.risk_score,
+                    "risk_level": f.risk_level,
+                }
+                for f in result.top_risky_files
+            ],
+        }
+        click.echo(json.dumps(output, indent=2, default=str))
+        return
+    
+    # Rich output
+    console.print(f"\n[bold]Repository:[/] {result.metadata.full_name}")
+    if result.metadata.description:
+        console.print(f"[dim]{result.metadata.description}[/]")
+    console.print(f"[bold]Stars:[/] {result.metadata.stars:,}  [bold]Forks:[/] {result.metadata.forks:,}")
+    console.print(f"[bold]Language:[/] {result.metadata.language or 'Unknown'}")
+    
+    console.print(f"\n[bold]Analysis Results:[/]")
+    console.print(f"  Commits analyzed: {result.commits_analyzed}")
+    
+    risk_color = RISK_COLOUR_MAP.get(result.risk_level.replace(" ", "").upper(), "white")
+    console.print(f"  Overall risk: [{risk_color}]{result.overall_risk:.3f}[/{risk_color}] ({result.risk_level})")
+    
+    if result.language_breakdown:
+        console.print(f"\n[bold]Language Breakdown:[/]")
+        for lang, count in sorted(result.language_breakdown.items(), key=lambda x: -x[1]):
+            console.print(f"  {lang}: {count} files")
+    
+    if result.top_risky_files:
+        tbl = Table(title="Top Risky Files", header_style="bold cyan")
+        tbl.add_column("File", style="cyan")
+        tbl.add_column("Language")
+        tbl.add_column("Risk", justify="right")
+        tbl.add_column("Level")
+        
+        for f in result.top_risky_files[:10]:
+            colour = RISK_COLOUR_MAP.get(f.risk_level.replace(" ", "").upper(), "white")
+            tbl.add_row(
+                f.path,
+                f.language,
+                f"{f.risk_score:.3f}",
+                f"[{colour}]{f.risk_level}[/{colour}]",
+            )
+        console.print(tbl)
+
+
+@cli.command("trend")
+@click.argument("repo", required=True)
+@click.option("--period", type=click.Choice(["weekly", "monthly", "quarterly"]), default="monthly")
+@click.option("--months", default=12, show_default=True, help="Number of months to analyze")
+@click.option("--token", envvar="GITHUB_TOKEN", help="GitHub token")
+@click.option("--json-output", is_flag=True, help="Emit JSON")
+def trend(repo: str, period: str, months: int, token: str | None, json_output: bool):
+    """Analyze historical trends of a GitHub repository.
+    
+    REPO format: owner/repo
+    
+    Examples:
+        consistency trend facebook/react --period monthly --months 6
+        consistency trend facebook/react --json-output > trends.json
+    """
+    try:
+        from src.remote import GitHubClient, RemoteAnalysisPipeline
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] Remote analysis requires 'requests' library: {e}")
+        raise SystemExit(1)
+    
+    if "/" not in repo:
+        console.print("[red]Error:[/red] REPO must be in format 'owner/repo'")
+        raise SystemExit(1)
+    
+    owner, repo_name = repo.split("/", 1)
+    
+    console.print(Panel.fit(
+        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
+        f"Trend analysis [cyan]{owner}/{repo_name}[/cyan] ({period})",
+        border_style="blue",
+    ))
+    
+    try:
+        client = GitHubClient(token=token)
+        pipeline = RemoteAnalysisPipeline(client)
+        
+        report = pipeline.analyze_trends(owner, repo_name, period=period, months=months)
+    except Exception as exc:
+        if json_output:
+            click.echo(json.dumps({"error": str(exc)}, indent=2))
+        else:
+            console.print(f"[red]Error:[/red] {exc}")
+        raise SystemExit(1) from exc
+    
+    if json_output:
+        output = {
+            "repo": report.repo_full_name,
+            "period": report.period,
+            "start_date": report.start_date.isoformat(),
+            "end_date": report.end_date.isoformat(),
+            "data_points": report.data_points,
+            "insights": report.insights,
+        }
+        click.echo(json.dumps(output, indent=2, default=str))
+        return
+    
+    console.print(f"\n[bold]Repository:[/] {report.repo_full_name}")
+    console.print(f"[bold]Period:[/] {report.period}")
+    console.print(f"[bold]Range:[/] {report.start_date.date()} to {report.end_date.date()}")
+    
+    if report.data_points:
+        tbl = Table(title=f"Risk Trends ({period})", header_style="bold cyan")
+        tbl.add_column("Period")
+        tbl.add_column("Commits", justify="right")
+        tbl.add_column("Avg Risk", justify="right")
+        tbl.add_column("Level")
+        
+        for point in report.data_points:
+            level = point.get("risk_level", "Unknown")
+            colour = RISK_COLOUR_MAP.get(level.replace(" ", "").upper(), "white")
+            tbl.add_row(
+                point["period"],
+                str(point["commits"]),
+                f"{point['avg_risk']:.3f}",
+                f"[{colour}]{level}[/{colour}]",
+            )
+        console.print(tbl)
+    
+    if report.insights:
+        console.print(f"\n[bold]Insights:[/]")
+        for insight in report.insights:
+            console.print(f"  · {insight}")
+
+
+# ---------------------------------------------------------------------------
 # Entry-point
 # ---------------------------------------------------------------------------
 
