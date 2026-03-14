@@ -127,10 +127,10 @@ ConsistenCy runs **8 specialized agents** on every commit:
 | **ParserAgent** | AST parsing, Halstead metrics, cyclomatic complexity |
 | **StyleAgent** | Naming conventions, docstrings, formatting drift |
 | **StructuralAgent** | Import dependencies, coupling, inheritance depth |
-| **SemanticAgent** | AST n-gram similarity, API usage, control flow |
+| **SemanticAgent** | Subtree-structure similarity, API usage, control flow |
 | **EvolutionAgent** | Code churn, Shannon entropy, hotspots, bus factor |
 | **DuplicationAgent** | Clone detection, duplication ratio |
-| **SecurityAgent** | Hardcoded secrets, dangerous calls, injection risks |
+| **SecurityAgent** | Hardcoded secrets, dangerous calls, injection risks (f-string / `.format()` / `%`) |
 | **RiskScoringAgent** | Weighted aggregation with security overrides |
 
 Each file gets a risk score from 0 to 1:
@@ -168,7 +168,7 @@ ConsistenCy/
 │   └── static/                    # CSS + JS
 ├── .github/workflows/ci.yml       # CI + PR automation
 ├── .env.example                   # Environment variable template
-└── tests/                         # 46 tests
+└── tests/                         # 55+ tests
 ```
 
 ---
@@ -185,6 +185,7 @@ PYTHONPATH=backend pytest tests -q
 
 - **Python only** — all analysis uses `ast.parse()` (other languages are on the roadmap)
 - **Local repos** — requires a cloned Git repository path
+- **Author view uses proxy risk** — `author_breakdown()` currently reports churn-based `avg_risk_proxy`
 
 ---
 

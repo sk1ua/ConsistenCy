@@ -15,5 +15,5 @@ ml_naming_model.py : ML naming style model
 utils.py           : Shared utilities
 """
 
-__version__ = "1.0.0"
+__version__ = "2.3.0"
 __author__ = "ConsistenCy Team"

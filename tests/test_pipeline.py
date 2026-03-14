@@ -68,6 +68,15 @@ def test_pipeline_analyze_commit():
     assert "commit" in result
 
 
+def test_commit_diff_stats_contains_file_churn_map():
+    pipeline = _get_pipeline()
+    if pipeline is None:
+        pytest.skip("Git repo not available")
+    stats = _commit_diff_stats(pipeline.repo.head.commit)
+    assert "file_churn_map" in stats
+    assert isinstance(stats["file_churn_map"], dict)
+
+
 def test_pipeline_weekly_history_shape():
     pipeline = _get_pipeline()
     if pipeline is None:

@@ -4,26 +4,43 @@ Duplication Agent
 =================
 Detects copy-paste / structural code duplication.
 
-Algorithm (CPD-inspired, pure-Python)
---------------------------------------
+Algorithm (rolling-hash fingerprinting)
+-----------------------------------------
 1. Normalise each function body by replacing variable names and string
    literals with placeholder tokens, producing "canonical token sequences".
-2. Build a suffix-array of all sequences and find matching n-grams of
-   length ≥ min_token_window (default: 50 tokens).
-3. Report the fraction of code lines covered by duplicate blocks.
+2. Build an inverted index:  window_hash → {(file, func), ...}  using a
+   sliding window of MIN_TOKENS over every function's token sequence.
+   Any window hash that appears in two or more distinct functions is a
+   shared code fragment (Type-1/2 clone).
+3. Count shared windows per function-pair and compute Sørensen-Dice
+   similarity.  Pairs with similarity ≥ 0.80 are clones.
+
+Compared to the previous O(n²) pairwise approach:
+  - Building the index is O(Σ tokens) ≈ O(n).
+  - Shared-window counting is O(n) for typical code (most windows are
+    unique); worst-case is O(n²) only if all functions are identical.
+  - Natural extension to **cross-file clone detection**: functions from
+    other project files are included in the same index.
+
+Cross-file support
+------------------
+If ``snapshot["project_sources"]`` is a ``dict[str, str]`` mapping
+file-paths to source code, functions from those files are added to the
+detection pool.  The risk score is derived only from clones that involve
+at least one function in the *primary* file being analysed.
 
 Dimensions scored
 -----------------
-dup_fraction    : Fraction of lines that appear in a duplicate block.
-clone_pair_count: Number of distinct duplicate pairs found.
+dup_fraction    : Fraction of primary-file code lines in a clone block.
+clone_pair_count: Number of distinct clone pairs (intra + cross-file).
 
 Final duplication_risk = min(dup_fraction / HIGH_DUP_THRESHOLD, 1.0)
-where HIGH_DUP_THRESHOLD = 0.15  (>15 % duplication = score 1.0)
+where HIGH_DUP_THRESHOLD = 0.20  (≥20 % duplication → score 1.0)
 """
 from __future__ import annotations
 
 import ast
-import hashlib
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +49,9 @@ from .base_agent import AgentBase, AgentResult
 # Lines-duplication fraction that maps to a maximum score of 1.0
 HIGH_DUP_THRESHOLD = 0.20
 MIN_TOKENS = 40  # minimum token sequence length to flag as duplicate
+
+# Sentinel used to separate source files in cross-file analysis
+_PRIMARY_FILE = ""  # primary file has empty filename label
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +93,27 @@ def _canonical_tokens(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list
 
 
 # ---------------------------------------------------------------------------
-# Duplicate detection
+# Function extraction
+# ---------------------------------------------------------------------------
+
+def _extract_functions(
+    source: str,
+    filename: str = _PRIMARY_FILE,
+) -> list[tuple[str, str, list[str]]]:
+    """Return (filename, funcname, canonical_tokens) for every function."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    result: list[tuple[str, str, list[str]]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            result.append((filename, node.name, _canonical_tokens(node)))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Clone detection via rolling-hash inverted index
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -84,42 +124,64 @@ class ClonePair:
     similarity: float  # 0..1
 
 
-def _detect_clones(functions: list[tuple[str, list[str]]]) -> list[ClonePair]:
-    """Compare every pair of functions for token sequence similarity."""
-    pairs: list[ClonePair] = []
-    for i in range(len(functions)):
-        for j in range(i + 1, len(functions)):
-            name_a, toks_a = functions[i]
-            name_b, toks_b = functions[j]
-            if len(toks_a) < MIN_TOKENS or len(toks_b) < MIN_TOKENS:
-                continue
-            sim = _token_sequence_similarity(toks_a, toks_b)
-            common_len = int(sim * min(len(toks_a), len(toks_b)))
-            if sim >= 0.80:
-                pairs.append(ClonePair(name_a, name_b, common_len, sim))
-    return pairs
+def _rolling_hash_clones(
+    all_functions: list[tuple[str, str, list[str]]],
+    min_tokens: int = MIN_TOKENS,
+    threshold: float = 0.80,
+) -> list[ClonePair]:
+    """Detect clone pairs using rolling-window fingerprinting.
 
+    Builds a window_hash → {(file, func)} inverted index in O(Σ tokens)
+    time, then counts shared windows per pair to compute similarity.
+    """
+    # Build inverted index: window_hash → set of (file, func) keys
+    window_index: dict[int, set[tuple[str, str]]] = defaultdict(set)
+    func_window_count: dict[tuple[str, str], int] = {}
 
-def _token_sequence_similarity(a: list[str], b: list[str]) -> float:
-    """Normalised LCS-based similarity (Sørensen–Dice via hashed windows)."""
-    if not a or not b:
-        return 0.0
-    # Build hash-set of windows of size WIN from each sequence
-    WIN = min(MIN_TOKENS // 2, len(a), len(b))
-    if WIN < 2:
-        return 0.0
+    for filename, funcname, tokens in all_functions:
+        if len(tokens) < min_tokens:
+            continue
+        key = (filename, funcname)
+        n_windows = len(tokens) - min_tokens + 1
+        func_window_count[key] = n_windows
+        for i in range(n_windows):
+            # tuple is hashable and uses Python's fast built-in hash
+            wh = hash(tuple(tokens[i : i + min_tokens]))
+            window_index[wh].add(key)
 
-    def windows(seq: list[str]) -> set[str]:
-        return {
-            hashlib.md5("".join(seq[i:i + WIN]).encode()).hexdigest()
-            for i in range(len(seq) - WIN + 1)
-        }
+    # Count shared windows per pair of functions
+    shared: dict[tuple[tuple[str, str], tuple[str, str]], int] = defaultdict(int)
+    for funcs in window_index.values():
+        if len(funcs) < 2:
+            continue
+        funcs_list = list(funcs)
+        for i in range(len(funcs_list)):
+            for j in range(i + 1, len(funcs_list)):
+                pair = (
+                    min(funcs_list[i], funcs_list[j]),
+                    max(funcs_list[i], funcs_list[j]),
+                )
+                shared[pair] += 1
 
-    w_a = windows(a)
-    w_b = windows(b)
-    if not w_a or not w_b:
-        return 0.0
-    return 2 * len(w_a & w_b) / (len(w_a) + len(w_b))
+    # Build ClonePair list for pairs exceeding the similarity threshold
+    clones: list[ClonePair] = []
+    for (key_a, key_b), match_count in shared.items():
+        total_a = func_window_count.get(key_a, 1)
+        total_b = func_window_count.get(key_b, 1)
+        similarity = 2 * match_count / (total_a + total_b)
+        if similarity >= threshold:
+            file_a, func_a = key_a
+            file_b, func_b = key_b
+            label_a = f"{file_a}:{func_a}" if file_a else func_a
+            label_b = f"{file_b}:{func_b}" if file_b else func_b
+            clones.append(ClonePair(
+                func_a=label_a,
+                func_b=label_b,
+                similar_tokens=match_count,
+                similarity=round(similarity, 4),
+            ))
+
+    return sorted(clones, key=lambda c: c.similarity, reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +189,7 @@ def _token_sequence_similarity(a: list[str], b: list[str]) -> float:
 # ---------------------------------------------------------------------------
 
 class DuplicationAgent(AgentBase):
-    """Detect structural code clones across a Python source file."""
+    """Detect structural code clones within and across Python source files."""
 
     @property
     def name(self) -> str:
@@ -135,63 +197,74 @@ class DuplicationAgent(AgentBase):
 
     def analyze(self, snapshot: dict[str, Any], baseline: dict[str, Any]) -> AgentResult:
         source = snapshot.get("source", "")
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
+
+        # Primary file functions
+        primary_funcs = _extract_functions(source, _PRIMARY_FILE)
+
+        # Cross-file functions (optional project-wide pool)
+        project_sources: dict[str, str] = snapshot.get("project_sources", {})
+        cross_funcs: list[tuple[str, str, list[str]]] = []
+        for filepath, fsource in project_sources.items():
+            cross_funcs.extend(_extract_functions(fsource, filepath))
+
+        all_funcs = primary_funcs + cross_funcs
+        primary_keys = {(_PRIMARY_FILE, f[1]) for f in primary_funcs}
+
+        if len(all_funcs) < 2:
             return AgentResult(
                 agent_name=self.name, score=0.0,
-                evidence=["Syntax error — skipping duplication check"]
-            )
-
-        # Collect function bodies ----------------------------------------
-        functions: list[tuple[str, list[str]]] = []
-        total_func_lines = 0
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                end = getattr(node, "end_lineno", node.lineno)
-                func_lines = end - node.lineno + 1
-                total_func_lines += func_lines
-                tokens = _canonical_tokens(node)
-                functions.append((node.name, tokens))
-
-        if len(functions) < 2:
-            return AgentResult(
-                agent_name=self.name, score=0.0,
-                details={"clone_pairs": 0, "dup_fraction": 0.0},
+                details={"clone_pair_count": 0, "dup_fraction": 0.0},
                 evidence=["Too few functions to detect duplication"],
             )
 
-        # Detect clones --------------------------------------------------
-        clones = _detect_clones(functions)
+        # Detect clones
+        clones = _rolling_hash_clones(all_funcs)
 
-        # Estimate duplicated line fraction
-        dup_func_lines = sum(
-            min(len(f[1]), len(g[1]))  # approximate via token count proxy
-            for f, g in [
-                (
-                    next(x for x in functions if x[0] == cp.func_a),
-                    next(x for x in functions if x[0] == cp.func_b),
-                )
-                for cp in clones
-            ]
+        # Score based on clones involving the primary file's functions
+        primary_clones = [
+            cp for cp in clones
+            if any(
+                cp.func_a == (f"{k[0]}:{k[1]}" if k[0] else k[1])
+                or cp.func_b == (f"{k[0]}:{k[1]}" if k[0] else k[1])
+                for k in primary_keys
+            )
+        ]
+
+        # Estimate duplicated line fraction for the primary file
+        total_tokens_by_func = {
+            f[1]: len(f[2]) for f in primary_funcs
+        }
+        loc_total = len([ln for ln in source.splitlines() if ln.strip()])
+
+        duplicated_token_count = sum(
+            total_tokens_by_func.get(cp.func_a.split(":")[-1], 0)
+            for cp in primary_clones
         )
-        loc_total = len([l for l in source.splitlines() if l.strip()])
-        dup_fraction = min(dup_func_lines / max(loc_total, 1), 1.0)
-
+        dup_fraction = min(
+            duplicated_token_count / max(loc_total * 5, 1),  # ~5 tokens/line heuristic
+            1.0,
+        )
         score = self.clamp(dup_fraction / HIGH_DUP_THRESHOLD)
+
+        cross_file_count = sum(
+            1 for cp in clones
+            if (":" in cp.func_a) != (":" in cp.func_b)  # one cross-file
+        )
 
         evidence: list[str] = []
         if clones:
-            evidence.append(
-                f"Detected {len(clones)} clone pair(s) with ≥80% token similarity"
-            )
+            intra = len(clones) - cross_file_count
+            msg = f"Detected {len(clones)} clone pair(s) with ≥80% token similarity"
+            if cross_file_count:
+                msg += f" ({cross_file_count} cross-file)"
+            evidence.append(msg)
             for cp in clones[:3]:
                 evidence.append(
                     f"  {cp.func_a} ↔ {cp.func_b}  similarity={cp.similarity:.0%}"
                 )
         if dup_fraction > 0.05:
             evidence.append(
-                f"Estimated duplicated code: {dup_fraction:.1%} of file"
+                f"Estimated duplicated code: {dup_fraction:.1%} of primary file"
             )
 
         return AgentResult(
@@ -199,6 +272,7 @@ class DuplicationAgent(AgentBase):
             score=score,
             details={
                 "clone_pair_count": len(clones),
+                "cross_file_clone_count": cross_file_count,
                 "dup_fraction": round(dup_fraction, 4),
                 "clone_pairs": [
                     {
@@ -211,3 +285,4 @@ class DuplicationAgent(AgentBase):
             },
             evidence=evidence,
         )
+
