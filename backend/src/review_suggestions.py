@@ -97,11 +97,19 @@ def generate_review_comment(
         formula = composition.get("formula")
         file_formula = composition.get("file_formula")
         comps = composition.get("components_avg", {})
+        contrib = composition.get("contributions_pct", {})
+        percentile_basis = composition.get("percentile_basis", "within_pr_files")
         if formula:
             lines.append(f"> **Risk Formula**: `{formula}`")
         if file_formula:
             lines.append(f"> **File Formula**: `{file_formula}`")
-        if comps:
+        if contrib:
+            ordered = sorted(contrib.items(), key=lambda kv: float(kv[1]), reverse=True)
+            pieces = [f"{name} `{float(value):.0%}`" for name, value in ordered]
+            lines.append(
+                "> **Risk Contribution (normalized)**: " + ", ".join(pieces)
+            )
+        elif comps:
             lines.append(
                 "> **Avg Composition**: "
                 f"style `{float(comps.get('style', 0.0)):.3f}`, "
@@ -111,6 +119,8 @@ def generate_review_comment(
                 f"security `{float(comps.get('security', 0.0)):.3f}`, "
                 f"evolution `{float(comps.get('evolution', 0.0)):.3f}`"
             )
+        basis_text = "within PR files" if percentile_basis == "within_pr_files" else str(percentile_basis)
+        lines.append(f"> **Risk %ile basis**: {basis_text} (`1.00` = highest risk in scope)")
         lines.append("")
 
     # ── Security findings ──────────────────────────────────────────────────
@@ -135,7 +145,7 @@ def generate_review_comment(
     if top_files:
         lines.append("### 📁 Highest Risk Files")
         lines.append("")
-        lines.append("| File | Avg Risk | Max Risk | Risk %ile | Churn | Complexity | Owner | Appearances |")
+        lines.append("| File | Avg Risk | Max Risk | Risk %ile (PR) | Churn | Complexity | Owner | Appearances |")
         lines.append("|------|:--------:|:--------:|:---------:|------:|-----------:|-------|:-----------:|")
         for item in top_files[:10]:
             e = _risk_emoji(item["avg_risk"])
@@ -167,7 +177,7 @@ def generate_review_comment(
         lines.append("")
 
     trend = report.get("commit_trend", [])
-    if trend:
+    if len(trend) >= 2:
         lines.append("### 📈 Commit Risk Trend")
         lines.append("")
         lines.append("| Commit | Risk | Δ | Δ% |")
@@ -214,6 +224,19 @@ def generate_review_comment(
         lines.append("### 🔎 Top File Deep Dive")
         lines.append("")
         lines.append(f"**File:** `{item.get('file', '?')}` · **Risk:** `{float(item.get('risk', 0.0)):.3f}`")
+        rank = item.get("rank_in_pr")
+        total = item.get("total_pr_files")
+        if rank is not None and total is not None:
+            lines.append(f"- **Risk ranking among PR files**: `#{rank} / {total}`")
+
+        effort = item.get("estimated_review_effort")
+        if effort:
+            lines.append(f"- **Estimated review effort**: `{effort}`")
+
+        region = item.get("primary_risk_region")
+        if region:
+            lines.append(f"- **Primary risk region**: `{region}`")
+
         lines.append(
             "- **Risk breakdown**: "
             f"style `{float(breakdown.get('style', 0.0)):.3f}`, "
@@ -222,6 +245,14 @@ def generate_review_comment(
             f"duplication `{float(breakdown.get('duplication', 0.0)):.3f}`, "
             f"security `{float(breakdown.get('security', 0.0)):.3f}`"
         )
+
+        structural_signals = item.get("structural_signals", [])
+        if structural_signals:
+            lines.append("- **Structural signals**: " + "; ".join(structural_signals[:4]))
+
+        semantic_signals = item.get("semantic_signals", [])
+        if semantic_signals:
+            lines.append("- **Semantic signals**: " + "; ".join(semantic_signals[:4]))
 
         risky_lines = item.get("risky_lines", [])
         if risky_lines:
@@ -368,13 +399,21 @@ def _build_suggestions(report: dict[str, Any]) -> list[str]:
 
     deep_dive = report.get("file_deep_dive", [])
     if deep_dive:
-        lines = deep_dive[0].get("risky_lines", [])
-        if lines:
+        risky_lines = deep_dive[0].get("risky_lines", [])
+        if risky_lines:
             suggestions.append(
                 f"Start review from high-risk lines in `{deep_dive[0].get('file', '?')}`: "
-                + ", ".join(str(x) for x in lines[:5])
+                + ", ".join(str(x) for x in risky_lines[:5])
                 + "."
             )
+
+        effort = deep_dive[0].get("estimated_review_effort")
+        region = deep_dive[0].get("primary_risk_region")
+        if effort:
+            hint = f"Estimated review effort for `{deep_dive[0].get('file', '?')}`: {effort}"
+            if region:
+                hint += f" (primary region {region})"
+            suggestions.append(hint + ".")
 
     # Bus factor check from evolution evidence
     concentration_flag = False
