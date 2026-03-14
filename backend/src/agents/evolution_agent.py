@@ -79,6 +79,7 @@ class EvolutionAgent(AgentBase):
         files       : list of str  (files touched)
         additions   : int
         deletions   : int
+        file_churn_map : dict[filename, churn]  (optional, preferred)
         complexity_map : dict[filename, cyclomatic_complexity]  (optional)
     """
 
@@ -180,23 +181,28 @@ class EvolutionAgent(AgentBase):
             return 0.0
         entropies = []
         for commit in commits:
-            files = commit.get("files", [])
-            if not files:
-                continue
-            # Build per-file churn distribution for this commit
-            adds = commit.get("additions", 0)
-            dels = commit.get("deletions", 0)
-            total_churn = adds + dels
-            n = len(files)
-            if total_churn == 0 or n <= 1:
-                entropies.append(0.0)
-                continue
-            # Approximate: distribute total churn equally then add noise from file count
-            # Real commit-level file stats aren't available, so use file count as base
-            # distribution — more files touched = higher entropy
-            dist = [max(1, total_churn // n)] * n
-            # Add remainder to first file to avoid pure-uniform
-            dist[0] += total_churn - sum(dist)
+            file_churn_map = commit.get("file_churn_map") or {}
+            dist = [
+                int(churn)
+                for churn in file_churn_map.values()
+                if isinstance(churn, (int, float)) and churn > 0
+            ]
+
+            if not dist:
+                # Backward-compatible fallback: derive a coarse distribution
+                # from commit-level churn and touched file count.
+                files = commit.get("files", [])
+                adds = commit.get("additions", 0)
+                dels = commit.get("deletions", 0)
+                total_churn = adds + dels
+                n = len(files)
+                if total_churn == 0 or n <= 1:
+                    entropies.append(0.0)
+                    continue
+                base = max(total_churn // n, 1)
+                dist = [base] * n
+                dist[0] += total_churn - sum(dist)
+
             entropies.append(_shannon_entropy(dist))
         return sum(entropies) / len(entropies) if entropies else 0.0
 
@@ -208,11 +214,17 @@ class EvolutionAgent(AgentBase):
         file_churn: Counter = Counter()
         file_complexity: dict[str, float] = {}
         for commit in commits:
-            churn = commit.get("additions", 0) + commit.get("deletions", 0)
-            files = commit.get("files", [])
-            per_file = churn / len(files) if files else 0
-            for f in files:
-                file_churn[f] += per_file
+            file_churn_map = commit.get("file_churn_map") or {}
+            if file_churn_map:
+                for filename, churn in file_churn_map.items():
+                    if isinstance(churn, (int, float)) and churn > 0:
+                        file_churn[filename] += churn
+            else:
+                churn = commit.get("additions", 0) + commit.get("deletions", 0)
+                files = commit.get("files", [])
+                per_file = churn / len(files) if files else 0
+                for filename in files:
+                    file_churn[filename] += per_file
             complexity_map = commit.get("complexity_map", {})
             for f, cc in complexity_map.items():
                 file_complexity[f] = max(file_complexity.get(f, 0), cc)

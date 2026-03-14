@@ -81,11 +81,18 @@ def _commit_diff_stats(commit) -> dict[str, Any]:
     """Return churn, files, author from a git.Commit object."""
     additions = deletions = 0
     files: list[str] = []
+    file_churn_map: dict[str, int] = {}
     try:
-        for diff in commit.stats.files.values():
-            additions += diff.get("insertions", 0)
-            deletions += diff.get("deletions", 0)
-        files = list(commit.stats.files.keys())
+        for filepath, diff in commit.stats.files.items():
+            ins = diff.get("insertions", 0)
+            dels = diff.get("deletions", 0)
+            churn = ins + dels
+            additions += ins
+            deletions += dels
+
+            if filepath.endswith(".py"):
+                files.append(filepath)
+                file_churn_map[filepath] = churn
     except Exception:  # noqa: BLE001
         pass
     return {
@@ -95,7 +102,8 @@ def _commit_diff_stats(commit) -> dict[str, Any]:
         "date": commit.committed_datetime.isoformat(),
         "additions": additions,
         "deletions": deletions,
-        "files": [f for f in files if f.endswith(".py")],
+        "files": files,
+        "file_churn_map": file_churn_map,
     }
 
 

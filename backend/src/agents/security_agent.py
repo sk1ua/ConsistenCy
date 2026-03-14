@@ -9,8 +9,8 @@ Detection categories
 CRITICAL  : Hardcoded credentials (API keys, passwords, tokens, private keys)
 HIGH      : Dangerous function calls (eval, exec, pickle.loads, os.system,
             subprocess with shell=True), arbitrary code execution risks
-MEDIUM    : SQL injection risk (f-string SQL queries), yaml.load() without
-            SafeLoader, insecure deserialization
+MEDIUM    : SQL injection risk (f-string / .format / % SQL queries),
+            yaml.load() without SafeLoader, insecure deserialization
 LOW       : Debug mode enabled (DEBUG=True), use of assert for security
 
 Score formula
@@ -244,6 +244,11 @@ class SecurityAgent(AgentBase):
         except SyntaxError:
             return findings
 
+        sql_keywords = ("SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "WHERE", "EXECUTE")
+
+        def _looks_like_sql(text: str) -> bool:
+            return any(kw in text.upper() for kw in sql_keywords)
+
         for node in ast.walk(tree):
             lineno = getattr(node, "lineno", 0)
 
@@ -294,19 +299,46 @@ class SecurityAgent(AgentBase):
                                     lineno,
                                 ))
 
+                # SQL query built via "...".format(...)
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "format"
+                    and isinstance(func.value, ast.Constant)
+                    and isinstance(func.value.value, str)
+                    and _looks_like_sql(func.value.value)
+                ):
+                    findings.append(SecurityFinding(
+                        "MEDIUM", "SQL Injection Risk",
+                        "String .format() used to construct SQL query — vulnerable to injection",
+                        lineno,
+                    ))
+
             # ── F-string SQL injection ──────────────────────────────────
             if isinstance(node, ast.JoinedStr):
                 try:
                     src_fragment = ast.unparse(node)
                 except AttributeError:
                     src_fragment = ""
-                _SQL_KW = ("SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "WHERE", "EXECUTE")
-                if any(kw in src_fragment.upper() for kw in _SQL_KW):
+                if _looks_like_sql(src_fragment):
                     findings.append(SecurityFinding(
                         "MEDIUM", "SQL Injection Risk",
                         "F-string used to construct SQL query — vulnerable to injection",
                         lineno,
                     ))
+
+            # SQL query built via "%" formatting, e.g. "... %s" % user_input
+            if (
+                isinstance(node, ast.BinOp)
+                and isinstance(node.op, ast.Mod)
+                and isinstance(node.left, ast.Constant)
+                and isinstance(node.left.value, str)
+                and _looks_like_sql(node.left.value)
+            ):
+                findings.append(SecurityFinding(
+                    "MEDIUM", "SQL Injection Risk",
+                    "Percent-format string used to construct SQL query — vulnerable to injection",
+                    lineno,
+                ))
 
             # ── DEBUG = True assignment ─────────────────────────────────
             if isinstance(node, ast.Assign) and node.value:

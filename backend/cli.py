@@ -31,6 +31,7 @@ if str(_SRC.parent) not in sys.path:
 
 from src.pipeline import AnalysisPipeline, analyze_sources
 from src.exporter import ResultExporter
+from src import __version__
 
 console = Console()
 
@@ -47,7 +48,7 @@ RISK_COLOUR_MAP = {
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(version="1.0.0")
+@click.version_option(version=__version__)
 def cli():
     """ConsistenCy — Multi-Agent Code Consistency Analysis."""
 
