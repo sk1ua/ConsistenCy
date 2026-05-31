@@ -18,14 +18,14 @@ The project is designed as a portfolio-ready AI4SE system: small enough to run l
 
 ## Multi-Agent Review Board
 
-| Agent | Focus |
-| --- | --- |
-| `StyleAgent` | Naming, docs, and local convention drift |
-| `StructuralAgent` | Imports, coupling, inheritance, and module shape |
-| `SemanticAgent` | Control flow, API usage, and behavior-level change |
-| `DuplicationAgent` | Repeated implementation and clone risk |
-| `SecurityAgent` | Secrets, unsafe calls, injection-like patterns, override evidence |
-| `EvolutionAgent` | Churn, hotspots, and history-aware PR risk |
+| Agent                | Focus                                                             |
+| -------------------- | ----------------------------------------------------------------- |
+| `StyleAgent`       | Naming, docs, and local convention drift                          |
+| `StructuralAgent`  | Imports, coupling, inheritance, and module shape                  |
+| `SemanticAgent`    | Control flow, API usage, and behavior-level change                |
+| `DuplicationAgent` | Repeated implementation and clone risk                            |
+| `SecurityAgent`    | Secrets, unsafe calls, injection-like patterns, override evidence |
+| `EvolutionAgent`   | Churn, hotspots, and history-aware PR risk                        |
 
 The collaboration layer emits quorum, votes, disagreement notes, merge decision, top findings, and a reviewer handoff queue.
 
@@ -148,10 +148,6 @@ git status --short
 ```
 
 Generated caches, local databases, evaluation result dumps, and cloned evaluation repos are ignored by default.
-
-## Resume Pitch
-
-Built a multi-agent PR review coordination system that compares code changes against project history, combines semantic, structural, security, style, duplication, and evolution signals, and produces explainable reviewer handoff plans with deterministic consensus and dashboard visualization.
 
 ## Status
 
