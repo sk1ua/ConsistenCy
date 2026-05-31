@@ -52,8 +52,6 @@ evaluation/annotations/pilot_tasks.json
 data/experiments/
 data/cache/*.json
 
-# Spec-driven local planning files
-.specify/
 
 # Private planning notes
 ARCHITECTURE.md
