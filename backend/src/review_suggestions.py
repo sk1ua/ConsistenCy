@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Review Suggestion Generator
-============================
-Converts a ConsistenCy PR analysis report (JSON) into a formatted
-GitHub PR review comment in Markdown.
+"""Explainable PR report renderer.
 
-Used by the CI workflow to automatically post review comments.
-
-Usage (CLI):
-    python review_suggestions.py <report.json>
-    python review_suggestions.py <report.json> --output comment.md
-
-Usage (Python):
-    from src.review_suggestions import generate_review_comment
-    md = generate_review_comment(pr_report_dict)
+This module renders the dictionary returned by AnalysisPipeline.pr_risk_report()
+into a Markdown report for human review. The report is organized as a research
+prototype artifact: overall risk, signal composition, risky-file ranking,
+evidence chain, file deep dive, review suggestions, and an optional AI narrative.
 """
 from __future__ import annotations
 
@@ -26,375 +17,296 @@ from typing import Any
 from src.llm_reviewer import is_llm_available, review_with_llm
 
 
-# ---------------------------------------------------------------------------
-# Risk helpers
-# ---------------------------------------------------------------------------
+from src.models import score_to_risk_label as _risk_label
 
-def _risk_emoji(score: float) -> str:
-    if score >= 0.75:
-        return "🔴"
-    if score >= 0.50:
-        return "🟠"
-    if score >= 0.25:
-        return "🟡"
-    return "🟢"
-
-
-def _risk_label(score: float) -> str:
-    if score >= 0.75:
-        return "High Risk"
-    if score >= 0.50:
-        return "Significant Drift"
-    if score >= 0.25:
-        return "Minor Drift"
-    return "Consistent"
+def _dedupe_text(items: list[str]) -> list[str]:
+    """Deduplicate rendered text while preserving order."""
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return unique
 
 
-# ---------------------------------------------------------------------------
-# Main generator
-# ---------------------------------------------------------------------------
+def _fmt_pct(value: Any) -> str:
+    return f"{float(value):.0%}"
 
-def generate_review_comment(
-    report: dict[str, Any],
-    *,
-    use_llm: bool = False,
-) -> str:
-    """Generate a GitHub PR review comment in Markdown.
 
-    Parameters
-    ----------
-    report : dict
-        Output of AnalysisPipeline.pr_risk_report() serialized as JSON/dict.
-    use_llm : bool
-        When True (and DEEPSEEK_API_KEY is set), append an AI-generated
-        review section from the DeepSeek API.
-
-    Returns
-    -------
-    str
-        Markdown-formatted review comment ready to post as a PR comment.
-    """
-    commit_count = report.get("commit_count", 0)
-    avg_risk     = float(report.get("avg_risk", 0.0))
-    max_risk     = float(report.get("max_risk", 0.0))
-    high_risk    = int(report.get("high_risk_commits", 0))
-
-    emoji = _risk_emoji(avg_risk)
-    label = _risk_label(avg_risk)
-
-    lines: list[str] = []
-    lines.append("## ⬡ ConsistenCy — Automated PR Risk Analysis")
-    lines.append("")
-    lines.append(
-        f"{emoji} **{label}** &nbsp;·&nbsp; "
-        f"avg `{avg_risk:.3f}` · max `{max_risk:.3f}` · "
-        f"{commit_count} commit(s) · {high_risk} high-risk"
-    )
-    lines.append("")
-
+def _render_signal_composition(lines: list[str], report: dict[str, Any]) -> None:
+    """Render the formal signal composition section."""
     composition = report.get("risk_composition", {})
-    if composition:
-        formula = composition.get("formula")
-        file_formula = composition.get("file_formula")
-        comps = composition.get("components_avg", {})
-        contrib = composition.get("contributions_pct", {})
-        percentile_basis = composition.get("percentile_basis", "within_pr_files")
-        if formula:
-            lines.append(f"> **Risk Formula**: `{formula}`")
-        if file_formula:
-            lines.append(f"> **File Formula**: `{file_formula}`")
-        if contrib:
-            ordered = sorted(contrib.items(), key=lambda kv: float(kv[1]), reverse=True)
-            pieces = [f"{name} `{float(value):.0%}`" for name, value in ordered]
-            lines.append(
-                "> **Risk Contribution (normalized)**: " + ", ".join(pieces)
-            )
-        elif comps:
-            lines.append(
-                "> **Avg Composition**: "
-                f"style `{float(comps.get('style', 0.0)):.3f}`, "
-                f"structural `{float(comps.get('structural', 0.0)):.3f}`, "
-                f"semantic `{float(comps.get('semantic', 0.0)):.3f}`, "
-                f"duplication `{float(comps.get('duplication', 0.0)):.3f}`, "
-                f"security `{float(comps.get('security', 0.0)):.3f}`, "
-                f"evolution `{float(comps.get('evolution', 0.0)):.3f}`"
-            )
-        basis_text = "within PR files" if percentile_basis == "within_pr_files" else str(percentile_basis)
-        lines.append(f"> **Risk %ile basis**: {basis_text} (`1.00` = highest risk in scope)")
-        lines.append("")
+    if not composition:
+        return
 
-    # ── Security findings ──────────────────────────────────────────────────
-    security_findings = report.get("security_findings", [])
-    if security_findings:
-        lines.append("### 🔐 Security Findings")
-        lines.append("")
-        lines.append("> ⚠️ Security issues were detected. These must be resolved before merging.")
-        lines.append("")
-        for item in security_findings[:10]:
-            fp  = item.get("filepath", "?")
-            sha = item.get("commit_sha", "")
-            ev  = item.get("evidence", "")
-            sha_label = f" (`{sha}`)" if sha else ""
-            lines.append(f"- `{fp}`{sha_label}: {ev}")
-        if len(security_findings) > 10:
-            lines.append(f"- *…and {len(security_findings) - 10} more findings*")
-        lines.append("")
+    lines.append("## Signal Composition")
+    lines.append("")
+    if composition.get("formula"):
+        lines.append(f"- **PR/commit model**: `{composition['formula']}`")
+    if composition.get("file_formula"):
+        lines.append(f"- **File model**: `{composition['file_formula']}`")
+    if composition.get("confidence_formula"):
+        lines.append(f"- **Confidence model**: `{composition['confidence_formula']}`")
 
-    # ── Top risky files ────────────────────────────────────────────────────
-    top_files = report.get("top_risky_files", [])
-    if top_files:
-        lines.append("### 📁 Highest Risk Files")
-        lines.append("")
-        lines.append("| File | Avg Risk | Max Risk | Risk %ile (PR) | Churn | Complexity | Owner | Appearances |")
-        lines.append("|------|:--------:|:--------:|:---------:|------:|-----------:|-------|:-----------:|")
-        for item in top_files[:10]:
-            e = _risk_emoji(item["avg_risk"])
-            lines.append(
-                f"| `{item['file']}` | {e} `{item['avg_risk']:.3f}` | "
-                f"`{item['max_risk']:.3f}` | "
-                f"`{float(item.get('risk_percentile', 0.0)):.2f}` | "
-                f"{int(item.get('churn_lines', 0))} | "
-                f"`{float(item.get('complexity', 0.0)):.2f}` | "
-                f"{item.get('owner', 'unknown')} | {item['hits']} |"
-            )
-        lines.append("")
-
-    # ── Commit breakdown ───────────────────────────────────────────────────
-    commits = report.get("commits", [])
-    if commits:
-        lines.append("### 📝 Commit Risk Breakdown")
-        lines.append("")
-        lines.append("| Commit | Author | Risk | Level |")
-        lines.append("|--------|--------|:----:|-------|")
-        for c in sorted(commits, key=lambda x: x.get("risk_score", 0), reverse=True)[:10]:
-            score  = float(c.get("risk_score", 0.0))
-            e      = _risk_emoji(score)
-            sha    = c.get("sha", "?")
-            author = c.get("author", "unknown")
-            level  = c.get("risk_level", _risk_label(score))
-            msg    = (c.get("message", "") or "")[:60]
-            lines.append(f"| `{sha}` | {author} | {e} `{score:.3f}` | {level} |")
-        lines.append("")
-
-    trend = report.get("commit_trend", [])
-    if len(trend) >= 2:
-        lines.append("### 📈 Commit Risk Trend")
-        lines.append("")
-        lines.append("| Commit | Risk | Δ | Δ% |")
-        lines.append("|--------|:----:|:--:|:--:|")
-        for t in trend[:20]:
-            score = float(t.get("risk_score", 0.0))
-            delta = t.get("delta")
-            delta_pct = t.get("delta_pct")
-            delta_txt = "—" if delta is None else f"{float(delta):+.3f}"
-            delta_pct_txt = "—" if delta_pct is None else f"{float(delta_pct):+.1%}"
-            lines.append(f"| `{t.get('sha', '?')}` | `{score:.3f}` | `{delta_txt}` | `{delta_pct_txt}` |")
-        lines.append("")
-
-    evidence_summary = report.get("evidence_summary", [])
-    if evidence_summary:
-        lines.append("<details>")
-        lines.append("<summary>📋 Evidence Chain (deduplicated)</summary>")
-        lines.append("")
-        for item in evidence_summary:
-            txt = item.get("text", "")
-            baseline = item.get("baseline")
-            current = item.get("current")
-            delta = item.get("delta")
-            delta_pct = item.get("delta_pct")
-            details = []
-            if baseline is not None:
-                details.append(f"baseline={baseline}")
-            if current is not None:
-                details.append(f"current={current}")
-            if delta is not None:
-                details.append(f"Δ={delta:+}")
-            if delta_pct is not None:
-                details.append(f"Δ%={float(delta_pct):+.1%}")
-            suffix = f" ({', '.join(details)})" if details else ""
-            lines.append(f"- {txt}{suffix}")
-        lines.append("")
-        lines.append("</details>")
-        lines.append("")
-
-    deep_dive = report.get("file_deep_dive", [])
-    if deep_dive:
-        item = deep_dive[0]
-        breakdown = item.get("risk_breakdown", {})
-        lines.append("### 🔎 Top File Deep Dive")
-        lines.append("")
-        lines.append(f"**File:** `{item.get('file', '?')}` · **Risk:** `{float(item.get('risk', 0.0)):.3f}`")
-        rank = item.get("rank_in_pr")
-        total = item.get("total_pr_files")
-        if rank is not None and total is not None:
-            lines.append(f"- **Risk ranking among PR files**: `#{rank} / {total}`")
-
-        effort = item.get("estimated_review_effort")
-        if effort:
-            lines.append(f"- **Estimated review effort**: `{effort}`")
-
-        region = item.get("primary_risk_region")
-        if region:
-            lines.append(f"- **Primary risk region**: `{region}`")
-
+    contributions = composition.get("contributions_pct", {})
+    if contributions:
+        ordered = sorted(contributions.items(), key=lambda kv: float(kv[1]), reverse=True)
         lines.append(
-            "- **Risk breakdown**: "
-            f"style `{float(breakdown.get('style', 0.0)):.3f}`, "
-            f"structural `{float(breakdown.get('structural', 0.0)):.3f}`, "
-            f"semantic `{float(breakdown.get('semantic', 0.0)):.3f}`, "
-            f"duplication `{float(breakdown.get('duplication', 0.0)):.3f}`, "
-            f"security `{float(breakdown.get('security', 0.0)):.3f}`"
+            "- **Normalized contribution**: "
+            + ", ".join(f"{name} `{_fmt_pct(value)}`" for name, value in ordered)
         )
 
-        structural_signals = item.get("structural_signals", [])
-        if structural_signals:
-            lines.append("- **Structural signals**: " + "; ".join(structural_signals[:4]))
-
-        semantic_signals = item.get("semantic_signals", [])
-        if semantic_signals:
-            lines.append("- **Semantic signals**: " + "; ".join(semantic_signals[:4]))
-
-        risky_lines = item.get("risky_lines", [])
-        if risky_lines:
-            lines.append(f"- **High-risk lines**: {', '.join(str(x) for x in risky_lines[:10])}")
-
-        diff_excerpt = item.get("diff_excerpt", "")
-        if diff_excerpt:
-            lines.append("")
-            lines.append("<details>")
-            lines.append("<summary>Diff snippet</summary>")
-            lines.append("")
-            lines.append("```diff")
-            lines.append(diff_excerpt)
-            lines.append("```")
-            lines.append("")
-            lines.append("</details>")
-
-        code_excerpt = item.get("code_excerpt", "")
-        if code_excerpt:
-            lines.append("")
-            lines.append("<details>")
-            lines.append("<summary>Code excerpt around high-risk lines</summary>")
-            lines.append("")
-            lines.append("```python")
-            lines.append(code_excerpt)
-            lines.append("```")
-            lines.append("")
-            lines.append("</details>")
-        lines.append("")
-
-    # ── Actionable suggestions ─────────────────────────────────────────────
-    suggestions = _build_suggestions(report)
-    if suggestions:
-        lines.append("### 💡 Review Suggestions")
-        lines.append("")
-        for s in suggestions:
-            lines.append(f"- {s}")
-        lines.append("")
-
-    # ── AI review (optional) ──────────────────────────────────────────────
-    if use_llm and is_llm_available():
-        lines.append("### 🤖 AI Code Review")
-        lines.append("")
-        # Extract code snippets for LLM from file sources in report
-        code_snippets = report.get("code_snippets", [])
-        ai_text = review_with_llm(
-            top_files=top_files,
-            security_findings=security_findings,
-            agent_summaries=report.get("agent_summaries", {}),
-            avg_risk=avg_risk,
-            code_snippets=code_snippets,
+    components = composition.get("components_avg", {})
+    if components:
+        ordered_components = ("style", "structural", "semantic", "duplication", "security", "evolution")
+        lines.append(
+            "- **Average signal scores**: "
+            + ", ".join(
+                f"{name} `{float(components.get(name, 0.0)):.3f}`"
+                for name in ordered_components
+            )
         )
-        lines.append(ai_text)
-        lines.append("")
-    elif use_llm and not is_llm_available():
-        lines.append("> ℹ️ Set `DEEPSEEK_API_KEY` to enable AI-powered review comments.")
-        lines.append("")
+    lines.append(f"- **Risk percentile basis**: `{composition.get('percentile_basis', 'within_pr_files')}`")
+    lines.append("")
 
-    # ── Footer ─────────────────────────────────────────────────────────────
-    lines.append("---")
-    lines.append(
-        "*Generated by [ConsistenCy](https://github.com) — "
-        "Multi-Agent Code Consistency & Security Analysis*"
-    )
 
-    return "\n".join(lines)
+def _render_agent_consensus(lines: list[str], report: dict[str, Any]) -> None:
+    """Render the multi-agent collaboration board summary."""
+    consensus = report.get("agent_collaboration", {})
+    if not consensus:
+        return
+
+    lines.append("## Multi-Agent Consensus")
+    lines.append("")
+    decision = str(consensus.get("decision", "n/a")).replace("_", " ")
+    lines.append(f"- **Board decision:** `{decision}`")
+    lines.append(f"- **Consensus score:** `{float(consensus.get('consensus_score', 0.0)):.3f}`")
+    lines.append(f"- **Confidence:** `{float(consensus.get('confidence', 0.0)):.2f}`")
+    lines.append(f"- **Quorum:** `{consensus.get('quorum', 'n/a')}`")
+
+    participants = consensus.get("participants", [])
+    if participants:
+        lines.append("- **Participants:** " + ", ".join(f"`{name}`" for name in participants))
+    if consensus.get("protocol"):
+        lines.append(f"- **Protocol:** `{consensus['protocol']}`")
+    if consensus.get("collaboration_value"):
+        lines.append(f"- **Why it matters:** {consensus['collaboration_value']}")
+
+    findings = consensus.get("top_findings", [])
+    if findings:
+        lines.append("")
+        lines.append("**Top agent findings**")
+        for finding in findings[:5]:
+            signal = finding.get("signal_name", "signal")
+            agent = finding.get("agent_name", "agent")
+            severity = finding.get("severity", "medium")
+            evidence = "; ".join(str(ev) for ev in finding.get("evidence", [])[:2])
+            lines.append(f"- `{severity}` [{signal}] {agent}: {evidence}")
+
+    queue = consensus.get("review_queue", [])
+    if queue:
+        lines.append("")
+        lines.append("**Suggested reviewer handoff**")
+        for item in queue[:5]:
+            lines.append(
+                f"- `{item.get('owner', 'Agent')}` -> `{item.get('scope', 'PR')}`: "
+                f"{item.get('focus', '')}"
+            )
+
+    disagreements = consensus.get("disagreements", [])
+    if disagreements:
+        lines.append("")
+        lines.append("**Disagreements to resolve**")
+        for note in disagreements[:4]:
+            lines.append(f"- {note}")
+
+    actions = consensus.get("next_actions", [])
+    if actions:
+        lines.append("")
+        lines.append("**Next actions**")
+        for action in actions[:5]:
+            lines.append(f"- {action}")
+    lines.append("")
+
+
+def _render_highest_risk_files(lines: list[str], report: dict[str, Any]) -> None:
+    top_files = report.get("top_risky_files", [])
+    if not top_files:
+        return
+
+    lines.append("## Highest-Risk Files")
+    lines.append("")
+    lines.append("| File | Avg Risk | Max Risk | Dominant Signals | Confidence | Churn | Owner |")
+    lines.append("|------|:--------:|:--------:|------------------|:----------:|------:|-------|")
+    for item in top_files[:10]:
+        dominant = ", ".join(item.get("dominant_signals", [])) or "n/a"
+        lines.append(
+            f"| `{item['file']}` | `{float(item.get('avg_risk', 0.0)):.3f}` | "
+            f"`{float(item.get('max_risk', 0.0)):.3f}` | {dominant} | "
+            f"`{float(item.get('confidence', 0.0)):.2f}` | "
+            f"{int(item.get('churn_lines', 0))} | {item.get('owner', 'unknown')} |"
+        )
+    lines.append("")
+
+
+def _render_security_override(lines: list[str], report: dict[str, Any]) -> None:
+    security_findings = report.get("security_findings", [])
+    if not security_findings:
+        return
+
+    lines.append("## Security Override")
+    lines.append("")
+    lines.append("Security findings are preserved as override evidence and should be reviewed before merge.")
+    for item in security_findings[:10]:
+        sha = item.get("commit_sha", "")
+        sha_label = f" (`{sha}`)" if sha else ""
+        lines.append(f"- `{item.get('filepath', '?')}`{sha_label}: {item.get('evidence', '')}")
+    if len(security_findings) > 10:
+        lines.append(f"- ...and {len(security_findings) - 10} more finding(s)")
+    lines.append("")
+
+
+def _render_evidence_chain(lines: list[str], report: dict[str, Any]) -> None:
+    chain_items: list[str] = []
+    for item in report.get("evidence_summary", []):
+        text = str(item.get("text", "")).strip()
+        if text:
+            chain_items.append(text)
+
+    for item in report.get("file_deep_dive", []):
+        for evidence in item.get("evidence_chain", []):
+            if isinstance(evidence, dict) and evidence.get("text"):
+                chain_items.append(f"[{evidence.get('signal_name', 'signal')}] {evidence['text']}")
+
+    chain_items = _dedupe_text(chain_items)
+    if not chain_items:
+        return
+
+    lines.append("## Evidence Chain")
+    lines.append("")
+    for text in chain_items[:12]:
+        lines.append(f"- {text}")
+    lines.append("")
+
+
+def _render_top_file_deep_dive(lines: list[str], report: dict[str, Any]) -> None:
+    deep_dive = report.get("file_deep_dive", [])
+    if not deep_dive:
+        return
+
+    item = deep_dive[0]
+    breakdown = item.get("risk_breakdown", {})
+    contributions = item.get("signal_contributions", {})
+    dominant = ", ".join(item.get("dominant_signals", [])) or "n/a"
+
+    lines.append("## Top File Deep Dive")
+    lines.append("")
+    lines.append(f"**File:** `{item.get('file', '?')}`")
+    lines.append(f"- **Risk:** `{float(item.get('risk', 0.0)):.3f}`")
+    lines.append(f"- **Dominant signals:** {dominant}")
+    lines.append(f"- **Confidence:** `{float(item.get('confidence', 0.0)):.2f}`")
+
+    rank = item.get("rank_in_pr")
+    total = item.get("total_pr_files")
+    if rank is not None and total is not None:
+        lines.append(f"- **Risk ranking among PR files:** `#{rank} / {total}`")
+    if item.get("estimated_review_effort"):
+        lines.append(f"- **Estimated review effort:** `{item['estimated_review_effort']}`")
+    if item.get("primary_risk_region"):
+        lines.append(f"- **Primary risk region:** `{item['primary_risk_region']}`")
+
+    if contributions:
+        ordered = sorted(contributions.items(), key=lambda kv: float(kv[1]), reverse=True)
+        lines.append(
+            "- **Contribution share:** "
+            + ", ".join(f"{name} `{_fmt_pct(value)}`" for name, value in ordered)
+        )
+    if breakdown:
+        lines.append(
+            "- **Raw signal scores:** "
+            + ", ".join(
+                f"{name} `{float(breakdown.get(name, 0.0)):.3f}`"
+                for name in ("style", "structural", "semantic", "duplication", "security")
+            )
+        )
+    if item.get("structural_signals"):
+        lines.append("- **Structural signals:** " + "; ".join(item["structural_signals"][:4]))
+    if item.get("semantic_signals"):
+        lines.append("- **Semantic signals:** " + "; ".join(item["semantic_signals"][:4]))
+    if item.get("risky_lines"):
+        lines.append("- **High-risk lines:** " + ", ".join(str(x) for x in item["risky_lines"][:10]))
+
+    if item.get("diff_excerpt"):
+        lines.append("")
+        lines.append("<details>")
+        lines.append("<summary>Diff snippet</summary>")
+        lines.append("")
+        lines.append("```diff")
+        lines.append(item["diff_excerpt"])
+        lines.append("```")
+        lines.append("</details>")
+
+    if item.get("code_excerpt"):
+        lines.append("")
+        lines.append("<details>")
+        lines.append("<summary>Code excerpt around high-risk lines</summary>")
+        lines.append("")
+        lines.append("```python")
+        lines.append(item["code_excerpt"])
+        lines.append("```")
+        lines.append("</details>")
+    lines.append("")
 
 
 def _build_suggestions(report: dict[str, Any]) -> list[str]:
-    """Generate actionable review suggestions from the report data."""
+    """Generate human review guidance from the explainability schema."""
     suggestions: list[str] = []
     avg_risk = float(report.get("avg_risk", 0.0))
     top_files = report.get("top_risky_files", [])
     security_findings = report.get("security_findings", [])
 
-    # Security-first: always highest priority
-    critical_findings = [f for f in security_findings if "[CRITICAL]" in f.get("evidence", "")]
-    high_findings     = [f for f in security_findings if "[HIGH]" in f.get("evidence", "")]
+    critical_findings = [item for item in security_findings if "[CRITICAL]" in str(item.get("evidence", ""))]
+    high_findings = [item for item in security_findings if "[HIGH]" in str(item.get("evidence", ""))]
 
     if critical_findings:
         suggestions.append(
-            "🚫 **Block merge**: CRITICAL security vulnerabilities detected "
-            "(hardcoded credentials or code-injection risk). "
-            "Remove all secrets and replace dangerous calls before merging."
+            "**Block merge**: CRITICAL security evidence was detected. Remove secrets "
+            "or code-injection risks before reviewing lower-priority drift signals."
         )
     elif high_findings:
         suggestions.append(
-            "⛔ **Request changes**: HIGH severity security issues found "
-            "(dangerous function calls or deserialization risks). "
-            "Address all HIGH findings before merging."
+            "**Request changes**: HIGH severity security evidence was detected. "
+            "Review the override evidence before accepting the PR."
         )
+    elif avg_risk >= 0.75:
+        suggestions.append(
+            "**High drift**: inspect the highest-risk files for project-specific "
+            "structural, semantic, and evolution deviations."
+        )
+    elif avg_risk >= 0.50:
+        suggestions.append(
+            "**Moderate drift**: review the top-ranked files and verify whether the "
+            "dominant signals represent intended design change."
+        )
+    elif avg_risk >= 0.25:
+        suggestions.append(
+            "**Minor drift**: a focused pass over naming, dependencies, and changed "
+            "control-flow regions should be sufficient."
+        )
+    else:
+        suggestions.append("The PR appears close to the project-specific historical baseline.")
 
-    # Drift-level suggestions
-    if not critical_findings and not high_findings:
-        if avg_risk >= 0.75:
-            suggestions.append(
-                "🔴 **Significant code drift** detected across this PR. "
-                "Review the high-risk files listed above for consistency violations — "
-                "naming style, import structure, and semantic patterns all diverge from the project baseline."
-            )
-        elif avg_risk >= 0.50:
-            suggestions.append(
-                "🟠 **Moderate drift** detected. "
-                "Review top-risk files for unintended style or structural changes."
-            )
-        elif avg_risk >= 0.25:
-            suggestions.append(
-                "🟡 **Minor drift** detected. A quick look at naming conventions "
-                "and import additions should be sufficient."
-            )
-        else:
-            suggestions.append(
-                "🟢 **Code appears consistent** with the project baseline. "
-                "Standard review is sufficient."
-            )
-
-    # File-specific suggestions
     if top_files:
-        top_file = top_files[0]["file"]
-        top_score = top_files[0]["avg_risk"]
-        if top_score >= 0.50:
-            suggestions.append(
-                f"Focus review effort on `{top_file}` — "
-                f"it has the highest repeated risk score (`{top_score:.3f}`) across commits in this PR."
-            )
-
-        top_breakdown = top_files[0].get("risk_breakdown", {})
-        if isinstance(top_breakdown, dict) and top_breakdown:
-            dominant_metric, dominant_score = max(
-                top_breakdown.items(), key=lambda kv: float(kv[1])
-            )
-            if float(dominant_score) > 0:
-                suggestions.append(
-                    f"For `{top_file}`, prioritize **{dominant_metric}** review first "
-                    f"(component `{float(dominant_score):.3f}`), then verify adjacent side effects."
-                )
+        top_file = top_files[0].get("file", "?")
+        dominant = ", ".join(top_files[0].get("dominant_signals", [])) or "dominant signal"
+        suggestions.append(f"Start with `{top_file}` because it is ranked highest by {dominant}.")
 
         owner_share = float(top_files[0].get("owner_share", 0.0))
         if owner_share >= 0.8:
             suggestions.append(
-                f"`{top_file}` is heavily concentrated on one author ({owner_share:.0%} of PR touches). "
-                "Request at least one additional reviewer outside the primary author."
+                f"`{top_file}` is concentrated on one author ({owner_share:.0%} of PR touches). "
+                "Ask for a second reviewer outside the primary author when possible."
             )
 
     deep_dive = report.get("file_deep_dive", [])
@@ -402,7 +314,7 @@ def _build_suggestions(report: dict[str, Any]) -> list[str]:
         risky_lines = deep_dive[0].get("risky_lines", [])
         if risky_lines:
             suggestions.append(
-                f"Start review from high-risk lines in `{deep_dive[0].get('file', '?')}`: "
+                f"Begin the file review at `{deep_dive[0].get('file', '?')}` lines "
                 + ", ".join(str(x) for x in risky_lines[:5])
                 + "."
             )
@@ -412,14 +324,14 @@ def _build_suggestions(report: dict[str, Any]) -> list[str]:
         if effort:
             hint = f"Estimated review effort for `{deep_dive[0].get('file', '?')}`: {effort}"
             if region:
-                hint += f" (primary region {region})"
+                hint += f" around {region}"
             suggestions.append(hint + ".")
 
-    # Bus factor check from evolution evidence
     concentration_flag = False
-    for c in report.get("commits", []):
-        for ev in c.get("evolution_evidence", []):
-            if "bus-factor" in ev.lower() or "single author" in ev.lower():
+    for commit in report.get("commits", []):
+        for evidence in commit.get("evolution_evidence", []):
+            lowered = str(evidence).lower()
+            if "bus-factor" in lowered or "single author" in lowered:
                 concentration_flag = True
                 break
         if concentration_flag:
@@ -427,19 +339,74 @@ def _build_suggestions(report: dict[str, Any]) -> list[str]:
 
     if concentration_flag:
         suggestions.append(
-            "👥 **Knowledge concentration risk**: Most files in this PR are "
-            "owned by a single author. Request review from additional contributors."
+            "**Knowledge concentration risk**: most touched files appear tied to a "
+            "single author; include an additional reviewer."
         )
 
-    # Keep suggestions concise and deduplicated while preserving order.
-    seen: set[str] = set()
-    unique: list[str] = []
-    for item in suggestions:
-        if item not in seen:
-            seen.add(item)
-            unique.append(item)
+    return _dedupe_text(suggestions)
 
-    return unique
+
+def generate_review_comment(
+    report: dict[str, Any],
+    *,
+    use_llm: bool = False,
+) -> str:
+    """Render an explainable, research-oriented PR risk report."""
+    commit_count = int(report.get("commit_count", 0))
+    avg_risk = float(report.get("avg_risk", 0.0))
+    max_risk = float(report.get("max_risk", 0.0))
+    high_risk = int(report.get("high_risk_commits", 0))
+    label = _risk_label(avg_risk)
+
+    lines: list[str] = []
+    lines.append("# ConsistenCy Explainable PR Risk Report")
+    lines.append("")
+    lines.append("## Overall PR Risk")
+    lines.append("")
+    lines.append(f"- **Risk level:** {label}")
+    lines.append(f"- **Average risk:** `{avg_risk:.3f}`")
+    lines.append(f"- **Maximum risk:** `{max_risk:.3f}`")
+    lines.append(f"- **Commit count:** `{commit_count}`")
+    lines.append(f"- **High-risk commits:** `{high_risk}`")
+    lines.append("")
+
+    _render_signal_composition(lines, report)
+    _render_agent_consensus(lines, report)
+    _render_highest_risk_files(lines, report)
+    _render_security_override(lines, report)
+    _render_evidence_chain(lines, report)
+    _render_top_file_deep_dive(lines, report)
+
+    suggestions = _build_suggestions(report)
+    if suggestions:
+        lines.append("## Human Review Suggestions")
+        lines.append("")
+        for suggestion in suggestions:
+            lines.append(f"- {suggestion}")
+        lines.append("")
+
+    if use_llm:
+        lines.append("## Optional AI Narrative")
+        lines.append("")
+        if is_llm_available():
+            lines.append(
+                review_with_llm(
+                    top_files=report.get("top_risky_files", []),
+                    security_findings=report.get("security_findings", []),
+                    agent_summaries=report.get("agent_summaries", {}),
+                    avg_risk=avg_risk,
+                    code_snippets=report.get("code_snippets", []),
+                )
+            )
+        else:
+            lines.append("Set `DEEPSEEK_API_KEY` to enable the optional AI narrative.")
+        lines.append("")
+
+    lines.append("---")
+    lines.append(
+        "*Generated by ConsistenCy: project-specific code drift modeling for PR review.*"
+    )
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

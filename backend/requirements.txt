@@ -1,33 +1,26 @@
-# ── Core analysis ──────────────────────────────────────────────
+# Core analysis
 click==8.1.7
 rich==13.7.0
 GitPython==3.1.43
 flask>=3.0.0
 
-# ── Code parsing & metrics ─────────────────────────────────────
-# Primary: stdlib ast + tokenize for Python
-# Extended: tree-sitter for multi-language support
+# Parsing and metrics
 astroid==3.0.3
-
-# ── Tree-sitter (multi-language parsing) ────────────────────────
 tree-sitter>=0.20.0
 tree-sitter-python>=0.20.0
 tree-sitter-javascript>=0.20.0
 tree-sitter-typescript>=0.20.0
 
-# ── ML helpers ─────────────────────────────────────────────────
-scikit-learn==1.5.2
+# Numeric and ML helpers
 numpy>=1.26,<3
+scikit-learn==1.5.2
 
-# ── LLM integration (DeepSeek / OpenAI-compatible) ────────────
-# Pin to 1.x: httpx 0.28+ removed 'proxies'; openai>=1.52 uses 'transport'
+# Optional LLM integration through OpenAI-compatible APIs
 openai>=1.52.0,<2.0.0
 
-# ── .env support ─────────────────────────────────────────────
+# Environment and GitHub integration
 python-dotenv>=1.0.0
+PyGithub>=2.0.0
 
-# ── GitHub App ────────────────────────────────────────────────
-PyGithub>=2.0.0  # GitHub API integration
-
-# ── Misc ───────────────────────────────────────────────────────
+# Misc
 pyyaml==6.0.1

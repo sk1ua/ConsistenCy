@@ -321,3 +321,63 @@ function process(data) {
     assert "risk_score" in result
     assert 0 <= result["risk_score"] <= 1
     assert "agent_details" in result
+
+
+def test_analyze_sources_javascript_end_to_end():
+    """End-to-end: analyze_sources with JS file should run all agents."""
+    from src.pipeline import analyze_sources
+
+    js_now = '''
+function processData(userId) {
+    var query = "SELECT * FROM users WHERE id = " + userId;
+    eval(query);
+    return db.execute(query);
+}
+'''
+    js_base = '''
+function processData(id) {
+    return db.execute("SELECT * FROM users WHERE id = ?", id);
+}
+'''
+
+    result = analyze_sources(js_now, js_base, filepath="utils.js")
+    assert "risk_score" in result
+    assert 0 <= result["risk_score"] <= 1
+    assert "breakdown" in result
+    # Security agent should detect eval → score > 0
+    assert result["breakdown"].get("security", 0) > 0
+    # Collaboration board should exist
+    assert "agent_collaboration" in result
+    assert "decision" in result["agent_collaboration"]
+
+
+def test_analyze_sources_typescript_inheritance_end_to_end():
+    """End-to-end: analyze_sources with TS class hierarchy."""
+    from src.pipeline import analyze_sources
+
+    ts_now = '''
+class BaseService {
+    constructor(protected db: Database) {}
+    query(sql: string): any[] { return []; }
+}
+class UserService extends BaseService {
+    getUser(id: number): any {
+        return this.db.execute("SELECT * FROM users WHERE id = " + id);
+    }
+}
+'''
+    ts_base = '''
+class BaseService {
+    constructor(protected db: Database) {}
+}
+class UserService extends BaseService {
+    getUser(id: number): any { return {}; }
+}
+'''
+
+    result = analyze_sources(ts_now, ts_base, filepath="services.ts")
+    assert "risk_score" in result
+    assert "structural" in result.get("breakdown", {})
+    # Should return valid agent_details for all agents
+    for agent in ("StyleAgent", "StructuralAgent", "SemanticAgent", "SecurityAgent"):
+        assert agent in result.get("agent_details", {}), f"{agent} missing"

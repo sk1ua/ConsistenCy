@@ -22,7 +22,15 @@ REPO_PATH = str(Path(__file__).parent.parent)  # ConsistenCy root
 def test_analyze_sources_returns_required_keys():
     src = "def f(x):\n    return x * 2\n"
     result = analyze_sources(src, src)
-    for key in ("risk_score", "risk_level", "risk_colour", "breakdown", "evidence", "agent_details"):
+    for key in (
+        "risk_score",
+        "risk_level",
+        "risk_colour",
+        "breakdown",
+        "evidence",
+        "agent_details",
+        "agent_collaboration",
+    ):
         assert key in result, f"Missing key: {key}"
 
 
@@ -142,6 +150,7 @@ def test_pipeline_pr_risk_report_shape():
     assert "evidence_summary" in report
     assert "commit_trend" in report
     assert "file_deep_dive" in report
+    assert "agent_collaboration" in report
     assert "cache" in report
 
     rc = report["risk_composition"]
@@ -157,6 +166,7 @@ def test_pipeline_pr_risk_report_shape():
         assert "rank_in_pr" in f
         assert "review_effort_min" in f
         assert "review_effort_max" in f
+        assert "agent_collaboration" in f
 
     if report["file_deep_dive"]:
         d = report["file_deep_dive"][0]

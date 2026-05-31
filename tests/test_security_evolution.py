@@ -95,3 +95,43 @@ def test_evolution_entropy_score_changes_with_distribution():
     result = agent.run(snapshot, baseline)
     assert result.details["entropy_score"] > 0.0
     assert result.details["avg_entropy_now"] < result.details["avg_entropy_base"]
+
+
+# ─── scan_file public API ──────────────────────────────────────────────────────
+
+
+def test_scan_file_python_detects_credentials():
+    agent = SecurityAgent()
+    result = agent.scan_file('API_KEY = "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx"')
+    assert result["score"] > 0
+    assert result["critical_count"] >= 1
+
+
+def test_scan_file_javascript_detects_eval():
+    agent = SecurityAgent()
+    result = agent.scan_file(
+        'function run(x) { eval(x); }',
+        language="javascript",
+    )
+    assert result["score"] > 0
+    assert result["high_count"] >= 1
+
+
+def test_scan_file_typescript_detects_xss():
+    agent = SecurityAgent()
+    result = agent.scan_file(
+        'function render(user) { document.getElementById("app").innerHTML = user; }',
+        language="typescript",
+    )
+    assert result["score"] > 0
+    descriptions = " ".join(str(f.get("description", "")) for f in result["findings"]).lower()
+    categories = " ".join(str(f.get("category", "")) for f in result["findings"]).lower()
+    assert "innerhtml" in descriptions or "xss" in categories
+
+
+def test_scan_file_clean_code_returns_zero():
+    agent = SecurityAgent()
+    result = agent.scan_file("def add(x, y):\n    return x + y\n")
+    assert result["score"] == 0.0
+    assert result["critical_count"] == 0
+    assert result["high_count"] == 0

@@ -1,124 +1,81 @@
-# GitHub App Setup Guide
+# GitHub App Setup
 
-This guide walks through setting up ConsistenCy as a GitHub App for automatic PR review.
+ConsistenCy can run as a GitHub App and post PR review comments automatically.
 
 ## Prerequisites
 
-- A server with Python 3.12+ and Git
-- A public IP or domain (for webhooks)
-- A GitHub account (for creating the app)
+- Python 3.12+
+- Git
+- A public webhook URL
+- A GitHub account with permission to create GitHub Apps
 
-## Step 1: Create GitHub App
+## Create The App
 
-1. Go to your GitHub Settings → Developer Settings → GitHub Apps
-2. Click "New GitHub App"
-3. Fill in:
-   - **GitHub App Name**: `ConsistenCy` (or your preferred name)
-   - **Homepage URL**: Your server URL
-   - **Webhook URL**: `https://your-server/github/webhook`
-   - **Webhook Secret**: Generate a strong random string
-4. Permissions needed:
-   - **Repository contents**: Read-only
-   - **Pull requests**: Read & write (for posting comments)
-   - **Metadata**: Read-only
-5. Subscribe to events:
-   - Pull request
-   - Push
-   - Installation
-6. Save and note the **App ID**
-7. Generate and download a **Private Key** (`.pem` file)
+1. Open GitHub Settings -> Developer settings -> GitHub Apps.
+2. Create a new app.
+3. Set the webhook URL to:
 
-## Step 2: Install Dependencies
-
-```bash
-cd ConsistenCy
-pip install -r backend/requirements.txt
-# Required for token encryption
-pip install cryptography
+```text
+https://your-server.example.com/github/webhook
 ```
 
-## Step 3: Configure Environment
+4. Add permissions:
+
+| Permission | Access |
+| --- | --- |
+| Metadata | Read |
+| Contents | Read |
+| Pull requests | Read and write |
+
+5. Subscribe to pull request, push, and installation events.
+6. Generate and download a private key.
+
+## Configure Environment
+
+Copy the example file:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Set these values:
 
 ```bash
 GITHUB_APP_ID=123456
 GITHUB_PRIVATE_KEY=/path/to/consistency-app.pem
 GITHUB_WEBHOOK_SECRET=your-webhook-secret
-GITHUB_APP_ENCRYPTION_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+GITHUB_APP_ENCRYPTION_KEY=your-64-char-hex-key
 GITHUB_APP_ENV=production
 FLASK_DEBUG=false
 PORT=8000
 ```
 
-**Important**: Generate a secure encryption key:
+Generate an encryption key:
+
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-## Step 4: Start Server
+## Run
 
 ```bash
-cd backend
-python github_app_server.py
+pip install -r requirements-dev.txt
+python backend/github_app_server.py
 ```
 
-Or use gunicorn for production:
-```bash
-gunicorn -w 4 -b 0.0.0.0:8000 github_app_server:create_app()
-```
-
-## Step 5: Install App on Repositories
-
-1. Go to your GitHub App's "Install App" tab
-2. Click "Install" next to your organization/account
-3. Select repositories (or all repos)
-4. Click Install
-
-## Step 6: Verify Setup
-
-1. Create a test PR
-2. You should see analysis activity in server logs
-3. A comment should appear on the PR with risk report
+For production, run behind HTTPS with a process manager or WSGI server.
 
 ## Security Checklist
 
-- [ ] Webhook secret is set and signature verification is working
-- [ ] Token encryption key is set in production
-- [ ] `GITHUB_APP_ENV=production` is set
-- [ ] `FLASK_DEBUG=false` is set
-- [ ] Private key file has restricted permissions (`chmod 600`)
-- [ ] Server uses HTTPS (via reverse proxy)
-- [ ] Firewall rules restrict access to webhook endpoint only
+- Webhook secret is set.
+- Private key file permissions are restricted.
+- `GITHUB_APP_ENV=production` is set.
+- `FLASK_DEBUG=false` is set.
+- HTTPS terminates before the webhook endpoint.
+- Repository access is limited to intended installations.
 
 ## Troubleshooting
 
-### Signature verification failures
-Check that `GITHUB_WEBHOOK_SECRET` matches exactly what you set in GitHub App settings.
-
-### Token encryption errors
-Ensure `cryptography` is installed and `GITHUB_APP_ENCRYPTION_KEY` is set.
-
-### Clone failures
-Verify the private key is valid and the App has repository permissions.
-
-### No PR comments
-Check server logs for errors. Ensure App has "Pull requests: Write" permission.
-
-## Advanced Configuration
-
-### Rate Limiting
-
-Set `RATE_LIMIT_PER_MINUTE=60` in `.env` to limit requests per IP.
-
-### Allowed Repository Paths
-
-Set `ALLOWED_REPO_PATHS=/data/repos` to restrict which paths can be analyzed via CLI.
-
-### Custom Port
-
-Set `PORT=5000` to run on a different port.
+- Signature failures usually mean the webhook secret differs from GitHub settings.
+- Missing PR comments usually mean the app lacks pull request write permission.
+- Clone or API errors usually mean the private key, installation, or repository permission is wrong.

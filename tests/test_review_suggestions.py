@@ -57,6 +57,15 @@ def _sample_report() -> dict:
                     "duplication": 0.03,
                     "security": 0.0,
                 },
+                "signal_composition": {
+                    "style": 0.10,
+                    "structural": 0.20,
+                    "semantic": 0.65,
+                    "duplication": 0.05,
+                    "security": 0.0,
+                },
+                "dominant_signals": ["semantic", "structural"],
+                "confidence": 0.82,
             }
         ],
         "commits": [
@@ -108,6 +117,25 @@ def _sample_report() -> dict:
                     "duplication": 0.03,
                     "security": 0.0,
                 },
+                "signal_contributions": {
+                    "style": 0.10,
+                    "structural": 0.20,
+                    "semantic": 0.65,
+                    "duplication": 0.05,
+                    "security": 0.0,
+                },
+                "dominant_signals": ["semantic", "structural"],
+                "confidence": 0.82,
+                "evidence_chain": [
+                    {
+                        "signal_name": "semantic",
+                        "text": "AST structure diverged significantly",
+                    },
+                    {
+                        "signal_name": "semantic",
+                        "text": "AST structure diverged significantly",
+                    },
+                ],
                 "risky_lines": [18, 35],
                 "primary_risk_region": "L18-L35",
                 "estimated_review_effort": "5-8 minutes",
@@ -122,6 +150,42 @@ def _sample_report() -> dict:
                 "diff_excerpt": "@@ -1,1 +1,2 @@\n+def x():\n+    return 1",
             }
         ],
+        "agent_collaboration": {
+            "scope": "pull_request",
+            "decision": "review_required",
+            "consensus_score": 0.44,
+            "confidence": 0.81,
+            "quorum": "5/5",
+            "participants": [
+                "StyleAgent",
+                "StructuralAgent",
+                "SemanticAgent",
+                "DuplicationAgent",
+                "SecurityAgent",
+            ],
+            "protocol": "parallel_agents -> evidence_normalization -> weighted_consensus -> reviewer_handoff",
+            "collaboration_value": "Specialist agents review in parallel, then route evidence to humans.",
+            "top_findings": [
+                {
+                    "signal_name": "semantic",
+                    "agent_name": "SemanticAgent",
+                    "severity": "medium",
+                    "evidence": [
+                        "tests/test_security_evolution.py: AST structure diverged significantly"
+                    ],
+                    "recommendation": "Trace changed behavior and API usage.",
+                }
+            ],
+            "review_queue": [
+                {
+                    "owner": "SemanticAgent",
+                    "scope": "tests/test_security_evolution.py",
+                    "focus": "control flow and API usage",
+                }
+            ],
+            "disagreements": [],
+            "next_actions": ["Run focused review on the top-ranked files before approval."],
+        },
         "security_findings": [],
     }
 
@@ -130,17 +194,56 @@ def test_review_comment_contains_explainability_sections():
     report = _sample_report()
     md = generate_review_comment(report)
 
-    assert "Risk Formula" in md
-    assert "Risk Contribution (normalized)" in md
-    assert "Highest Risk Files" in md
-    assert "Risk %ile basis" in md
-    assert "Commit Risk Trend" in md
-    assert "Evidence Chain (deduplicated)" in md
+    assert "Overall PR Risk" in md
+    assert "Signal Composition" in md
+    assert "PR/commit model" in md
+    assert "Normalized contribution" in md
+    assert "Highest-Risk Files" in md
+    assert "Risk percentile basis" in md
+    assert "Evidence Chain" in md
     assert "Top File Deep Dive" in md
+    assert "Multi-Agent Consensus" in md
+    assert "Board decision" in md
+    assert "Suggested reviewer handoff" in md
+    assert "Human Review Suggestions" in md
     assert "Risk ranking among PR files" in md
     assert "Estimated review effort" in md
+    assert "Dominant signals" in md
     assert "Structural signals" in md
     assert "Semantic signals" in md
+
+
+def test_review_comment_schema_contract_surfaces_dominant_signal_and_confidence():
+    report = _sample_report()
+    md = generate_review_comment(report)
+
+    assert "semantic, structural" in md
+    assert "Confidence" in md
+    assert "`0.82`" in md
+
+
+def test_review_comment_security_override_not_dropped():
+    report = _sample_report()
+    report["security_findings"] = [
+        {
+            "filepath": "app/secrets.py",
+            "commit_sha": "deadbeef",
+            "evidence": "[CRITICAL] hardcoded credential detected",
+        }
+    ]
+
+    md = generate_review_comment(report)
+
+    assert "Security Override" in md
+    assert "[CRITICAL] hardcoded credential detected" in md
+    assert "Block merge" in md
+
+
+def test_review_comment_evidence_chain_deduplicates_rendered_items():
+    report = _sample_report()
+    md = generate_review_comment(report)
+
+    assert md.count("[semantic] AST structure diverged significantly") == 1
 
 
 def test_review_suggestions_knowledge_risk_not_duplicated():

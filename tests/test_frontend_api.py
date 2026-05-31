@@ -42,6 +42,32 @@ class TestHealthEndpoint:
         assert "version" in data
 
 
+class TestShowcase:
+    """Tests for portfolio showcase routes."""
+
+    def test_showcase_page_renders(self, client):
+        response = client.get("/showcase")
+        assert response.status_code == 200
+        html = response.data.decode("utf-8")
+        assert "Multi-agent PR coordination" in html
+        assert "showcase.js" in html
+
+    def test_demo_collaboration_payload(self, client):
+        response = client.get("/api/demo/collaboration")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["agent_collaboration"]["quorum"] == "5/5"
+        assert data["agent_collaboration"]["decision"] in {
+            "approve",
+            "approve_with_watchlist",
+            "review_required",
+            "request_changes",
+            "block_merge",
+        }
+        assert len(data["votes"]) >= 5
+        assert "signal_composition" in data
+
+
 class TestAnalyzeEndpoint:
     """Tests for /api/analyze endpoint."""
 

@@ -31,7 +31,7 @@ _BACKEND = Path(__file__).parent.parent / "backend"
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request
 
 from src.agents import (
     DuplicationAgent,
@@ -42,10 +42,44 @@ from src.agents import (
     StructuralAgent,
     StyleAgent,
 )
-from src.pipeline import AnalysisPipeline
+from src.pipeline import AnalysisPipeline, analyze_sources
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["JSON_SORT_KEYS"] = False
+
+# ---------------------------------------------------------------------------
+# Rate limiting (simple token-bucket, no external dependency)
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60"))
+_rate_limit_store: dict[str, tuple[float, int]] = {}  # ip → (window_start, count)
+_rate_limit_lock = Lock()
+
+
+@app.before_request
+def _rate_limit_check() -> None:
+    """Simple sliding-window rate limiter per client IP."""
+    if request.path == "/api/health":
+        return  # health check is always allowed
+
+    now = time.time()
+    client_ip = request.remote_addr or "127.0.0.1"
+
+    with _rate_limit_lock:
+        window_start, count = _rate_limit_store.get(client_ip, (now, 0))
+        if now - window_start > 60.0:
+            window_start, count = now, 0
+        count += 1
+        _rate_limit_store[client_ip] = (window_start, count)
+
+        # Clean up stale entries periodically
+        if len(_rate_limit_store) > 10_000:
+            stale = [ip for ip, (ws, _) in _rate_limit_store.items() if now - ws > 60.0]
+            for ip in stale:
+                _rate_limit_store.pop(ip, None)
+
+    if count > _RATE_LIMIT_PER_MINUTE:
+        abort(429, description="Rate limit exceeded. Try again later.")
 
 _CACHE_DIR = Path(__file__).parent.parent / "data" / "cache"
 _CACHE_FILE = _CACHE_DIR / "dashboard_api_cache.json"
@@ -213,6 +247,12 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/showcase")
+def showcase():
+    """Portfolio-ready multi-agent collaboration view."""
+    return render_template("showcase.html")
+
+
 # ---------------------------------------------------------------------------
 # API endpoints
 # ---------------------------------------------------------------------------
@@ -221,7 +261,57 @@ def index():
 @app.route("/api/health")
 def health():
     """Health check endpoint."""
-    return jsonify({"status": "ok", "version": "2.4.0"})
+    return jsonify({"status": "ok", "version": "2.5.0"})
+
+
+@app.route("/api/demo/collaboration")
+def demo_collaboration():
+    """Return a deterministic no-Git multi-agent collaboration demo payload."""
+    root = Path(__file__).parent.parent
+    base_path = root / "examples" / "demo_base.py"
+    new_path = root / "examples" / "demo_new.py"
+    try:
+        source_base = base_path.read_text(encoding="utf-8")
+        source_now = new_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        source_base = "def load_user_profile(user_id):\n    return {'id': user_id}\n"
+        source_now = (
+            "import sqlite3\n"
+            "TOKEN = 'sk_live_demo_token'\n"
+            "def loadUserProfile(userId):\n"
+            "    query = \"select * from users where id = '%s'\" % userId\n"
+            "    return sqlite3.connect('profiles.db').execute(query).fetchone()\n"
+        )
+
+    result = analyze_sources(
+        source_now,
+        source_base,
+        filepath="examples/demo_new.py",
+    )
+    board = result.get("agent_collaboration", {})
+    votes = board.get("votes", [])
+    payload = {
+        "scenario": {
+            "title": "Profile service PR",
+            "base_file": "examples/demo_base.py",
+            "changed_file": "examples/demo_new.py",
+            "summary": "A small PR adds database access, broadens API behavior, and introduces security-sensitive evidence.",
+        },
+        "risk": {
+            "score": result.get("risk_score", 0.0),
+            "level": result.get("risk_level", "Unknown"),
+            "colour": result.get("risk_colour", "GREEN"),
+        },
+        "signals": result.get("breakdown", {}),
+        "signal_composition": result.get("signal_composition", {}),
+        "dominant_signals": result.get("dominant_signals", []),
+        "agent_collaboration": board,
+        "review_queue": board.get("review_queue", []),
+        "top_findings": board.get("top_findings", []),
+        "votes": votes,
+        "evidence_chain": result.get("explainability", {}).get("evidence_chain", []),
+    }
+    return jsonify(payload)
 
 
 @app.route("/api/analyze", methods=["POST"])

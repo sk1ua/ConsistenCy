@@ -112,7 +112,7 @@ def review_with_llm(
     except Exception as exc:  # pylint: disable=broad-except
         # Surface a readable error without leaking the key or stack trace
         kind = type(exc).__name__
-        return f"_AI review failed ({kind}): {exc}_"
+        return f"_AI review failed ({kind}) — check server logs for details._"
 
 
 # ---------------------------------------------------------------------------

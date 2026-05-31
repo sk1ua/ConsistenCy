@@ -18,7 +18,8 @@ from src.agents.style_agent import StyleAgent
 from src.agents.structural_agent import StructuralAgent
 from src.agents.semantic_agent import SemanticAgent
 from src.agents.duplication_agent import DuplicationAgent
-from src.agents.risk_scoring_agent import RiskScoringAgent, _risk_label
+from src.agents.risk_scoring_agent import RiskScoringAgent
+from src.models import score_to_risk_colour, score_to_risk_label
 
 # ───────────────────────────── fixtures ─────────────────────────────────────
 
@@ -322,11 +323,16 @@ def test_duplication_primary_score_excludes_non_primary_clones():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_risk_label():
-    assert _risk_label(0.0)[0]  == "GREEN"
-    assert _risk_label(0.25)[0] == "YELLOW"
-    assert _risk_label(0.50)[0] == "ORANGE"
-    assert _risk_label(0.75)[0] == "RED"
-    assert _risk_label(1.0)[0]  == "RED"
+    assert score_to_risk_colour(0.0) == "GREEN"
+    assert score_to_risk_colour(0.25) == "YELLOW"
+    assert score_to_risk_colour(0.50) == "ORANGE"
+    assert score_to_risk_colour(0.75) == "RED"
+    assert score_to_risk_colour(1.0) == "RED"
+
+    assert score_to_risk_label(0.0) == "Consistent"
+    assert score_to_risk_label(0.25) == "Minor Drift"
+    assert score_to_risk_label(0.50) == "Significant Drift"
+    assert score_to_risk_label(0.75) == "High Risk"
 
 
 def test_risk_aggregation_zero():

@@ -27,11 +27,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r backend/requirements.txt pytest ruff
+          python -m pip install -r requirements-dev.txt ruff
 
       - name: Lint (syntax and undefined-name gate)
         run: |
           ruff check backend frontend tests --select E9,F63,F7,F82
+
+      - name: Check showcase JavaScript
+        run: |
+          node --check frontend/static/js/showcase.js
 
       - name: Run tests
         env:

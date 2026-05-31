@@ -1,0 +1,35 @@
+# Auto-detect text files, normalize to LF on commit
+* text=auto
+
+# Source code — force LF
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Documentation — force LF
+*.md text eol=lf
+*.rst text eol=lf
+
+# Shell scripts — force LF
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Config files — force LF
+*.cfg text eol=lf
+*.ini text eol=lf
+*.txt text eol=lf
+requirements*.txt text eol=lf
+
+# Binary files — never convert
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary

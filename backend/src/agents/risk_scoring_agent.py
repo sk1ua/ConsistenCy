@@ -37,25 +37,13 @@ from typing import Any
 
 from .base_agent import AgentBase, AgentResult
 
+from ..models import score_to_risk_colour, score_to_risk_label
+
 DEFAULT_WEIGHTS: dict[str, float] = {
     "style": 0.28,
     "structural": 0.39,
     "semantic": 0.33,
 }
-
-RISK_LEVELS = [
-    (0.75, "RED",    "High Risk"),
-    (0.50, "ORANGE", "Significant Drift"),
-    (0.25, "YELLOW", "Minor Drift"),
-    (0.00, "GREEN",  "Consistent"),
-]
-
-
-def _risk_label(score: float) -> tuple[str, str]:
-    for threshold, colour, label in RISK_LEVELS:
-        if score >= threshold:
-            return colour, label
-    return "GREEN", "Consistent"
 
 
 class RiskScoringAgent(AgentBase):
@@ -88,37 +76,21 @@ class RiskScoringAgent(AgentBase):
                     return res.score
             return 0.0
 
-        style_score = _find("style")
-        structural_score = _find("structural")
-        semantic_score = _find("semantic")
-        dup_score = _find("duplication")
-        security_score = _find("security")
-
-        # Evolution is NOT included here — it is blended at commit level
-        # in AnalysisPipeline.analyze_commit() as:
+        # Extract raw scores into breakdown dict for compose_file_risk
+        breakdown = {
+            "style": _find("style"),
+            "structural": _find("structural"),
+            "semantic": _find("semantic"),
+            "duplication": _find("duplication"),
+            "security": _find("security"),
+        }
+        # Evolution is NOT included — it is blended at commit level:
         #   final = 0.90 * mean(file_scores) + 0.10 * evolution_score
-        raw = (
-            self.weights.get("style", 0.28) * style_score
-            + self.weights.get("structural", 0.39) * structural_score
-            + self.weights.get("semantic", 0.33) * semantic_score
-        )
+        from ..scoring.composer import compose_file_risk
+        final_score = compose_file_risk(breakdown, weights=self.weights)
 
-        # Optional duplication boost
-        dup_boost = 0.05 * min(dup_score / 0.30, 1.0) if dup_score > 0.05 else 0.0
-        # Security is additive: each finding contributes directly
-        security_boost = security_score * 0.50  # max +0.50 from security alone
-        combined = self.clamp(raw + dup_boost + security_boost)
-
-        # Security override: critical/high findings floor the final risk level
-        if security_score >= 0.60:   # CRITICAL finding present
-            final_score = max(combined, 0.75)
-        elif security_score >= 0.30:  # HIGH finding present
-            final_score = max(combined, 0.50)
-        else:
-            final_score = combined
-        final_score = self.clamp(final_score)
-
-        colour, label = _risk_label(final_score)
+        colour = score_to_risk_colour(final_score)
+        label = score_to_risk_label(final_score)
 
         # Collect all evidence strings in priority order
         all_evidence: list[str] = []
@@ -128,15 +100,10 @@ class RiskScoringAgent(AgentBase):
                     all_evidence.extend(res.evidence[:2])
 
         details = {
-            "breakdown": {
-                "style": round(style_score, 4),
-                "structural": round(structural_score, 4),
-                "semantic": round(semantic_score, 4),
-                "duplication": round(dup_score, 4),
-                "security": round(security_score, 4),
-            },
-            "dup_boost": round(dup_boost, 4),
-            "security_boost": round(security_boost, 4),
+            "breakdown": {k: round(v, 4) for k, v in breakdown.items()},
+            "dup_boost": round(0.05 * min(breakdown["duplication"] / 0.30, 1.0)
+                              if breakdown["duplication"] > 0.05 else 0.0, 4),
+            "security_boost": round(breakdown["security"] * 0.50, 4),
             "risk_level": label,
             "risk_colour": colour,
             "weights_used": self.weights,

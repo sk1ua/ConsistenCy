@@ -424,9 +424,9 @@ class SecurityAgent(AgentBase):
     # Standalone helper for external use (e.g., CLI, tests)
     # ------------------------------------------------------------------
 
-    def scan_file(self, source: str) -> dict[str, Any]:
+    def scan_file(self, source: str, language: str = "python") -> dict[str, Any]:
         """Public interface: scan source and return structured findings dict."""
-        findings = self._scan(source)
+        findings = self._scan(source, language)
         score = self._score(findings)
         return {
             "score": score,

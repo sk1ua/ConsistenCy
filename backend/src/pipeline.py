@@ -43,6 +43,15 @@ from .baseline_strategy import (
     get_template_baseline,
 )
 from .baseline_storage import BaselineStorage
+from .collaboration import build_file_consensus
+from .models import score_to_risk_colour, score_to_risk_label
+from .scoring import (
+    build_confidence,
+    build_explainability_block,
+    dominant_signals,
+    file_contributions,
+    normalize_signal_results,
+)
 
 # Multi-language support
 try:
@@ -131,7 +140,9 @@ def _commit_diff_stats(commit) -> dict[str, Any]:
 
             files.append(filepath)
             file_churn_map[filepath] = churn
-    except Exception:  # noqa: BLE001
+    except (KeyError, AttributeError, ValueError, TypeError):  # noqa: BLE001
+        # gitpython can raise ValueError when stats can't be computed
+        # (e.g., binary files, empty commits).  We return defaults.
         pass
     return {
         "sha": commit.hexsha[:8],
@@ -145,14 +156,7 @@ def _commit_diff_stats(commit) -> dict[str, Any]:
     }
 
 
-def _score_to_level(score: float) -> str:
-    if score >= 0.75:
-        return "High Risk"
-    if score >= 0.50:
-        return "Significant Drift"
-    if score >= 0.25:
-        return "Minor Drift"
-    return "Consistent"
+_score_to_level = score_to_risk_label  # canonical, imported from models
 
 
 # ---------------------------------------------------------------------------
@@ -218,21 +222,57 @@ def analyze_sources(
     }
 
     final = _risk.aggregate(results)
+    agent_details = {
+        name: {
+            "score": round(r.score, 4),
+            "evidence": r.evidence,
+            "elapsed_ms": round(r.elapsed_ms, 2),
+        }
+        for name, r in results.items()
+    }
+    signal_results = {
+        name: signal.to_dict()
+        for name, signal in normalize_signal_results(agent_details).items()
+    }
+    breakdown = final.details.get("breakdown", {})
+    non_zero_signals = sum(
+        1 for value in breakdown.values()
+        if isinstance(value, (int, float)) and float(value) > 0.05
+    )
+    signal_agreement = min(non_zero_signals / 3.0, 1.0)
+    evidence_by_signal = {
+        name: signal.get("evidence", [])
+        for name, signal in signal_results.items()
+    }
+    confidence = build_confidence(
+        baseline_versions=int((aggregated_baseline or {}).get("sample_count", 1)),
+        signal_agreement=signal_agreement,
+        history_depth=int((aggregated_baseline or {}).get("history_depth", 1)),
+    )
+    agent_collaboration = build_file_consensus(
+        agent_details,
+        breakdown,
+        confidence=confidence,
+        filepath=filepath,
+    )
 
     return {
         "risk_score": round(final.score, 4),
         "risk_level": final.details.get("risk_level", ""),
         "risk_colour": final.details.get("risk_colour", ""),
-        "breakdown": final.details.get("breakdown", {}),
+        "breakdown": breakdown,
+        "signal_results": signal_results,
+        "signal_composition": file_contributions(breakdown),
+        "dominant_signals": dominant_signals(file_contributions(breakdown)),
+        "confidence": confidence,
+        "explainability": build_explainability_block(
+            breakdown,
+            evidence_by_signal,
+            confidence=confidence,
+        ),
+        "agent_collaboration": agent_collaboration,
         "evidence": final.evidence,
-        "agent_details": {
-            name: {
-                "score": round(r.score, 4),
-                "evidence": r.evidence,
-                "elapsed_ms": round(r.elapsed_ms, 2),
-            }
-            for name, r in results.items()
-        },
+        "agent_details": agent_details,
     }
 
 
@@ -536,7 +576,8 @@ class AnalysisPipeline:
         versions = self._collect_versions(filepath, commits, max_versions)
         if len(versions) < 2:
             return None
-        return self._aggregate_baseline_snapshot(versions)
+        # _collect_versions returns newest→oldest; aggregate expects oldest→newest
+        return self._aggregate_baseline_snapshot(list(reversed(versions)))
 
     def _build_project_class_map(self, commit) -> dict[str, list[str]]:
         """Build a project-wide class-to-bases map for cross-file inheritance.
@@ -694,6 +735,14 @@ class AnalysisPipeline:
                 "risk_score": analysis["risk_score"],
                 "risk_level": analysis["risk_level"],
                 "breakdown": analysis.get("breakdown", {}),
+                "signal_results": analysis.get("signal_results", {}),
+                "signal_composition": analysis.get("signal_composition", {}),
+                "dominant_signals": analysis.get("dominant_signals", []),
+                "confidence": analysis.get("confidence", 0.0),
+                "explainability": analysis.get("explainability", {}),
+                "agent_collaboration": analysis.get("agent_collaboration", {}),
+                "evidence": analysis.get("evidence", []),
+                "agent_details": analysis.get("agent_details", {}),
             }
             for filepath, analysis in file_results.items()
         ]
@@ -1039,394 +1088,17 @@ class AnalysisPipeline:
         baseline_n: int = 50,
         max_commits: int = 40,
     ) -> dict[str, Any]:
-        """Return an initial PR-level risk report for commit range base..head."""
-        range_expr = f"{base_ref}..{head_ref}"
-        commits = list(self.repo.iter_commits(range_expr, max_count=max_commits))
-        commits = list(reversed(commits))  # oldest → newest for readability
+        """Return an initial PR-level risk report for commit range base..head.
 
-        if not commits:
-            return {
-                "base_ref": base_ref,
-                "head_ref": head_ref,
-                "commit_count": 0,
-                "avg_risk": 0.0,
-                "max_risk": 0.0,
-                "high_risk_commits": 0,
-                "commits": [],
-                "top_risky_files": [],
-                "cache": self.cache_stats(),
-            }
-
-        commit_entries: list[dict[str, Any]] = []
-        file_scores: dict[str, list[float]] = defaultdict(list)
-        file_breakdown_series: dict[str, dict[str, list[float]]] = defaultdict(
-            lambda: defaultdict(list)
+        Delegates to PRReportBuilder for the actual report construction.
+        """
+        from .pr_report_builder import PRReportBuilder
+        builder = PRReportBuilder(self)
+        return builder.build(
+            base_ref=base_ref,
+            head_ref=head_ref,
+            baseline_n=baseline_n,
+            max_commits=max_commits,
         )
-        file_churn_totals: dict[str, int] = defaultdict(int)
-        file_authors: dict[str, Counter] = defaultdict(Counter)
-        file_complexities: dict[str, list[float]] = defaultdict(list)
-        file_agent_evidence: dict[str, dict[str, list[str]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
-        security_findings: list[dict[str, Any]] = []
-
-        for commit in commits:
-            res = self.analyze_commit(commit_sha=commit.hexsha, baseline_n=baseline_n)
-            score = float(res.get("final_risk_score", 0.0))
-            info = res.get("commit", {})
-            commit_churn_map = info.get("file_churn_map", {})
-
-            commit_entries.append({
-                "sha": info.get("sha", commit.hexsha[:8]),
-                "date": info.get("date", commit.committed_datetime.isoformat()),
-                "author": info.get("author", "unknown"),
-                "message": info.get("message", ""),
-                "risk_score": round(score, 4),
-                "risk_level": _score_to_level(score),
-                "evolution_score": float(res.get("evolution_score", 0.0)),
-                "evolution_details": res.get("evolution_details", {}),
-                "files_analyzed": int(res.get("files_analyzed", 0)),
-                "evolution_evidence": res.get("evolution_evidence", []),
-            })
-
-            # file_results is now a list format
-            for file_res in res.get("file_results", []):
-                filepath = file_res.get("file", "")
-                if not filepath:
-                    continue
-                risk_score = float(file_res.get("risk_score", 0.0))
-                file_scores[filepath].append(risk_score)
-
-                bd = file_res.get("breakdown", {})
-                for key in ("style", "structural", "semantic", "duplication", "security"):
-                    file_breakdown_series[filepath][key].append(float(bd.get(key, 0.0)))
-
-                file_churn_totals[filepath] += int(commit_churn_map.get(filepath, 0))
-                file_authors[filepath][info.get("author", "unknown")] += 1
-
-                src_now = self._source_at_commit(commit, filepath)
-                if src_now:
-                    snap = _parser.parse(src_now)
-                    cc = snap.get("cyclomatic_avg")
-                    if isinstance(cc, (int, float)):
-                        file_complexities[filepath].append(float(cc))
-
-                # Collect security findings for the report
-                for agent_name, adetails in file_res.get("agent_details", {}).items():
-                    lowered = agent_name.lower()
-
-                    if lowered.startswith("structural"):
-                        for ev in adetails.get("evidence", [])[:3]:
-                            if ev and ev not in file_agent_evidence[filepath]["structural"]:
-                                file_agent_evidence[filepath]["structural"].append(ev)
-
-                    if lowered.startswith("semantic"):
-                        for ev in adetails.get("evidence", [])[:3]:
-                            if ev and ev not in file_agent_evidence[filepath]["semantic"]:
-                                file_agent_evidence[filepath]["semantic"].append(ev)
-
-                    if "security" in agent_name.lower() and adetails.get("score", 0) > 0:
-                        for ev in adetails.get("evidence", []):
-                            if ev != "No security issues detected.":
-                                security_findings.append({
-                                    "filepath": filepath,
-                                    "commit_sha": info.get("sha", commit.hexsha[:8]),
-                                    "author": info.get("author", "unknown"),
-                                    "evidence": ev,
-                                })
-
-        scores = [c["risk_score"] for c in commit_entries]
-
-        file_rows: list[dict[str, Any]] = []
-        for filepath, vals in file_scores.items():
-            owner_counter = file_authors.get(filepath, Counter())
-            owner = owner_counter.most_common(1)[0][0] if owner_counter else "unknown"
-            owner_share = (
-                owner_counter.most_common(1)[0][1] / max(sum(owner_counter.values()), 1)
-                if owner_counter else 0.0
-            )
-
-            complexity_avg = (
-                statistics.mean(file_complexities[filepath])
-                if file_complexities.get(filepath) else 0.0
-            )
-
-            breakdown_avg = {
-                key: round(statistics.mean(vals_by_key), 4) if vals_by_key else 0.0
-                for key, vals_by_key in file_breakdown_series.get(filepath, {}).items()
-            }
-            for key in ("style", "structural", "semantic", "duplication", "security"):
-                breakdown_avg.setdefault(key, 0.0)
-
-            churn_lines = int(file_churn_totals.get(filepath, 0))
-            hotspot_impact = round(
-                (min(churn_lines / 1000, 1.0) + min(complexity_avg / 10, 1.0)) / 2,
-                4,
-            )
-
-            file_rows.append({
-                "file": filepath,
-                "avg_risk": round(statistics.mean(vals), 4),
-                "max_risk": round(max(vals), 4),
-                "hits": len(vals),
-                "churn_lines": churn_lines,
-                "complexity": round(complexity_avg, 3),
-                "owner": owner,
-                "owner_share": round(owner_share, 4),
-                "hotspot_impact": hotspot_impact,
-                "risk_breakdown": breakdown_avg,
-            })
-
-        file_rows.sort(
-            key=lambda x: (x["avg_risk"], x["max_risk"], x["hits"]),
-            reverse=True,
-        )
-        if file_rows:
-            total_files = len(file_rows)
-            for idx, item in enumerate(file_rows):
-                item["risk_percentile"] = round((total_files - idx) / total_files, 4)
-                item["rank_in_pr"] = idx + 1
-                item["total_pr_files"] = total_files
-
-                effort_center = (
-                    3.0
-                    + min(item.get("churn_lines", 0) / 120.0, 8.0)
-                    + min(item.get("complexity", 0.0) / 2.5, 6.0)
-                    + min(item.get("avg_risk", 0.0) * 6.0, 6.0)
-                )
-                effort_min = max(3, int(round(effort_center - 2)))
-                effort_max = max(effort_min + 1, int(round(effort_center + 2)))
-                item["review_effort_min"] = effort_min
-                item["review_effort_max"] = effort_max
-
-        top_risky_files = file_rows[:20]
-
-        evolution_scores = [float(c.get("evolution_score", 0.0)) for c in commit_entries]
-        all_file_breakdowns: dict[str, list[float]] = defaultdict(list)
-        for row in file_rows:
-            for key, value in row.get("risk_breakdown", {}).items():
-                all_file_breakdowns[key].append(float(value))
-
-        composition_avg = {
-            key: round(statistics.mean(vals), 4) if vals else 0.0
-            for key, vals in all_file_breakdowns.items()
-        }
-        for key in ("style", "structural", "semantic", "duplication", "security"):
-            composition_avg.setdefault(key, 0.0)
-        composition_avg["evolution"] = (
-            round(statistics.mean(evolution_scores), 4) if evolution_scores else 0.0
-        )
-
-        weights_used = getattr(_risk, "weights", {"style": 0.28, "structural": 0.39, "semantic": 0.33})
-        duplication_boost_avg = (
-            0.05 * min(composition_avg["duplication"] / 0.30, 1.0)
-            if composition_avg["duplication"] > 0.05
-            else 0.0
-        )
-        security_boost_avg = composition_avg["security"] * 0.50
-        contribution_raw = {
-            "style": 0.90 * weights_used.get("style", 0.28) * composition_avg["style"],
-            "structural": 0.90 * weights_used.get("structural", 0.39) * composition_avg["structural"],
-            "semantic": 0.90 * weights_used.get("semantic", 0.33) * composition_avg["semantic"],
-            "duplication": 0.90 * duplication_boost_avg,
-            "security": 0.90 * security_boost_avg,
-            "evolution": 0.10 * composition_avg["evolution"],
-        }
-        total_contribution = sum(contribution_raw.values()) or 1.0
-        contribution_pct = {
-            key: round(value / total_contribution, 4)
-            for key, value in contribution_raw.items()
-        }
-
-        commit_trend: list[dict[str, Any]] = []
-        prev_score: float | None = None
-        for entry in commit_entries:
-            current = float(entry.get("risk_score", 0.0))
-            delta = None if prev_score is None else (current - prev_score)
-            delta_pct = None
-            if prev_score is not None and prev_score > 0:
-                delta_pct = delta / prev_score
-            commit_trend.append({
-                "sha": entry.get("sha", ""),
-                "date": entry.get("date", ""),
-                "risk_score": round(current, 4),
-                "delta": round(delta, 4) if delta is not None else None,
-                "delta_pct": round(delta_pct, 4) if delta_pct is not None else None,
-            })
-            prev_score = current
-
-        evidence_summary: list[dict[str, Any]] = []
-        evolution_details = [
-            c.get("evolution_details", {}) for c in commit_entries
-            if isinstance(c.get("evolution_details", {}), dict)
-        ]
-        if evolution_details:
-            churn_base_vals = [float(d.get("avg_churn_base", 0.0)) for d in evolution_details]
-            churn_now_vals = [float(d.get("avg_churn_now", 0.0)) for d in evolution_details]
-            if churn_base_vals and churn_now_vals:
-                churn_base = statistics.mean(churn_base_vals)
-                churn_now = statistics.mean(churn_now_vals)
-                churn_delta = churn_now - churn_base
-                churn_delta_pct = (churn_delta / churn_base) if churn_base > 0 else None
-                evidence_summary.append({
-                    "type": "churn_anomaly",
-                    "baseline": round(churn_base, 2),
-                    "current": round(churn_now, 2),
-                    "delta": round(churn_delta, 2),
-                    "delta_pct": round(churn_delta_pct, 4) if churn_delta_pct is not None else None,
-                    "text": (
-                        f"Code churn: baseline {churn_base:.0f} → current {churn_now:.0f} "
-                        f"lines/commit (Δ{churn_delta:+.0f})"
-                    ),
-                })
-
-            hotspot_vals = [float(d.get("hotspot_score", 0.0)) for d in evolution_details]
-            if hotspot_vals:
-                hotspot_avg = statistics.mean(hotspot_vals)
-                evidence_summary.append({
-                    "type": "hotspot_impact",
-                    "current": round(hotspot_avg, 4),
-                    "text": f"Hotspot impact: {hotspot_avg:.1%} of touched files",
-                })
-
-            bus_vals = [float(d.get("bus_factor_score", 0.0)) for d in evolution_details]
-            if bus_vals:
-                bus_avg = statistics.mean(bus_vals)
-                if bus_avg > 0.0:
-                    evidence_summary.append({
-                        "type": "knowledge_concentration",
-                        "current": round(bus_avg, 4),
-                        "text": f"Knowledge concentration (bus-factor risk): {bus_avg:.1%}",
-                    })
-
-        # Build code snippets for the top risky files (for LLM review)
-        code_snippets: list[dict[str, Any]] = []
-        head_commit = commits[-1] if commits else None
-        if head_commit and top_risky_files:
-            from src.llm_ready_snippets import prepare_code_for_llm
-            for item in top_risky_files[:_LLM_REVIEW_TOP]:
-                src = self._source_at_commit(head_commit, item["file"])
-                if src:
-                    code_snippets.append(
-                        prepare_code_for_llm(src, filepath=item["file"])
-                    )
-
-        snippet_map = {s.get("filepath", ""): s for s in code_snippets}
-
-        def _snippet_around_line(source: str, line_no: int, context: int = 4) -> str:
-            lines = source.splitlines()
-            if line_no < 1 or line_no > len(lines):
-                return ""
-            start = max(1, line_no - context)
-            end = min(len(lines), line_no + context)
-            return "\n".join(
-                f"{idx:>4}: {lines[idx - 1]}"
-                for idx in range(start, end + 1)
-            )
-
-        def _primary_region(lines: list[int]) -> str:
-            if not lines:
-                return ""
-            window = sorted(lines[:5])
-            start = window[0]
-            end = window[-1]
-            return f"L{start}" if start == end else f"L{start}-L{end}"
-
-        deep_dive: list[dict[str, Any]] = []
-        for item in top_risky_files[:3]:
-            filepath = item["file"]
-            source = self._source_at_commit(head_commit, filepath) if head_commit else ""
-            code_meta = snippet_map.get(filepath, {})
-            risky_lines = sorted(
-                {
-                    int(s.get("location"))
-                    for s in code_meta.get("risky_snippets", [])
-                    if isinstance(s.get("location"), int)
-                }
-            )
-
-            snippet_text = ""
-            if source and risky_lines:
-                snippet_text = _snippet_around_line(source, risky_lines[0])
-
-            diff_excerpt = ""
-            try:
-                diff_text = self.repo.git.diff(base_ref, head_ref, "--", filepath, unified=3)
-                if diff_text:
-                    diff_excerpt = "\n".join(diff_text.splitlines()[:80])
-            except Exception:
-                diff_excerpt = ""
-
-            structural_signals = list(file_agent_evidence.get(filepath, {}).get("structural", []))
-            semantic_signals = list(file_agent_evidence.get(filepath, {}).get("semantic", []))
-
-            imports = code_meta.get("imports", [])
-            functions = code_meta.get("functions", [])
-            classes = code_meta.get("classes", [])
-            risky_snippets = code_meta.get("risky_snippets", [])
-
-            if imports and len(imports) >= 5:
-                msg = f"{len(imports)} imports detected (dependency surface expanded)."
-                if msg not in structural_signals:
-                    structural_signals.append(msg)
-            if classes:
-                msg = f"{len(classes)} class definition(s) touched in this file."
-                if msg not in structural_signals:
-                    structural_signals.append(msg)
-
-            complex_funcs = [f for f in functions if f.get("complexity") in {"moderate", "complex"}]
-            if complex_funcs:
-                msg = f"{len(complex_funcs)} function(s) marked moderate/complex."
-                if msg not in structural_signals:
-                    structural_signals.append(msg)
-
-            risky_reasons = [s.get("reason") for s in risky_snippets if s.get("reason")]
-            for reason in risky_reasons[:3]:
-                if reason not in semantic_signals:
-                    semantic_signals.append(reason)
-
-            primary_region = _primary_region(risky_lines)
-            effort_min = int(item.get("review_effort_min", 3))
-            effort_max = int(item.get("review_effort_max", max(effort_min + 1, 4)))
-
-            deep_dive.append({
-                "file": filepath,
-                "risk": item.get("avg_risk", 0.0),
-                "rank_in_pr": item.get("rank_in_pr", 1),
-                "total_pr_files": item.get("total_pr_files", len(file_rows) or 1),
-                "risk_breakdown": item.get("risk_breakdown", {}),
-                "risky_lines": risky_lines,
-                "primary_risk_region": primary_region,
-                "estimated_review_effort": f"{effort_min}-{effort_max} minutes",
-                "structural_signals": structural_signals[:5],
-                "semantic_signals": semantic_signals[:5],
-                "code_excerpt": snippet_text,
-                "diff_excerpt": diff_excerpt,
-            })
-
-        return {
-            "base_ref": base_ref,
-            "head_ref": head_ref,
-            "commit_count": len(commit_entries),
-            "avg_risk": round(statistics.mean(scores), 4),
-            "max_risk": round(max(scores), 4),
-            "high_risk_commits": sum(1 for s in scores if s >= 0.75),
-            "commits": commit_entries,
-            "commit_trend": commit_trend,
-            "risk_composition": {
-                "formula": "commit_risk = 0.90*mean(file_risk) + 0.10*evolution",
-                "file_formula": "file_risk = 0.28*style + 0.39*structural + 0.33*semantic + duplication/security adjustments",
-                "components_avg": composition_avg,
-                "contributions_pct": contribution_pct,
-                "percentile_basis": "within_pr_files",
-                "scale_max": 1.0,
-            },
-            "evidence_summary": evidence_summary,
-            "top_risky_files": top_risky_files,
-            "file_deep_dive": deep_dive,
-            "security_findings": security_findings,
-            "code_snippets": code_snippets,
-            "cache": self.cache_stats(),
-        }
 
 # end of pipeline.py

@@ -5,59 +5,56 @@ __pycache__/
 *.so
 .Python
 build/
-develop-eggs/
 dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 
-# 虚拟环境
+# Virtual environments
+.venv/
 venv/
 env/
 ENV/
 
-# IDE
+# IDE and OS files
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# ChromaDB数据
-chroma_db/
-*.db
-
-# 配置文件
-.env
-config.local.py
-
-# 日志
-*.log
-
-# 实验输出
-data/experiments/
-data/cache/*.json
-
-# 测试
-.pytest_cache/
-.coverage
-htmlcov/
-
-# 操作系统
 .DS_Store
 Thumbs.db
 
-# Spec-driven docs
+# Environment and local config
+.env
+config.local.py
+
+# Logs and local databases
+*.log
+*.db
+.consistency_baseline.db
+chroma_db/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+pytest-cache-files-*/
+
+# Evaluation working copies and generated reports
+evaluation/repos/
+evaluation/results/
+evaluation/sampled_prs.json
+evaluation/annotations/pilot_tasks.json
+
+# Generated experiment caches
+data/experiments/
+data/cache/*.json
+
+# Spec-driven local planning files
 .specify/
 
-# Internal docs (not published to GitHub)
+# Private planning notes
 ARCHITECTURE.md
 ROADMAP.md

@@ -29,13 +29,14 @@ _SRC = Path(__file__).parent / "src"
 if str(_SRC.parent) not in sys.path:
     sys.path.insert(0, str(_SRC.parent))
 
+from src.models import score_to_risk_colour, score_to_risk_label
 from src.pipeline import AnalysisPipeline, analyze_sources
 from src.exporter import ResultExporter
 from src import __version__
 
 console = Console()
 
-RISK_COLOUR_MAP = {
+_RISK_COLOUR_RICH = {
     "GREEN":  "green",
     "YELLOW": "yellow",
     "ORANGE": "dark_orange",
@@ -50,7 +51,7 @@ RISK_COLOUR_MAP = {
 @click.group()
 @click.version_option(version=__version__)
 def cli():
-    """ConsistenCy — Multi-Agent Code Consistency Analysis."""
+    """ConsistenCy - Multi-Agent Code Consistency Analysis."""
 
 
 # ---------------------------------------------------------------------------
@@ -64,10 +65,10 @@ def cli():
 def scan(repo_path: str, baseline_commits: int):
     """Scan REPO_PATH and print a baseline risk summary.
 
-    REPO_PATH — absolute or relative path to a Git repository.
+    REPO_PATH - absolute or relative path to a Git repository.
     """
     console.print(Panel.fit(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  Scanning [cyan]{repo_path}[/cyan]",
+        f"[bold blue]ConsistenCy[/bold blue]  Scanning [cyan]{repo_path}[/cyan]",
         border_style="blue",
     ))
     try:
@@ -84,7 +85,7 @@ def scan(repo_path: str, baseline_commits: int):
     tbl.add_column("Level")
 
     for entry in file_summary[:20]:
-        colour = RISK_COLOUR_MAP.get(entry.get("risk_level", ""), "white")
+        colour = _RISK_COLOUR_RICH.get(entry.get("risk_level", ""), "white")
         tbl.add_row(
             entry["file"],
             f"{entry['risk_score']:.3f}",
@@ -107,7 +108,7 @@ def scan(repo_path: str, baseline_commits: int):
             )
         console.print(h_tbl)
 
-    console.print("[green]✔ Scan complete.[/green]")
+    console.print("[green]OK Scan complete.[/green]")
 
 
 # ---------------------------------------------------------------------------
@@ -124,11 +125,12 @@ def scan(repo_path: str, baseline_commits: int):
 @click.option("--json-output", is_flag=True, help="Print full JSON result to stdout.")
 def analyze_commit(repo: str, commit: str, baseline_commits: int, json_output: bool):
     """Run multi-agent analysis on a single commit."""
-    console.print(Panel.fit(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  Analysing commit "
-        f"[cyan]{commit or 'HEAD'}[/cyan] in [cyan]{repo}[/cyan]",
-        border_style="blue",
-    ))
+    if not json_output:
+        console.print(Panel.fit(
+            f"[bold blue]ConsistenCy[/bold blue]  Analysing commit "
+            f"[cyan]{commit or 'HEAD'}[/cyan] in [cyan]{repo}[/cyan]",
+            border_style="blue",
+        ))
 
     try:
         pipeline = AnalysisPipeline(repo)
@@ -137,9 +139,13 @@ def analyze_commit(repo: str, commit: str, baseline_commits: int, json_output: b
         console.print(f"[red]Error:[/red] {exc}")
         raise SystemExit(1) from exc
 
+    if json_output:
+        click.echo(json.dumps(result, indent=2, default=str))
+        return
+
     final_score = result.get("final_risk_score", 0.0)
     colour = _risk_colour_str(final_score)
-    rich_colour = RISK_COLOUR_MAP.get(colour, "white")
+    rich_colour = _RISK_COLOUR_RICH.get(colour, "white")
 
     console.print(
         f"\n  Final risk score: [{rich_colour}]{final_score:.3f}[/{rich_colour}]"
@@ -147,10 +153,18 @@ def analyze_commit(repo: str, commit: str, baseline_commits: int, json_output: b
     )
 
     for line in result.get("evolution_evidence", []):
-        console.print(f"  [dim]·[/dim] {line}")
+        console.print(f"  [dim]-[/dim] {line}")
 
     file_results = result.get("file_results", {})
     if file_results:
+        if isinstance(file_results, dict):
+            file_rows = [
+                {"file": filepath, **fr}
+                for filepath, fr in file_results.items()
+            ]
+        else:
+            file_rows = list(file_results)
+
         tbl = Table(title="Per-file Breakdown", header_style="bold cyan")
         tbl.add_column("File", style="cyan")
         tbl.add_column("Risk", justify="right")
@@ -158,11 +172,14 @@ def analyze_commit(repo: str, commit: str, baseline_commits: int, json_output: b
         tbl.add_column("Struct", justify="right")
         tbl.add_column("Semantic", justify="right")
         tbl.add_column("Dup", justify="right")
-        for filepath, fr in sorted(
-            file_results.items(), key=lambda x: x[1]["risk_score"], reverse=True
+        tbl.add_column("Board")
+        for fr in sorted(
+            file_rows, key=lambda x: x.get("risk_score", 0.0), reverse=True
         ):
+            filepath = fr.get("file", "?")
             bd = fr.get("breakdown", {})
-            c = RISK_COLOUR_MAP.get(_risk_colour_str(fr["risk_score"]), "white")
+            c = _RISK_COLOUR_RICH.get(_risk_colour_str(fr["risk_score"]), "white")
+            board = fr.get("agent_collaboration", {}).get("decision", "n/a")
             tbl.add_row(
                 filepath,
                 f"[{c}]{fr['risk_score']:.3f}[/{c}]",
@@ -170,12 +187,9 @@ def analyze_commit(repo: str, commit: str, baseline_commits: int, json_output: b
                 f"{bd.get('structural', 0):.3f}",
                 f"{bd.get('semantic', 0):.3f}",
                 f"{bd.get('duplication', 0):.3f}",
+                board,
             )
         console.print(tbl)
-
-    if json_output:
-        click.echo(json.dumps(result, indent=2, default=str))
-
 
 # ---------------------------------------------------------------------------
 # analyze-range
@@ -198,11 +212,12 @@ def analyze_range(
     json_output: bool,
 ):
     """Analyse risk score evolution over the past N weeks."""
-    console.print(Panel.fit(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
-        f"Weekly history [{weeks}w] [cyan]{repo}[/cyan]",
-        border_style="blue",
-    ))
+    if not json_output:
+        console.print(Panel.fit(
+            f"[bold blue]ConsistenCy[/bold blue]  "
+            f"Weekly history [{weeks}w] [cyan]{repo}[/cyan]",
+            border_style="blue",
+        ))
 
     try:
         pipeline = AnalysisPipeline(repo)
@@ -216,6 +231,10 @@ def analyze_range(
         console.print(f"[red]Error:[/red] {exc}")
         raise SystemExit(1) from exc
 
+    if json_output:
+        click.echo(json.dumps(report, indent=2))
+        return
+
     tbl = Table(title="Weekly Risk History", header_style="bold cyan")
     tbl.add_column("Week")
     tbl.add_column("Avg Risk", justify="right")
@@ -226,13 +245,13 @@ def analyze_range(
     prev = None
     for entry in history:
         score = entry["avg_risk"]
-        c = RISK_COLOUR_MAP.get(_risk_colour_str(score), "white")
+        c = _RISK_COLOUR_RICH.get(_risk_colour_str(score), "white")
         trend = ""
         if prev is not None:
             delta = score - prev
-            trend = (f"[red]↑{delta:+.3f}[/red]" if delta > 0.01
-                     else f"[green]↓{delta:+.3f}[/green]" if delta < -0.01
-                     else "→")
+            trend = (f"[red]up {delta:+.3f}[/red]" if delta > 0.01
+                     else f"[green]down {delta:+.3f}[/green]" if delta < -0.01
+                     else "flat")
         tbl.add_row(
             entry["week"],
             f"[{c}]{score:.3f}[/{c}]",
@@ -246,15 +265,11 @@ def analyze_range(
     console.print(
         "\n"
         f"  Range commits: {report.get('commit_count', 0)}"
-        f"  · avg={report.get('avg_risk', 0.0):.3f}"
-        f"  · max={report.get('max_risk', 0.0):.3f}"
-        f"  · high-risk={report.get('high_risk_commits', 0)}"
-        f"  · baseline-cache-hit={report.get('cache', {}).get('baseline_hit', 0)}\n"
+        f"  | avg={report.get('avg_risk', 0.0):.3f}"
+        f"  | max={report.get('max_risk', 0.0):.3f}"
+        f"  | high-risk={report.get('high_risk_commits', 0)}"
+        f"  | baseline-cache-hit={report.get('cache', {}).get('baseline_hit', 0)}\n"
     )
-
-    if json_output:
-        click.echo(json.dumps(report, indent=2))
-
 
 # ---------------------------------------------------------------------------
 # pr-report
@@ -310,7 +325,7 @@ def pr_report(
 
     # Rich terminal output (only when not in json-output mode)
     console.print(Panel.fit(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
+        f"[bold blue]ConsistenCy[/bold blue]  "
         f"PR report [cyan]{base}..{head}[/cyan] in [cyan]{repo}[/cyan]",
         border_style="blue",
     ))
@@ -318,10 +333,10 @@ def pr_report(
     console.print(
         "\n"
         f"  Commits: {report.get('commit_count', 0)}"
-        f"  · avg={report.get('avg_risk', 0.0):.3f}"
-        f"  · max={report.get('max_risk', 0.0):.3f}"
-        f"  · high-risk={report.get('high_risk_commits', 0)}"
-        f"  · baseline-cache-hit={report.get('cache', {}).get('baseline_hit', 0)}\n"
+        f"  | avg={report.get('avg_risk', 0.0):.3f}"
+        f"  | max={report.get('max_risk', 0.0):.3f}"
+        f"  | high-risk={report.get('high_risk_commits', 0)}"
+        f"  | baseline-cache-hit={report.get('cache', {}).get('baseline_hit', 0)}\n"
     )
 
     composition = report.get("risk_composition", {})
@@ -329,6 +344,15 @@ def pr_report(
         console.print(
             f"  Formula: {composition.get('formula', 'n/a')}\n"
             f"  File formula: {composition.get('file_formula', 'n/a')}\n"
+        )
+
+    board = report.get("agent_collaboration", {})
+    if board:
+        console.print(
+            "  Agent board: "
+            f"{board.get('decision', 'n/a')} "
+            f"(score={float(board.get('consensus_score', 0.0)):.3f}, "
+            f"quorum={board.get('quorum', 'n/a')})\n"
         )
 
     commits = report.get("commits", [])
@@ -341,7 +365,7 @@ def pr_report(
         tbl.add_column("Files", justify="right")
         for entry in sorted(commits, key=lambda x: x["risk_score"], reverse=True):
             score = entry["risk_score"]
-            c = RISK_COLOUR_MAP.get(_risk_colour_str(score), "white")
+            c = _RISK_COLOUR_RICH.get(_risk_colour_str(score), "white")
             tbl.add_row(
                 entry["sha"],
                 entry["author"],
@@ -362,7 +386,7 @@ def pr_report(
         f_tbl.add_column("Owner", style="cyan")
         f_tbl.add_column("Hits", justify="right")
         for item in top_files[:15]:
-            c = RISK_COLOUR_MAP.get(_risk_colour_str(item["avg_risk"]), "white")
+            c = _RISK_COLOUR_RICH.get(_risk_colour_str(item["avg_risk"]), "white")
             f_tbl.add_row(
                 item["file"],
                 f"[{c}]{item['avg_risk']:.3f}[/{c}]",
@@ -397,10 +421,10 @@ def pr_report(
         from src.review_suggestions import generate_review_comment  # noqa: PLC0415
         from src.llm_reviewer import is_llm_available  # noqa: PLC0415
         if is_llm_available():
-            console.print("\n[bold cyan]Generating AI review via DeepSeek…[/bold cyan]")
+            console.print("\n[bold cyan]Generating AI review via DeepSeek...[/bold cyan]")
         md_comment = generate_review_comment(report, use_llm=True)
         # Print just the AI review section
-        ai_marker = "### 🤖 AI Code Review"
+        ai_marker = "### AI Code Review"
         if ai_marker in md_comment:
             ai_section = md_comment[md_comment.index(ai_marker):]
             ai_section = ai_section.split("\n---")[0]
@@ -414,38 +438,47 @@ def pr_report(
 def analyze_file(file_now: str, file_base: str, json_output: bool):
     """Compare FILE_NOW against FILE_BASE directly (no Git required).
 
-    FILE_NOW  — the new / modified version.\n
-    FILE_BASE — the baseline / reference version.
+    FILE_NOW  - the new / modified version.\n
+    FILE_BASE - the baseline / reference version.
     """
     src_now  = Path(file_now).read_text(encoding="utf-8", errors="replace")
     src_base = Path(file_base).read_text(encoding="utf-8", errors="replace")
 
-    result = analyze_sources(src_now, src_base)
+    result = analyze_sources(src_now, src_base, filepath=file_now)
+    if json_output:
+        click.echo(json.dumps(result, indent=2, default=str))
+        return
+
     score  = result["risk_score"]
-    c = RISK_COLOUR_MAP.get(_risk_colour_str(score), "white")
+    c = _RISK_COLOUR_RICH.get(_risk_colour_str(score), "white")
 
     console.print(Panel.fit(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
+        f"[bold blue]ConsistenCy[/bold blue]  "
         f"[cyan]{file_now}[/cyan] vs [cyan]{file_base}[/cyan]",
         border_style="blue",
     ))
     console.print(f"\n  Risk score: [{c}]{score:.3f}[/{c}]  ({result['risk_level']})\n")
+    board = result.get("agent_collaboration", {})
+    if board:
+        console.print(
+            "  Agent board: "
+            f"{board.get('decision', 'n/a')} "
+            f"(score={float(board.get('consensus_score', 0.0)):.3f}, "
+            f"quorum={board.get('quorum', 'n/a')})\n"
+        )
 
     tbl = Table(header_style="bold cyan")
     tbl.add_column("Agent", style="cyan")
     tbl.add_column("Score", justify="right")
     tbl.add_column("Time (ms)", justify="right")
     for agent_name, ad in result.get("agent_details", {}).items():
-        ac = RISK_COLOUR_MAP.get(_risk_colour_str(ad["score"]), "white")
+        ac = _RISK_COLOUR_RICH.get(_risk_colour_str(ad["score"]), "white")
         tbl.add_row(agent_name, f"[{ac}]{ad['score']:.3f}[/{ac}]",
                     f"{ad.get('elapsed_ms', 0):.1f}")
     console.print(tbl)
 
     for ev in result.get("evidence", [])[:10]:
-        console.print(f"  [dim]·[/dim] {ev}")
-
-    if json_output:
-        click.echo(json.dumps(result, indent=2, default=str))
+        console.print(f"  [dim]-[/dim] {ev}")
 
 
 # ---------------------------------------------------------------------------
@@ -461,8 +494,8 @@ def web_ui(port: int, debug: bool):
     sys.path.insert(0, str(_frontend.parent))
 
     console.print(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
-        f"Dashboard → [underline]http://localhost:{port}[/underline]"
+        f"[bold blue]ConsistenCy[/bold blue]  "
+        f"Dashboard -> [underline]http://localhost:{port}[/underline]"
     )
 
     try:
@@ -479,23 +512,11 @@ def web_ui(port: int, debug: bool):
 # ---------------------------------------------------------------------------
 
 def _risk_colour_str(score: float) -> str:
-    if score >= 0.75:
-        return "RED"
-    if score >= 0.50:
-        return "ORANGE"
-    if score >= 0.25:
-        return "YELLOW"
-    return "GREEN"
+    return score_to_risk_colour(score)
 
 
 def _risk_level(score: float) -> str:
-    if score >= 0.75:
-        return "High Risk"
-    if score >= 0.50:
-        return "Significant Drift"
-    if score >= 0.25:
-        return "Minor Drift"
-    return "Consistent"
+    return score_to_risk_label(score)
 
 
 # ---------------------------------------------------------------------------
@@ -525,20 +546,30 @@ def export_range_cmd(repo_path: str, weeks: int, format: str, output: str):
             commits = result.get("commits", [])
             file_results = []
             for commit in commits:
-                for filepath in commit.get("file_results", {}):
-                    file_results.append({
-                        "filepath": filepath,
-                        "commit_sha": commit["sha"],
-                    })
+                commit_files = commit.get("file_results", {})
+                if isinstance(commit_files, dict):
+                    iterable = commit_files.keys()
+                else:
+                    iterable = [
+                        item.get("file", "")
+                        for item in commit_files
+                        if isinstance(item, dict)
+                    ]
+                for filepath in iterable:
+                    if filepath:
+                        file_results.append({
+                            "filepath": filepath,
+                            "commit_sha": commit["sha"],
+                        })
             success = ResultExporter.export_sqlite(commits, file_results, output)
         elif format == "parquet":
             commits = result.get("commits", [])
             success = ResultExporter.export_parquet(commits, output)
         
         if success:
-            console.print(f"[green]✓ Exported to {output}[/]")
+            console.print(f"[green]OK Exported to {output}[/]")
         else:
-            console.print(f"[red]✗ Failed to export to {output}[/]")
+            console.print(f"[red]Failed to export to {output}[/]")
             sys.exit(1)
     except Exception as e:
         console.print(f"[red]Error: {e}[/]")
@@ -558,7 +589,7 @@ def export_by_file_cmd(repo_path: str, weeks: int, output_dir: str):
         result = pipeline.analyze_range(weeks=weeks, baseline_n=50, max_commits=100)
         commits = result.get("commits", [])
         
-        # Build commit results — re-analyze to get full file-level data
+        # Build commit results - re-analyze to get full file-level data
         commit_results = []
         for commit in commits:
             sha = commit["sha"]
@@ -576,7 +607,7 @@ def export_by_file_cmd(repo_path: str, weeks: int, output_dir: str):
         
         export_status = ResultExporter.export_by_file(commit_results, output_dir)
         success_count = sum(1 for v in export_status.values() if v)
-        console.print(f"[green]✓ Exported {success_count}/{len(export_status)} files[/]")
+        console.print(f"[green]OK Exported {success_count}/{len(export_status)} files[/]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/]")
         sys.exit(1)
@@ -597,7 +628,7 @@ def export_by_author_cmd(repo_path: str, weeks: int, output_dir: str):
         
         export_status = ResultExporter.export_by_author(commits, output_dir)
         success_count = sum(1 for v in export_status.values() if v)
-        console.print(f"[green]✓ Exported {success_count}/{len(export_status)} authors[/]")
+        console.print(f"[green]OK Exported {success_count}/{len(export_status)} authors[/]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/]")
         sys.exit(1)
@@ -648,7 +679,7 @@ def analyze_remote(repo: str, since: str | None, until: str | None, max_commits:
         until_dt = datetime.fromisoformat(until)
     
     console.print(Panel.fit(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
+        f"[bold blue]ConsistenCy[/bold blue]  "
         f"Remote analysis [cyan]{owner}/{repo_name}[/cyan]",
         border_style="blue",
     ))
@@ -711,7 +742,7 @@ def analyze_remote(repo: str, since: str | None, until: str | None, max_commits:
     console.print(f"\n[bold]Analysis Results:[/]")
     console.print(f"  Commits analyzed: {result.commits_analyzed}")
     
-    risk_color = RISK_COLOUR_MAP.get(result.risk_level.replace(" ", "").upper(), "white")
+    risk_color = _RISK_COLOUR_RICH.get(result.risk_level.replace(" ", "").upper(), "white")
     console.print(f"  Overall risk: [{risk_color}]{result.overall_risk:.3f}[/{risk_color}] ({result.risk_level})")
     
     if result.language_breakdown:
@@ -727,7 +758,7 @@ def analyze_remote(repo: str, since: str | None, until: str | None, max_commits:
         tbl.add_column("Level")
         
         for f in result.top_risky_files[:10]:
-            colour = RISK_COLOUR_MAP.get(f.risk_level.replace(" ", "").upper(), "white")
+            colour = _RISK_COLOUR_RICH.get(f.risk_level.replace(" ", "").upper(), "white")
             tbl.add_row(
                 f.path,
                 f.language,
@@ -765,7 +796,7 @@ def trend(repo: str, period: str, months: int, token: str | None, json_output: b
     owner, repo_name = repo.split("/", 1)
     
     console.print(Panel.fit(
-        f"[bold blue]⬡ ConsistenCy[/bold blue]  "
+        f"[bold blue]ConsistenCy[/bold blue]  "
         f"Trend analysis [cyan]{owner}/{repo_name}[/cyan] ({period})",
         border_style="blue",
     ))
@@ -807,7 +838,7 @@ def trend(repo: str, period: str, months: int, token: str | None, json_output: b
         
         for point in report.data_points:
             level = point.get("risk_level", "Unknown")
-            colour = RISK_COLOUR_MAP.get(level.replace(" ", "").upper(), "white")
+            colour = _RISK_COLOUR_RICH.get(level.replace(" ", "").upper(), "white")
             tbl.add_row(
                 point["period"],
                 str(point["commits"]),
@@ -819,7 +850,7 @@ def trend(repo: str, period: str, months: int, token: str | None, json_output: b
     if report.insights:
         console.print(f"\n[bold]Insights:[/]")
         for insight in report.insights:
-            console.print(f"  · {insight}")
+            console.print(f"  - {insight}")
 
 
 # ---------------------------------------------------------------------------
