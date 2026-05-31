@@ -47,6 +47,7 @@ evaluation/repos/
 evaluation/results/
 evaluation/sampled_prs.json
 evaluation/annotations/pilot_tasks.json
+evaluation/data/
 
 # Generated experiment caches
 data/experiments/

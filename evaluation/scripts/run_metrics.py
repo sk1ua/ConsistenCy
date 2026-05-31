@@ -128,10 +128,80 @@ def evaluate_manifest(manifest_path: Path, *, k: int = 3) -> dict[str, Any]:
     }
 
 
+def _format_metric(value: Any, fmt: str = "{:.3f}") -> str:
+    """Render a numeric metric, returning ``n/a`` for missing/uncomputable values.
+
+    Spearman / kappa return 0.0 when there are not enough samples - that
+    technically renders fine, but the README needs to make absent measurements
+    obviously absent rather than implausibly precise zeros. Callers pass
+    ``None`` (or NaN) to flag genuine absence.
+    """
+    if value is None:
+        return "n/a"
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if f != f:  # NaN
+        return "n/a"
+    return fmt.format(f)
+
+
+def render_markdown(summary: dict[str, Any]) -> str:
+    """Build the README-ready Markdown table for a metrics summary.
+
+    Metrics that could not be computed because the sample set is too thin
+    (e.g. fewer than two evaluated samples for Spearman) are rendered as
+    ``n/a`` rather than misleadingly small numbers.
+    """
+    k = summary.get("k", 3)
+    sample_count = summary.get("sample_count", 0)
+    evaluated = summary.get("evaluated_count", 0)
+
+    if evaluated < 2:
+        spearman_value: Any = None
+        kappa_value: Any = None
+    else:
+        spearman_value = summary.get("overall_spearman")
+        kappa_value = summary.get("pairwise_cohens_kappa")
+
+    precision = (
+        summary.get("mean_precision_at_k") if evaluated > 0 else None
+    )
+    recall = summary.get("mean_recall_at_k") if evaluated > 0 else None
+
+    lines = [
+        "# ConsistenCy Public PR Evaluation",
+        "",
+        "| Metric | Value |",
+        "|---|---:|",
+        f"| Samples | {sample_count} |",
+        f"| Evaluated | {evaluated} |",
+        f"| Precision@{k} | {_format_metric(precision)} |",
+        f"| Recall@{k} | {_format_metric(recall)} |",
+        f"| Spearman | {_format_metric(spearman_value)} |",
+        f"| Cohen's Kappa | {_format_metric(kappa_value)} |",
+        "",
+        "## Notes",
+        "",
+        "- Labels are weak labels derived from public human review comments.",
+        "- Samples marked needs_manual_audit should be manually checked before "
+        "claiming final results.",
+        "- SemanticAgent uses AST/API/control-flow proxy signals, not formal "
+        "semantic equivalence.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", default="evaluation/sampled_prs.json")
     parser.add_argument("--output", default="evaluation/results/metrics_summary.json")
+    parser.add_argument(
+        "--markdown-output", default=None,
+        help="Optional path to write a README-ready Markdown summary table.",
+    )
     parser.add_argument("--k", type=int, default=3)
     args = parser.parse_args()
 
@@ -139,6 +209,12 @@ def main() -> None:
     output_path = _resolve(args.output) or Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    if args.markdown_output:
+        md_path = _resolve(args.markdown_output) or Path(args.markdown_output)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(render_markdown(summary), encoding="utf-8")
+
     print(json.dumps(summary, indent=2))
 
 

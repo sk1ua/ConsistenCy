@@ -725,6 +725,9 @@ def analyze_remote(repo: str, since: str | None, until: str | None, max_commits:
                     "language": f.language,
                     "risk_score": f.risk_score,
                     "risk_level": f.risk_level,
+                    "baseline_strategy": f.baseline_strategy,
+                    "current_ref": f.current_ref,
+                    "baseline_ref": f.baseline_ref,
                 }
                 for f in result.top_risky_files
             ],
