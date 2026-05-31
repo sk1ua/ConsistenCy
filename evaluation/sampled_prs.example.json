@@ -1,0 +1,24 @@
+[
+  {
+    "_comment": "Example manifest entry. Copy this file to sampled_prs.json and replace with real data.",
+    "repo": "owner/repo-name",
+    "pr_number": 1,
+    "model_report_path": "evaluation/results/report_pr_1.json",
+    "annotations": [
+      {
+        "annotator": "alice",
+        "overall_risk": "medium",
+        "top_risky_files": ["src/auth.py", "src/db.py"],
+        "severity_per_file": {
+          "src/auth.py": "high",
+          "src/db.py": "medium"
+        },
+        "reason_per_file": {
+          "src/auth.py": ["security"],
+          "src/db.py": ["structural", "semantic"]
+        },
+        "notes": "auth.py introduces credential handling; db.py adds new query patterns"
+      }
+    ]
+  }
+]

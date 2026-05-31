@@ -1,6 +1,6 @@
 # Project Overview
 
-ConsistenCy frames pull request review as a multi-agent coordination problem. Each agent owns one review perspective, emits evidence, and lets a deterministic coordinator convert those findings into a shared decision.
+ConsistenCy frames pull request review as a multi-signal coordination problem. Each specialist deterministic analyzer owns one review perspective, emits evidence, and lets a deterministic coordinator convert those findings into a shared decision. An optional LLM review pass can augment the analyzers when configured.
 
 ## Review Flow
 
@@ -20,7 +20,7 @@ git diff -> specialist agents -> normalized evidence -> weighted consensus -> re
 | --- | --- |
 | `style` | naming, docstring, and convention drift |
 | `structural` | import surface, coupling, inheritance, module shape |
-| `semantic` | behavior-level and API usage changes |
+| `semantic/behavioral` | behavior-level and API usage changes (proxy signals) |
 | `duplication` | repeated implementation and clone risk |
 | `security` | hardcoded secrets, unsafe calls, injection-like patterns |
 | `evolution` | churn, hotspots, ownership, and history anomalies |

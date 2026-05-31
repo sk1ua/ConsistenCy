@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml/badge.svg)](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml)
 
-ConsistenCy is a multi-agent code review assistant for pull requests. It compares a change against project history, asks specialist agents to review different risk signals, and turns their evidence into an explainable reviewer handoff plan.
+ConsistenCy is a multi-signal code review assistant for pull requests. It compares a change against project history, runs specialist deterministic analyzers (optionally assisted by LLM review) to score different risk signals, and turns their evidence into an explainable reviewer handoff plan.
 
 The project is designed as a portfolio-ready AI4SE system: small enough to run locally, but structured like a real review product with CLI commands, a Flask dashboard, GitHub App hooks, evaluation helpers, and reproducible tests.
 
@@ -18,14 +18,16 @@ The project is designed as a portfolio-ready AI4SE system: small enough to run l
 
 ## Multi-Agent Review Board
 
-| Agent                | Focus                                                             |
-| -------------------- | ----------------------------------------------------------------- |
-| `StyleAgent`       | Naming, docs, and local convention drift                          |
-| `StructuralAgent`  | Imports, coupling, inheritance, and module shape                  |
-| `SemanticAgent`    | Control flow, API usage, and behavior-level change                |
-| `DuplicationAgent` | Repeated implementation and clone risk                            |
-| `SecurityAgent`    | Secrets, unsafe calls, injection-like patterns, override evidence |
-| `EvolutionAgent`   | Churn, hotspots, and history-aware PR risk                        |
+Each *agent* is a specialist deterministic analyzer — a focused module that applies rules, metrics, and pattern detection rather than autonomous LLM reasoning.  An optional LLM review pass can augment the deterministic output when configured.
+
+| Agent                | Focus                                                              |
+| -------------------- | ------------------------------------------------------------------ |
+| `StyleAgent`       | Naming, docs, and local convention drift                           |
+| `StructuralAgent`  | Imports, coupling, inheritance, and module shape                   |
+| `SemanticAgent`    | Control flow, API usage, and behavior-level change (proxy signals) |
+| `DuplicationAgent` | Repeated implementation and clone risk                             |
+| `SecurityAgent`    | Secrets, unsafe calls, injection-like patterns, override evidence  |
+| `EvolutionAgent`   | Churn, hotspots, and history-aware PR risk                         |
 
 The collaboration layer emits quorum, votes, disagreement notes, merge decision, top findings, and a reviewer handoff queue.
 

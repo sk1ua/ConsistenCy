@@ -18,7 +18,7 @@ from typing import Any
 
 from ..pipeline import analyze_sources
 from ..agents.parser_agent import ParserAgent
-from ..baseline_strategy import detect_file_scenario, FileScenario
+from ..baseline_strategy import detect_file_scenario, FileScenario, get_template_baseline
 from .github_client import GitHubClient, RepoMetadata, CommitInfo
 
 
@@ -252,13 +252,24 @@ class RemoteAnalysisPipeline:
             if not self._is_code_file(path):
                 continue
             
-            # Fetch current and previous version
+            # Fetch current and parent-commit versions for true drift comparison
             current_content = self._fetch_file(owner, repo, path, commit.sha)
             if not current_content:
                 continue
-            
-            # For simplicity, use empty baseline (could fetch parent commit)
+
+            # Fetch file at parent commit for a real baseline (not empty string).
+            # Falls back to template baseline when parent doesn't have the file
+            # (new files) or the commit has no parent (initial commit).
+            parent_sha = commit.parents[0]["sha"] if commit.parents else None
             baseline_content = ""
+            if parent_sha:
+                baseline_content = self._fetch_file(owner, repo, path, parent_sha) or ""
+
+            # For new files (not in parent), try a template baseline
+            if not baseline_content:
+                template = get_template_baseline(path)
+                if template:
+                    baseline_content = template
             
             # Analyze
             try:

@@ -44,6 +44,28 @@ from src.agents import (
 )
 from src.pipeline import AnalysisPipeline, analyze_sources
 
+# ---------------------------------------------------------------------------
+# Repo path whitelist — restricts which directories the API can analyze
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ALLOWED_ROOTS = [
+    str(Path(__file__).resolve().parent.parent / "examples"),
+    str(Path.home() / "repos"),
+    str(Path.home() / "projects"),
+]
+_ALLOWED_ROOTS_ENV = os.environ.get("ALLOWED_REPO_PATHS", "")
+if _ALLOWED_ROOTS_ENV:
+    # Support both comma and OS path-separator delimited lists
+    import re
+    _split_parts = re.split(r"[,;]", _ALLOWED_ROOTS_ENV) if os.pathsep == ";" else re.split(r"[,:]", _ALLOWED_ROOTS_ENV)
+    ALLOWED_REPO_ROOTS = [
+        Path(p.strip()) for p in _split_parts if p.strip()
+    ]
+else:
+    ALLOWED_REPO_ROOTS = [
+        Path(p) for p in _DEFAULT_ALLOWED_ROOTS if Path(p).is_dir()
+    ]
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["JSON_SORT_KEYS"] = False
 
@@ -210,11 +232,23 @@ def _handle_exception(exc: Exception, operation: str) -> tuple:
 
 
 def _validate_repo_path(repo_path: str, required_message: str = "repo_path is required"):
-    """Validate repo_path presence and directory existence."""
+    """Validate repo_path presence, directory existence, and path whitelist."""
     if not repo_path:
         return _error(required_message, "MISSING_REPO_PATH", 400)
-    if not Path(repo_path).is_dir():
+    resolved = Path(repo_path).resolve()
+    if not resolved.is_dir():
         return _error("repo_path must be a valid directory", "INVALID_REPO_PATH", 400)
+    # Path must be within allowed roots (skip in test mode)
+    if not app.config.get("TESTING") and ALLOWED_REPO_ROOTS and not any(
+        str(resolved).startswith(str(root.resolve()))
+        for root in ALLOWED_REPO_ROOTS
+    ):
+        return _error(
+            "repo_path is not in allowed directories. "
+            "Set ALLOWED_REPO_PATHS to extend the whitelist.",
+            "REPO_PATH_NOT_ALLOWED",
+            403,
+        )
     return None
 
 

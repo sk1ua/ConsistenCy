@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Semantic Agent
-==============
-Measures drift in program *semantics* — what the code *does* — rather
-than how it looks.
+Behavioral-Change Agent (Semantic Proxy)
+=========================================
+Measures drift in program *behavior* through syntactic proxy signals —
+what the code *does* — rather than how it looks.
+
+This agent uses syntactic approximations for behavioral change.  It does
+**not** perform formal semantic equivalence checking or symbolic execution.
 
 Dimensions scored
 -----------------
@@ -141,7 +144,12 @@ def _profile_distance(p_a: dict[str, int], p_b: dict[str, int]) -> float:
 # ---------------------------------------------------------------------------
 
 class SemanticAgent(AgentBase):
-    """Detect logical / semantic drift between two code versions."""
+    """Detect behavioral drift between two code versions via syntactic proxy signals.
+
+    Uses AST subtree fingerprints, API call set comparison, and control-flow
+    profile distance as proxies for behavioral change.  This is a lightweight
+    syntactic approximation — it does not perform formal semantic analysis.
+    """
 
     WEIGHTS = {"ast": 0.45, "api": 0.30, "cf": 0.25}
 

@@ -2,6 +2,8 @@
 
 This folder contains the optional reproducibility scaffold for human-aligned PR risk ranking studies. Generated reports, sampled manifests, and local repository clones are ignored so the GitHub repository stays small.
 
+**Important:** The scaffold is ready but no real annotated PR data is included.  You must supply your own `sampled_prs.json` manifest and labels before the metrics scripts produce meaningful numbers.  See `sampled_prs.example.json` for the schema.
+
 ## Workflow
 
 1. Add sampled PR metadata to `sampled_prs.json`.

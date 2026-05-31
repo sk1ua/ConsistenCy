@@ -56,6 +56,7 @@ class CommitInfo:
     committer_date: datetime
     stats: dict[str, int]  # additions, deletions, total
     files: list[dict[str, Any]]  # changed files
+    parents: list[dict[str, str]] = field(default_factory=list)  # parent commit SHAs
 
 
 @dataclass
@@ -201,6 +202,7 @@ class GitHubClient:
                 committer_date=datetime.fromisoformat(committer["date"].replace("Z", "+00:00")),
                 stats=data.get("stats", {"additions": 0, "deletions": 0, "total": 0}),
                 files=data.get("files", []),
+                parents=[{"sha": p["sha"]} for p in data.get("parents", [])],
             )
         except (KeyError, ValueError):
             return None
