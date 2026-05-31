@@ -169,6 +169,7 @@ def analyze_sources(
     project_class_bases: dict[str, list[str]] | None = None,
     aggregated_baseline: dict[str, Any] | None = None,
     filepath: str | None = None,
+    baseline_strategy: str | None = None,
 ) -> dict[str, Any]:
     """Run all code-level agents on two source strings.
 
@@ -188,6 +189,10 @@ def analyze_sources(
         enables multi-version statistical baselines.
     filepath : str | None
         File path for language detection (enables multi-language support)
+    baseline_strategy : str | None
+        How the baseline was chosen.  One of ``"parent_commit"``,
+        ``"new_file_empty_baseline"``, ``"new_file_template_baseline"``,
+        ``"empty_no_parent"``, or ``None`` (unknown / legacy).
 
     Returns a dict with per-agent scores and the final risk score.
     """
@@ -249,6 +254,29 @@ def analyze_sources(
         signal_agreement=signal_agreement,
         history_depth=int((aggregated_baseline or {}).get("history_depth", 1)),
     )
+    # ── New-file confidence adjustment ────────────────────────────────────
+    # When the baseline is not a real parent commit (empty / template /
+    # no-parent), AST divergence ~ 1.0 and "all imports are new" are
+    # expected but not meaningful risk indicators.  We cap the raw score
+    # and reduce confidence so the report reflects the thin comparison.
+    _new_file_strategies: set[str] = {
+        "new_file_empty_baseline",
+        "new_file_template_baseline",
+        "empty_no_parent",
+    }
+    _strategy: str = baseline_strategy or ""
+    if _strategy in _new_file_strategies:
+        # heuristic: a new-file score above threshold is dominated by the
+        # empty-baseline gap, not by actual bugs
+        adjusted_score = min(float(final.score), 0.35)
+        confidence = round(confidence * 0.50, 4)
+    else:
+        adjusted_score = float(final.score)
+
+    # Re-derive risk label from adjusted score so labels are consistent
+    adjusted_level = score_to_risk_label(adjusted_score)
+    adjusted_colour = score_to_risk_colour(adjusted_score)
+
     agent_collaboration = build_file_consensus(
         agent_details,
         breakdown,
@@ -257,9 +285,9 @@ def analyze_sources(
     )
 
     return {
-        "risk_score": round(final.score, 4),
-        "risk_level": final.details.get("risk_level", ""),
-        "risk_colour": final.details.get("risk_colour", ""),
+        "risk_score": round(adjusted_score, 4),
+        "risk_level": adjusted_level,
+        "risk_colour": adjusted_colour,
         "breakdown": breakdown,
         "signal_results": signal_results,
         "signal_composition": file_contributions(breakdown),
@@ -273,6 +301,8 @@ def analyze_sources(
         "agent_collaboration": agent_collaboration,
         "evidence": final.evidence,
         "agent_details": agent_details,
+        "raw_score": round(float(final.score), 4),
+        "baseline_strategy": baseline_strategy,
     }
 
 

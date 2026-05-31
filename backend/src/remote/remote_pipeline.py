@@ -312,7 +312,11 @@ class RemoteAnalysisPipeline:
 
             # Analyze
             try:
-                result = analyze_sources(current_content, baseline_content, filepath=path)
+                result = analyze_sources(
+                    current_content, baseline_content,
+                    filepath=path,
+                    baseline_strategy=baseline_strategy,
+                )
 
                 file_results.append(RemoteFileAnalysis(
                     path=path,

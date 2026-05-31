@@ -20,14 +20,18 @@ class CodeSnippetExtractor:
     """Extract LLM-friendly code snippets."""
 
     @staticmethod
-    def extract_functions(source: str) -> list[dict[str, Any]]:
-        """Extract all functions/methods from source with signatures.
-        
+    def extract_functions(source: str, *, max_body_lines: int = 40) -> list[dict[str, Any]]:
+        """Extract all functions/methods from source with signatures and bodies.
+
         Parameters
         ----------
         source : str
             Python source code
-        
+        max_body_lines : int
+            Maximum number of body lines to include per function.
+            Bodies longer than this are truncated with a ``...`` marker
+            so the LLM knows the excerpt is incomplete.
+
         Returns
         -------
         list[dict]
@@ -37,36 +41,45 @@ class CodeSnippetExtractor:
             tree = ast.parse(source)
         except SyntaxError:
             return []
-        
+
         functions = []
         lines = source.splitlines()
-        
+
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 start_line = node.lineno - 1
                 end_line = node.end_lineno or len(lines)
-                
-                # Extract function signature
+
+                # Extract function signature (first line only)
                 signature = ast.get_source_segment(source, node)
                 if not signature:
-                    # Fallback: build from AST
                     args = ", ".join(
                         arg.arg for arg in node.args.args
                     )
-                    func_type = f"async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+                    func_type = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
                     signature = f"{func_type} {node.name}({args}):"
-                
+
+                # Extract function body (all lines after signature)
+                body_lines = lines[start_line:end_line]
+                truncated = len(body_lines) > max_body_lines
+                body = "\n".join(body_lines[:max_body_lines])
+                if truncated:
+                    body += f"\n# ... ({len(body_lines) - max_body_lines} more lines) ..."
+
                 functions.append({
                     "name": node.name,
                     "type": "async_function" if isinstance(node, ast.AsyncFunctionDef) else "function",
                     "lineno": node.lineno,
+                    "end_lineno": end_line,
                     "length": end_line - start_line,
-                    "signature": signature[:200],  # First 200 chars
-                    "is_method": False,  # Would need class context
+                    "signature": signature[:200],
+                    "body": body,
+                    "truncated": truncated,
+                    "is_method": False,
                     "has_docstring": ast.get_docstring(node) is not None,
                     "complexity": _estimate_function_complexity(node),
                 })
-        
+
         return functions
 
     @staticmethod
