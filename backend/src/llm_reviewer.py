@@ -111,7 +111,10 @@ def review_with_llm(
                         "You receive structured static-analysis data about a pull request "
                         "and produce a concise, actionable Markdown review. "
                         "Use bullet points. Be direct. Prioritise security and correctness. "
-                        "Do not pad with generic advice. Maximum 400 words."
+                        "Do not pad with generic advice. Maximum 400 words. "
+                        "IMPORTANT: Code excerpts marked [TRUNCATED] are incomplete — "
+                        "do NOT guess what the missing lines contain. "
+                        "Only comment on code you can actually see."
                     ),
                 },
                 {"role": "user", "content": prompt},
@@ -169,24 +172,29 @@ def _build_prompt(
     # Actual code snippets — the most valuable signal for the LLM
     if code_snippets:
         parts.append("\n**Code excerpts from highest-risk files:**")
-        budget = 2400  # rough token budget for code
+        budget = 3200  # rough token budget for code
         used = 0
         for snip in code_snippets:
             fp = snip.get("filepath", "?")
+            # Risky-snippet markers with context
             for rs in snip.get("risky_snippets", [])[:3]:
+                loc = rs.get("location", "?")
                 desc = (
-                    f"`{fp}` L{rs.get('location', '?')}: "
+                    f"`{fp}` L{loc}: "
                     f"{rs.get('reason', '')} [{rs.get('severity', '')}]"
                 )
                 parts.append(f"- {desc}")
-            # Include top functions (sorted by complexity hint)
+            # Include top functions with actual bodies
             for fn in snip.get("functions", [])[:4]:
-                sig = fn.get("signature", "")[:300]
-                if not sig:
+                body = fn.get("body", "")
+                if not body:
                     continue
-                # Only include body up to ~40 lines to stay within budget
-                body = sig[:1600]
-                chunk = f"\n```python\n# {fp} L{fn.get('lineno', '?')} ({fn.get('complexity', '?')})\n{body}\n```"
+                loc = f"L{fn.get('lineno', '?')}-L{fn.get('end_lineno', '?')}"
+                truncated_marker = " [TRUNCATED]" if fn.get("truncated") else ""
+                chunk = (
+                    f"\n```python\n# {fp} {loc} ({fn.get('complexity', '?')})"
+                    f"{truncated_marker}\n{body}\n```"
+                )
                 if used + len(chunk) > budget:
                     break
                 parts.append(chunk)
