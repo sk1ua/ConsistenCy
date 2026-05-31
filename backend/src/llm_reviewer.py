@@ -14,7 +14,6 @@ must not appear in source, commits, or logs.
 from __future__ import annotations
 
 import os
-import sys
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -86,7 +85,6 @@ def review_with_llm(
         except ImportError:
             pass
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    print(f"[LLM] DEEPSEEK_API_KEY last4=...{api_key[-4:] if len(api_key) >= 4 else '?'}", file=sys.stderr)
     if not api_key:
         return "_AI review unavailable: `DEEPSEEK_API_KEY` not set._"
 
