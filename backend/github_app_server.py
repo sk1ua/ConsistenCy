@@ -200,13 +200,13 @@ def create_app() -> Flask:
     @app.route("/github/webhook", methods=["POST"])
     def webhook():
         """Receive GitHub webhooks.
-        
+
         Signature verification happens BEFORE any event processing.
         Invalid signatures return 401 with zero side effects.
         """
         headers = dict(request.headers)
         body = request.get_data()
-        
+
         try:
             # Signature verification happens inside process_event
             # If signature is invalid, event is returned without dispatching

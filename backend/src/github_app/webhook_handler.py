@@ -88,19 +88,29 @@ class GitHubWebhookHandler:
     
     def process_event(self, headers: dict[str, str], body: bytes | str) -> WebhookEvent:
         """Process incoming webhook event.
-        
+
         Parameters
         ----------
         headers : dict[str, str]
             HTTP headers including X-GitHub-Event, X-GitHub-Delivery, X-Hub-Signature-256
         body : bytes | str
             Raw request body
-            
+
         Returns
         -------
         WebhookEvent
             Normalized event object
         """
+        # Parse payload
+        if isinstance(body, bytes):
+            body_bytes = body
+            body_str = body.decode("utf-8")
+        else:
+            body_str = body
+            body_bytes = body.encode("utf-8")
+
+        payload = json.loads(body_str) if body_str else {}
+
         # Normalize header keys to lower-case for case-insensitive lookup.
         # Werkzeug / Flask store headers with original casing in the environ,
         # but proxies like ngrok, ELB, or nginx may change the key case.
@@ -110,16 +120,7 @@ class GitHubWebhookHandler:
         event_type = _lower_headers.get("x-github-event", "unknown")
         delivery_id = _lower_headers.get("x-github-delivery", "unknown")
         signature = _lower_headers.get("x-hub-signature-256", "")
-        
-        # Parse payload
-        if isinstance(body, bytes):
-            body_str = body.decode("utf-8")
-        else:
-            body_str = body
-            body = body.encode("utf-8")
-        
-        payload = json.loads(body_str) if body_str else {}
-        
+
         # Verify signature BEFORE any processing
         signature_valid = False
         if self.webhook_secret:
