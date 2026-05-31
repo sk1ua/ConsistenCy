@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import textwrap
+from pathlib import Path
 from typing import Any
 
 # Load .env file if present (local development convenience)
@@ -74,7 +75,17 @@ def review_with_llm(
     str
         Markdown-formatted AI review section, or an error/unavailable note.
     """
+    # Enforce loading from project .env to override stale system env vars
+    _project_root = Path(__file__).parent.parent.parent
+    _dotenv_path = _project_root / ".env"
+    if _dotenv_path.exists():
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(str(_dotenv_path), override=True)
+        except ImportError:
+            pass
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    print(f"[LLM] DEEPSEEK_API_KEY last4=...{api_key[-4:] if len(api_key) >= 4 else '?'}", file=sys.stderr)
     if not api_key:
         return "_AI review unavailable: `DEEPSEEK_API_KEY` not set._"
 
