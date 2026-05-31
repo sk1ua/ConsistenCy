@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import os
 import textwrap
+from pathlib import Path
 from typing import Any
 
 # Load .env file if present (local development convenience)
 try:
-    from dotenv import load_dotenv
-    load_dotenv(override=False)  # env vars already set take priority
+    from dotenv import load_dotenv, find_dotenv
+    _env_path = find_dotenv(usecwd=True)
+    if _env_path:
+        load_dotenv(_env_path, override=True)
 except ImportError:
     pass  # python-dotenv not installed — rely on shell environment
 
@@ -72,6 +75,15 @@ def review_with_llm(
     str
         Markdown-formatted AI review section, or an error/unavailable note.
     """
+    # Enforce loading from project .env to override stale system env vars
+    _project_root = Path(__file__).parent.parent.parent
+    _dotenv_path = _project_root / ".env"
+    if _dotenv_path.exists():
+        try:
+            from dotenv import load_dotenv
+            load_dotenv(str(_dotenv_path), override=True)
+        except ImportError:
+            pass
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
         return "_AI review unavailable: `DEEPSEEK_API_KEY` not set._"
@@ -110,9 +122,13 @@ def review_with_llm(
         content = response.choices[0].message.content or ""
         return content.strip()
     except Exception as exc:  # pylint: disable=broad-except
-        # Surface a readable error without leaking the key or stack trace
+        # Log full error to server console for debugging; return sanitized message to PR
+        import sys, traceback
+        print(f"[LLM] ERROR calling DeepSeek: {type(exc).__name__}: {exc}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         kind = type(exc).__name__
-        return f"_AI review failed ({kind}) — check server logs for details._"
+        detail = str(exc)[:200] if str(exc) else "no detail"
+        return f"_AI review failed ({kind}: {detail})_"
 
 
 # ---------------------------------------------------------------------------

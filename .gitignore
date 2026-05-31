@@ -33,6 +33,8 @@ config.local.py
 # Logs and local databases
 *.log
 *.db
+*.sqlite
+*.sqlite3
 .consistency_baseline.db
 chroma_db/
 
@@ -47,14 +49,17 @@ evaluation/repos/
 evaluation/results/
 evaluation/sampled_prs.json
 evaluation/annotations/pilot_tasks.json
+evaluation/data/
 
 # Generated experiment caches
 data/experiments/
 data/cache/*.json
 
-# Spec-driven local planning files
-.specify/
 
 # Private planning notes
 ARCHITECTURE.md
 ROADMAP.md
+
+# Others
+.claude
+.specify
