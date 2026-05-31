@@ -206,6 +206,34 @@ def test_cache_load_legacy_payload(tmp_path: Path):
     assert f.baseline_ref is None
 
 
+def test_analyze_commit_hydrates_when_files_empty(tmp_path: Path):
+    """When commit.files is [] (as from list_commits), _analyze_commit must
+    hydrate via client.get_commit so file analysis can proceed."""
+    pipeline, client = _make_pipeline(tmp_path)
+
+    # Simulate list_commits returning a commit with no files
+    list_commit = _commit(sha="hydrate-1", parents=["base"])
+    list_commit.files = []  # list endpoint doesn't include files
+
+    # get_commit should return the hydrated version with files
+    hydrated = _commit(sha="hydrate-1", parents=["base"])
+    hydrated.files = [{"filename": "src/real.py", "status": "modified"}]
+
+    fetch_results = {
+        ("hydrate-1", "src/real.py"): "def f():\n    return 2\n",
+        ("base", "src/real.py"): "def f():\n    return 1\n",
+    }
+    client.get_file_content = lambda o, r, p, ref: fetch_results.get((ref, p))
+    client.get_commit = lambda o, r, sha: hydrated
+
+    result = pipeline._analyze_commit("o", "r", list_commit)
+
+    assert result is not None
+    assert len(result.file_results) == 1
+    assert result.file_results[0].path == "src/real.py"
+    assert result.file_results[0].baseline_strategy == "parent_commit"
+
+
 def test_cache_round_trip_preserves_strategy(tmp_path: Path):
     pipeline, _ = _make_pipeline(tmp_path)
     new_result = RemoteCommitAnalysis(

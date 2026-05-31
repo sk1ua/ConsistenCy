@@ -1,50 +1,43 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# ConsistenCy Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Deterministic Scoring First
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+All risk signals MUST be produced by deterministic specialist analyzers. The scoring layer MUST be reproducible without an LLM key. LLM review is an optional augmentation, never a required scoring path. Every score change MUST be traceable to a specific rule, metric, or pattern in the agent that produced it.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Specialist Agent Architecture
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+Each review perspective (style, structure, semantics, duplication, security, evolution) MUST live in an independent agent module. Agents MUST NOT share mutable state. Each agent MUST emit typed `AgentResult` objects with score, evidence, confidence, and metadata. New signals MUST be added as new agents rather than expanding existing ones.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Test-First for Scoring Changes
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+Any change to agent scoring, the consensus protocol, or report schema MUST include tests before implementation. Tests MUST verify: (a) deterministic output for fixed inputs, (b) edge cases produce sensible scores, and (c) the collaboration coordinator produces the expected decision for known vote patterns.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. CLI + API Product Surfaces
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Every analysis capability MUST be exposed through both a CLI command and a Flask API endpoint. CLI output MUST support `--json-output` for machine consumption and Rich-formatted terminal output for humans. API responses MUST match the stable report schema. New commands or endpoints MUST be documented in README.md.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Explainable Output
+
+Every risk score above 0.5 MUST be accompanied by at least one evidence statement. The collaboration coordinator MUST produce: votes, quorum, decision, top findings, disagreement notes, and a reviewer handoff queue. The output schema MUST remain stable enough that evaluation scripts from previous versions can still read current reports.
+
+## Security Requirements
+
+- Security agent evidence categorized as CRITICAL/HIGH/MEDIUM MUST override lower-priority signals in the consensus protocol.
+- No secrets (API keys, tokens, credentials) MUST ever appear in reports, logs, or cached files. Token redaction MUST be applied before writing any captured command output to disk.
+- GitHub App mode MUST require an encryption key in production; development mode falls back to obfuscation with a clear warning.
+
+## Development Workflow
+
+- All changes MUST pass `python -m pytest -q` before merging.
+- Frontend JavaScript changes MUST pass `node --check`.
+- The deterministic demo (`python examples/multi_agent_demo.py`) MUST not regress.
+- Generated files (caches, databases, evaluation outputs, cloned repos) MUST be git-ignored.
+- Commits SHOULD follow conventional commit format: `type: description`.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes all other project practices. Amendments require a documented rationale and approval. Any PR that weakens determinism, removes explainability, or degrades test coverage below current levels MUST explicitly justify the trade-off in its description.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2026-05-31 | **Last Amended**: 2026-05-31

@@ -254,12 +254,23 @@ class RemoteAnalysisPipeline:
         repo: str,
         commit: CommitInfo,
     ) -> RemoteCommitAnalysis | None:
-        """Analyze a single commit."""
+        """Analyze a single commit.
+
+        The GitHub list-commits endpoint does NOT return the ``files`` field,
+        so we hydrate the commit detail when ``commit.files`` is empty.
+        """
         # Check cache
         cached = self._get_cached_analysis(owner, repo, commit.sha)
         if cached:
             return cached
-        
+
+        # Hydrate commit details when files are missing (list-commits endpoint
+        # omits the file list; only get_commit returns it).
+        if not commit.files:
+            hydrated = self.client.get_commit(owner, repo, commit.sha)
+            if hydrated is not None and hydrated.files:
+                commit = hydrated
+
         # Analyze changed files
         file_results: list[RemoteFileAnalysis] = []
         parent_sha: str | None = commit.parents[0]["sha"] if commit.parents else None

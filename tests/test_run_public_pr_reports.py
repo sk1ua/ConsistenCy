@@ -103,3 +103,88 @@ def test_main_missing_manifest(tmp_path, capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "manifest not found" in err
+
+
+def test_main_invalid_json_manifest(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    rc = main([
+        "--manifest", str(bad),
+        "--dry-run",
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "invalid JSON" in err
+
+
+def test_main_manifest_not_a_list(tmp_path, capsys):
+    obj = tmp_path / "obj.json"
+    obj.write_text('{"key": "value"}', encoding="utf-8")
+    rc = main([
+        "--manifest", str(obj),
+        "--dry-run",
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "JSON list" in err
+
+
+def test_process_entry_template_repo_name(tmp_path):
+    """_repo_dir_name replaces / with __ for filesystem-safe dirs."""
+    from run_public_pr_reports import _repo_dir_name
+    assert _repo_dir_name("owner/repo") == "owner__repo"
+    assert _repo_dir_name("single") == "single"
+
+
+def test_process_entry_with_explicit_model_report_path(tmp_path):
+    """When model_report_path is set, it is used instead of auto-derived."""
+    record = process_entry(
+        {
+            "repo": "owner/repo", "pr_number": 3,
+            "base_ref": "abc", "head_ref": "def",
+            "model_report_path": "evaluation/results/custom_path.json",
+        },
+        repos_dir=tmp_path / "repos",
+        results_dir=tmp_path / "results",
+        dry_run=True,
+    )
+    assert record["status"] == "dry_run"
+    assert record["report_path"].endswith("custom_path.json")
+
+
+def test_main_with_limit_respects_limit(tmp_path, capsys):
+    """--limit N processes at most N entries."""
+    entries = []
+    for i in range(10):
+        entries.append({
+            "repo": "owner/repo", "pr_number": i,
+            "base_ref": "abc", "head_ref": "def",
+        })
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(entries), encoding="utf-8")
+    summary_path = tmp_path / "summary.json"
+
+    rc = main([
+        "--manifest", str(manifest),
+        "--repos-dir", str(tmp_path / "repos"),
+        "--results-dir", str(tmp_path / "results"),
+        "--summary", str(summary_path),
+        "--limit", "3",
+        "--dry-run",
+    ])
+    assert rc == 0
+    out = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert out["total"] == 3
+    assert out["dry_run"] == 3
+
+
+def test_process_entry_missing_repo_field(tmp_path):
+    """Missing repo means status skipped, not a crash."""
+    record = process_entry(
+        {"pr_number": 1, "base_ref": "x", "head_ref": "y"},
+        repos_dir=tmp_path / "repos",
+        results_dir=tmp_path / "results",
+        dry_run=True,
+    )
+    assert record["status"] == "skipped"
+    assert "missing" in record["error"].lower()
