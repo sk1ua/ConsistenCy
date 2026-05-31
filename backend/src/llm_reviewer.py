@@ -14,6 +14,7 @@ must not appear in source, commits, or logs.
 from __future__ import annotations
 
 import os
+import sys
 import textwrap
 from pathlib import Path
 from typing import Any
