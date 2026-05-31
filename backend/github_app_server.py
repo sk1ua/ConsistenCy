@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from flask import Flask, jsonify, request
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 from src.github_app import (
     GitHubWebhookHandler,
@@ -31,7 +31,10 @@ from src.github_app import (
     RepositoryScanner,
 )
 
-load_dotenv()
+# Load .env from project root regardless of cwd; override any shell env vars
+_env_path = find_dotenv(usecwd=True)
+if _env_path:
+    load_dotenv(_env_path, override=True)
 
 
 def create_app() -> Flask:

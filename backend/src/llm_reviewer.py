@@ -19,8 +19,10 @@ from typing import Any
 
 # Load .env file if present (local development convenience)
 try:
-    from dotenv import load_dotenv
-    load_dotenv(override=False)  # env vars already set take priority
+    from dotenv import load_dotenv, find_dotenv
+    _env_path = find_dotenv(usecwd=True)
+    if _env_path:
+        load_dotenv(_env_path, override=True)
 except ImportError:
     pass  # python-dotenv not installed — rely on shell environment
 
