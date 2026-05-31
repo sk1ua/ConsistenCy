@@ -112,9 +112,13 @@ def review_with_llm(
         content = response.choices[0].message.content or ""
         return content.strip()
     except Exception as exc:  # pylint: disable=broad-except
-        # Surface a readable error without leaking the key or stack trace
+        # Log full error to server console for debugging; return sanitized message to PR
+        import sys, traceback
+        print(f"[LLM] ERROR calling DeepSeek: {type(exc).__name__}: {exc}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         kind = type(exc).__name__
-        return f"_AI review failed ({kind}) — check server logs for details._"
+        detail = str(exc)[:200] if str(exc) else "no detail"
+        return f"_AI review failed ({kind}: {detail})_"
 
 
 # ---------------------------------------------------------------------------
