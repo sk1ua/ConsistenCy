@@ -189,6 +189,8 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "claiming final results.",
         "- SemanticAgent uses AST/API/control-flow proxy signals, not formal "
         "semantic equivalence.",
+        "- Multi-agent means deterministic specialist analyzers plus consensus "
+        "coordination.",
         "",
     ]
     return "\n".join(lines)
