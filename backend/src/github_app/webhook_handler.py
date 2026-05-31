@@ -101,10 +101,15 @@ class GitHubWebhookHandler:
         WebhookEvent
             Normalized event object
         """
-        # Extract headers
-        event_type = headers.get("X-GitHub-Event", "unknown")
-        delivery_id = headers.get("X-GitHub-Delivery", "unknown")
-        signature = headers.get("X-Hub-Signature-256", "")
+        # Normalize header keys to lower-case for case-insensitive lookup.
+        # Werkzeug / Flask store headers with original casing in the environ,
+        # but proxies like ngrok, ELB, or nginx may change the key case.
+        _lower_headers = {k.lower(): v for k, v in headers.items()}
+
+        # Extract headers (case-insensitive)
+        event_type = _lower_headers.get("x-github-event", "unknown")
+        delivery_id = _lower_headers.get("x-github-delivery", "unknown")
+        signature = _lower_headers.get("x-hub-signature-256", "")
         
         # Parse payload
         if isinstance(body, bytes):
