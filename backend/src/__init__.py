@@ -4,15 +4,22 @@ ConsistenCy — Multi-Agent Code Consistency Analysis
 
 Package layout
 --------------
-agents/            : 7 specialised analysis agents + base class
-pipeline.py        : AnalysisPipeline orchestrator (requires gitpython)
-parser.py          : Legacy AST parser (kept for compatibility)
-extractor.py       : Knowledge extractor
-storage.py         : Vector store wrapper
-checker.py         : Consistency checker
-commit_pipeline.py : Commit-level pipeline utilities
-ml_naming_model.py : ML naming style model
-utils.py           : Shared utilities
+agents/            : 7 specialist analysis agents + base class
+collaboration/     : vote and consensus coordinator
+evaluation/        : metric, dataset, and ablation helpers
+github_app/        : installation, webhook, and repository scanner
+models/            : typed report contracts (schemas, enums)
+parsers/            : Python / JS / TS parsing helpers
+remote/            : GitHub API client and remote analysis pipeline
+scoring/            : risk composition and explainability
+baseline_storage.py : persistent baseline snapshot storage
+baseline_strategy.py: intelligent baseline selection engine
+exporter.py         : JSON / CSV / SQLite / Parquet result export
+llm_ready_snippets.py: code snippet extraction for LLM prompts
+llm_reviewer.py     : DeepSeek-powered AI code review
+pipeline.py         : AnalysisPipeline orchestrator
+pr_report_builder.py: explainable PR risk report construction
+review_suggestions.py: Markdown review comment renderer
 """
 
 __version__ = "2.5.0"

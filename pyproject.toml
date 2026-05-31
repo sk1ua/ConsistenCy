@@ -1,3 +1,52 @@
+[project]
+name = "consistency"
+version = "2.5.0"
+description = "Multi-signal code review assistant for pull requests"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "ConsistenCy Team"},
+]
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "rich>=13.7",
+    "GitPython>=3.1",
+    "flask>=3.0",
+    "astroid>=3.0",
+    "tree-sitter>=0.20",
+    "tree-sitter-python>=0.20",
+    "tree-sitter-javascript>=0.20",
+    "tree-sitter-typescript>=0.20",
+    "numpy>=1.26,<3",
+    "scikit-learn>=1.5,<2",
+    "python-dotenv>=1.0",
+    "PyGithub>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+llm = ["openai>=1.52,<2"]
+dev = [
+    "pytest>=8.2,<9",
+    "pytest-cov>=5.0,<7",
+    "ruff",
+]
+crypto = ["cryptography"]
+datasets = ["datasets", "huggingface_hub"]
+all = [
+    "openai>=1.52,<2",
+    "pytest>=8.2,<9",
+    "pytest-cov>=5.0,<7",
+    "ruff",
+    "cryptography",
+    "datasets",
+    "huggingface_hub",
+]
+
+[project.scripts]
+consistency = "backend.cli:cli"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["backend", "."]
@@ -7,3 +56,11 @@ norecursedirs = [
     "evaluation/repos",
     "pytest-cache-files-*",
 ]
+
+[tool.ruff]
+target-version = "py311"
+select = ["E9", "F63", "F7", "F82"]
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
