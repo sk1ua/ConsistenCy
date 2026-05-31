@@ -427,8 +427,21 @@ def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
             yield obj
 
 
-def _iter_hf(dataset: str, split: str) -> Iterable[dict[str, Any]]:
+def _iter_hf(dataset: str, split: str, config: str | None = None) -> Iterable[dict[str, Any]]:
     """Stream a HuggingFace dataset record-by-record.
+
+    Parameters
+    ----------
+    dataset : str
+        HF dataset name (e.g. ``foundry-ai/swe-prbench``).
+    split : str
+        Split name (e.g. ``train``). When the dataset requires a config
+        (sub-dataset), ``split`` is passed as the config name instead.
+    config : str | None
+        Explicit config name override. When set, ``load_dataset(name=config,
+        split=split)`` is used. When None (default), the legacy signature
+        ``load_dataset(name, split=split)`` is used where the dataset name
+        acts as both dataset and config.
 
     Imports lazily so the script works without ``datasets`` installed; the
     failure path emits the exact short message in the task spec, not a long
@@ -444,7 +457,14 @@ def _iter_hf(dataset: str, split: str) -> Iterable[dict[str, Any]]:
         )
         print(message, file=sys.stderr)
         raise SystemExit(2)
-    ds = load_dataset(dataset, split=split, streaming=True)
+
+    if config:
+        # Load a specific config (sub-dataset) within the dataset, e.g.
+        # load_dataset('foundry-ai/swe-prbench', 'prs', split='train')
+        ds = load_dataset(dataset, config, split=split, streaming=True)
+    else:
+        ds = load_dataset(dataset, split=split, streaming=True)
+
     for row in ds:
         if isinstance(row, dict):
             yield row
@@ -516,6 +536,14 @@ def main(argv: list[str] | None = None) -> int:
         help="HuggingFace dataset split (default: train).",
     )
     parser.add_argument(
+        "--hf-config", default=None,
+        help=(
+            "HuggingFace dataset config / sub-dataset name. "
+            "Required for datasets like foundry-ai/swe-prbench that have "
+            "multiple configs (e.g. prs, eval_split)."
+        ),
+    )
+    parser.add_argument(
         "--output", default="evaluation/sampled_prs.json",
         help="Output manifest path (default: evaluation/sampled_prs.json).",
     )
@@ -548,8 +576,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if source_dataset is None:
             source_dataset = args.hf_dataset
-        records = _iter_hf(args.hf_dataset, args.hf_split)
-        source_label = f"hf:{args.hf_dataset}#{args.hf_split}"
+        records = _iter_hf(args.hf_dataset, args.hf_split, config=args.hf_config)
+        source_label = f"hf:{args.hf_dataset}#{args.hf_config or args.hf_split}"
 
     manifest, stats = build_manifest(
         records,
