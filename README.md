@@ -125,11 +125,11 @@ ConsistenCy/
 ConsistenCy ships an end-to-end public PR evaluation workflow:
 
 ```bash
-# 1. Build a manifest from a public PR data file (or HF dataset)
+# 1. Build a weak-label manifest from SWE-PRBench
 python evaluation/scripts/build_public_pr_manifest.py \
-  --input evaluation/data/public_prs.jsonl \
+  --hf-dataset foundry-ai/swe-prbench \
   --output evaluation/sampled_prs.json \
-  --limit 50 --languages py,js,ts,tsx
+  --limit 50 --languages py,js,jsx,ts,tsx
 
 # 2. Run ConsistenCy on every sample (clones into evaluation/repos/)
 python evaluation/scripts/run_public_pr_reports.py \
@@ -148,14 +148,17 @@ Results table (placeholder until the sampled benchmark is run locally):
 | Metric | Value |
 |---|---:|
 | Samples | pending |
+| Evaluated | pending |
 | Precision@3 | pending |
 | Recall@3 | pending |
 | Spearman | pending |
 
-The public PR evaluation workflow is implemented; final numbers should be
-filled in after running the sampled benchmark locally and manually
-auditing the weak-label samples. See [Evaluation workflow](docs/EVALUATION.md)
-for the full procedure.
+The public PR evaluation workflow is implemented as an automatic
+weak-label benchmark: SWE-PRBench review comments provide the comparison
+signal, and `run_metrics.py` reports `n/a` for rank metrics such as
+Spearman when too few samples are evaluated. Manual audit is optional and
+only needed for stronger research claims. See
+[Evaluation workflow](docs/EVALUATION.md) for the full procedure.
 
 ## Limitations
 
@@ -163,8 +166,9 @@ for the full procedure.
   consensus coordination**, not autonomous LLM agents.
 - `SemanticAgent` uses AST / API / control-flow **proxy signals**, not
   formal semantic equivalence.
-- Public review comments are **weak labels** and should be manually
-  audited before publishing precision/recall numbers.
+- Public review comments are **weak labels**. They support an automatic
+  ranking benchmark, but manual audit is still needed before treating the
+  labels as gold-standard research annotations.
 - Remote analysis quality depends on the parent commit being available
   via the GitHub API and on rate limits; the per-file `baseline_strategy`
   field reports whether each comparison used the parent commit, a

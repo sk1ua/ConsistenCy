@@ -387,7 +387,7 @@ def _normalize_record(
                 "reason_categories": reason_categories,
                 "notes": (
                     "Weak label derived from public human review comments; "
-                    "manually audit before final reporting."
+                    "manual audit is only required for stronger research claims."
                 ),
             }
         ],
