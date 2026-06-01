@@ -2,6 +2,16 @@
 
 ConsistenCy can run as a GitHub App and post PR review comments automatically.
 
+The project now has two GitHub App surfaces:
+
+- `apps/api` is the TypeScript product shell for webhook verification,
+  event routing, and job orchestration.
+- `backend/github_app_server.py` remains the Python/Flask implementation
+  that can run repository scanning and comment posting directly.
+
+Prefer the TypeScript shell for new product/API work. Keep parser, agents,
+  scoring, evaluation, and model-heavy logic in Python.
+
 ## Prerequisites
 
 - Python 3.12+

@@ -46,11 +46,34 @@ schemas for runtime validation in API, web, and future GitHub App code.
   invokes `python backend/cli.py analyze-file ... --json-output`, parses
   stdout as JSON, and validates the payload through `packages/schema`
   before returning it.
+- `POST /github/webhook` receives GitHub App webhooks, verifies
+  `X-Hub-Signature-256` when `GITHUB_WEBHOOK_SECRET` is configured,
+  normalizes supported events, and enqueues review jobs.
+- `GET /jobs` and `GET /jobs/:id` expose the current in-memory job queue
+  for dashboard and orchestration smoke tests.
 
 The subprocess bridge uses `spawn(..., { shell: false })`, explicit
 arguments, a fixed repository working directory, and a timeout. This keeps
 the Python engine authoritative while giving TS clients a stable product
 API boundary.
+
+## GitHub App Shell
+
+The TypeScript GitHub App surface is intentionally thin:
+
+- TypeScript owns webhook authentication, event routing, and job lifecycle
+  state.
+- Pull request events enqueue `pull_request` jobs for `opened`,
+  `reopened`, `synchronize`, and `ready_for_review`.
+- Push events enqueue `push` jobs for `main` and `master` refs.
+- Unsupported events and non-actionable refs return `ignored` responses
+  without side effects.
+- Python remains responsible for repository parsing, agent scoring, report
+  generation, and future ML-backed analysis work.
+
+The current queue is in-memory so local development and tests stay simple.
+Production persistence can replace `InMemoryJobQueue` without changing the
+webhook contract.
 
 ## Commands
 
@@ -61,6 +84,12 @@ npm test
 npm run build
 npm run dev:api
 npm run dev:web
+```
+
+Webhook smoke example:
+
+```bash
+GITHUB_WEBHOOK_SECRET=dev-secret npm run dev:api
 ```
 
 ## Migration Policy
