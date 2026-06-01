@@ -91,6 +91,9 @@ python backend/cli.py analyze-remote pallets/flask --max-commits 20
 
 ```text
 ConsistenCy/
++-- apps/
+|   +-- api/                  # TypeScript API shell
+|   +-- web/                  # React/Vite dashboard shell
 +-- backend/
 |   +-- cli.py                  # CLI entrypoint
 |   +-- github_app_server.py    # GitHub App webhook server
@@ -109,9 +112,13 @@ ConsistenCy/
 |   +-- app.py                  # Flask dashboard API
 |   +-- templates/
 |   +-- static/
++-- packages/
+|   +-- schema/               # Shared TS/Zod report contracts
++-- schemas/                  # JSON Schema report contracts
 +-- docs/
 |   +-- PROJECT_OVERVIEW.md
 |   +-- output_schema.md
+|   +-- TYPESCRIPT_SHELL.md
 |   +-- EVALUATION.md
 |   +-- REMOTE_ANALYSIS.md
 |   +-- GITHUB_APP_SETUP.md
