@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
 import type { RunProcess } from "./pythonBridge";
+import prReportFixture from "../../../tests/fixtures/pr_report_minimal.json";
 
 const validAnalysisResult = {
   risk_score: 0.1,
@@ -102,6 +103,27 @@ function githubSignature(payload: unknown, secret: string): string {
   return `sha256=${createHmac("sha256", secret).update(JSON.stringify(payload)).digest("hex")}`;
 }
 
+async function listen(server: ReturnType<typeof createApiServer>): Promise<number> {
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected an ephemeral TCP port");
+  }
+  return address.port;
+}
+
+function enqueuePullRequestJob(jobs: InMemoryJobQueue) {
+  return jobs.enqueue({
+    kind: "pull_request",
+    deliveryId: "delivery-queued",
+    repository: "sk1ua/ConsistenCy",
+    pullRequestNumber: 31,
+    baseSha: "base123",
+    headSha: "head456",
+    installationId: 123
+  });
+}
+
 describe("createApiServer", () => {
   const servers: ReturnType<typeof createApiServer>[] = [];
 
@@ -125,13 +147,9 @@ describe("createApiServer", () => {
     });
     const server = createApiServer({ runProcess });
     servers.push(server);
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected an ephemeral TCP port");
-    }
+    const port = await listen(server);
 
-    const response = await postJson(address.port, "/analyze-file", {
+    const response = await postJson(port, "/analyze-file", {
       currentFile: "examples/demo_new.py",
       baselineFile: "examples/demo_base.py"
     });
@@ -144,11 +162,7 @@ describe("createApiServer", () => {
     const jobs = new InMemoryJobQueue();
     const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
     servers.push(server);
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected an ephemeral TCP port");
-    }
+    const port = await listen(server);
 
     const payload = {
       action: "synchronize",
@@ -161,7 +175,7 @@ describe("createApiServer", () => {
       }
     };
 
-    const response = await postJson(address.port, "/github/webhook", payload, {
+    const response = await postJson(port, "/github/webhook", payload, {
       "x-github-event": "pull_request",
       "x-github-delivery": "delivery-1",
       "x-hub-signature-256": githubSignature(payload, "secret")
@@ -182,7 +196,7 @@ describe("createApiServer", () => {
       }
     });
 
-    const jobsResponse = await getJson(address.port, "/jobs");
+    const jobsResponse = await getJson(port, "/jobs");
     expect(jobsResponse.status).toBe(200);
     expect(jobsResponse.body).toMatchObject({
       jobs: [
@@ -198,14 +212,10 @@ describe("createApiServer", () => {
     const jobs = new InMemoryJobQueue();
     const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
     servers.push(server);
-    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      throw new Error("Expected an ephemeral TCP port");
-    }
+    const port = await listen(server);
 
     const response = await postJson(
-      address.port,
+      port,
       "/github/webhook",
       { zen: "Keep it logically awesome." },
       {
@@ -218,5 +228,77 @@ describe("createApiServer", () => {
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({ code: "INVALID_SIGNATURE" });
     expect(jobs.list()).toHaveLength(0);
+  });
+
+  it("runs the next queued PR job and exposes the generated report", async () => {
+    const jobs = new InMemoryJobQueue();
+    const queued = enqueuePullRequestJob(jobs);
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const runProcess: RunProcess = async (command, args) => {
+      calls.push({ command, args });
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify(prReportFixture),
+        stderr: ""
+      };
+    };
+    const server = createApiServer({ jobs, runProcess });
+    servers.push(server);
+    const port = await listen(server);
+
+    const notReady = await getJson(port, `/jobs/${queued.id}/report`);
+    expect(notReady.status).toBe(409);
+    expect(notReady.body).toMatchObject({ code: "JOB_NOT_READY" });
+
+    const response = await postJson(port, "/jobs/run-next", {});
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      job: {
+        id: queued.id,
+        status: "succeeded",
+        result: {
+          base_ref: "base123",
+          head_ref: "head456"
+        }
+      }
+    });
+    expect(calls[0]?.command).toBe("python");
+    expect(calls[0]?.args).toEqual(
+      expect.arrayContaining(["pr-report", "--base", "base123", "--head", "head456", "--json-output"])
+    );
+
+    const report = await getJson(port, `/jobs/${queued.id}/report`);
+    expect(report.status).toBe(200);
+    expect(report.body).toMatchObject({
+      base_ref: "base123",
+      head_ref: "head456",
+      top_risky_files: [{ file: "docs/EVALUATION.md" }]
+    });
+  });
+
+  it("marks a job failed when Python PR report generation fails", async () => {
+    const jobs = new InMemoryJobQueue();
+    const queued = enqueuePullRequestJob(jobs);
+    const runProcess: RunProcess = async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "fatal: bad revision"
+    });
+    const server = createApiServer({ jobs, runProcess });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await postJson(port, `/jobs/${queued.id}/run`, {});
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({ code: "PYTHON_PR_REPORT_EXIT_NONZERO" });
+
+    const job = await getJson(port, `/jobs/${queued.id}`);
+    expect(job.status).toBe(200);
+    expect(job.body).toMatchObject({
+      job: {
+        id: queued.id,
+        status: "failed"
+      }
+    });
   });
 });

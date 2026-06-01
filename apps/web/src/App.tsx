@@ -1,7 +1,21 @@
+import { useEffect, useMemo, useState } from "react";
 import { parsePRReport, type PRReport } from "@consistency/schema";
 import fixture from "../../../tests/fixtures/pr_report_minimal.json";
 
-const report = parsePRReport(fixture);
+const fallbackReport = parsePRReport(fixture);
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8787";
+
+type JobStatus = "queued" | "running" | "succeeded" | "failed";
+
+type ReviewJob = {
+  id: string;
+  kind: "pull_request" | "push";
+  status: JobStatus;
+  repository: string;
+  pullRequestNumber?: number;
+  createdAt: string;
+  updatedAt: string;
+};
 
 type EvidenceItem = {
   signal_name: string;
@@ -103,6 +117,15 @@ function fileDeepDive(input: unknown): FileDeepDive | undefined {
   };
 }
 
+function countByStatus(jobs: ReviewJob[]): Record<JobStatus, number> {
+  return {
+    queued: jobs.filter(job => job.status === "queued").length,
+    running: jobs.filter(job => job.status === "running").length,
+    succeeded: jobs.filter(job => job.status === "succeeded").length,
+    failed: jobs.filter(job => job.status === "failed").length
+  };
+}
+
 function RiskGauge({ score }: { score: number }) {
   const degrees = Math.round(score * 270);
   return (
@@ -116,6 +139,41 @@ function RiskGauge({ score }: { score: number }) {
       <span>{pct(score)}</span>
       <small>risk</small>
     </div>
+  );
+}
+
+function JobStatusPanel({
+  jobs,
+  activeJob,
+  source
+}: {
+  jobs: ReviewJob[];
+  activeJob?: ReviewJob;
+  source: string;
+}) {
+  const counts = countByStatus(jobs);
+  return (
+    <section className="job-panel panel" aria-label="Job orchestration status">
+      <div className="panel-heading">
+        <span className="label">Job Orchestration</span>
+        <span className="muted">{source}</span>
+      </div>
+      <div className="job-grid">
+        {Object.entries(counts).map(([status, count]) => (
+          <div className="job-stat" key={status}>
+            <span>{status}</span>
+            <strong>{count}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="latest-job">
+        <strong>{activeJob?.repository ?? "Demo fixture"}</strong>
+        <span>
+          {activeJob?.pullRequestNumber ? `PR #${activeJob.pullRequestNumber}` : activeJob?.kind ?? "fallback report"} -{" "}
+          {activeJob?.status ?? "succeeded"}
+        </span>
+      </div>
+    </section>
   );
 }
 
@@ -212,7 +270,53 @@ function Handoff({ report }: { report: PRReport }) {
 }
 
 export function App() {
+  const [report, setReport] = useState<PRReport>(fallbackReport);
+  const [jobs, setJobs] = useState<ReviewJob[]>([]);
+  const [activeJob, setActiveJob] = useState<ReviewJob | undefined>();
+  const [source, setSource] = useState("Demo fixture fallback");
   const deepDive = fileDeepDive(report.file_deep_dive[0]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadJobs() {
+      try {
+        const jobsResponse = await fetch(`${apiBaseUrl}/jobs`, { signal: controller.signal });
+        if (!jobsResponse.ok) {
+          throw new Error(`jobs ${jobsResponse.status}`);
+        }
+        const jobsPayload = (await jobsResponse.json()) as { jobs?: ReviewJob[] };
+        const loadedJobs = Array.isArray(jobsPayload.jobs) ? jobsPayload.jobs : [];
+        setJobs(loadedJobs);
+
+        const latestSucceeded = [...loadedJobs].reverse().find(job => job.status === "succeeded");
+        setActiveJob(latestSucceeded ?? loadedJobs[loadedJobs.length - 1]);
+
+        if (!latestSucceeded) {
+          setSource(loadedJobs.length > 0 ? "API jobs loaded; no completed report yet" : "Demo fixture fallback");
+          return;
+        }
+
+        const reportResponse = await fetch(`${apiBaseUrl}/jobs/${encodeURIComponent(latestSucceeded.id)}/report`, {
+          signal: controller.signal
+        });
+        if (!reportResponse.ok) {
+          throw new Error(`report ${reportResponse.status}`);
+        }
+        setReport(parsePRReport(await reportResponse.json()));
+        setSource("Live API report");
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSource("Demo fixture fallback");
+        }
+      }
+    }
+
+    void loadJobs();
+    return () => controller.abort();
+  }, []);
+
+  const activeReportJob = useMemo(() => activeJob, [activeJob]);
 
   return (
     <div className="shell">
@@ -247,6 +351,8 @@ export function App() {
             <strong>{report.commit_count} commit</strong>
           </div>
         </header>
+
+        <JobStatusPanel jobs={jobs} activeJob={activeReportJob} source={source} />
 
         <section id="overview" className="hero-grid" aria-label="Consensus overview">
           <div className="panel decision-panel">

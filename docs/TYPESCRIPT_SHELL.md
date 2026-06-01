@@ -51,6 +51,10 @@ schemas for runtime validation in API, web, and future GitHub App code.
   normalizes supported events, and enqueues review jobs.
 - `GET /jobs` and `GET /jobs/:id` expose the current in-memory job queue
   for dashboard and orchestration smoke tests.
+- `POST /jobs/run-next` and `POST /jobs/:id/run` run queued PR jobs by
+  invoking Python `pr-report`.
+- `GET /jobs/:id/report` returns the schema-validated PR report for
+  completed jobs.
 
 The subprocess bridge uses `spawn(..., { shell: false })`, explicit
 arguments, a fixed repository working directory, and a timeout. This keeps
@@ -68,6 +72,9 @@ The TypeScript GitHub App surface is intentionally thin:
 - Push events enqueue `push` jobs for `main` and `master` refs.
 - Unsupported events and non-actionable refs return `ignored` responses
   without side effects.
+- The demo job runner turns `pull_request` jobs into PR reports by calling
+  `python backend/cli.py pr-report --json-output` and validating the
+  result through `packages/schema`.
 - Python remains responsible for repository parsing, agent scoring, report
   generation, and future ML-backed analysis work.
 

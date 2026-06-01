@@ -11,6 +11,8 @@ describe("App", () => {
     const html = renderToString(<App />);
 
     expect(html).toContain("Multi-agent PR coordination");
+    expect(html).toContain("Job Orchestration");
+    expect(html).toContain("Demo fixture fallback");
     expect(html).toContain("Highest-Risk Files");
     expect(html).toContain("Evidence Chain");
     expect(html).toContain("Human Review Queue");

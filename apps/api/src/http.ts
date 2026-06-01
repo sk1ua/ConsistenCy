@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { buildHealthPayload } from "./health";
 import { processGitHubWebhook, WebhookError } from "./githubWebhook";
 import { InMemoryJobQueue } from "./jobQueue";
+import { JobRunnerError, runNextReviewJob, runReviewJob } from "./jobRunner";
 import { analyzeFileWithPython, parseAnalyzeFileRequest, PythonBridgeError, type RunProcess } from "./pythonBridge";
 
 async function readBody(request: IncomingMessage): Promise<Buffer> {
@@ -25,11 +26,23 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 }
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown): void {
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+  response.writeHead(statusCode, {
+    "access-control-allow-headers": "content-type,x-github-event,x-github-delivery,x-hub-signature-256",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-origin": "*",
+    "content-type": "application/json; charset=utf-8"
+  });
   response.end(JSON.stringify(payload));
 }
 
 function sendError(response: ServerResponse, error: unknown): void {
+  if (error instanceof JobRunnerError) {
+    sendJson(response, error.statusCode, {
+      error: error.message,
+      code: error.code
+    });
+    return;
+  }
   if (error instanceof WebhookError) {
     sendJson(response, error.statusCode, {
       error: error.message,
@@ -68,6 +81,11 @@ export function createApiServer(
     try {
       const path = routePath(request.url);
 
+      if (request.method === "OPTIONS") {
+        sendJson(response, 204, {});
+        return;
+      }
+
       if (request.method === "GET" && path === "/health") {
         sendJson(response, 200, buildHealthPayload());
         return;
@@ -97,6 +115,42 @@ export function createApiServer(
 
       if (request.method === "GET" && path === "/jobs") {
         sendJson(response, 200, { jobs: jobs.list() });
+        return;
+      }
+
+      if (request.method === "POST" && path === "/jobs/run-next") {
+        const job = await runNextReviewJob(jobs, {
+          runProcess: options.runProcess
+        });
+        if (!job) {
+          sendJson(response, 404, { error: "No queued jobs", code: "NO_QUEUED_JOBS" });
+          return;
+        }
+        sendJson(response, 200, { job });
+        return;
+      }
+
+      if (request.method === "POST" && path.startsWith("/jobs/") && path.endsWith("/run")) {
+        const id = decodeURIComponent(path.slice("/jobs/".length, -"/run".length));
+        const job = await runReviewJob(jobs, id, {
+          runProcess: options.runProcess
+        });
+        sendJson(response, 200, { job });
+        return;
+      }
+
+      if (request.method === "GET" && path.startsWith("/jobs/") && path.endsWith("/report")) {
+        const id = decodeURIComponent(path.slice("/jobs/".length, -"/report".length));
+        const job = jobs.get(id);
+        if (!job) {
+          sendJson(response, 404, { error: "Job not found", code: "JOB_NOT_FOUND" });
+          return;
+        }
+        if (job.status !== "succeeded" || !job.result) {
+          sendJson(response, 409, { error: "Job report is not ready", code: "JOB_NOT_READY" });
+          return;
+        }
+        sendJson(response, 200, job.result);
         return;
       }
 

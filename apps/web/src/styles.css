@@ -200,6 +200,48 @@ h1 {
   font-weight: 800;
 }
 
+.job-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.job-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.job-stat,
+.latest-job {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.job-stat {
+  padding: 11px 12px;
+}
+
+.job-stat span,
+.latest-job span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.job-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+}
+
+.latest-job {
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+
 .decision-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 160px;
@@ -438,7 +480,8 @@ h1 {
   }
 
   .metric-strip,
-  .file-metrics {
+  .file-metrics,
+  .job-grid {
     grid-template-columns: 1fr;
     text-align: left;
   }

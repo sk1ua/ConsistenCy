@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseAnalysisResult, type AnalysisResult } from "@consistency/schema";
+import { parseAnalysisResult, parsePRReport, type AnalysisResult, type PRReport } from "@consistency/schema";
 
 const apiDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(apiDir, "../../..");
-const backendCli = resolve(repoRoot, "backend/cli.py");
+export const repoRoot = resolve(apiDir, "../../..");
+export const backendCli = resolve(repoRoot, "backend/cli.py");
 
 export type ProcessResult = {
   exitCode: number | null;
@@ -26,6 +26,14 @@ export type RunProcess = (
 export type AnalyzeFileRequest = {
   currentFile: string;
   baselineFile: string;
+};
+
+export type PRReportRequest = {
+  repoPath: string;
+  baseSha: string;
+  headSha: string;
+  baselineCommits?: number;
+  maxCommits?: number;
 };
 
 export class PythonBridgeError extends Error {
@@ -91,6 +99,24 @@ export function buildAnalyzeFileArgs(request: AnalyzeFileRequest): string[] {
   return [backendCli, "analyze-file", request.currentFile, request.baselineFile, "--json-output"];
 }
 
+export function buildPRReportArgs(request: PRReportRequest): string[] {
+  return [
+    backendCli,
+    "pr-report",
+    "--repo",
+    request.repoPath,
+    "--base",
+    request.baseSha,
+    "--head",
+    request.headSha,
+    "--baseline-commits",
+    String(request.baselineCommits ?? 50),
+    "--max-commits",
+    String(request.maxCommits ?? 40),
+    "--json-output"
+  ];
+}
+
 export function parseAnalyzeFileRequest(input: unknown): AnalyzeFileRequest {
   if (!input || typeof input !== "object") {
     throw new PythonBridgeError("Request body must be a JSON object", "INVALID_REQUEST");
@@ -146,5 +172,46 @@ export async function analyzeFileWithPython(
     return parseAnalysisResult(parsed);
   } catch (error) {
     throw new PythonBridgeError("Python analysis JSON failed schema validation", "PYTHON_SCHEMA_INVALID", error);
+  }
+}
+
+export async function buildPRReportWithPython(
+  request: PRReportRequest,
+  options: {
+    runProcess?: RunProcess;
+    timeoutMs?: number;
+  } = {}
+): Promise<PRReport> {
+  const runProcess = options.runProcess ?? defaultRunProcess;
+  const result = await runProcess("python", buildPRReportArgs(request), {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      PYTHONPATH: resolve(repoRoot, "backend")
+    },
+    timeoutMs: options.timeoutMs ?? 120_000
+  });
+
+  if (result.exitCode !== 0) {
+    throw new PythonBridgeError("Python PR report failed", "PYTHON_PR_REPORT_EXIT_NONZERO", {
+      exitCode: result.exitCode,
+      stderr: result.stderr.slice(0, 4000)
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new PythonBridgeError("Python PR report returned invalid JSON", "PYTHON_PR_REPORT_INVALID_JSON", {
+      stdout: result.stdout.slice(0, 1000),
+      error
+    });
+  }
+
+  try {
+    return parsePRReport(parsed);
+  } catch (error) {
+    throw new PythonBridgeError("Python PR report JSON failed schema validation", "PYTHON_PR_REPORT_SCHEMA_INVALID", error);
   }
 }

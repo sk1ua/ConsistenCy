@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeFileWithPython,
+  buildPRReportWithPython,
   buildAnalyzeFileArgs,
+  buildPRReportArgs,
   parseAnalyzeFileRequest,
   PythonBridgeError,
   type RunProcess
 } from "./pythonBridge";
+import prReportFixture from "../../../tests/fixtures/pr_report_minimal.json";
 
 const validAnalysisResult = {
   risk_score: 0.1,
@@ -57,6 +60,21 @@ describe("pythonBridge", () => {
     );
   });
 
+  it("builds pr-report CLI args without a shell string", () => {
+    expect(buildPRReportArgs({ repoPath: ".", baseSha: "base123", headSha: "head456" })).toEqual(
+      expect.arrayContaining([
+        "pr-report",
+        "--repo",
+        ".",
+        "--base",
+        "base123",
+        "--head",
+        "head456",
+        "--json-output"
+      ])
+    );
+  });
+
   it("validates analyze-file request bodies", () => {
     expect(parseAnalyzeFileRequest({ currentFile: "new.py", baselineFile: "old.py" })).toEqual({
       currentFile: "new.py",
@@ -99,5 +117,17 @@ describe("pythonBridge", () => {
     await expect(
       analyzeFileWithPython({ currentFile: "new.py", baselineFile: "old.py" }, { runProcess })
     ).rejects.toMatchObject({ code: "PYTHON_INVALID_JSON" });
+  });
+
+  it("returns schema-validated PR report JSON", async () => {
+    const runProcess: RunProcess = async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify(prReportFixture),
+      stderr: ""
+    });
+
+    await expect(
+      buildPRReportWithPython({ repoPath: ".", baseSha: "base123", headSha: "head456" }, { runProcess })
+    ).resolves.toMatchObject({ base_ref: "base123", head_ref: "head456" });
   });
 });
