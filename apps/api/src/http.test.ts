@@ -1,6 +1,8 @@
 import { request } from "node:http";
+import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer } from "./http";
+import { InMemoryJobQueue } from "./jobQueue";
 import type { RunProcess } from "./pythonBridge";
 
 const validAnalysisResult = {
@@ -46,18 +48,25 @@ const validAnalysisResult = {
   }
 };
 
-function postJson(port: number, path: string, payload: unknown): Promise<{ status: number; body: unknown }> {
+function httpJson(
+  port: number,
+  method: "GET" | "POST",
+  path: string,
+  payload?: unknown,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: unknown }> {
   return new Promise((resolve, reject) => {
-    const raw = JSON.stringify(payload);
+    const raw = payload === undefined ? "" : JSON.stringify(payload);
     const req = request(
       {
         hostname: "127.0.0.1",
         port,
         path,
-        method: "POST",
+        method,
         headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(raw)
+          ...(payload === undefined ? {} : { "content-type": "application/json" }),
+          ...(raw.length === 0 ? {} : { "content-length": String(Buffer.byteLength(raw)) }),
+          ...headers
         }
       },
       res => {
@@ -74,6 +83,23 @@ function postJson(port: number, path: string, payload: unknown): Promise<{ statu
     req.on("error", reject);
     req.end(raw);
   });
+}
+
+function postJson(
+  port: number,
+  path: string,
+  payload: unknown,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: unknown }> {
+  return httpJson(port, "POST", path, payload, headers);
+}
+
+function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
+  return httpJson(port, "GET", path);
+}
+
+function githubSignature(payload: unknown, secret: string): string {
+  return `sha256=${createHmac("sha256", secret).update(JSON.stringify(payload)).digest("hex")}`;
 }
 
 describe("createApiServer", () => {
@@ -112,5 +138,85 @@ describe("createApiServer", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ risk_score: 0.1 });
+  });
+
+  it("verifies GitHub pull_request webhooks and enqueues review jobs", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected an ephemeral TCP port");
+    }
+
+    const payload = {
+      action: "synchronize",
+      repository: { full_name: "sk1ua/ConsistenCy" },
+      installation: { id: 123 },
+      pull_request: {
+        number: 31,
+        base: { sha: "base123" },
+        head: { sha: "head456" }
+      }
+    };
+
+    const response = await postJson(address.port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-1",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+
+    expect(response.status).toBe(202);
+    expect(response.body).toMatchObject({
+      status: "enqueued",
+      event: "pull_request",
+      job: {
+        kind: "pull_request",
+        status: "queued",
+        repository: "sk1ua/ConsistenCy",
+        pullRequestNumber: 31,
+        baseSha: "base123",
+        headSha: "head456",
+        installationId: 123
+      }
+    });
+
+    const jobsResponse = await getJson(address.port, "/jobs");
+    expect(jobsResponse.status).toBe(200);
+    expect(jobsResponse.body).toMatchObject({
+      jobs: [
+        {
+          deliveryId: "delivery-1",
+          repository: "sk1ua/ConsistenCy"
+        }
+      ]
+    });
+  });
+
+  it("rejects GitHub webhooks with an invalid signature", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected an ephemeral TCP port");
+    }
+
+    const response = await postJson(
+      address.port,
+      "/github/webhook",
+      { zen: "Keep it logically awesome." },
+      {
+        "x-github-event": "ping",
+        "x-github-delivery": "delivery-2",
+        "x-hub-signature-256": "sha256=bad"
+      }
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({ code: "INVALID_SIGNATURE" });
+    expect(jobs.list()).toHaveLength(0);
   });
 });
