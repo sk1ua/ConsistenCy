@@ -185,8 +185,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "## Notes",
         "",
         "- Labels are weak labels derived from public human review comments.",
-        "- Samples marked needs_manual_audit should be manually checked before "
-        "claiming final results.",
+        "- Samples marked needs_manual_audit can still be used for the "
+        "automatic weak-label benchmark; manual audit is only required for "
+        "stronger gold-standard research claims.",
         "- SemanticAgent uses AST/API/control-flow proxy signals, not formal "
         "semantic equivalence.",
         "- Multi-agent means deterministic specialist analyzers plus consensus "
