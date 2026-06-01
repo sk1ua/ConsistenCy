@@ -37,6 +37,21 @@ schemas/      # source JSON Schema contracts generated/maintained from Python ou
 surfaces. It exports the machine-readable JSON Schema contracts plus Zod
 schemas for runtime validation in API, web, and future GitHub App code.
 
+## API Shell
+
+`apps/api` starts with a small Node/TypeScript HTTP service:
+
+- `GET /health` returns service metadata for smoke tests.
+- `POST /analyze-file` accepts `{ "currentFile": "...", "baselineFile": "..." }`,
+  invokes `python backend/cli.py analyze-file ... --json-output`, parses
+  stdout as JSON, and validates the payload through `packages/schema`
+  before returning it.
+
+The subprocess bridge uses `spawn(..., { shell: false })`, explicit
+arguments, a fixed repository working directory, and a timeout. This keeps
+the Python engine authoritative while giving TS clients a stable product
+API boundary.
+
 ## Commands
 
 ```bash
