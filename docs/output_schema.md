@@ -2,6 +2,24 @@
 
 This document describes the stable report fields used by the CLI, Flask API, Markdown review comments, and dashboard showcase.
 
+Machine-readable contracts live in:
+
+- `schemas/analysis_result.schema.json` for `backend/cli.py analyze-file`
+  and `src.pipeline.analyze_sources` output.
+- `schemas/pr_report.schema.json` for `AnalysisPipeline.pr_risk_report`
+  and `backend/cli.py pr-report --json-output`.
+
+These schemas are the compatibility boundary for the TypeScript product
+shell. Additive fields are allowed because downstream consumers validate
+with `additionalProperties: true`; removing or changing the type of an
+existing required field is a breaking change and should be treated as a
+schema-versioned migration.
+
+Contract tests live in `tests/test_report_contracts.py`. They validate a
+golden PR report fixture, the deterministic demo `analyze_sources`
+output, and a real local Git PR report when repository history is
+available.
+
 ## Signal Result
 
 ```json

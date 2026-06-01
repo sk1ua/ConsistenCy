@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sk1ua/ConsistenCy/schemas/analysis_result.schema.json",
+  "title": "ConsistenCy source analysis result",
+  "description": "Contract for backend.cli analyze-file and src.pipeline.analyze_sources JSON output.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "risk_score",
+    "risk_level",
+    "risk_colour",
+    "breakdown",
+    "signal_results",
+    "signal_composition",
+    "dominant_signals",
+    "confidence",
+    "explainability",
+    "agent_collaboration",
+    "evidence",
+    "agent_details",
+    "raw_score"
+  ],
+  "properties": {
+    "risk_score": { "$ref": "#/$defs/score" },
+    "raw_score": { "$ref": "#/$defs/score" },
+    "risk_level": { "type": "string", "minLength": 1 },
+    "risk_colour": { "type": "string", "minLength": 1 },
+    "breakdown": { "$ref": "#/$defs/signalScoreMap" },
+    "signal_results": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/signalResult" }
+    },
+    "signal_composition": { "$ref": "#/$defs/signalScoreMap" },
+    "dominant_signals": { "$ref": "#/$defs/stringList" },
+    "confidence": { "$ref": "#/$defs/score" },
+    "explainability": { "$ref": "#/$defs/explainability" },
+    "agent_collaboration": { "$ref": "#/$defs/agentCollaboration" },
+    "evidence": { "$ref": "#/$defs/stringList" },
+    "agent_details": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["score", "evidence", "elapsed_ms"],
+        "properties": {
+          "score": { "type": "number" },
+          "evidence": { "$ref": "#/$defs/stringList" },
+          "elapsed_ms": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "baseline_strategy": {
+      "type": ["string", "null"]
+    }
+  },
+  "$defs": {
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "signalScoreMap": {
+      "type": "object",
+      "additionalProperties": { "type": "number" },
+      "properties": {
+        "style": { "type": "number" },
+        "structural": { "type": "number" },
+        "semantic": { "type": "number" },
+        "duplication": { "type": "number" },
+        "security": { "type": "number" },
+        "evolution": { "type": "number" }
+      }
+    },
+    "signalResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["signal_name", "score", "evidence", "confidence", "metadata"],
+      "properties": {
+        "signal_name": { "type": "string", "minLength": 1 },
+        "score": { "$ref": "#/$defs/score" },
+        "evidence": { "$ref": "#/$defs/stringList" },
+        "confidence": { "$ref": "#/$defs/score" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "evidenceItem": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["signal_name", "text"],
+      "properties": {
+        "signal_name": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" },
+        "source": { "type": "string" },
+        "confidence": { "type": "number" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "explainability": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["dominant_signals", "contributions", "evidence_chain", "confidence"],
+      "properties": {
+        "dominant_signals": { "$ref": "#/$defs/stringList" },
+        "contributions": { "$ref": "#/$defs/signalScoreMap" },
+        "evidence_chain": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidenceItem" }
+        },
+        "confidence": { "$ref": "#/$defs/score" },
+        "uncertainty_note": { "type": "string" }
+      }
+    },
+    "agentCollaboration": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "scope",
+        "decision",
+        "consensus_score",
+        "confidence",
+        "quorum",
+        "participants",
+        "protocol"
+      ],
+      "properties": {
+        "scope": { "type": "string" },
+        "decision": { "type": "string" },
+        "consensus_score": { "$ref": "#/$defs/score" },
+        "confidence": { "$ref": "#/$defs/score" },
+        "quorum": { "type": "string" },
+        "participants": { "$ref": "#/$defs/stringList" },
+        "votes": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "top_findings": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "disagreements": { "$ref": "#/$defs/stringList" },
+        "next_actions": { "$ref": "#/$defs/stringList" },
+        "review_queue": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "protocol": { "type": "string" }
+      }
+    }
+  }
+}
