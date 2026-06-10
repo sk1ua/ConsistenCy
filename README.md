@@ -14,7 +14,7 @@ The project is designed as a portfolio-ready AI4SE system: small enough to run l
 - Scores style, structure, semantics, duplication, security, and evolution drift.
 - Coordinates specialist agent votes into a deterministic consensus decision.
 - Produces explainable PR reports with evidence, confidence, top risky files, and review queues.
-- Exposes the result through a CLI, Flask API, Markdown review comment renderer, and a dashboard showcase.
+- Exposes the result through Python CLI/report builders and a TypeScript product shell for API, dashboard, GitHub webhooks, and job orchestration.
 
 ## Multi-Agent Review Board
 
@@ -34,6 +34,8 @@ The collaboration layer emits quorum, votes, disagreement notes, merge decision,
 ## Demo Surface
 
 The screenshot above is generated from the `/showcase` route. It demonstrates the data visualization layer: risk gauge, normalized signal chart, agent vote cards, evidence chain, and reviewer handoff queue.
+
+The React/Vite dashboard in `apps/web` is the current TypeScript product shell surface. It reads live job/report data from `apps/api` when available and falls back to a deterministic fixture so the portfolio demo never opens blank.
 
 ## Quick Start
 
@@ -67,6 +69,20 @@ Then open:
 http://127.0.0.1:8000/showcase
 ```
 
+Run the TypeScript product shell:
+
+```bash
+npm install
+npm run dev:api
+npm run dev:web
+```
+
+Then open:
+
+```text
+http://localhost:5173/
+```
+
 ## CLI Examples
 
 Generate a PR-style report for a local Git repository:
@@ -91,6 +107,9 @@ python backend/cli.py analyze-remote pallets/flask --max-commits 20
 
 ```text
 ConsistenCy/
++-- apps/
+|   +-- api/                  # TypeScript API shell
+|   +-- web/                  # React/Vite dashboard shell
 +-- backend/
 |   +-- cli.py                  # CLI entrypoint
 |   +-- github_app_server.py    # GitHub App webhook server
@@ -109,9 +128,13 @@ ConsistenCy/
 |   +-- app.py                  # Flask dashboard API
 |   +-- templates/
 |   +-- static/
++-- packages/
+|   +-- schema/               # Shared TS/Zod report contracts
++-- schemas/                  # JSON Schema report contracts
 +-- docs/
 |   +-- PROJECT_OVERVIEW.md
 |   +-- output_schema.md
+|   +-- TYPESCRIPT_SHELL.md
 |   +-- EVALUATION.md
 |   +-- REMOTE_ANALYSIS.md
 |   +-- GITHUB_APP_SETUP.md
@@ -143,15 +166,15 @@ python evaluation/scripts/run_metrics.py \
   --markdown-output evaluation/results/metrics_summary.md
 ```
 
-Results table (placeholder until the sampled benchmark is run locally):
+Current automatic weak-label benchmark:
 
 | Metric | Value |
 |---|---:|
-| Samples | pending |
-| Evaluated | pending |
-| Precision@3 | pending |
-| Recall@3 | pending |
-| Spearman | pending |
+| Samples | 20 |
+| Evaluated | 1 |
+| Precision@3 | 0.333 |
+| Recall@3 | 0.250 |
+| Spearman | n/a |
 
 The public PR evaluation workflow is implemented as an automatic
 weak-label benchmark: SWE-PRBench review comments provide the comparison
@@ -188,9 +211,12 @@ only needed for stronger research claims. See
 ```bash
 python -m pytest -q
 node --check frontend/static/js/showcase.js
+npm run typecheck
+npm test
+npm run build
 ```
 
-The current release-ready workspace passes the full Python test suite and browser-verifies the `/showcase` dashboard.
+The current release-ready workspace keeps Python as the analysis engine and TypeScript as the product shell. The web dashboard can be browser-verified at `http://localhost:5173/`.
 
 ## GitHub Release Hygiene
 
@@ -207,4 +233,4 @@ Generated caches, local databases, evaluation result dumps, and cloned evaluatio
 
 ## Status
 
-ConsistenCy is a research prototype and portfolio project. Python analysis is the strongest path; JavaScript and TypeScript parsing are supported where tree-sitter dependencies are available. The scoring layer is deterministic by design so that behavior is reproducible and easy to evaluate.
+ConsistenCy is a research prototype and portfolio project. Python owns parser, agents, scoring, evaluation, and model-heavy analysis. TypeScript owns API boundaries, schema validation, GitHub webhook intake, job orchestration, and the React dashboard. The scoring layer is deterministic by design so that behavior is reproducible and easy to evaluate.

@@ -44,6 +44,10 @@ chroma_db/
 htmlcov/
 pytest-cache-files-*/
 
+# Node / TypeScript workspace
+node_modules/
+*.tsbuildinfo
+
 # Evaluation working copies and generated reports
 evaluation/repos/
 evaluation/results/

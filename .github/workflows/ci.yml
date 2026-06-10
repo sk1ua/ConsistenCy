@@ -37,6 +37,24 @@ jobs:
         run: |
           node --check frontend/static/js/showcase.js
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install TypeScript workspace dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: TypeScript tests
+        run: npm test
+
+      - name: TypeScript build
+        run: npm run build
+
       - name: Run tests
         env:
           PYTHONPATH: backend
