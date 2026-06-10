@@ -1,5 +1,4 @@
 import { resolve } from "node:path";
-import type { PRReport } from "@consistency/schema";
 import type { InMemoryJobQueue, ReviewJob } from "./jobQueue";
 import {
   buildPRReportWithPython,
@@ -7,6 +6,7 @@ import {
   repoRoot,
   type RunProcess
 } from "./pythonBridge";
+import { adaptLegacyReport } from "./review/legacyReportAdapter";
 
 export class JobRunnerError extends Error {
   constructor(
@@ -35,14 +35,16 @@ function repoPathForJob(job: ReviewJob): string {
 
 function assertRunnablePullRequest(job: ReviewJob): asserts job is ReviewJob & {
   kind: "pull_request";
+  repository: string;
+  pullRequestNumber: number;
   baseSha: string;
   headSha: string;
 } {
   if (job.kind !== "pull_request") {
     throw new JobRunnerError("Only pull_request jobs can build PR reports in the demo runner", "UNSUPPORTED_JOB_KIND");
   }
-  if (!job.baseSha || !job.headSha) {
-    throw new JobRunnerError("Pull request job is missing base/head SHAs", "INVALID_JOB");
+  if (!job.repository || !job.pullRequestNumber || !job.baseSha || !job.headSha) {
+    throw new JobRunnerError("Pull request job is missing repository, number, or base/head SHAs", "INVALID_JOB");
   }
 }
 
@@ -68,7 +70,7 @@ export async function runReviewJob(
   try {
     assertRunnablePullRequest(job);
     jobs.markRunning(job.id);
-    const result: PRReport = await buildPRReportWithPython(
+    const legacyReport = await buildPRReportWithPython(
       {
         repoPath: repoPathForJob(job),
         baseSha: job.baseSha,
@@ -79,6 +81,14 @@ export async function runReviewJob(
         timeoutMs: options.timeoutMs
       }
     );
+    const result = adaptLegacyReport(legacyReport, {
+      jobId: job.id,
+      repositoryFullName: job.repository,
+      pullRequestNumber: job.pullRequestNumber,
+      baseSha: job.baseSha,
+      headSha: job.headSha,
+      createdAt: new Date().toISOString()
+    });
     const updated = jobs.markSucceeded(job.id, result);
     if (!updated) {
       throw new JobRunnerError("Job disappeared while running", "JOB_NOT_FOUND", 404);

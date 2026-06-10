@@ -1,7 +1,12 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseAnalysisResult, parsePRReport, type AnalysisResult, type PRReport } from "@consistency/schema";
+import {
+  parseAnalysisResult,
+  parseLegacyPRReport,
+  type AnalysisResult,
+  type LegacyPRReport
+} from "@consistency/schema";
 
 const apiDir = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(apiDir, "../../..");
@@ -181,7 +186,7 @@ export async function buildPRReportWithPython(
     runProcess?: RunProcess;
     timeoutMs?: number;
   } = {}
-): Promise<PRReport> {
+): Promise<LegacyPRReport> {
   const runProcess = options.runProcess ?? defaultRunProcess;
   const result = await runProcess("python", buildPRReportArgs(request), {
     cwd: repoRoot,
@@ -210,7 +215,7 @@ export async function buildPRReportWithPython(
   }
 
   try {
-    return parsePRReport(parsed);
+    return parseLegacyPRReport(parsed);
   } catch (error) {
     throw new PythonBridgeError("Python PR report JSON failed schema validation", "PYTHON_PR_REPORT_SCHEMA_INVALID", error);
   }

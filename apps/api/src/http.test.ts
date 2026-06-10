@@ -257,8 +257,11 @@ describe("createApiServer", () => {
         id: queued.id,
         status: "succeeded",
         result: {
-          base_ref: "base123",
-          head_ref: "head456"
+          jobId: queued.id,
+          repositoryFullName: "sk1ua/ConsistenCy",
+          pullRequestNumber: 31,
+          baseSha: "base123",
+          headSha: "head456"
         }
       }
     });
@@ -270,9 +273,10 @@ describe("createApiServer", () => {
     const report = await getJson(port, `/jobs/${queued.id}/report`);
     expect(report.status).toBe(200);
     expect(report.body).toMatchObject({
-      base_ref: "base123",
-      head_ref: "head456",
-      top_risky_files: [{ file: "docs/EVALUATION.md" }]
+      jobId: queued.id,
+      baseSha: "base123",
+      headSha: "head456",
+      findings: [{ file: "docs/EVALUATION.md", confidence: "hypothesis" }]
     });
   });
 

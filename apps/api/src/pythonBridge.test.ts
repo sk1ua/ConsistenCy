@@ -119,7 +119,7 @@ describe("pythonBridge", () => {
     ).rejects.toMatchObject({ code: "PYTHON_INVALID_JSON" });
   });
 
-  it("returns schema-validated PR report JSON", async () => {
+  it("returns schema-validated legacy PR report JSON", async () => {
     const runProcess: RunProcess = async () => ({
       exitCode: 0,
       stdout: JSON.stringify(prReportFixture),

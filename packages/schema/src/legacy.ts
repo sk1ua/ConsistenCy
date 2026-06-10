@@ -154,11 +154,3 @@ export function parseAnalysisResult(input: unknown): AnalysisResult {
 export function parseLegacyPRReport(input: unknown): LegacyPRReport {
   return legacyPRReportSchema.parse(input);
 }
-
-/** @deprecated Use LegacyPRReport only at the Python compatibility boundary. */
-export type PRReport = LegacyPRReport;
-/** @deprecated Use legacyPRReportSchema only at the Python compatibility boundary. */
-export const prReportSchema = legacyPRReportSchema;
-/** @deprecated Use parseLegacyPRReport only at the Python compatibility boundary. */
-export const parsePRReport = parseLegacyPRReport;
-
