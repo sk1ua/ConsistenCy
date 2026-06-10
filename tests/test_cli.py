@@ -22,6 +22,7 @@ from cli import cli  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def test_cli_group_help():
+    """``consistency --help`` prints usage and the project name."""
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
@@ -29,6 +30,7 @@ def test_cli_group_help():
 
 
 def test_cli_version():
+    """``--version`` prints the current version number."""
     runner = CliRunner()
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
