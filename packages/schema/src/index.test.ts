@@ -1,20 +1,80 @@
 import prReportFixture from "../../../tests/fixtures/pr_report_minimal.json" assert { type: "json" };
 import { describe, expect, it } from "vitest";
-import { jsonSchemas, parsePRReport, prReportSchema } from "./index";
+import {
+  agentRunSchema,
+  demoReviewReport,
+  errorResponseSchema,
+  jsonSchemas,
+  legacyPRReportSchema,
+  parseLegacyPRReport,
+  reviewFindingSchema,
+  reviewPlanSchema,
+  reviewReportSchema,
+  riskLevelForScore
+} from "./index";
+
+const findingBase = {
+  id: "finding-1",
+  agent: "Security",
+  title: "Unsafe API exposure",
+  severity: "high",
+  file: "apps/api/src/http.ts",
+  evidence: "The route is registered without an authorization guard.",
+  reasoning: "Untrusted clients may invoke management operations.",
+  recommendation: "Require a bearer token for management routes."
+} as const;
 
 describe("@consistency/schema", () => {
-  it("exports the JSON Schema contracts", () => {
+  it("keeps the Python JSON contracts available at the compatibility boundary", () => {
     expect(jsonSchemas.prReport.title).toBe("ConsistenCy PR risk report");
-    expect(jsonSchemas.analysisResult.title).toBe("ConsistenCy source analysis result");
+    expect(parseLegacyPRReport(prReportFixture).base_ref).toBe("base123");
+    expect(() => legacyPRReportSchema.parse({ base_ref: "main" })).toThrow();
   });
 
-  it("parses the golden PR report fixture", () => {
-    const parsed = parsePRReport(prReportFixture);
-    expect(parsed.base_ref).toBe("base123");
-    expect(parsed.top_risky_files[0]?.file).toBe("docs/EVALUATION.md");
+  it("enforces evidence requirements for confirmed findings", () => {
+    const confirmed = reviewFindingSchema.parse({
+      ...findingBase,
+      confidence: "confirmed",
+      startLine: 94,
+      endLine: 100
+    });
+    expect(confirmed.confidence).toBe("confirmed");
+    expect(() => reviewFindingSchema.parse({ ...findingBase, confidence: "confirmed" })).toThrow();
+    expect(() => reviewFindingSchema.parse({
+      ...findingBase,
+      confidence: "confirmed",
+      startLine: 100,
+      endLine: 94
+    })).toThrow();
   });
 
-  it("rejects incomplete PR reports", () => {
-    expect(() => prReportSchema.parse({ base_ref: "main" })).toThrow();
+  it("requires explicit uncertainty for hypotheses", () => {
+    const hypothesis = reviewFindingSchema.parse({
+      ...findingBase,
+      confidence: "hypothesis",
+      uncertainty: "Deployment-level authentication was not visible."
+    });
+    expect(hypothesis.startLine).toBeUndefined();
+    expect(() => reviewFindingSchema.parse({ ...findingBase, confidence: "hypothesis" })).toThrow();
+  });
+
+  it("parses plans, agent runs, reports, and API errors", () => {
+    expect(reviewPlanSchema.parse({
+      enabledAgents: ["Security", "Correctness"],
+      skippedAgents: ["Style"],
+      riskAreas: ["webhook"],
+      reason: "The PR changes request handling."
+    }).enabledAgents).toHaveLength(2);
+    expect(agentRunSchema.parse(demoReviewReport.agentRuns[0]).status).toBe("succeeded");
+    expect(reviewReportSchema.parse(demoReviewReport).score).toBe(74);
+    expect(errorResponseSchema.parse({ error: { code: "NOT_FOUND", message: "Missing" } }).error.code).toBe("NOT_FOUND");
+  });
+
+  it("maps quality scores to risk levels", () => {
+    expect(riskLevelForScore(39)).toBe("critical");
+    expect(riskLevelForScore(40)).toBe("high");
+    expect(riskLevelForScore(60)).toBe("medium");
+    expect(riskLevelForScore(80)).toBe("low");
   });
 });
+
