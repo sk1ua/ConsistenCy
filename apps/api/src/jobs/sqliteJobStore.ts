@@ -146,6 +146,21 @@ export class SQLiteJobStore implements ReviewJobStore {
     return row ? this.jobFromRow(row) : undefined;
   }
 
+  claimNextQueued(): ReviewJob | undefined {
+    return this.database.transaction(() => {
+      const queued = this.database.prepare(`
+        SELECT id FROM jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1
+      `).get() as { id: string } | undefined;
+      if (!queued) return undefined;
+      const now = new Date().toISOString();
+      const claimed = this.database.prepare(`
+        UPDATE jobs SET status = 'running', started_at = ?, updated_at = ?, error = NULL
+        WHERE id = ? AND status = 'queued'
+      `).run(now, now, queued.id);
+      return claimed.changes === 1 ? this.get(queued.id) : undefined;
+    })();
+  }
+
   markRunning(id: string): ReviewJob | undefined {
     const now = new Date().toISOString();
     this.database.prepare(`

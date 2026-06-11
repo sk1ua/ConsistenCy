@@ -10,6 +10,7 @@ export const envSchema = z.object({
   DATABASE_PATH: z.string().trim().min(1).default(".consistency/consistency.db"),
   LLM_PROVIDER: z.enum(["mock", "deepseek", "openai"]).optional(),
   CONSISTENCY_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
+  CONSISTENCY_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(1_000),
   CONSISTENCY_API_TOKEN: optionalSecret,
   CONSISTENCY_ALLOWED_ORIGINS: z.string().trim().default("http://127.0.0.1:5173,http://localhost:5173"),
   GITHUB_APP_ID: optionalSecret,

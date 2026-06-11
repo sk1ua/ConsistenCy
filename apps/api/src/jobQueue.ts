@@ -56,6 +56,7 @@ export interface ReviewJobStore {
   list(): ReviewJob[];
   get(id: string): ReviewJob | undefined;
   nextQueued(): ReviewJob | undefined;
+  claimNextQueued(): ReviewJob | undefined;
   markRunning(id: string): ReviewJob | undefined;
   markSucceeded(id: string, result: ReviewReport): ReviewJob | undefined;
   markFailed(id: string, error: string): ReviewJob | undefined;
@@ -205,6 +206,11 @@ export class InMemoryJobQueue implements ReviewJobStore {
     };
     this.jobs.set(id, updated);
     return updated;
+  }
+
+  claimNextQueued(): ReviewJob | undefined {
+    const job = this.nextQueued();
+    return job ? this.markRunning(job.id) : undefined;
   }
 
   saveAgentRun(agentRun: AgentRun): void {

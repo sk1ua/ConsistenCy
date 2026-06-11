@@ -54,13 +54,14 @@ export async function runReviewJob(
   options: {
     runProcess?: RunProcess;
     timeoutMs?: number;
+    alreadyClaimed?: boolean;
   } = {}
 ): Promise<ReviewJob> {
   const job = jobs.get(jobId);
   if (!job) {
     throw new JobRunnerError("Job not found", "JOB_NOT_FOUND", 404);
   }
-  if (job.status === "running") {
+  if (job.status === "running" && !options.alreadyClaimed) {
     throw new JobRunnerError("Job is already running", "JOB_ALREADY_RUNNING", 409);
   }
   if (job.status === "succeeded") {
@@ -69,7 +70,7 @@ export async function runReviewJob(
 
   try {
     assertRunnablePullRequest(job);
-    jobs.markRunning(job.id);
+    if (!options.alreadyClaimed) jobs.markRunning(job.id);
     const legacyReport = await buildPRReportWithPython(
       {
         repoPath: repoPathForJob(job),
@@ -107,9 +108,9 @@ export async function runNextReviewJob(
     timeoutMs?: number;
   } = {}
 ): Promise<ReviewJob | undefined> {
-  const job = jobs.nextQueued();
+  const job = jobs.claimNextQueued();
   if (!job) {
     return undefined;
   }
-  return runReviewJob(jobs, job.id, options);
+  return runReviewJob(jobs, job.id, { ...options, alreadyClaimed: true });
 }

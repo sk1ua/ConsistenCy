@@ -124,4 +124,18 @@ describe("SQLiteJobStore", () => {
       database.close();
     }
   });
+
+  it("claims each queued job only once", () => {
+    const { database, store } = createStore();
+    try {
+      const first = acceptJob(store, "delivery-claim-1");
+      const second = acceptJob(store, "delivery-claim-2");
+      expect(store.claimNextQueued()?.id).toBe(first.id);
+      expect(store.claimNextQueued()?.id).toBe(second.id);
+      expect(store.claimNextQueued()).toBeUndefined();
+      expect(store.list().every(job => job.status === "running")).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
 });

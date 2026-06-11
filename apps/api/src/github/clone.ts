@@ -53,9 +53,7 @@ export async function clonePullRequestWorkspace(options: {
   const workspaceRoot = resolve(options.workspaceRoot ?? ".consistency/workspaces");
   const workspacePath = workspacePathForJob(workspaceRoot, options.jobId);
   mkdirSync(workspaceRoot, { recursive: true });
-  if (existsSync(workspacePath)) {
-    throw new Error("Review workspace already exists");
-  }
+  if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
 
   const runGit = options.runGit ?? defaultRunGit;
   const env: NodeJS.ProcessEnv = {
