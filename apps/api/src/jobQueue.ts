@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ReviewReport } from "@consistency/schema";
+import type { AgentRun, ReviewReport } from "@consistency/schema";
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
 
@@ -13,6 +13,8 @@ export type ReviewJob = {
   repository: string;
   repoPath?: string;
   installationId?: number;
+  senderLogin?: string;
+  action?: string;
   pullRequestNumber?: number;
   baseSha?: string;
   headSha?: string;
@@ -48,9 +50,27 @@ export type WebhookAcceptance = {
   job?: ReviewJob;
 };
 
-export class InMemoryJobQueue {
+export interface ReviewJobStore {
+  enqueue(input: CreateReviewJobInput): ReviewJob;
+  list(): ReviewJob[];
+  get(id: string): ReviewJob | undefined;
+  nextQueued(): ReviewJob | undefined;
+  markRunning(id: string): ReviewJob | undefined;
+  markSucceeded(id: string, result: ReviewReport): ReviewJob | undefined;
+  markFailed(id: string, error: string): ReviewJob | undefined;
+  updateStatus(id: string, status: JobStatus, error?: string): ReviewJob | undefined;
+  acceptWebhookJob(input: WebhookJobInput): WebhookAcceptance;
+  recordWebhookDelivery(input: Omit<WebhookDelivery, "receivedAt"> & { receivedAt?: string }): WebhookAcceptance;
+  getWebhookDelivery(deliveryId: string): WebhookDelivery | undefined;
+  saveAgentRun(agentRun: AgentRun): void;
+  listAgentRuns(jobId: string): AgentRun[];
+  recoverStaleRunningJobs(cutoff: Date): number;
+}
+
+export class InMemoryJobQueue implements ReviewJobStore {
   private readonly jobs = new Map<string, ReviewJob>();
   private readonly deliveries = new Map<string, WebhookDelivery>();
+  private readonly agentRuns = new Map<string, AgentRun>();
   enqueue(input: CreateReviewJobInput): ReviewJob {
     const now = new Date().toISOString();
     const job: ReviewJob = {
@@ -182,5 +202,33 @@ export class InMemoryJobQueue {
     };
     this.jobs.set(id, updated);
     return updated;
+  }
+
+  saveAgentRun(agentRun: AgentRun): void {
+    this.agentRuns.set(agentRun.id, agentRun);
+  }
+
+  listAgentRuns(jobId: string): AgentRun[] {
+    return [...this.agentRuns.values()]
+      .filter(agentRun => agentRun.jobId === jobId)
+      .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+  }
+
+  recoverStaleRunningJobs(cutoff: Date): number {
+    let recovered = 0;
+    for (const job of this.jobs.values()) {
+      if (job.status === "running" && job.startedAt && new Date(job.startedAt) < cutoff) {
+        this.jobs.set(job.id, {
+          ...job,
+          status: "queued",
+          startedAt: undefined,
+          finishedAt: undefined,
+          updatedAt: new Date().toISOString(),
+          error: "Recovered after an interrupted worker run"
+        });
+        recovered += 1;
+      }
+    }
+    return recovered;
   }
 }

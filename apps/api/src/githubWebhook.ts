@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { InMemoryJobQueue, ReviewJob } from "./jobQueue";
+import type { ReviewJob, ReviewJobStore } from "./jobQueue";
 
 export class WebhookError extends Error {
   constructor(
@@ -86,7 +86,7 @@ function repositoryName(payload: Record<string, unknown>): string | undefined {
 function enqueuePullRequest(
   payload: Record<string, unknown>,
   deliveryId: string,
-  jobs: InMemoryJobQueue
+  jobs: ReviewJobStore
 ): WebhookResult {
   const action = stringField(payload, "action");
   if (!["opened", "reopened", "synchronize", "ready_for_review"].includes(action ?? "")) {
@@ -123,7 +123,9 @@ function enqueuePullRequest(
       pullRequestNumber,
       baseSha,
       headSha,
-      installationId: installation
+      installationId: installation,
+      senderLogin,
+      action
     }
   });
 
@@ -136,7 +138,7 @@ export function processGitHubWebhook(options: {
   headers: WebhookHeaders;
   body: Buffer;
   secret: string;
-  jobs: InMemoryJobQueue;
+  jobs: ReviewJobStore;
 }): WebhookResult {
   const event = headerValue(options.headers, "x-github-event");
   const deliveryId = headerValue(options.headers, "x-github-delivery");

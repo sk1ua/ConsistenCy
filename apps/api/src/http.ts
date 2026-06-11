@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { buildHealthPayload } from "./health";
 import { processGitHubWebhook, WebhookError } from "./githubWebhook";
-import { InMemoryJobQueue } from "./jobQueue";
+import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
 import { JobRunnerError, runNextReviewJob, runReviewJob } from "./jobRunner";
 import { analyzeFileWithPython, parseAnalyzeFileRequest, PythonBridgeError, type RunProcess } from "./pythonBridge";
 
@@ -70,7 +70,7 @@ function routePath(url: string | undefined): string {
 export function createApiServer(
   options: {
     runProcess?: RunProcess;
-    jobs?: InMemoryJobQueue;
+    jobs?: ReviewJobStore;
     githubWebhookSecret?: string;
   } = {}
 ) {

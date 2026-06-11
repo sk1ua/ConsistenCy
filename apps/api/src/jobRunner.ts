@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { InMemoryJobQueue, ReviewJob } from "./jobQueue";
+import type { ReviewJob, ReviewJobStore } from "./jobQueue";
 import {
   buildPRReportWithPython,
   PythonBridgeError,
@@ -49,7 +49,7 @@ function assertRunnablePullRequest(job: ReviewJob): asserts job is ReviewJob & {
 }
 
 export async function runReviewJob(
-  jobs: InMemoryJobQueue,
+  jobs: ReviewJobStore,
   jobId: string,
   options: {
     runProcess?: RunProcess;
@@ -101,7 +101,7 @@ export async function runReviewJob(
 }
 
 export async function runNextReviewJob(
-  jobs: InMemoryJobQueue,
+  jobs: ReviewJobStore,
   options: {
     runProcess?: RunProcess;
     timeoutMs?: number;

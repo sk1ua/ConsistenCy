@@ -7,6 +7,7 @@ describe("SQLite foundation", () => {
     const database = openDatabase(":memory:");
     try {
       expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
+      expect(runMigrations(database)).toEqual(["0001_review_storage"]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
@@ -45,5 +46,19 @@ describe("SQLite foundation", () => {
       database.close();
     }
   });
-});
 
+  it("creates the review domain tables", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database);
+      const tables = database.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name IN ('webhook_deliveries', 'jobs', 'agent_runs', 'reports')
+        ORDER BY name
+      `).all() as Array<{ name: string }>;
+      expect(tables.map(table => table.name)).toEqual(["agent_runs", "jobs", "reports", "webhook_deliveries"]);
+    } finally {
+      database.close();
+    }
+  });
+});
