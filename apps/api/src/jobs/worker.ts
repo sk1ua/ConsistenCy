@@ -99,7 +99,12 @@ export class ReviewWorker {
 
   private async loop(): Promise<void> {
     while (this.running) {
-      const processed = await this.runOnce();
+      let processed = 0;
+      try {
+        processed = await this.runOnce();
+      } catch (error) {
+        this.options.onError?.(error);
+      }
       if (this.running && processed === 0) {
         await delay(this.options.pollIntervalMs ?? 1_000);
       }

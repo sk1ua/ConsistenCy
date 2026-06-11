@@ -28,7 +28,7 @@ describe("reportBuilder", () => {
       uncertainty: "The deployment boundary was not supplied."
     };
     const findings = deduplicateAndSortFindings([hypothesis, confirmedHigh]);
-    expect(findings).toHaveLength(2);
+    expect(findings).toEqual([confirmedHigh]);
 
     const duplicateLikely: ReviewFinding = {
       ...confirmedHigh,

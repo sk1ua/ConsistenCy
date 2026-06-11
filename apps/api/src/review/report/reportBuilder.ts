@@ -5,7 +5,7 @@ const confidenceRank = { confirmed: 3, likely: 2, hypothesis: 1 } as const;
 const confirmedDeductions = { critical: 30, high: 20, medium: 10, low: 3, info: 0 } as const;
 
 function findingKey(finding: ReviewFinding): string {
-  return [finding.file.toLowerCase(), finding.startLine ?? 0, finding.endLine ?? 0, finding.title.toLowerCase()].join(":");
+  return [finding.file.toLowerCase(), finding.title.toLowerCase()].join(":");
 }
 
 export function deduplicateAndSortFindings(findings: ReviewFinding[]): ReviewFinding[] {
