@@ -7,6 +7,7 @@ import {
   jsonSchemas,
   legacyPRReportSchema,
   parseLegacyPRReport,
+  prReviewContextSchema,
   reviewFindingSchema,
   reviewPlanSchema,
   reviewReportSchema,
@@ -76,5 +77,25 @@ describe("@consistency/schema", () => {
     expect(riskLevelForScore(60)).toBe("medium");
     expect(riskLevelForScore(80)).toBe("low");
   });
-});
 
+  it("parses PR review contexts used by the TypeScript workflow", () => {
+    expect(prReviewContextSchema.parse({
+      jobId: "job-1",
+      repositoryFullName: "sk1ua/ConsistenCy",
+      pullRequestNumber: 34,
+      baseSha: "base123",
+      headSha: "head456",
+      changedFiles: [{
+        path: "apps/api/src/http.ts",
+        status: "modified",
+        additions: 4,
+        deletions: 1,
+        changes: 5
+      }],
+      diff: "diff --git a/apps/api/src/http.ts b/apps/api/src/http.ts",
+      fileContents: { "apps/api/src/http.ts": "export {};" },
+      projectMetadata: { "package.json": "{}" },
+      workspacePath: "C:/workspace/job-1"
+    }).changedFiles).toHaveLength(1);
+  });
+});

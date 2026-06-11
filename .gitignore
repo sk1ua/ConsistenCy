@@ -36,6 +36,7 @@ config.local.py
 *.sqlite
 *.sqlite3
 .consistency_baseline.db
+.consistency/
 chroma_db/
 
 # Test and coverage output

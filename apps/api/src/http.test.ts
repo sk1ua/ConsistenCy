@@ -273,6 +273,23 @@ describe("createApiServer", () => {
     expect(jobs.list()).toHaveLength(0);
   });
 
+  it("persists signed but invalid deliveries as failed", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
+    servers.push(server);
+    const port = await listen(server);
+    const payload = { action: "opened" };
+
+    const response = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-invalid",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+
+    expect(response.status).toBe(400);
+    expect(jobs.getWebhookDelivery("delivery-invalid")?.status).toBe("failed");
+  });
+
   it("runs the next queued PR job and exposes the generated report", async () => {
     const jobs = new InMemoryJobQueue();
     const queued = enqueuePullRequestJob(jobs);

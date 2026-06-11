@@ -190,13 +190,14 @@ export class SQLiteJobStore implements ReviewJobStore {
 
   acceptWebhookJob(input: WebhookJobInput): WebhookAcceptance {
     return this.database.transaction(() => {
-      const existing = this.getWebhookDelivery(input.delivery.deliveryId);
-      if (existing) return { duplicate: true, delivery: existing };
       const receivedAt = new Date().toISOString();
-      this.database.prepare(`
-        INSERT INTO webhook_deliveries (delivery_id, event, action, received_at, status)
+      const inserted = this.database.prepare(`
+        INSERT OR IGNORE INTO webhook_deliveries (delivery_id, event, action, received_at, status)
         VALUES (?, ?, ?, ?, 'enqueued')
       `).run(input.delivery.deliveryId, input.delivery.event, input.delivery.action ?? null, receivedAt);
+      if (inserted.changes === 0) {
+        return { duplicate: true, delivery: this.getWebhookDelivery(input.delivery.deliveryId)! };
+      }
       const job = this.enqueue({ ...input.job, deliveryId: input.delivery.deliveryId });
       return {
         duplicate: false,
@@ -209,13 +210,14 @@ export class SQLiteJobStore implements ReviewJobStore {
   recordWebhookDelivery(
     input: Omit<WebhookDelivery, "receivedAt"> & { receivedAt?: string }
   ): WebhookAcceptance {
-    const existing = this.getWebhookDelivery(input.deliveryId);
-    if (existing) return { duplicate: true, delivery: existing };
     const delivery = { ...input, receivedAt: input.receivedAt ?? new Date().toISOString() };
-    this.database.prepare(`
-      INSERT INTO webhook_deliveries (delivery_id, event, action, received_at, status)
+    const inserted = this.database.prepare(`
+      INSERT OR IGNORE INTO webhook_deliveries (delivery_id, event, action, received_at, status)
       VALUES (?, ?, ?, ?, ?)
     `).run(delivery.deliveryId, delivery.event, delivery.action ?? null, delivery.receivedAt, delivery.status);
+    if (inserted.changes === 0) {
+      return { duplicate: true, delivery: this.getWebhookDelivery(input.deliveryId)! };
+    }
     return { duplicate: false, delivery };
   }
 

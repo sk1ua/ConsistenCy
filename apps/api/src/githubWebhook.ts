@@ -151,37 +151,44 @@ export function processGitHubWebhook(options: {
     throw new WebhookError("Invalid GitHub webhook signature", "INVALID_SIGNATURE", 401);
   }
 
-  let parsed: unknown;
   try {
-    parsed = options.body.length > 0 ? JSON.parse(options.body.toString("utf8")) : {};
-  } catch {
-    throw new WebhookError("Webhook body must be valid JSON", "INVALID_JSON", 400);
-  }
+    let parsed: unknown;
+    try {
+      parsed = options.body.length > 0 ? JSON.parse(options.body.toString("utf8")) : {};
+    } catch {
+      throw new WebhookError("Webhook body must be valid JSON", "INVALID_JSON", 400);
+    }
 
-  const payload = payloadObject(parsed);
-  if (event === "ping") {
+    const payload = payloadObject(parsed);
+    if (event === "ping") {
+      const acceptance = options.jobs.recordWebhookDelivery({ deliveryId, event, status: "ignored" });
+      return acceptance.duplicate
+        ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
+        : { status: "ignored", event, deliveryId, reason: "pong" };
+    }
+    if (event === "pull_request") {
+      return enqueuePullRequest(payload, deliveryId, options.jobs);
+    }
+    if (event === "push") {
+      const acceptance = options.jobs.recordWebhookDelivery({
+        deliveryId,
+        event,
+        action: stringField(payload, "action"),
+        status: "ignored"
+      });
+      return acceptance.duplicate
+        ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
+        : { status: "ignored", event, deliveryId, reason: "push reviews are not supported" };
+    }
+
     const acceptance = options.jobs.recordWebhookDelivery({ deliveryId, event, status: "ignored" });
     return acceptance.duplicate
       ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
-      : { status: "ignored", event, deliveryId, reason: "pong" };
+      : { status: "ignored", event, deliveryId, reason: `unsupported event ${event}` };
+  } catch (error) {
+    if (error instanceof WebhookError && !options.jobs.getWebhookDelivery(deliveryId)) {
+      options.jobs.recordWebhookDelivery({ deliveryId, event, status: "failed" });
+    }
+    throw error;
   }
-  if (event === "pull_request") {
-    return enqueuePullRequest(payload, deliveryId, options.jobs);
-  }
-  if (event === "push") {
-    const acceptance = options.jobs.recordWebhookDelivery({
-      deliveryId,
-      event,
-      action: stringField(payload, "action"),
-      status: "ignored"
-    });
-    return acceptance.duplicate
-      ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
-      : { status: "ignored", event, deliveryId, reason: "push reviews are not supported" };
-  }
-
-  const acceptance = options.jobs.recordWebhookDelivery({ deliveryId, event, status: "ignored" });
-  return acceptance.duplicate
-    ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
-    : { status: "ignored", event, deliveryId, reason: `unsupported event ${event}` };
 }
