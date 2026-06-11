@@ -103,5 +103,6 @@ export type Confidence = z.infer<typeof confidenceSchema>;
 export type AgentStatus = z.infer<typeof agentStatusSchema>;
 export type ReviewAgentName = z.infer<typeof reviewAgentNameSchema>;
 export type ReviewFinding = z.infer<typeof reviewFindingSchema>;
+export type TokenUsage = z.infer<typeof tokenUsageSchema>;
 export type AgentRun = z.infer<typeof agentRunSchema>;
 export type ReviewPlan = z.infer<typeof reviewPlanSchema>;

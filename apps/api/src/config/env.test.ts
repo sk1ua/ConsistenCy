@@ -23,4 +23,12 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ NODE_ENV: "production" })).toThrow(/GITHUB_WEBHOOK_SECRET/);
     expect(loadEnv({ NODE_ENV: "production", GITHUB_WEBHOOK_SECRET: "secret" }).NODE_ENV).toBe("production");
   });
+
+  it("prefers DeepSeek when its key is configured and otherwise uses mock", () => {
+    expect(loadEnv({}).LLM_PROVIDER).toBe("mock");
+    expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).LLM_PROVIDER).toBe("deepseek");
+    expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).DEEPSEEK_MODEL).toBe("deepseek-v4-flash");
+    expect(() => loadEnv({ LLM_PROVIDER: "deepseek" })).toThrow(/DEEPSEEK_API_KEY/);
+    expect(() => loadEnv({ LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
+  });
 });
