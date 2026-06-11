@@ -8,6 +8,7 @@ import {
 import type { ConsistencyDatabase } from "../db/connection";
 import type {
   CreateReviewJobInput,
+  GitHubCommentStatus,
   JobStatus,
   ReviewJob,
   ReviewJobStore,
@@ -281,5 +282,11 @@ export class SQLiteJobStore implements ReviewJobStore {
       WHERE status = 'running' AND started_at < ?
     `).run(new Date().toISOString(), cutoff.toISOString());
     return result.changes;
+  }
+
+  updateReportCommentStatus(jobId: string, status: GitHubCommentStatus, error?: string): void {
+    this.database.prepare(`
+      UPDATE reports SET github_comment_status = ?, github_comment_error = ? WHERE job_id = ?
+    `).run(status, error ?? null, jobId);
   }
 }

@@ -30,6 +30,7 @@ export type ReviewJob = {
 export type CreateReviewJobInput = Omit<ReviewJob, "id" | "status" | "createdAt" | "updatedAt">;
 
 export type WebhookDeliveryStatus = "enqueued" | "ignored" | "failed";
+export type GitHubCommentStatus = "pending" | "published" | "failed" | "skipped";
 
 export type WebhookDelivery = {
   deliveryId: string;
@@ -65,12 +66,14 @@ export interface ReviewJobStore {
   saveAgentRun(agentRun: AgentRun): void;
   listAgentRuns(jobId: string): AgentRun[];
   recoverStaleRunningJobs(cutoff: Date): number;
+  updateReportCommentStatus(jobId: string, status: GitHubCommentStatus, error?: string): void;
 }
 
 export class InMemoryJobQueue implements ReviewJobStore {
   private readonly jobs = new Map<string, ReviewJob>();
   private readonly deliveries = new Map<string, WebhookDelivery>();
   private readonly agentRuns = new Map<string, AgentRun>();
+  private readonly commentStatuses = new Map<string, { status: GitHubCommentStatus; error?: string }>();
   enqueue(input: CreateReviewJobInput): ReviewJob {
     const now = new Date().toISOString();
     const job: ReviewJob = {
@@ -230,5 +233,13 @@ export class InMemoryJobQueue implements ReviewJobStore {
       }
     }
     return recovered;
+  }
+
+  updateReportCommentStatus(jobId: string, status: GitHubCommentStatus, error?: string): void {
+    this.commentStatuses.set(jobId, { status, error });
+  }
+
+  getReportCommentStatus(jobId: string): { status: GitHubCommentStatus; error?: string } | undefined {
+    return this.commentStatuses.get(jobId);
   }
 }
