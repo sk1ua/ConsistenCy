@@ -168,6 +168,7 @@ describe("createApiServer", () => {
       action: "synchronize",
       repository: { full_name: "sk1ua/ConsistenCy" },
       installation: { id: 123 },
+      sender: { login: "octocat" },
       pull_request: {
         number: 31,
         base: { sha: "base123" },
@@ -206,6 +207,48 @@ describe("createApiServer", () => {
         }
       ]
     });
+
+    const duplicate = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-1",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body).toMatchObject({ status: "duplicate" });
+    expect(jobs.list()).toHaveLength(1);
+  });
+
+  it("records push deliveries as ignored without creating a job", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
+    servers.push(server);
+    const port = await listen(server);
+    const payload = { ref: "refs/heads/main", repository: { full_name: "sk1ua/ConsistenCy" } };
+
+    const response = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "push",
+      "x-github-delivery": "delivery-push",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ status: "ignored", reason: "push reviews are not supported" });
+    expect(jobs.list()).toHaveLength(0);
+    expect(jobs.getWebhookDelivery("delivery-push")?.status).toBe("ignored");
+  });
+
+  it("rejects webhook requests when no secret is configured", async () => {
+    const server = createApiServer({ githubWebhookSecret: "" });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await postJson(port, "/github/webhook", {}, {
+      "x-github-event": "ping",
+      "x-github-delivery": "delivery-unconfigured"
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ code: "WEBHOOK_NOT_CONFIGURED" });
   });
 
   it("rejects GitHub webhooks with an invalid signature", async () => {

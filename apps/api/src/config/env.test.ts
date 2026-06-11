@@ -18,5 +18,9 @@ describe("loadEnv", () => {
     expect(config.allowedOrigins).toEqual(["https://example.com", "https://admin.example.com"]);
     expect(() => loadEnv({ PORT: "70000" })).toThrow();
   });
-});
 
+  it("requires a webhook secret in production", () => {
+    expect(() => loadEnv({ NODE_ENV: "production" })).toThrow(/GITHUB_WEBHOOK_SECRET/);
+    expect(loadEnv({ NODE_ENV: "production", GITHUB_WEBHOOK_SECRET: "secret" }).NODE_ENV).toBe("production");
+  });
+});

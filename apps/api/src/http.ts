@@ -102,6 +102,9 @@ export function createApiServer(
       }
 
       if (request.method === "POST" && path === "/github/webhook") {
+        if (!githubWebhookSecret) {
+          throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
+        }
         const body = await readBody(request);
         const result = processGitHubWebhook({
           headers: request.headers,

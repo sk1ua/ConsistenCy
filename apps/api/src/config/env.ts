@@ -30,6 +30,9 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.parse(input);
+  if (parsed.NODE_ENV === "production" && !parsed.GITHUB_WEBHOOK_SECRET) {
+    throw new Error("GITHUB_WEBHOOK_SECRET is required in production");
+  }
   return {
     ...parsed,
     databasePath: resolve(parsed.DATABASE_PATH),
@@ -38,4 +41,3 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
       .filter(Boolean)
   };
 }
-

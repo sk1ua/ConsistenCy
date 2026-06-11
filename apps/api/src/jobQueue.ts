@@ -27,8 +27,30 @@ export type ReviewJob = {
 
 export type CreateReviewJobInput = Omit<ReviewJob, "id" | "status" | "createdAt" | "updatedAt">;
 
+export type WebhookDeliveryStatus = "enqueued" | "ignored" | "failed";
+
+export type WebhookDelivery = {
+  deliveryId: string;
+  event: string;
+  action?: string;
+  receivedAt: string;
+  status: WebhookDeliveryStatus;
+};
+
+export type WebhookJobInput = {
+  delivery: Omit<WebhookDelivery, "receivedAt" | "status">;
+  job: Omit<CreateReviewJobInput, "deliveryId">;
+};
+
+export type WebhookAcceptance = {
+  duplicate: boolean;
+  delivery: WebhookDelivery;
+  job?: ReviewJob;
+};
+
 export class InMemoryJobQueue {
   private readonly jobs = new Map<string, ReviewJob>();
+  private readonly deliveries = new Map<string, WebhookDelivery>();
   enqueue(input: CreateReviewJobInput): ReviewJob {
     const now = new Date().toISOString();
     const job: ReviewJob = {
@@ -40,6 +62,41 @@ export class InMemoryJobQueue {
     };
     this.jobs.set(job.id, job);
     return job;
+  }
+
+  acceptWebhookJob(input: WebhookJobInput): WebhookAcceptance {
+    const existing = this.deliveries.get(input.delivery.deliveryId);
+    if (existing) {
+      return { duplicate: true, delivery: existing };
+    }
+
+    const delivery: WebhookDelivery = {
+      ...input.delivery,
+      receivedAt: new Date().toISOString(),
+      status: "enqueued"
+    };
+    const job = this.enqueue({ ...input.job, deliveryId: delivery.deliveryId });
+    this.deliveries.set(delivery.deliveryId, delivery);
+    return { duplicate: false, delivery, job };
+  }
+
+  recordWebhookDelivery(
+    input: Omit<WebhookDelivery, "receivedAt"> & { receivedAt?: string }
+  ): WebhookAcceptance {
+    const existing = this.deliveries.get(input.deliveryId);
+    if (existing) {
+      return { duplicate: true, delivery: existing };
+    }
+    const delivery: WebhookDelivery = {
+      ...input,
+      receivedAt: input.receivedAt ?? new Date().toISOString()
+    };
+    this.deliveries.set(delivery.deliveryId, delivery);
+    return { duplicate: false, delivery };
+  }
+
+  getWebhookDelivery(deliveryId: string): WebhookDelivery | undefined {
+    return this.deliveries.get(deliveryId);
   }
 
   list(): ReviewJob[] {
