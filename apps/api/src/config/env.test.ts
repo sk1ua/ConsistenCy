@@ -21,7 +21,12 @@ describe("loadEnv", () => {
 
   it("requires a webhook secret in production", () => {
     expect(() => loadEnv({ NODE_ENV: "production" })).toThrow(/GITHUB_WEBHOOK_SECRET/);
-    expect(loadEnv({ NODE_ENV: "production", GITHUB_WEBHOOK_SECRET: "secret" }).NODE_ENV).toBe("production");
+    expect(() => loadEnv({ NODE_ENV: "production", GITHUB_WEBHOOK_SECRET: "secret" })).toThrow(/CONSISTENCY_API_TOKEN/);
+    expect(loadEnv({
+      NODE_ENV: "production",
+      GITHUB_WEBHOOK_SECRET: "secret",
+      CONSISTENCY_API_TOKEN: "api-token"
+    }).NODE_ENV).toBe("production");
   });
 
   it("prefers DeepSeek when its key is configured and otherwise uses mock", () => {

@@ -5,6 +5,7 @@ import { reviewReportSchema, riskLevelSchema } from "./report";
 export const jobListResponseSchema = z.object({ jobs: z.array(reviewJobSchema) }).strict();
 export const jobDetailResponseSchema = z.object({ job: reviewJobSchema }).strict();
 export const reportResponseSchema = z.object({ report: reviewReportSchema }).strict();
+export const recentReportsResponseSchema = z.object({ reports: z.array(reviewReportSchema) }).strict();
 export const statsResponseSchema = z.object({
   totalJobs: z.number().int().nonnegative(),
   succeededJobs: z.number().int().nonnegative(),
@@ -28,6 +29,6 @@ export const errorResponseSchema = z.object({
 export type JobListResponse = z.infer<typeof jobListResponseSchema>;
 export type JobDetailResponse = z.infer<typeof jobDetailResponseSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;
+export type RecentReportsResponse = z.infer<typeof recentReportsResponseSchema>;
 export type StatsResponse = z.infer<typeof statsResponseSchema>;
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;
-

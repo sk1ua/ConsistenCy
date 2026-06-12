@@ -37,6 +37,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.NODE_ENV === "production" && !parsed.GITHUB_WEBHOOK_SECRET) {
     throw new Error("GITHUB_WEBHOOK_SECRET is required in production");
   }
+  if (parsed.NODE_ENV === "production" && !parsed.CONSISTENCY_API_TOKEN) {
+    throw new Error("CONSISTENCY_API_TOKEN is required in production");
+  }
   const llmProvider = parsed.LLM_PROVIDER ?? (parsed.DEEPSEEK_API_KEY ? "deepseek" : "mock");
   if (llmProvider === "deepseek" && !parsed.DEEPSEEK_API_KEY) {
     throw new Error("DEEPSEEK_API_KEY is required when LLM_PROVIDER=deepseek");

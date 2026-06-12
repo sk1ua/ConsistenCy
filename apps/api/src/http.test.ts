@@ -202,8 +202,8 @@ describe("createApiServer", () => {
     expect(jobsResponse.body).toMatchObject({
       jobs: [
         {
-          deliveryId: "delivery-1",
-          repository: "sk1ua/ConsistenCy"
+          type: "PR_REVIEW",
+          repositoryFullName: "sk1ua/ConsistenCy"
         }
       ]
     });
@@ -248,7 +248,7 @@ describe("createApiServer", () => {
     });
 
     expect(response.status).toBe(503);
-    expect(response.body).toMatchObject({ code: "WEBHOOK_NOT_CONFIGURED" });
+    expect(response.body).toMatchObject({ error: { code: "WEBHOOK_NOT_CONFIGURED" } });
   });
 
   it("rejects GitHub webhooks with an invalid signature", async () => {
@@ -269,7 +269,7 @@ describe("createApiServer", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(response.body).toMatchObject({ code: "INVALID_SIGNATURE" });
+    expect(response.body).toMatchObject({ error: { code: "INVALID_SIGNATURE" } });
     expect(jobs.list()).toHaveLength(0);
   });
 
@@ -308,7 +308,7 @@ describe("createApiServer", () => {
 
     const notReady = await getJson(port, `/jobs/${queued.id}/report`);
     expect(notReady.status).toBe(409);
-    expect(notReady.body).toMatchObject({ code: "JOB_NOT_READY" });
+    expect(notReady.body).toMatchObject({ error: { code: "JOB_NOT_READY" } });
 
     const response = await postJson(port, "/jobs/run-next", {});
     expect(response.status).toBe(200);
@@ -316,7 +316,7 @@ describe("createApiServer", () => {
       job: {
         id: queued.id,
         status: "succeeded",
-        result: {
+        report: {
           jobId: queued.id,
           repositoryFullName: "sk1ua/ConsistenCy",
           pullRequestNumber: 31,
@@ -333,10 +333,12 @@ describe("createApiServer", () => {
     const report = await getJson(port, `/jobs/${queued.id}/report`);
     expect(report.status).toBe(200);
     expect(report.body).toMatchObject({
-      jobId: queued.id,
-      baseSha: "base123",
-      headSha: "head456",
-      findings: [{ file: "docs/EVALUATION.md", confidence: "hypothesis" }]
+      report: {
+        jobId: queued.id,
+        baseSha: "base123",
+        headSha: "head456",
+        findings: [{ file: "docs/EVALUATION.md", confidence: "hypothesis" }]
+      }
     });
   });
 
@@ -354,7 +356,7 @@ describe("createApiServer", () => {
 
     const response = await postJson(port, `/jobs/${queued.id}/run`, {});
     expect(response.status).toBe(502);
-    expect(response.body).toMatchObject({ code: "PYTHON_PR_REPORT_EXIT_NONZERO" });
+    expect(response.body).toMatchObject({ error: { code: "PYTHON_PR_REPORT_EXIT_NONZERO" } });
 
     const job = await getJson(port, `/jobs/${queued.id}`);
     expect(job.status).toBe(200);
@@ -364,5 +366,45 @@ describe("createApiServer", () => {
         status: "failed"
       }
     });
+  });
+
+  it("protects management routes with a bearer token", async () => {
+    const server = createApiServer({ apiToken: "api-secret" });
+    servers.push(server);
+    const port = await listen(server);
+
+    const unauthorized = await getJson(port, "/jobs");
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.body).toMatchObject({ error: { code: "UNAUTHORIZED" } });
+
+    const authorized = await httpJson(port, "GET", "/jobs", undefined, {
+      authorization: "Bearer api-secret"
+    });
+    expect(authorized.status).toBe(200);
+  });
+
+  it("seeds demo reports and exposes filters, stats, and recent reports", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, nodeEnv: "development" });
+    servers.push(server);
+    const port = await listen(server);
+
+    const seeded = await postJson(port, "/demo/seed", {});
+    expect(seeded.status).toBe(201);
+    expect(seeded.body).toEqual({ created: 4 });
+
+    const filtered = await getJson(port, "/jobs?status=succeeded&repository=payments&severity=medium");
+    expect(filtered.status).toBe(200);
+    expect(filtered.body).toMatchObject({
+      jobs: [{ repositoryFullName: "acme/payments-api", status: "succeeded" }]
+    });
+
+    const stats = await getJson(port, "/stats");
+    expect(stats.body).toMatchObject({ totalJobs: 4, succeededJobs: 3, runningJobs: 1 });
+
+    const reports = await getJson(port, "/reports/recent?limit=2");
+    const recent = (reports.body as { reports: Array<{ repositoryFullName: string }> }).reports;
+    expect(recent).toHaveLength(2);
+    expect(recent[0]?.repositoryFullName).toBe("sk1ua/ConsistenCy");
   });
 });

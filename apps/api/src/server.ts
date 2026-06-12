@@ -63,7 +63,25 @@ export const worker = new ReviewWorker({
   }
 });
 
-export const server = createApiServer({ jobs, githubWebhookSecret: config.GITHUB_WEBHOOK_SECRET });
+export const server = createApiServer({
+  jobs,
+  githubWebhookSecret: config.GITHUB_WEBHOOK_SECRET,
+  apiToken: config.CONSISTENCY_API_TOKEN,
+  nodeEnv: config.NODE_ENV,
+  allowedOrigins: config.allowedOrigins,
+  healthDetails: () => ({
+    database: { ok: database.open },
+    worker: worker.status(),
+    llmProvider: provider.name,
+    configuration: {
+      githubAppConfigured: Boolean(config.GITHUB_APP_ID && config.GITHUB_PRIVATE_KEY),
+      webhookSecretConfigured: Boolean(config.GITHUB_WEBHOOK_SECRET),
+      databasePath: config.databasePath,
+      workerConcurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
+      demoMode: provider.name === "mock"
+    }
+  })
+});
 server.on("close", () => {
   void worker.stop().finally(() => database.close());
 });
