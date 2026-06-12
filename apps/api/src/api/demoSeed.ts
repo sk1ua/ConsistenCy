@@ -2,7 +2,7 @@ import { demoReviewReport } from "@consistency/schema";
 import type { ReviewJobStore } from "../jobQueue";
 
 export function seedDemoData(store: ReviewJobStore): { created: number } {
-  if (store.list().some(job => job.deliveryId.startsWith("demo:"))) return { created: 0 };
+  if (store.list().some(job => job.baseSha?.startsWith("demo-base-"))) return { created: 0 };
   const definitions = [
     { repository: "sk1ua/ConsistenCy", pullRequestNumber: 34, score: 74, status: "succeeded" as const },
     { repository: "acme/payments-api", pullRequestNumber: 182, score: 42, status: "succeeded" as const },
@@ -12,7 +12,7 @@ export function seedDemoData(store: ReviewJobStore): { created: number } {
   for (const [index, definition] of definitions.entries()) {
     const job = store.enqueue({
       kind: "pull_request",
-      deliveryId: `demo:${index + 1}`,
+      deliveryId: `manual:demo:${index + 1}`,
       repository: definition.repository,
       pullRequestNumber: definition.pullRequestNumber,
       installationId: 1,

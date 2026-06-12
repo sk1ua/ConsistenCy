@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { seedDemoData } from "../api/demoSeed";
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
 import { SQLiteJobStore } from "./sqliteJobStore";
@@ -134,6 +135,18 @@ describe("SQLiteJobStore", () => {
       expect(store.claimNextQueued()?.id).toBe(second.id);
       expect(store.claimNextQueued()).toBeUndefined();
       expect(store.list().every(job => job.status === "running")).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("seeds demo jobs without webhook delivery foreign keys", () => {
+    const { database, store } = createStore();
+    try {
+      expect(seedDemoData(store)).toEqual({ created: 4 });
+      expect(seedDemoData(store)).toEqual({ created: 0 });
+      expect(store.list()).toHaveLength(4);
+      expect(store.list().filter(job => job.status === "succeeded")).toHaveLength(3);
     } finally {
       database.close();
     }
