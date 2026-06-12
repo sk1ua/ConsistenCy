@@ -9,6 +9,8 @@ import { ReviewWorker } from "./jobs/worker";
 import { GitHubAppAuthenticator } from "./github/auth";
 import { buildPRContext } from "./review/context/buildPRContext";
 import { createLLMProvider } from "./review/llm/factory";
+import { publishPullRequestComment } from "./github/comment";
+import { renderReviewComment } from "./review/report/markdownRenderer";
 
 try {
   loadEnvFile();
@@ -36,6 +38,21 @@ export const worker = new ReviewWorker({
     contextBuilder: input => {
       if (!authenticator) throw new Error("GitHub App credentials are required to build PR context");
       return buildPRContext(input, { authenticator });
+    },
+    publishReport: async report => {
+      if (!authenticator) throw new Error("GitHub App credentials are required to publish PR comments");
+      const job = jobs.get(report.jobId);
+      if (!job?.installationId) throw new Error("Review job is missing its GitHub installation id");
+      const authentication = await authenticator.getInstallationToken(job.installationId);
+      await publishPullRequestComment({
+        repositoryFullName: report.repositoryFullName,
+        pullRequestNumber: report.pullRequestNumber,
+        token: authentication.token,
+        body: renderReviewComment(report, {
+          providerName: provider.name,
+          webBaseUrl: config.CONSISTENCY_WEB_URL
+        })
+      });
     }
   },
   onError: (error, job) => {

@@ -13,6 +13,7 @@ export const envSchema = z.object({
   CONSISTENCY_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(1_000),
   CONSISTENCY_API_TOKEN: optionalSecret,
   CONSISTENCY_ALLOWED_ORIGINS: z.string().trim().default("http://127.0.0.1:5173,http://localhost:5173"),
+  CONSISTENCY_WEB_URL: z.string().url().default("http://127.0.0.1:5173"),
   GITHUB_APP_ID: optionalSecret,
   GITHUB_PRIVATE_KEY: optionalSecret,
   GITHUB_WEBHOOK_SECRET: optionalSecret,
