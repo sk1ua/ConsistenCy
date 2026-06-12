@@ -11,6 +11,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
+    "test:python": "python -m pytest -q",
+    "verify": "npm run typecheck && npm test && npm run build && npm run test:python",
     "dev:api": "npm run dev -w @consistency/api",
     "dev:web": "npm run dev -w @consistency/web"
   },
