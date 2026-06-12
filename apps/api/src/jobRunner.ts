@@ -7,6 +7,7 @@ import {
   type RunProcess
 } from "./pythonBridge";
 import { adaptLegacyReport } from "./review/legacyReportAdapter";
+import { sanitizePublicError } from "./security/redact";
 
 export class JobRunnerError extends Error {
   constructor(
@@ -21,10 +22,10 @@ export class JobRunnerError extends Error {
 
 function sanitizeError(error: unknown): string {
   if (error instanceof PythonBridgeError) {
-    return `${error.code}: ${error.message}`;
+    return sanitizePublicError(`${error.code}: ${error.message}`);
   }
   if (error instanceof Error) {
-    return error.message;
+    return sanitizePublicError(error.message);
   }
   return "Unknown job runner error";
 }

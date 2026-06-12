@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   analyzeFileWithPython,
   buildPRReportWithPython,
   buildAnalyzeFileArgs,
   buildPRReportArgs,
   parseAnalyzeFileRequest,
+  resolveAnalyzeFileRequest,
   PythonBridgeError,
   type RunProcess
 } from "./pythonBridge";
@@ -53,6 +57,12 @@ const validAnalysisResult = {
   }
 };
 
+const tempDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
 describe("pythonBridge", () => {
   it("builds analyze-file CLI args without a shell string", () => {
     expect(buildAnalyzeFileArgs({ currentFile: "new.py", baselineFile: "old.py" })).toEqual(
@@ -81,6 +91,31 @@ describe("pythonBridge", () => {
       baselineFile: "old.py"
     });
     expect(() => parseAnalyzeFileRequest({ currentFile: "new.py" })).toThrow(PythonBridgeError);
+  });
+
+  it("only resolves analyze-file inputs inside the configured workspace", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "consistency-analyze-"));
+    tempDirectories.push(workspace);
+    mkdirSync(join(workspace, "job-1"));
+    writeFileSync(join(workspace, "job-1", "new.py"), "print('new')");
+    writeFileSync(join(workspace, "job-1", "old.py"), "print('old')");
+    writeFileSync(join(workspace, ".env"), "TOKEN=secret");
+
+    expect(resolveAnalyzeFileRequest(workspace, {
+      currentFile: "job-1/new.py",
+      baselineFile: "job-1/old.py"
+    })).toEqual({
+      currentFile: join(workspace, "job-1", "new.py"),
+      baselineFile: join(workspace, "job-1", "old.py")
+    });
+    expect(() => resolveAnalyzeFileRequest(workspace, {
+      currentFile: "../outside.py",
+      baselineFile: "job-1/old.py"
+    })).toThrow(/configured workspace/);
+    expect(() => resolveAnalyzeFileRequest(workspace, {
+      currentFile: ".env",
+      baselineFile: "job-1/old.py"
+    })).toThrow(/Secret files/);
   });
 
   it("returns schema-validated Python JSON", async () => {

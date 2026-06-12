@@ -1,6 +1,7 @@
 import type { ReviewJob, ReviewJobStore } from "../jobQueue";
 import type { ReviewWorkflowDependencies } from "../review/graph/workflow";
 import { runReviewWorkflow } from "../review/graph/workflow";
+import { sanitizePublicError } from "../security/redact";
 
 export type WorkerStatus = {
   running: boolean;
@@ -14,7 +15,7 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unknown review worker failure";
+  return error instanceof Error ? sanitizePublicError(error.message) : "Unknown review worker failure";
 }
 
 function workflowInput(job: ReviewJob) {

@@ -11,6 +11,7 @@ import { createTestAgentNode } from "../agents/test";
 import type { ContextBuilder } from "../agents/types";
 import type { LLMProvider } from "../llm/types";
 import { ReviewGraphState, type ReviewGraphStateValue } from "./state";
+import { sanitizePublicError } from "../../security/redact";
 
 export type ReviewWorkflowDependencies = {
   contextBuilder: ContextBuilder;
@@ -59,7 +60,7 @@ export function createReviewWorkflow(dependencies: ReviewWorkflowDependencies) {
         await dependencies.publishReport(state.report);
         dependencies.jobStore.updateReportCommentStatus(state.jobId, "published");
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown GitHub comment failure";
+        const message = error instanceof Error ? sanitizePublicError(error.message) : "Unknown GitHub comment failure";
         dependencies.jobStore.updateReportCommentStatus(state.jobId, "failed", message);
         return { errors: [`GitHub comment: ${message}`] };
       }

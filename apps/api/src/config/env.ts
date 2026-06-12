@@ -8,6 +8,7 @@ export const envSchema = z.object({
   HOST: z.string().trim().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
   DATABASE_PATH: z.string().trim().min(1).default(".consistency/consistency.db"),
+  CONSISTENCY_WORKSPACE_ROOT: z.string().trim().min(1).default(".consistency/workspaces"),
   LLM_PROVIDER: z.enum(["mock", "deepseek", "openai"]).optional(),
   CONSISTENCY_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
   CONSISTENCY_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(1_000),
@@ -26,8 +27,9 @@ export const envSchema = z.object({
 
 export type RawEnvironment = z.input<typeof envSchema>;
 
-export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER"> & {
+export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_WORKSPACE_ROOT" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER"> & {
   databasePath: string;
+  workspaceRoot: string;
   allowedOrigins: string[];
   LLM_PROVIDER: "mock" | "deepseek" | "openai";
 };
@@ -40,6 +42,12 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.NODE_ENV === "production" && !parsed.CONSISTENCY_API_TOKEN) {
     throw new Error("CONSISTENCY_API_TOKEN is required in production");
   }
+  if (parsed.NODE_ENV === "production" && !parsed.GITHUB_APP_ID) {
+    throw new Error("GITHUB_APP_ID is required in production");
+  }
+  if (parsed.NODE_ENV === "production" && !parsed.GITHUB_PRIVATE_KEY) {
+    throw new Error("GITHUB_PRIVATE_KEY is required in production");
+  }
   const llmProvider = parsed.LLM_PROVIDER ?? (parsed.DEEPSEEK_API_KEY ? "deepseek" : "mock");
   if (llmProvider === "deepseek" && !parsed.DEEPSEEK_API_KEY) {
     throw new Error("DEEPSEEK_API_KEY is required when LLM_PROVIDER=deepseek");
@@ -47,12 +55,17 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   if (llmProvider === "openai" && !parsed.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
   }
+  const allowedOrigins = parsed.CONSISTENCY_ALLOWED_ORIGINS.split(",")
+    .map(origin => origin.trim())
+    .filter(Boolean);
+  if (parsed.NODE_ENV === "production" && (allowedOrigins.length === 0 || allowedOrigins.includes("*"))) {
+    throw new Error("CONSISTENCY_ALLOWED_ORIGINS must contain explicit origins in production");
+  }
   return {
     ...parsed,
     LLM_PROVIDER: llmProvider,
     databasePath: resolve(parsed.DATABASE_PATH),
-    allowedOrigins: parsed.CONSISTENCY_ALLOWED_ORIGINS.split(",")
-      .map(origin => origin.trim())
-      .filter(Boolean)
+    workspaceRoot: resolve(parsed.CONSISTENCY_WORKSPACE_ROOT),
+    allowedOrigins
   };
 }

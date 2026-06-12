@@ -7,6 +7,7 @@ import {
   type AnalysisResult,
   type LegacyPRReport
 } from "@consistency/schema";
+import { isSecretPath, resolveWorkspaceFile } from "./review/context/fileLoader";
 
 const apiDir = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(apiDir, "../../..");
@@ -137,6 +138,22 @@ export function parseAnalyzeFileRequest(input: unknown): AnalyzeFileRequest {
     currentFile: body.currentFile,
     baselineFile: body.baselineFile
   };
+}
+
+export function resolveAnalyzeFileRequest(workspaceRoot: string, request: AnalyzeFileRequest): AnalyzeFileRequest {
+  for (const path of [request.currentFile, request.baselineFile]) {
+    if (isSecretPath(path)) {
+      throw new PythonBridgeError("Secret files cannot be analyzed through this endpoint", "SECRET_FILE_BLOCKED");
+    }
+  }
+  try {
+    return {
+      currentFile: resolveWorkspaceFile(workspaceRoot, request.currentFile),
+      baselineFile: resolveWorkspaceFile(workspaceRoot, request.baselineFile)
+    };
+  } catch {
+    throw new PythonBridgeError("Analysis files must be regular files inside the configured workspace", "WORKSPACE_PATH_INVALID");
+  }
 }
 
 export async function analyzeFileWithPython(

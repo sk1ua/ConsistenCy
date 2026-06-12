@@ -11,6 +11,7 @@ import { buildPRContext } from "./review/context/buildPRContext";
 import { createLLMProvider } from "./review/llm/factory";
 import { publishPullRequestComment } from "./github/comment";
 import { renderReviewComment } from "./review/report/markdownRenderer";
+import { redactSensitiveText } from "./security/redact";
 
 try {
   loadEnvFile();
@@ -37,7 +38,7 @@ export const worker = new ReviewWorker({
     provider,
     contextBuilder: input => {
       if (!authenticator) throw new Error("GitHub App credentials are required to build PR context");
-      return buildPRContext(input, { authenticator });
+      return buildPRContext(input, { authenticator, workspaceRoot: config.workspaceRoot });
     },
     publishReport: async report => {
       if (!authenticator) throw new Error("GitHub App credentials are required to publish PR comments");
@@ -58,7 +59,7 @@ export const worker = new ReviewWorker({
   onError: (error, job) => {
     logger.error({
       jobId: job?.id,
-      error: error instanceof Error ? error.message : "Unknown worker error"
+      error: error instanceof Error ? redactSensitiveText(error.message) : "Unknown worker error"
     }, "Review worker failed a job");
   }
 });
@@ -69,6 +70,7 @@ export const server = createApiServer({
   apiToken: config.CONSISTENCY_API_TOKEN,
   nodeEnv: config.NODE_ENV,
   allowedOrigins: config.allowedOrigins,
+  workspaceRoot: config.workspaceRoot,
   healthDetails: () => ({
     database: { ok: database.open },
     worker: worker.status(),

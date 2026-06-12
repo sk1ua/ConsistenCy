@@ -6,7 +6,8 @@ import { buildHealthPayload } from "./health";
 import { processGitHubWebhook, WebhookError } from "./githubWebhook";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
 import { JobRunnerError, runNextReviewJob, runReviewJob } from "./jobRunner";
-import { analyzeFileWithPython, parseAnalyzeFileRequest, PythonBridgeError, type RunProcess } from "./pythonBridge";
+import { analyzeFileWithPython, parseAnalyzeFileRequest, PythonBridgeError, resolveAnalyzeFileRequest, type RunProcess } from "./pythonBridge";
+import { sanitizePublicError } from "./security/redact";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -60,11 +61,12 @@ function errorPayload(code: string, message: string) {
 
 function sendError(request: IncomingMessage, response: ServerResponse, error: unknown, allowedOrigins: string[]): void {
   if (error instanceof ApiError || error instanceof JobRunnerError || error instanceof WebhookError) {
-    sendJson(request, response, error.statusCode, errorPayload(error.code, error.message), allowedOrigins);
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
     return;
   }
   if (error instanceof PythonBridgeError) {
-    sendJson(request, response, error.code.startsWith("INVALID_") ? 400 : 502, errorPayload(error.code, error.message), allowedOrigins);
+    const statusCode = error.code.startsWith("INVALID_") || error.code === "WORKSPACE_PATH_INVALID" || error.code === "SECRET_FILE_BLOCKED" ? 400 : 502;
+    sendJson(request, response, statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
     return;
   }
   sendJson(request, response, 500, errorPayload("INTERNAL_ERROR", "Unexpected API error"), allowedOrigins);
@@ -102,6 +104,7 @@ export function createApiServer(options: {
   nodeEnv?: "development" | "test" | "production";
   allowedOrigins?: string[];
   healthDetails?: () => ApiHealthDetails;
+  workspaceRoot?: string;
 } = {}) {
   const jobs = options.jobs ?? new InMemoryJobQueue();
   const githubWebhookSecret = options.githubWebhookSecret ?? process.env.GITHUB_WEBHOOK_SECRET;
@@ -111,12 +114,32 @@ export function createApiServer(options: {
 
   return createServer(async (request, response) => {
     try {
+      const contentLength = Number(request.headers["content-length"] ?? 0);
+      if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+        throw new ApiError("Request body exceeds 1 MB", "BODY_TOO_LARGE", 413);
+      }
       const url = parseUrl(request.url);
       const path = url.pathname;
 
       if (request.method === "OPTIONS") {
         sendJson(request, response, 204, {}, allowedOrigins);
         return;
+      }
+
+      if (request.method === "POST" && path === "/github/webhook") {
+        if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
+        const result = processGitHubWebhook({
+          headers: request.headers,
+          body: await readBody(request),
+          secret: githubWebhookSecret,
+          jobs
+        });
+        sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
+        return;
+      }
+
+      if (apiToken && !isAuthorized(request, apiToken)) {
+        throw new ApiError("A valid bearer token is required", "UNAUTHORIZED", 401);
       }
 
       if (request.method === "GET" && path === "/health") {
@@ -136,22 +159,6 @@ export function createApiServer(options: {
           })
         }, allowedOrigins);
         return;
-      }
-
-      if (request.method === "POST" && path === "/github/webhook") {
-        if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
-        const result = processGitHubWebhook({
-          headers: request.headers,
-          body: await readBody(request),
-          secret: githubWebhookSecret,
-          jobs
-        });
-        sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
-        return;
-      }
-
-      if (apiToken && !isAuthorized(request, apiToken)) {
-        throw new ApiError("A valid bearer token is required", "UNAUTHORIZED", 401);
       }
 
       if (request.method === "GET" && path === "/jobs") {
@@ -177,7 +184,10 @@ export function createApiServer(options: {
       }
 
       if (request.method === "POST" && path === "/analyze-file") {
-        const report = await analyzeFileWithPython(parseAnalyzeFileRequest(await readJson(request)), {
+        if (nodeEnv !== "development") throw new ApiError("File analysis is only available in development", "ANALYZE_FILE_DISABLED", 404);
+        const workspaceRoot = options.workspaceRoot ?? ".consistency/workspaces";
+        const input = resolveAnalyzeFileRequest(workspaceRoot, parseAnalyzeFileRequest(await readJson(request)));
+        const report = await analyzeFileWithPython(input, {
           runProcess: options.runProcess
         });
         sendJson(request, response, 200, report, allowedOrigins);

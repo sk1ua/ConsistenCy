@@ -1,5 +1,8 @@
 import { request } from "node:http";
 import { createHmac } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
@@ -55,7 +58,7 @@ function httpJson(
   path: string,
   payload?: unknown,
   headers: Record<string, string> = {}
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ status: number; body: unknown; headers: Record<string, string | string[] | undefined> }> {
   return new Promise((resolve, reject) => {
     const raw = payload === undefined ? "" : JSON.stringify(payload);
     const req = request(
@@ -77,7 +80,7 @@ function httpJson(
           responseBody += chunk;
         });
         res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body: JSON.parse(responseBody) });
+          resolve({ status: res.statusCode ?? 0, body: responseBody ? JSON.parse(responseBody) : {}, headers: res.headers });
         });
       }
     );
@@ -91,11 +94,11 @@ function postJson(
   path: string,
   payload: unknown,
   headers: Record<string, string> = {}
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ status: number; body: unknown; headers: Record<string, string | string[] | undefined> }> {
   return httpJson(port, "POST", path, payload, headers);
 }
 
-function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
+function getJson(port: number, path: string): Promise<{ status: number; body: unknown; headers: Record<string, string | string[] | undefined> }> {
   return httpJson(port, "GET", path);
 }
 
@@ -126,6 +129,7 @@ function enqueuePullRequestJob(jobs: InMemoryJobQueue) {
 
 describe("createApiServer", () => {
   const servers: ReturnType<typeof createApiServer>[] = [];
+  const tempDirectories: string[] = [];
 
   afterEach(async () => {
     await Promise.all(
@@ -137,25 +141,71 @@ describe("createApiServer", () => {
       )
     );
     servers.length = 0;
+    for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
   it("serves POST /analyze-file through the Python bridge", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "consistency-http-workspace-"));
+    tempDirectories.push(workspace);
+    mkdirSync(join(workspace, "job-1"));
+    writeFileSync(join(workspace, "job-1", "new.py"), "print('new')");
+    writeFileSync(join(workspace, "job-1", "old.py"), "print('old')");
     const runProcess: RunProcess = async () => ({
       exitCode: 0,
       stdout: JSON.stringify(validAnalysisResult),
       stderr: ""
     });
-    const server = createApiServer({ runProcess });
+    const server = createApiServer({ runProcess, workspaceRoot: workspace, nodeEnv: "development" });
     servers.push(server);
     const port = await listen(server);
 
     const response = await postJson(port, "/analyze-file", {
-      currentFile: "examples/demo_new.py",
-      baselineFile: "examples/demo_base.py"
+      currentFile: "job-1/new.py",
+      baselineFile: "job-1/old.py"
     });
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ risk_score: 0.1 });
+  });
+
+  it("blocks analyze-file outside development and rejects workspace traversal", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "consistency-http-secure-"));
+    tempDirectories.push(workspace);
+    mkdirSync(join(workspace, "job-1"));
+    writeFileSync(join(workspace, "job-1", "old.py"), "print('old')");
+
+    const production = createApiServer({ nodeEnv: "production", workspaceRoot: workspace });
+    servers.push(production);
+    const productionPort = await listen(production);
+    expect((await postJson(productionPort, "/analyze-file", {
+      currentFile: "job-1/old.py",
+      baselineFile: "job-1/old.py"
+    })).body).toMatchObject({ error: { code: "ANALYZE_FILE_DISABLED" } });
+
+    const development = createApiServer({ nodeEnv: "development", workspaceRoot: workspace });
+    servers.push(development);
+    const developmentPort = await listen(development);
+    const traversal = await postJson(developmentPort, "/analyze-file", {
+      currentFile: "../outside.py",
+      baselineFile: "job-1/old.py"
+    });
+    expect(traversal.status).toBe(400);
+    expect(traversal.body).toMatchObject({ error: { code: "WORKSPACE_PATH_INVALID" } });
+  });
+
+  it("enforces CORS allow lists and the request body limit", async () => {
+    const server = createApiServer({ allowedOrigins: ["https://dashboard.example.com"] });
+    servers.push(server);
+    const port = await listen(server);
+
+    const allowed = await httpJson(port, "GET", "/health", undefined, { origin: "https://dashboard.example.com" });
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://dashboard.example.com");
+    const denied = await httpJson(port, "GET", "/health", undefined, { origin: "https://evil.example.com" });
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+
+    const oversized = await postJson(port, "/demo/seed", { value: "x".repeat(1024 * 1024) });
+    expect(oversized.status).toBe(413);
+    expect(oversized.body).toMatchObject({ error: { code: "BODY_TOO_LARGE" } });
   });
 
   it("verifies GitHub pull_request webhooks and enqueues review jobs", async () => {

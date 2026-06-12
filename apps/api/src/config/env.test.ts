@@ -6,6 +6,7 @@ describe("loadEnv", () => {
     const config = loadEnv({});
     expect(config.HOST).toBe("127.0.0.1");
     expect(config.PORT).toBe(8787);
+    expect(config.workspaceRoot).toMatch(/\.consistency[\\/]workspaces$/);
     expect(config.LLM_PROVIDER).toBe("mock");
     expect(config.CONSISTENCY_WORKER_CONCURRENCY).toBe(1);
   });
@@ -22,11 +23,26 @@ describe("loadEnv", () => {
   it("requires a webhook secret in production", () => {
     expect(() => loadEnv({ NODE_ENV: "production" })).toThrow(/GITHUB_WEBHOOK_SECRET/);
     expect(() => loadEnv({ NODE_ENV: "production", GITHUB_WEBHOOK_SECRET: "secret" })).toThrow(/CONSISTENCY_API_TOKEN/);
-    expect(loadEnv({
+    expect(() => loadEnv({
       NODE_ENV: "production",
       GITHUB_WEBHOOK_SECRET: "secret",
       CONSISTENCY_API_TOKEN: "api-token"
+    })).toThrow(/GITHUB_APP_ID/);
+    expect(loadEnv({
+      NODE_ENV: "production",
+      GITHUB_WEBHOOK_SECRET: "secret",
+      CONSISTENCY_API_TOKEN: "api-token",
+      GITHUB_APP_ID: "123",
+      GITHUB_PRIVATE_KEY: "private-key"
     }).NODE_ENV).toBe("production");
+    expect(() => loadEnv({
+      NODE_ENV: "production",
+      GITHUB_WEBHOOK_SECRET: "secret",
+      CONSISTENCY_API_TOKEN: "api-token",
+      GITHUB_APP_ID: "123",
+      GITHUB_PRIVATE_KEY: "private-key",
+      CONSISTENCY_ALLOWED_ORIGINS: "*"
+    })).toThrow(/explicit origins/);
   });
 
   it("prefers DeepSeek when its key is configured and otherwise uses mock", () => {
