@@ -391,7 +391,7 @@ describe("createApiServer", () => {
 
     const seeded = await postJson(port, "/demo/seed", {});
     expect(seeded.status).toBe(201);
-    expect(seeded.body).toEqual({ created: 4 });
+    expect(seeded.body).toEqual({ created: 8 });
 
     const filtered = await getJson(port, "/jobs?status=succeeded&repository=payments&severity=medium");
     expect(filtered.status).toBe(200);
@@ -400,7 +400,7 @@ describe("createApiServer", () => {
     });
 
     const stats = await getJson(port, "/stats");
-    expect(stats.body).toMatchObject({ totalJobs: 4, succeededJobs: 3, runningJobs: 1 });
+    expect(stats.body).toMatchObject({ totalJobs: 8, succeededJobs: 5, failedJobs: 1, runningJobs: 1 });
 
     const reports = await getJson(port, "/reports/recent?limit=2");
     const recent = (reports.body as { reports: Array<{ repositoryFullName: string }> }).reports;

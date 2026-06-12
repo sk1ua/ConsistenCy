@@ -143,10 +143,10 @@ describe("SQLiteJobStore", () => {
   it("seeds demo jobs without webhook delivery foreign keys", () => {
     const { database, store } = createStore();
     try {
-      expect(seedDemoData(store)).toEqual({ created: 4 });
+      expect(seedDemoData(store)).toEqual({ created: 8 });
       expect(seedDemoData(store)).toEqual({ created: 0 });
-      expect(store.list()).toHaveLength(4);
-      expect(store.list().filter(job => job.status === "succeeded")).toHaveLength(3);
+      expect(store.list()).toHaveLength(8);
+      expect(store.list().filter(job => job.status === "succeeded")).toHaveLength(5);
     } finally {
       database.close();
     }

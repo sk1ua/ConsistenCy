@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
-import { Activity, BarChart3, BriefcaseBusiness, Github, RefreshCw, Settings } from "lucide-react";
+import { Activity, BarChart3, BriefcaseBusiness, ChevronDown, Clock3, FlaskConical, Menu, RefreshCw, Settings } from "lucide-react";
 import { api, type HealthResponse } from "./api/client";
 import { mockJobs, mockReports, mockStats } from "./demo/mockReports";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -33,6 +33,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState<string>();
+  const [now, setNow] = useState(() => new Date());
 
   async function loadData() {
     setLoading(true);
@@ -58,6 +59,10 @@ export function App() {
   }
 
   useEffect(() => { void loadData(); }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -96,25 +101,29 @@ export function App() {
 
   return <div className="app-shell">
     <aside className="app-sidebar">
-      <div className="brand"><span className="brand-mark">C</span><span><strong>ConsistenCy</strong><small>PR review operations</small></span></div>
+      <div className="brand"><img src="/consistency-logo.png" alt="" /><strong>Consisten<span>Cy</span></strong></div>
       <nav>{navItems.map(([id, label, Icon]) => <button className={view === id ? "active" : ""} key={id} type="button" onClick={() => setView(id)} title={label}><Icon size={18} /><span>{label}</span></button>)}</nav>
-      <div className="sidebar-footer"><Github size={17} /><span>GitHub App</span><i className={health?.configuration.githubAppConfigured ? "online" : "offline"} /></div>
+      <div className="sidebar-profile"><span className="profile-avatar">DE</span><span><strong>Demo Engineer</strong><small>demo@consistency.ai</small></span><ChevronDown size={15} /></div>
     </aside>
     <main className="app-main">
       <header className="app-header">
-        <div><h1>{pageTitle}</h1><p>{view === "dashboard" ? "Multi-agent pull request review activity" : view === "jobs" ? "Search and inspect persisted review runs" : view === "settings" ? "Runtime health and integration status" : "Evidence-backed findings and agent execution"}</p></div>
+        <div className="header-title"><Menu size={21} /><h1>{pageTitle}</h1></div>
         <div className="header-actions">
-          {demoMode && <span className="demo-indicator">Demo Mode</span>}
+          {demoMode && <span className="demo-indicator"><FlaskConical size={15} />Demo Mode</span>}
+          <span className="api-status">API <i className={health?.database.ok ? "online" : "offline"} /> {health?.database.ok ? "Connected" : "Demo data"}</span>
+          <span className="header-time"><Clock3 size={16} />{now.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
           {jobs.length === 0 && !loading && <button className="secondary-button" onClick={() => void seedDemo()}>Load demo data</button>}
           <button className="icon-button" type="button" onClick={() => void loadData()} title="Refresh data"><RefreshCw size={18} /></button>
         </div>
       </header>
-      {error && <div className="notice"><strong>Using local demo data.</strong><span>{error}</span></div>}
-      {loading ? <div className="loading-state"><RefreshCw size={22} /><span>Loading review workspace</span></div> :
-        view === "dashboard" ? <DashboardPage stats={stats} jobs={jobs} reports={reports} onOpenJob={job => void openJob(job)} /> :
-        view === "jobs" ? <JobsPage jobs={jobs} onOpenJob={job => void openJob(job)} /> :
-        view === "settings" ? <SettingsPage health={health} /> :
-        <ReportPage job={selectedJob ?? jobs.find(job => job.status === "succeeded")} report={selectedReport ?? reports[0]} onBack={() => setView("jobs")} />}
+      <div className="app-content">
+        {error && <div className="notice"><strong>Using local demo data.</strong><span>{error}</span></div>}
+        {loading ? <div className="loading-state"><RefreshCw size={22} /><span>Loading review workspace</span></div> :
+          view === "dashboard" ? <DashboardPage stats={stats} jobs={jobs} reports={reports} onOpenJob={job => void openJob(job)} onOpenJobs={() => setView("jobs")} /> :
+          view === "jobs" ? <JobsPage jobs={jobs} onOpenJob={job => void openJob(job)} /> :
+          view === "settings" ? <SettingsPage health={health} /> :
+          <ReportPage job={selectedJob ?? jobs.find(job => job.status === "succeeded")} report={selectedReport ?? reports[0]} onBack={() => setView("jobs")} />}
+      </div>
     </main>
   </div>;
 }

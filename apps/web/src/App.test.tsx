@@ -15,14 +15,14 @@ describe("App", () => {
     const html = renderToString(<App />);
 
     expect(html).toContain("Dashboard");
-    expect(html).toContain("PR review operations");
+    expect(html).toContain("Consisten");
     expect(html).toContain("Loading review workspace");
     expect(html).toContain(">Jobs<");
     expect(html).toContain("Settings");
   });
 
   it("renders dashboard, jobs, and report detail views", () => {
-    expect(renderToString(<DashboardPage stats={mockStats} jobs={mockJobs} reports={mockReports} onOpenJob={() => {}} />)).toContain("Recent review jobs");
+    expect(renderToString(<DashboardPage stats={mockStats} jobs={mockJobs} reports={mockReports} onOpenJob={() => {}} onOpenJobs={() => {}} />)).toContain("Recent PR review jobs");
     expect(renderToString(<JobsPage jobs={mockJobs} onOpenJob={() => {}} />)).toContain("Search repository or PR");
     expect(renderToString(<ReportPage job={mockJobs[0]} report={mockReports[0]} onBack={() => {}} />)).toContain("Agent runs");
   });
