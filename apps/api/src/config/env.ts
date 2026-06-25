@@ -1,7 +1,10 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 
-const optionalSecret = z.string().trim().min(1).optional();
+const optionalSecret = z.preprocess(
+  value => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().trim().min(1).optional()
+);
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),

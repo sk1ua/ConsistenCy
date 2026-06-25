@@ -2,7 +2,6 @@
 click==8.1.7
 rich==13.7.0
 GitPython==3.1.43
-flask>=3.0.0
 
 # Parsing and metrics
 astroid==3.0.3
@@ -20,7 +19,6 @@ openai>=1.52.0,<2.0.0
 
 # Environment and GitHub integration
 python-dotenv>=1.0.0
-PyGithub>=2.0.0
 
 # Misc
 pyyaml==6.0.1

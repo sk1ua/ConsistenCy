@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { GitHubAppAuthenticator, normalizeGitHubPrivateKey, type AppAuthFactory } from "./auth";
 
@@ -5,6 +8,19 @@ describe("GitHubAppAuthenticator", () => {
   it("normalizes escaped newlines in environment private keys", () => {
     expect(normalizeGitHubPrivateKey("-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----"))
       .toBe("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----");
+  });
+
+  it("loads private keys from a configured file path", () => {
+    const directory = mkdtempSync(join(tmpdir(), "consistency-key-"));
+    try {
+      const keyPath = join(directory, "github-app.pem");
+      writeFileSync(keyPath, "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n", "utf8");
+
+      expect(normalizeGitHubPrivateKey(keyPath))
+        .toBe("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("requests an installation token for the requested installation", async () => {

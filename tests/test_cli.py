@@ -47,7 +47,6 @@ def test_cli_version():
     "analyze-range",
     "analyze-file",
     "pr-report",
-    "web-ui",
     "export-range",
     "export-by-file",
     "export-by-author",

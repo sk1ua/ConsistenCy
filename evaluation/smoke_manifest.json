@@ -11,7 +11,7 @@
         "overall_risk": "medium",
         "top_risky_files": [
           "backend/src/remote/remote_pipeline.py",
-          "frontend/app.py"
+          "apps/web/src/App.tsx"
         ],
         "reason_categories": [
           "review_comment"
@@ -34,7 +34,7 @@
         "overall_risk": "medium",
         "top_risky_files": [
           "backend/src/collaboration/coordinator.py",
-          "frontend/static/js/showcase.js"
+          "apps/web/src/App.tsx"
         ],
         "reason_categories": [
           "security",

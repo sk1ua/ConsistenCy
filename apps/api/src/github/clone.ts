@@ -61,7 +61,7 @@ export async function clonePullRequestWorkspace(options: {
     GIT_TERMINAL_PROMPT: "0",
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.extraHeader",
-    GIT_CONFIG_VALUE_0: `Authorization: Bearer ${options.token}`
+    GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`
   };
   const url = `https://github.com/${owner}/${repo}.git`;
   try {

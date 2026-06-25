@@ -273,7 +273,7 @@ def test_template_baseline_cli():
 
 def test_template_baseline_flask():
     from src.baseline_strategy import get_template_baseline
-    tmpl = get_template_baseline("frontend/app.py")
+    tmpl = get_template_baseline("examples/app.py")
     assert "Flask" in tmpl
 
 

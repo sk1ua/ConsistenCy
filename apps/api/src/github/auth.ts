@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { createAppAuth } from "@octokit/auth-app";
 
 export type InstallationToken = {
@@ -22,6 +23,9 @@ export function normalizeGitHubPrivateKey(value: string): string {
     trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')
       ? trimmed.slice(1, -1)
       : trimmed;
+  if (!unquoted.includes("-----BEGIN") && existsSync(unquoted)) {
+    return readFileSync(unquoted, "utf8").replace(/\\n/g, "\n").trim();
+  }
   return unquoted.replace(/\\n/g, "\n").trim();
 }
 

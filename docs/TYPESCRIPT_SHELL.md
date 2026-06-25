@@ -72,11 +72,12 @@ The TypeScript GitHub App surface is intentionally thin:
 - Push events enqueue `push` jobs for `main` and `master` refs.
 - Unsupported events and non-actionable refs return `ignored` responses
   without side effects.
-- The demo job runner turns `pull_request` jobs into PR reports by calling
-  `python backend/cli.py pr-report --json-output` and validating the
-  result through `packages/schema`.
-- Python remains responsible for repository parsing, agent scoring, report
-  generation, and future ML-backed analysis work.
+- The compatibility runner can still turn `pull_request` jobs into PR reports
+  by calling `python backend/cli.py pr-report --json-output` and validating
+  the result through `packages/schema`.
+- The current production worker primarily uses the TypeScript LangGraph review
+  workflow. Python remains responsible for repository parsing, deterministic
+  analysis, evaluation, and compatibility report generation.
 
 The current queue is in-memory so local development and tests stay simple.
 Production persistence can replace `InMemoryJobQueue` without changing the
@@ -107,5 +108,6 @@ GITHUB_WEBHOOK_SECRET=dev-secret npm run dev:api
 - Additive report fields are allowed.
 - Removing or changing the type of a required report field requires a
   schema-versioned migration.
-- Flask dashboard routes remain supported until the TS dashboard reaches
-  feature parity.
+- The old Flask dashboard and Python/Flask GitHub App server have been removed.
+  The supported product surfaces are `apps/api`, `apps/web`, `packages/schema`,
+  and the retained Python analysis CLI used by the compatibility bridge.

@@ -33,7 +33,10 @@ describe("clonePullRequestWorkspace", () => {
     expect(workspace).toBe(join(root, "job_123"));
     expect(calls.map(call => call.args[0])).toEqual(["clone", "fetch", "checkout"]);
     expect(JSON.stringify(calls.map(call => call.args))).not.toContain("secret-installation-token");
-    expect(calls[0]?.env.GIT_CONFIG_VALUE_0).toBe("Authorization: Bearer secret-installation-token");
+    const header = calls[0]?.env.GIT_CONFIG_VALUE_0 ?? "";
+    expect(header).toMatch(/^Authorization: Basic /);
+    expect(Buffer.from(header.replace("Authorization: Basic ", ""), "base64").toString("utf8"))
+      .toBe("x-access-token:secret-installation-token");
   });
 
   it("rejects unsafe job and repository identifiers", async () => {

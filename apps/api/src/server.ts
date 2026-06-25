@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { loadEnvFile } from "node:process";
 import { createApiServer } from "./http";
 import { loadEnv } from "./config/env";
@@ -13,11 +15,21 @@ import { publishPullRequestComment } from "./github/comment";
 import { renderReviewComment } from "./review/report/markdownRenderer";
 import { redactSensitiveText } from "./security/redact";
 
-try {
-  loadEnvFile();
-} catch (error) {
-  if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+function loadNearestEnvFile(startDirectory = process.cwd()): void {
+  let directory = startDirectory;
+  while (true) {
+    const envPath = join(directory, ".env");
+    if (existsSync(envPath)) {
+      loadEnvFile(envPath);
+      return;
+    }
+    const parent = dirname(directory);
+    if (parent === directory) return;
+    directory = parent;
+  }
 }
+
+loadNearestEnvFile();
 const config = loadEnv();
 const database = openDatabase(config.databasePath);
 runMigrations(database);
