@@ -61,7 +61,7 @@ the project has one WebApp and one webhook implementation.
 
 ## Figma Handoff Notes
 
-When a Figma workspace is available, recreate the showcase screen with these constraints:
+When a Figma workspace is available, recreate the WebApp review dashboard with these constraints:
 
 | Token | Value | Usage |
 | --- | --- | --- |

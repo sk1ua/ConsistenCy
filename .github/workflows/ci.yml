@@ -33,11 +33,7 @@ jobs:
 
       - name: Lint (syntax and undefined-name gate)
         run: |
-          ruff check backend frontend tests --select E9,F63,F7,F82
-
-      - name: Check showcase JavaScript
-        run: |
-          node --check frontend/static/js/showcase.js
+          ruff check backend tests
 
       - name: Setup Node
         uses: actions/setup-node@v4
