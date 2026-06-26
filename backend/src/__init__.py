@@ -7,7 +7,6 @@ Package layout
 agents/            : 7 specialist analysis agents + base class
 collaboration/     : vote and consensus coordinator
 evaluation/        : metric, dataset, and ablation helpers
-github_app/        : installation, webhook, and repository scanner
 models/            : typed report contracts (schemas, enums)
 parsers/            : Python / JS / TS parsing helpers
 remote/            : GitHub API client and remote analysis pipeline

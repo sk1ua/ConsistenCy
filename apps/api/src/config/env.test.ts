@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import { loadEnv } from "./env";
+
+describe("loadEnv", () => {
+  it("uses local-safe defaults", () => {
+    const config = loadEnv({});
+    expect(config.HOST).toBe("127.0.0.1");
+    expect(config.PORT).toBe(8787);
+    expect(config.workspaceRoot).toMatch(/\.consistency[\\/]workspaces$/);
+    expect(config.LLM_PROVIDER).toBe("mock");
+    expect(config.CONSISTENCY_WORKER_CONCURRENCY).toBe(1);
+  });
+
+  it("parses origins and rejects invalid ports", () => {
+    const config = loadEnv({
+      PORT: "9000",
+      CONSISTENCY_ALLOWED_ORIGINS: "https://example.com, https://admin.example.com"
+    });
+    expect(config.allowedOrigins).toEqual(["https://example.com", "https://admin.example.com"]);
+    expect(() => loadEnv({ PORT: "70000" })).toThrow();
+  });
+
+  it("requires a webhook secret in production", () => {
+    expect(() => loadEnv({ NODE_ENV: "production" })).toThrow(/GITHUB_WEBHOOK_SECRET/);
+    expect(() => loadEnv({ NODE_ENV: "production", GITHUB_WEBHOOK_SECRET: "secret" })).toThrow(/CONSISTENCY_API_TOKEN/);
+    expect(() => loadEnv({
+      NODE_ENV: "production",
+      GITHUB_WEBHOOK_SECRET: "secret",
+      CONSISTENCY_API_TOKEN: "api-token"
+    })).toThrow(/GITHUB_APP_ID/);
+    expect(loadEnv({
+      NODE_ENV: "production",
+      GITHUB_WEBHOOK_SECRET: "secret",
+      CONSISTENCY_API_TOKEN: "api-token",
+      GITHUB_APP_ID: "123",
+      GITHUB_PRIVATE_KEY: "private-key"
+    }).NODE_ENV).toBe("production");
+    expect(() => loadEnv({
+      NODE_ENV: "production",
+      GITHUB_WEBHOOK_SECRET: "secret",
+      CONSISTENCY_API_TOKEN: "api-token",
+      GITHUB_APP_ID: "123",
+      GITHUB_PRIVATE_KEY: "private-key",
+      CONSISTENCY_ALLOWED_ORIGINS: "*"
+    })).toThrow(/explicit origins/);
+  });
+
+  it("prefers DeepSeek when its key is configured and otherwise uses mock", () => {
+    expect(loadEnv({}).LLM_PROVIDER).toBe("mock");
+    expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).LLM_PROVIDER).toBe("deepseek");
+    expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).DEEPSEEK_MODEL).toBe("deepseek-v4-flash");
+    expect(() => loadEnv({ LLM_PROVIDER: "deepseek" })).toThrow(/DEEPSEEK_API_KEY/);
+    expect(() => loadEnv({ LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
+  });
+});

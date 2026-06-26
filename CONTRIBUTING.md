@@ -17,16 +17,17 @@ Run these before opening a pull request:
 ```bash
 python examples/multi_agent_demo.py
 python -m pytest -q
-node --check frontend/static/js/showcase.js
+npm run verify
 ```
 
-For dashboard work, also run:
+For WebApp work, run the TypeScript services:
 
 ```bash
-python frontend/app.py
+npm run dev:api
+npm run dev:web
 ```
 
-Then open `http://127.0.0.1:8000/showcase`.
+Then open `http://127.0.0.1:5173`.
 
 ## Development Guidelines
 
@@ -41,5 +42,5 @@ Then open `http://127.0.0.1:8000/showcase`.
 - The change has a clear user-facing reason.
 - Tests cover the changed behavior.
 - `python -m pytest -q` passes.
-- `node --check frontend/static/js/showcase.js` passes when frontend files changed.
+- `npm run verify` passes when TypeScript or WebApp files changed.
 - README or docs are updated when commands, schemas, routes, or setup steps change.

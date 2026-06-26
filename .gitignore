@@ -36,6 +36,7 @@ config.local.py
 *.sqlite
 *.sqlite3
 .consistency_baseline.db
+.consistency/
 chroma_db/
 
 # Test and coverage output
@@ -61,8 +62,8 @@ data/cache/*.json
 
 
 # Private planning notes
-ARCHITECTURE.md
-ROADMAP.md
+/ARCHITECTURE.md
+/ROADMAP.md
 
 # Others
 .claude

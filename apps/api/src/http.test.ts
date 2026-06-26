@@ -1,5 +1,8 @@
 import { request } from "node:http";
 import { createHmac } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
@@ -55,7 +58,7 @@ function httpJson(
   path: string,
   payload?: unknown,
   headers: Record<string, string> = {}
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ status: number; body: unknown; headers: Record<string, string | string[] | undefined> }> {
   return new Promise((resolve, reject) => {
     const raw = payload === undefined ? "" : JSON.stringify(payload);
     const req = request(
@@ -77,7 +80,7 @@ function httpJson(
           responseBody += chunk;
         });
         res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body: JSON.parse(responseBody) });
+          resolve({ status: res.statusCode ?? 0, body: responseBody ? JSON.parse(responseBody) : {}, headers: res.headers });
         });
       }
     );
@@ -91,11 +94,11 @@ function postJson(
   path: string,
   payload: unknown,
   headers: Record<string, string> = {}
-): Promise<{ status: number; body: unknown }> {
+): Promise<{ status: number; body: unknown; headers: Record<string, string | string[] | undefined> }> {
   return httpJson(port, "POST", path, payload, headers);
 }
 
-function getJson(port: number, path: string): Promise<{ status: number; body: unknown }> {
+function getJson(port: number, path: string): Promise<{ status: number; body: unknown; headers: Record<string, string | string[] | undefined> }> {
   return httpJson(port, "GET", path);
 }
 
@@ -126,6 +129,7 @@ function enqueuePullRequestJob(jobs: InMemoryJobQueue) {
 
 describe("createApiServer", () => {
   const servers: ReturnType<typeof createApiServer>[] = [];
+  const tempDirectories: string[] = [];
 
   afterEach(async () => {
     await Promise.all(
@@ -137,25 +141,71 @@ describe("createApiServer", () => {
       )
     );
     servers.length = 0;
+    for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
   it("serves POST /analyze-file through the Python bridge", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "consistency-http-workspace-"));
+    tempDirectories.push(workspace);
+    mkdirSync(join(workspace, "job-1"));
+    writeFileSync(join(workspace, "job-1", "new.py"), "print('new')");
+    writeFileSync(join(workspace, "job-1", "old.py"), "print('old')");
     const runProcess: RunProcess = async () => ({
       exitCode: 0,
       stdout: JSON.stringify(validAnalysisResult),
       stderr: ""
     });
-    const server = createApiServer({ runProcess });
+    const server = createApiServer({ runProcess, workspaceRoot: workspace, nodeEnv: "development" });
     servers.push(server);
     const port = await listen(server);
 
     const response = await postJson(port, "/analyze-file", {
-      currentFile: "examples/demo_new.py",
-      baselineFile: "examples/demo_base.py"
+      currentFile: "job-1/new.py",
+      baselineFile: "job-1/old.py"
     });
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ risk_score: 0.1 });
+  });
+
+  it("blocks analyze-file outside development and rejects workspace traversal", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "consistency-http-secure-"));
+    tempDirectories.push(workspace);
+    mkdirSync(join(workspace, "job-1"));
+    writeFileSync(join(workspace, "job-1", "old.py"), "print('old')");
+
+    const production = createApiServer({ nodeEnv: "production", workspaceRoot: workspace });
+    servers.push(production);
+    const productionPort = await listen(production);
+    expect((await postJson(productionPort, "/analyze-file", {
+      currentFile: "job-1/old.py",
+      baselineFile: "job-1/old.py"
+    })).body).toMatchObject({ error: { code: "ANALYZE_FILE_DISABLED" } });
+
+    const development = createApiServer({ nodeEnv: "development", workspaceRoot: workspace });
+    servers.push(development);
+    const developmentPort = await listen(development);
+    const traversal = await postJson(developmentPort, "/analyze-file", {
+      currentFile: "../outside.py",
+      baselineFile: "job-1/old.py"
+    });
+    expect(traversal.status).toBe(400);
+    expect(traversal.body).toMatchObject({ error: { code: "WORKSPACE_PATH_INVALID" } });
+  });
+
+  it("enforces CORS allow lists and the request body limit", async () => {
+    const server = createApiServer({ allowedOrigins: ["https://dashboard.example.com"] });
+    servers.push(server);
+    const port = await listen(server);
+
+    const allowed = await httpJson(port, "GET", "/health", undefined, { origin: "https://dashboard.example.com" });
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://dashboard.example.com");
+    const denied = await httpJson(port, "GET", "/health", undefined, { origin: "https://evil.example.com" });
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+
+    const oversized = await postJson(port, "/demo/seed", { value: "x".repeat(1024 * 1024) });
+    expect(oversized.status).toBe(413);
+    expect(oversized.body).toMatchObject({ error: { code: "BODY_TOO_LARGE" } });
   });
 
   it("verifies GitHub pull_request webhooks and enqueues review jobs", async () => {
@@ -168,6 +218,7 @@ describe("createApiServer", () => {
       action: "synchronize",
       repository: { full_name: "sk1ua/ConsistenCy" },
       installation: { id: 123 },
+      sender: { login: "octocat" },
       pull_request: {
         number: 31,
         base: { sha: "base123" },
@@ -201,11 +252,53 @@ describe("createApiServer", () => {
     expect(jobsResponse.body).toMatchObject({
       jobs: [
         {
-          deliveryId: "delivery-1",
-          repository: "sk1ua/ConsistenCy"
+          type: "PR_REVIEW",
+          repositoryFullName: "sk1ua/ConsistenCy"
         }
       ]
     });
+
+    const duplicate = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-1",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body).toMatchObject({ status: "duplicate" });
+    expect(jobs.list()).toHaveLength(1);
+  });
+
+  it("records push deliveries as ignored without creating a job", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
+    servers.push(server);
+    const port = await listen(server);
+    const payload = { ref: "refs/heads/main", repository: { full_name: "sk1ua/ConsistenCy" } };
+
+    const response = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "push",
+      "x-github-delivery": "delivery-push",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ status: "ignored", reason: "push reviews are not supported" });
+    expect(jobs.list()).toHaveLength(0);
+    expect(jobs.getWebhookDelivery("delivery-push")?.status).toBe("ignored");
+  });
+
+  it("rejects webhook requests when no secret is configured", async () => {
+    const server = createApiServer({ githubWebhookSecret: "" });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await postJson(port, "/github/webhook", {}, {
+      "x-github-event": "ping",
+      "x-github-delivery": "delivery-unconfigured"
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ error: { code: "WEBHOOK_NOT_CONFIGURED" } });
   });
 
   it("rejects GitHub webhooks with an invalid signature", async () => {
@@ -226,8 +319,25 @@ describe("createApiServer", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(response.body).toMatchObject({ code: "INVALID_SIGNATURE" });
+    expect(response.body).toMatchObject({ error: { code: "INVALID_SIGNATURE" } });
     expect(jobs.list()).toHaveLength(0);
+  });
+
+  it("persists signed but invalid deliveries as failed", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
+    servers.push(server);
+    const port = await listen(server);
+    const payload = { action: "opened" };
+
+    const response = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-invalid",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+
+    expect(response.status).toBe(400);
+    expect(jobs.getWebhookDelivery("delivery-invalid")?.status).toBe("failed");
   });
 
   it("runs the next queued PR job and exposes the generated report", async () => {
@@ -248,7 +358,7 @@ describe("createApiServer", () => {
 
     const notReady = await getJson(port, `/jobs/${queued.id}/report`);
     expect(notReady.status).toBe(409);
-    expect(notReady.body).toMatchObject({ code: "JOB_NOT_READY" });
+    expect(notReady.body).toMatchObject({ error: { code: "JOB_NOT_READY" } });
 
     const response = await postJson(port, "/jobs/run-next", {});
     expect(response.status).toBe(200);
@@ -256,9 +366,12 @@ describe("createApiServer", () => {
       job: {
         id: queued.id,
         status: "succeeded",
-        result: {
-          base_ref: "base123",
-          head_ref: "head456"
+        report: {
+          jobId: queued.id,
+          repositoryFullName: "sk1ua/ConsistenCy",
+          pullRequestNumber: 31,
+          baseSha: "base123",
+          headSha: "head456"
         }
       }
     });
@@ -270,9 +383,12 @@ describe("createApiServer", () => {
     const report = await getJson(port, `/jobs/${queued.id}/report`);
     expect(report.status).toBe(200);
     expect(report.body).toMatchObject({
-      base_ref: "base123",
-      head_ref: "head456",
-      top_risky_files: [{ file: "docs/EVALUATION.md" }]
+      report: {
+        jobId: queued.id,
+        baseSha: "base123",
+        headSha: "head456",
+        findings: [{ file: "docs/EVALUATION.md", confidence: "hypothesis" }]
+      }
     });
   });
 
@@ -290,7 +406,7 @@ describe("createApiServer", () => {
 
     const response = await postJson(port, `/jobs/${queued.id}/run`, {});
     expect(response.status).toBe(502);
-    expect(response.body).toMatchObject({ code: "PYTHON_PR_REPORT_EXIT_NONZERO" });
+    expect(response.body).toMatchObject({ error: { code: "PYTHON_PR_REPORT_EXIT_NONZERO" } });
 
     const job = await getJson(port, `/jobs/${queued.id}`);
     expect(job.status).toBe(200);
@@ -300,5 +416,45 @@ describe("createApiServer", () => {
         status: "failed"
       }
     });
+  });
+
+  it("protects management routes with a bearer token", async () => {
+    const server = createApiServer({ apiToken: "api-secret" });
+    servers.push(server);
+    const port = await listen(server);
+
+    const unauthorized = await getJson(port, "/jobs");
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.body).toMatchObject({ error: { code: "UNAUTHORIZED" } });
+
+    const authorized = await httpJson(port, "GET", "/jobs", undefined, {
+      authorization: "Bearer api-secret"
+    });
+    expect(authorized.status).toBe(200);
+  });
+
+  it("seeds demo reports and exposes filters, stats, and recent reports", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs, nodeEnv: "development" });
+    servers.push(server);
+    const port = await listen(server);
+
+    const seeded = await postJson(port, "/demo/seed", {});
+    expect(seeded.status).toBe(201);
+    expect(seeded.body).toEqual({ created: 8 });
+
+    const filtered = await getJson(port, "/jobs?status=succeeded&repository=payments&severity=medium");
+    expect(filtered.status).toBe(200);
+    expect(filtered.body).toMatchObject({
+      jobs: [{ repositoryFullName: "acme/payments-api", status: "succeeded" }]
+    });
+
+    const stats = await getJson(port, "/stats");
+    expect(stats.body).toMatchObject({ totalJobs: 8, succeededJobs: 5, failedJobs: 1, runningJobs: 1 });
+
+    const reports = await getJson(port, "/reports/recent?limit=2");
+    const recent = (reports.body as { reports: Array<{ repositoryFullName: string }> }).reports;
+    expect(recent).toHaveLength(2);
+    expect(recent[0]?.repositoryFullName).toBe("sk1ua/ConsistenCy");
   });
 });

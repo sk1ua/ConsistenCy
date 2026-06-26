@@ -12,7 +12,6 @@ dependencies = [
     "click>=8.1",
     "rich>=13.7",
     "GitPython>=3.1",
-    "flask>=3.0",
     "astroid>=3.0",
     "tree-sitter>=0.20",
     "tree-sitter-python>=0.20",
@@ -20,8 +19,8 @@ dependencies = [
     "tree-sitter-typescript>=0.20",
     "numpy>=1.26,<3",
     "scikit-learn>=1.5,<2",
+    "requests>=2.31,<3",
     "python-dotenv>=1.0",
-    "PyGithub>=2.0",
     "pyyaml>=6.0",
 ]
 
@@ -33,7 +32,6 @@ dev = [
     "jsonschema>=4.22,<5",
     "ruff",
 ]
-crypto = ["cryptography"]
 datasets = ["datasets", "huggingface_hub"]
 all = [
     "openai>=1.52,<2",
@@ -41,7 +39,6 @@ all = [
     "pytest-cov>=5.0,<7",
     "jsonschema>=4.22,<5",
     "ruff",
-    "cryptography",
     "datasets",
     "huggingface_hub",
 ]
@@ -61,6 +58,8 @@ norecursedirs = [
 
 [tool.ruff]
 target-version = "py311"
+
+[tool.ruff.lint]
 select = ["E9", "F63", "F7", "F82"]
 
 [build-system]

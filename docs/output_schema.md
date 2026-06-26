@@ -1,6 +1,6 @@
 # Output Schema
 
-This document describes the stable report fields used by the CLI, Flask API, Markdown review comments, and dashboard showcase.
+This document describes the stable report fields used by the CLI, TypeScript API, Markdown review comments, and React WebApp.
 
 Machine-readable contracts live in:
 

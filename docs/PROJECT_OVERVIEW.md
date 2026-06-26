@@ -38,39 +38,30 @@ The coordinator produces:
 
 Security evidence can override lower-priority signals. Structural and semantic drift receive more weight than style-only drift. This keeps the output closer to how real code reviews are triaged.
 
-## Public Demo
+## Product Surfaces
 
-The `/showcase` route is the recommended GitHub demo surface. It uses deterministic example files from `examples/` and renders a dashboard with:
+The supported user-facing surfaces are:
 
-- board decision and risk gauge
-- normalized signal contribution chart
-- specialist vote cards
-- consensus flow
-- evidence chain
-- reviewer handoff queue
+- `apps/web`: React/Vite WebApp for dashboard, job history, report detail, and runtime settings.
+- `apps/api`: TypeScript API and GitHub App webhook receiver.
+- `POST /github/webhook`: signed GitHub App webhook entrypoint for PR review jobs.
+- `backend/cli.py`: retained Python CLI for deterministic analysis, evaluation, and the TypeScript compatibility bridge.
 
-Run it locally with:
+Run the product UI locally with:
 
 ```bash
-python frontend/app.py
+npm run dev:api
+npm run dev:web
 ```
 
-Open `http://127.0.0.1:8000/showcase`.
+Open `http://127.0.0.1:5173`.
 
-## Web And Data Visualization Surface
-
-The dashboard is built as a real product screen rather than a static mockup:
-
-- `GET /showcase` renders the portfolio-ready agent board.
-- `GET /api/demo/collaboration` returns deterministic demo data for the board.
-- `frontend/static/js/showcase.js` draws the risk gauge and signal contribution chart on canvas.
-- `frontend/static/css/showcase.css` owns responsive dashboard layout and visual tokens.
-
-The visualization intentionally focuses on reviewer operations: risk decision, normalized signal weight, agent vote confidence, evidence trace, and handoff queue.
+The retired Flask dashboard and Python/Flask GitHub App server were removed so
+the project has one WebApp and one webhook implementation.
 
 ## Figma Handoff Notes
 
-When a Figma workspace is available, recreate the showcase screen with these constraints:
+When a Figma workspace is available, recreate the WebApp review dashboard with these constraints:
 
 | Token | Value | Usage |
 | --- | --- | --- |
@@ -96,5 +87,5 @@ Use component instances for sidebar, topbar, decision panel, signal chart, agent
 ## Design Notes
 
 - The project favors deterministic scoring over opaque ranking models so reports are reproducible.
-- The backend is organized around stable product surfaces: CLI, Flask API, GitHub App server, report rendering, and evaluation helpers.
-- The dashboard is intentionally operational rather than marketing-heavy: it is meant to look like a real review board, not a landing page.
+- The backend is organized around stable product surfaces: TypeScript API, GitHub App webhook handling, retained Python analysis CLI, report rendering, and evaluation helpers.
+- The WebApp is intentionally operational rather than marketing-heavy: it is meant to look like a real review board, not a landing page.

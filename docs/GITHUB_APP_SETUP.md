@@ -2,19 +2,16 @@
 
 ConsistenCy can run as a GitHub App and post PR review comments automatically.
 
-The project now has two GitHub App surfaces:
-
-- `apps/api` is the TypeScript product shell for webhook verification,
-  event routing, and job orchestration.
-- `backend/github_app_server.py` remains the Python/Flask implementation
-  that can run repository scanning and comment posting directly.
-
-Prefer the TypeScript shell for new product/API work. Keep parser, agents,
-  scoring, evaluation, and model-heavy logic in Python.
+The GitHub App surface is owned by `apps/api`: it verifies webhooks, creates
+durable review jobs, runs the worker-backed review workflow, stores reports,
+and posts PR comments. Python remains available behind the compatibility bridge
+for parser, agent, scoring, evaluation, and model-heavy analysis code.
 
 ## Prerequisites
 
 - Python 3.12+
+- Node.js 22+
+- npm
 - Git
 - A public webhook URL
 - A GitHub account with permission to create GitHub Apps
@@ -54,33 +51,33 @@ Set these values:
 GITHUB_APP_ID=123456
 GITHUB_PRIVATE_KEY=/path/to/consistency-app.pem
 GITHUB_WEBHOOK_SECRET=your-webhook-secret
-GITHUB_APP_ENCRYPTION_KEY=your-64-char-hex-key
-GITHUB_APP_ENV=production
-FLASK_DEBUG=false
-PORT=8000
 ```
 
-Generate an encryption key:
+For production, also set an API token and allowed origins:
 
 ```bash
-python -c "import secrets; print(secrets.token_hex(32))"
+CONSISTENCY_API_TOKEN=replace-with-a-long-random-token
+CONSISTENCY_ALLOWED_ORIGINS=https://your-web.example.com
 ```
 
 ## Run
 
 ```bash
-pip install -r requirements-dev.txt
-python backend/github_app_server.py
+npm install
+python -m pip install -r requirements-dev.txt
+npm run dev:api
+npm run dev:web
 ```
 
-For production, run behind HTTPS with a process manager or WSGI server.
+For production, run the API behind HTTPS with a process manager and point the
+GitHub App webhook URL at `/github/webhook`.
 
 ## Security Checklist
 
 - Webhook secret is set.
 - Private key file permissions are restricted.
-- `GITHUB_APP_ENV=production` is set.
-- `FLASK_DEBUG=false` is set.
+- `CONSISTENCY_API_TOKEN` is set for non-webhook API routes.
+- `CONSISTENCY_ALLOWED_ORIGINS` is explicit.
 - HTTPS terminates before the webhook endpoint.
 - Repository access is limited to intended installations.
 

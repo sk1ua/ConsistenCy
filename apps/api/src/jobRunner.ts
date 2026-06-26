@@ -1,12 +1,13 @@
 import { resolve } from "node:path";
-import type { PRReport } from "@consistency/schema";
-import type { InMemoryJobQueue, ReviewJob } from "./jobQueue";
+import type { ReviewJob, ReviewJobStore } from "./jobQueue";
 import {
   buildPRReportWithPython,
   PythonBridgeError,
   repoRoot,
   type RunProcess
 } from "./pythonBridge";
+import { adaptLegacyReport } from "./review/legacyReportAdapter";
+import { sanitizePublicError } from "./security/redact";
 
 export class JobRunnerError extends Error {
   constructor(
@@ -21,10 +22,10 @@ export class JobRunnerError extends Error {
 
 function sanitizeError(error: unknown): string {
   if (error instanceof PythonBridgeError) {
-    return `${error.code}: ${error.message}`;
+    return sanitizePublicError(`${error.code}: ${error.message}`);
   }
   if (error instanceof Error) {
-    return error.message;
+    return sanitizePublicError(error.message);
   }
   return "Unknown job runner error";
 }
@@ -35,30 +36,33 @@ function repoPathForJob(job: ReviewJob): string {
 
 function assertRunnablePullRequest(job: ReviewJob): asserts job is ReviewJob & {
   kind: "pull_request";
+  repository: string;
+  pullRequestNumber: number;
   baseSha: string;
   headSha: string;
 } {
   if (job.kind !== "pull_request") {
     throw new JobRunnerError("Only pull_request jobs can build PR reports in the demo runner", "UNSUPPORTED_JOB_KIND");
   }
-  if (!job.baseSha || !job.headSha) {
-    throw new JobRunnerError("Pull request job is missing base/head SHAs", "INVALID_JOB");
+  if (!job.repository || !job.pullRequestNumber || !job.baseSha || !job.headSha) {
+    throw new JobRunnerError("Pull request job is missing repository, number, or base/head SHAs", "INVALID_JOB");
   }
 }
 
 export async function runReviewJob(
-  jobs: InMemoryJobQueue,
+  jobs: ReviewJobStore,
   jobId: string,
   options: {
     runProcess?: RunProcess;
     timeoutMs?: number;
+    alreadyClaimed?: boolean;
   } = {}
 ): Promise<ReviewJob> {
   const job = jobs.get(jobId);
   if (!job) {
     throw new JobRunnerError("Job not found", "JOB_NOT_FOUND", 404);
   }
-  if (job.status === "running") {
+  if (job.status === "running" && !options.alreadyClaimed) {
     throw new JobRunnerError("Job is already running", "JOB_ALREADY_RUNNING", 409);
   }
   if (job.status === "succeeded") {
@@ -67,8 +71,8 @@ export async function runReviewJob(
 
   try {
     assertRunnablePullRequest(job);
-    jobs.markRunning(job.id);
-    const result: PRReport = await buildPRReportWithPython(
+    if (!options.alreadyClaimed) jobs.markRunning(job.id);
+    const legacyReport = await buildPRReportWithPython(
       {
         repoPath: repoPathForJob(job),
         baseSha: job.baseSha,
@@ -79,6 +83,14 @@ export async function runReviewJob(
         timeoutMs: options.timeoutMs
       }
     );
+    const result = adaptLegacyReport(legacyReport, {
+      jobId: job.id,
+      repositoryFullName: job.repository,
+      pullRequestNumber: job.pullRequestNumber,
+      baseSha: job.baseSha,
+      headSha: job.headSha,
+      createdAt: new Date().toISOString()
+    });
     const updated = jobs.markSucceeded(job.id, result);
     if (!updated) {
       throw new JobRunnerError("Job disappeared while running", "JOB_NOT_FOUND", 404);
@@ -91,15 +103,15 @@ export async function runReviewJob(
 }
 
 export async function runNextReviewJob(
-  jobs: InMemoryJobQueue,
+  jobs: ReviewJobStore,
   options: {
     runProcess?: RunProcess;
     timeoutMs?: number;
   } = {}
 ): Promise<ReviewJob | undefined> {
-  const job = jobs.nextQueued();
+  const job = jobs.claimNextQueued();
   if (!job) {
     return undefined;
   }
-  return runReviewJob(jobs, job.id, options);
+  return runReviewJob(jobs, job.id, { ...options, alreadyClaimed: true });
 }

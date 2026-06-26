@@ -11,7 +11,6 @@ analyze-commit  Run full multi-agent analysis on a single commit
 analyze-range   Batch analysis over a date/commit range
 pr-report       Generate initial PR-level risk report for base..head range
 analyze-file    Compare two Python files directly (no Git required)
-web-ui          Launch the Flask web dashboard
 """
 from __future__ import annotations
 
@@ -479,32 +478,6 @@ def analyze_file(file_now: str, file_base: str, json_output: bool):
 
     for ev in result.get("evidence", [])[:10]:
         console.print(f"  [dim]-[/dim] {ev}")
-
-
-# ---------------------------------------------------------------------------
-# web-ui
-# ---------------------------------------------------------------------------
-
-@cli.command("web-ui")
-@click.option("--port", default=8000, show_default=True, help="HTTP port.")
-@click.option("--debug", is_flag=True, help="Enable Flask debug mode.")
-def web_ui(port: int, debug: bool):
-    """Launch the web dashboard in a browser."""
-    _frontend = Path(__file__).parent.parent / "frontend"
-    sys.path.insert(0, str(_frontend.parent))
-
-    console.print(
-        f"[bold blue]ConsistenCy[/bold blue]  "
-        f"Dashboard -> [underline]http://localhost:{port}[/underline]"
-    )
-
-    try:
-        from frontend.app import app
-    except ImportError:
-        sys.path.insert(0, str(_frontend))
-        from app import app  # type: ignore[import]
-
-    app.run(host="0.0.0.0", port=port, debug=debug)
 
 
 # ---------------------------------------------------------------------------

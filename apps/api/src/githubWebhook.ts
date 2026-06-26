@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { InMemoryJobQueue, ReviewJob } from "./jobQueue";
+import type { ReviewJob, ReviewJobStore } from "./jobQueue";
 
 export class WebhookError extends Error {
   constructor(
@@ -15,7 +15,7 @@ export class WebhookError extends Error {
 export type WebhookHeaders = Record<string, string | string[] | undefined>;
 
 export type WebhookResult = {
-  status: "ignored" | "enqueued";
+  status: "ignored" | "enqueued" | "duplicate";
   event: string;
   deliveryId: string;
   job?: ReviewJob;
@@ -86,11 +86,19 @@ function repositoryName(payload: Record<string, unknown>): string | undefined {
 function enqueuePullRequest(
   payload: Record<string, unknown>,
   deliveryId: string,
-  jobs: InMemoryJobQueue
+  jobs: ReviewJobStore
 ): WebhookResult {
   const action = stringField(payload, "action");
   if (!["opened", "reopened", "synchronize", "ready_for_review"].includes(action ?? "")) {
-    return { status: "ignored", event: "pull_request", deliveryId, reason: `ignored action ${action ?? "unknown"}` };
+    const acceptance = jobs.recordWebhookDelivery({
+      deliveryId,
+      event: "pull_request",
+      action,
+      status: "ignored"
+    });
+    return acceptance.duplicate
+      ? { status: "duplicate", event: "pull_request", deliveryId, reason: "delivery already processed" }
+      : { status: "ignored", event: "pull_request", deliveryId, reason: `ignored action ${action ?? "unknown"}` };
   }
 
   const pullRequest = nestedRecord(payload, "pull_request");
@@ -100,53 +108,37 @@ function enqueuePullRequest(
   const pullRequestNumber = numberField(pullRequest, "number");
   const baseSha = stringField(base, "sha");
   const headSha = stringField(head, "sha");
+  const installation = installationId(payload);
+  const senderLogin = stringField(nestedRecord(payload, "sender"), "login");
 
-  if (!repository || !pullRequestNumber || !baseSha || !headSha) {
+  if (!repository || !pullRequestNumber || !baseSha || !headSha || !installation || !senderLogin) {
     throw new WebhookError("Pull request webhook is missing required fields", "INVALID_PULL_REQUEST", 400);
   }
 
-  const job = jobs.enqueue({
-    kind: "pull_request",
-    deliveryId,
-    repository,
-    pullRequestNumber,
-    baseSha,
-    headSha,
-    installationId: installationId(payload)
+  const acceptance = jobs.acceptWebhookJob({
+    delivery: { deliveryId, event: "pull_request", action },
+    job: {
+      kind: "pull_request",
+      repository,
+      pullRequestNumber,
+      baseSha,
+      headSha,
+      installationId: installation,
+      senderLogin,
+      action
+    }
   });
 
-  return { status: "enqueued", event: "pull_request", deliveryId, job };
-}
-
-function enqueuePush(payload: Record<string, unknown>, deliveryId: string, jobs: InMemoryJobQueue): WebhookResult {
-  const ref = stringField(payload, "ref");
-  if (!ref?.endsWith("/main") && !ref?.endsWith("/master")) {
-    return { status: "ignored", event: "push", deliveryId, reason: `ignored ref ${ref ?? "unknown"}` };
-  }
-
-  const repository = repositoryName(payload);
-  const headSha = stringField(payload, "after");
-  if (!repository || !headSha) {
-    throw new WebhookError("Push webhook is missing required fields", "INVALID_PUSH", 400);
-  }
-
-  const job = jobs.enqueue({
-    kind: "push",
-    deliveryId,
-    repository,
-    headSha,
-    ref,
-    installationId: installationId(payload)
-  });
-
-  return { status: "enqueued", event: "push", deliveryId, job };
+  return acceptance.duplicate
+    ? { status: "duplicate", event: "pull_request", deliveryId, reason: "delivery already processed" }
+    : { status: "enqueued", event: "pull_request", deliveryId, job: acceptance.job };
 }
 
 export function processGitHubWebhook(options: {
   headers: WebhookHeaders;
   body: Buffer;
-  secret?: string;
-  jobs: InMemoryJobQueue;
+  secret: string;
+  jobs: ReviewJobStore;
 }): WebhookResult {
   const event = headerValue(options.headers, "x-github-event");
   const deliveryId = headerValue(options.headers, "x-github-delivery");
@@ -154,30 +146,49 @@ export function processGitHubWebhook(options: {
     throw new WebhookError("Missing GitHub webhook headers", "MISSING_WEBHOOK_HEADERS", 400);
   }
 
-  if (options.secret) {
-    const signature = headerValue(options.headers, "x-hub-signature-256");
-    if (!verifyGitHubSignature(options.body, signature, options.secret)) {
-      throw new WebhookError("Invalid GitHub webhook signature", "INVALID_SIGNATURE", 401);
-    }
+  const signature = headerValue(options.headers, "x-hub-signature-256");
+  if (!verifyGitHubSignature(options.body, signature, options.secret)) {
+    throw new WebhookError("Invalid GitHub webhook signature", "INVALID_SIGNATURE", 401);
   }
 
-  let parsed: unknown;
   try {
-    parsed = options.body.length > 0 ? JSON.parse(options.body.toString("utf8")) : {};
-  } catch {
-    throw new WebhookError("Webhook body must be valid JSON", "INVALID_JSON", 400);
-  }
+    let parsed: unknown;
+    try {
+      parsed = options.body.length > 0 ? JSON.parse(options.body.toString("utf8")) : {};
+    } catch {
+      throw new WebhookError("Webhook body must be valid JSON", "INVALID_JSON", 400);
+    }
 
-  const payload = payloadObject(parsed);
-  if (event === "ping") {
-    return { status: "ignored", event, deliveryId, reason: "pong" };
-  }
-  if (event === "pull_request") {
-    return enqueuePullRequest(payload, deliveryId, options.jobs);
-  }
-  if (event === "push") {
-    return enqueuePush(payload, deliveryId, options.jobs);
-  }
+    const payload = payloadObject(parsed);
+    if (event === "ping") {
+      const acceptance = options.jobs.recordWebhookDelivery({ deliveryId, event, status: "ignored" });
+      return acceptance.duplicate
+        ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
+        : { status: "ignored", event, deliveryId, reason: "pong" };
+    }
+    if (event === "pull_request") {
+      return enqueuePullRequest(payload, deliveryId, options.jobs);
+    }
+    if (event === "push") {
+      const acceptance = options.jobs.recordWebhookDelivery({
+        deliveryId,
+        event,
+        action: stringField(payload, "action"),
+        status: "ignored"
+      });
+      return acceptance.duplicate
+        ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
+        : { status: "ignored", event, deliveryId, reason: "push reviews are not supported" };
+    }
 
-  return { status: "ignored", event, deliveryId, reason: `unsupported event ${event}` };
+    const acceptance = options.jobs.recordWebhookDelivery({ deliveryId, event, status: "ignored" });
+    return acceptance.duplicate
+      ? { status: "duplicate", event, deliveryId, reason: "delivery already processed" }
+      : { status: "ignored", event, deliveryId, reason: `unsupported event ${event}` };
+  } catch (error) {
+    if (error instanceof WebhookError && !options.jobs.getWebhookDelivery(deliveryId)) {
+      options.jobs.recordWebhookDelivery({ deliveryId, event, status: "failed" });
+    }
+    throw error;
+  }
 }
