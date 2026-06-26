@@ -13,6 +13,7 @@ tree-sitter-typescript>=0.20.0
 # Numeric and ML helpers
 numpy>=1.26,<3
 scikit-learn==1.5.2
+requests>=2.31,<3
 
 # Optional LLM integration through OpenAI-compatible APIs
 openai>=1.52.0,<2.0.0

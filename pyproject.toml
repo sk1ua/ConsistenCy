@@ -19,6 +19,7 @@ dependencies = [
     "tree-sitter-typescript>=0.20",
     "numpy>=1.26,<3",
     "scikit-learn>=1.5,<2",
+    "requests>=2.31,<3",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
 ]
