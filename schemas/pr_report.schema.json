@@ -51,6 +51,7 @@
       "type": "array",
       "items": { "$ref": "#/$defs/fileDeepDive" }
     },
+    "retrieval": { "$ref": "#/$defs/retrieval" },
     "security_findings": {
       "type": "array",
       "items": { "$ref": "#/$defs/securityFinding" }
@@ -275,7 +276,165 @@
         "structural_signals": { "$ref": "#/$defs/stringList" },
         "semantic_signals": { "$ref": "#/$defs/stringList" },
         "code_excerpt": { "type": "string" },
-        "diff_excerpt": { "type": "string" }
+        "diff_excerpt": { "type": "string" },
+        "evidence_pack": { "$ref": "#/$defs/evidencePack" }
+      }
+    },
+    "evidenceQuery": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "file",
+        "path_terms",
+        "symbol_terms",
+        "import_terms",
+        "risk_terms",
+        "natural_query",
+        "metadata"
+      ],
+      "properties": {
+        "file": { "type": "string" },
+        "path_terms": { "$ref": "#/$defs/stringList" },
+        "symbol_terms": { "$ref": "#/$defs/stringList" },
+        "import_terms": { "$ref": "#/$defs/stringList" },
+        "risk_terms": { "$ref": "#/$defs/stringList" },
+        "natural_query": { "type": "string" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "evidenceCandidate": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "file", "kind", "source", "content"],
+      "properties": {
+        "id": { "type": "string" },
+        "file": { "type": "string" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "changed_hunk",
+            "file_snippet",
+            "baseline_snippet",
+            "history_signal",
+            "agent_finding",
+            "import_context",
+            "callsite_hint",
+            "review_comment_hint",
+            "security_hint",
+            "evolution_hint"
+          ]
+        },
+        "source": { "type": "string" },
+        "content": { "type": "string" },
+        "start_line": { "type": ["integer", "null"], "minimum": 1 },
+        "end_line": { "type": ["integer", "null"], "minimum": 1 },
+        "metadata": { "type": "object" }
+      }
+    },
+    "evidenceScore": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["total"],
+      "properties": {
+        "total": { "type": "number" },
+        "path_relevance": { "type": "number" },
+        "symbol_overlap": { "type": "number" },
+        "import_overlap": { "type": "number" },
+        "risk_signal_overlap": { "type": "number" },
+        "changed_line_proximity": { "type": "number" },
+        "severity_boost": { "type": "number" },
+        "history_boost": { "type": "number" },
+        "security_boost": { "type": "number" },
+        "local_similarity": { "type": "number" },
+        "reasons": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "selectedEvidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["candidate", "score", "why_selected"],
+      "properties": {
+        "candidate": { "$ref": "#/$defs/evidenceCandidate" },
+        "score": { "$ref": "#/$defs/evidenceScore" },
+        "why_selected": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "discardedEvidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["candidate_id", "kind", "score", "why_discarded"],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "kind": { "type": "string" },
+        "score": { "type": "number" },
+        "why_discarded": { "$ref": "#/$defs/stringList" }
+      }
+    },
+    "evidencePack": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "file",
+        "retrieval_strategy",
+        "context_budget_tokens",
+        "query",
+        "selected_evidence",
+        "discarded_candidates",
+        "compression"
+      ],
+      "properties": {
+        "file": { "type": "string" },
+        "retrieval_strategy": { "type": "string" },
+        "context_budget_tokens": { "type": "integer", "minimum": 0 },
+        "query": { "$ref": "#/$defs/evidenceQuery" },
+        "selected_evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/selectedEvidence" }
+        },
+        "discarded_candidates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/discardedEvidence" }
+        },
+        "compression": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "candidate_count": { "type": "integer", "minimum": 0 },
+            "selected_count": { "type": "integer", "minimum": 0 },
+            "estimated_input_tokens": { "type": "integer", "minimum": 0 },
+            "estimated_output_tokens": { "type": "integer", "minimum": 0 },
+            "compression_ratio": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["strategy", "context_budget_tokens", "packs", "summary"],
+      "properties": {
+        "strategy": { "type": "string" },
+        "context_budget_tokens": { "type": "integer", "minimum": 0 },
+        "packs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidencePack" }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "files_with_evidence",
+            "total_selected_evidence",
+            "average_selected_evidence_count",
+            "average_compression_ratio"
+          ],
+          "properties": {
+            "files_with_evidence": { "type": "integer", "minimum": 0 },
+            "total_selected_evidence": { "type": "integer", "minimum": 0 },
+            "average_selected_evidence_count": { "type": "number", "minimum": 0 },
+            "average_compression_ratio": { "type": "number", "minimum": 0 }
+          }
+        }
       }
     },
     "securityFinding": {

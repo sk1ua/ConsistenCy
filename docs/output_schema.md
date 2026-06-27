@@ -1,155 +1,34 @@
 # Output Schema
 
-This document describes the stable report fields used by the CLI, TypeScript API, Markdown review comments, and React WebApp.
+Machine-readable contracts:
 
-Machine-readable contracts live in:
+- `schemas/analysis_result.schema.json`
+- `schemas/pr_report.schema.json`
+- `packages/schema/src/report.ts`
+- `packages/schema/src/legacy.ts`
 
-- `schemas/analysis_result.schema.json` for `backend/cli.py analyze-file`
-  and `src.pipeline.analyze_sources` output.
-- `schemas/pr_report.schema.json` for `AnalysisPipeline.pr_risk_report`
-  and `backend/cli.py pr-report --json-output`.
+Schemas are additive where possible. Existing required fields should not change meaning.
 
-These schemas are the compatibility boundary for the TypeScript product
-shell. Additive fields are allowed because downstream consumers validate
-with `additionalProperties: true`; removing or changing the type of an
-existing required field is a breaking change and should be treated as a
-schema-versioned migration.
+## PR Report Retrieval Field
 
-Contract tests live in `tests/test_report_contracts.py`. They validate a
-golden PR report fixture, the deterministic demo `analyze_sources`
-output, and a real local Git PR report when repository history is
-available.
-
-## Signal Result
+New PR reports may include:
 
 ```json
 {
-  "signal_name": "semantic",
-  "score": 0.47,
-  "evidence": ["AST structure diverged significantly"],
-  "confidence": 0.82,
-  "metadata": {"agent_name": "SemanticAgent"}
-}
-```
-
-## File Result
-
-```json
-{
-  "file": "src/example.py",
-  "risk_score": 0.651,
-  "risk_level": "Significant Drift",
-  "breakdown": {
-    "style": 0.08,
-    "structural": 0.19,
-    "semantic": 0.47,
-    "duplication": 0.03,
-    "security": 0.0
-  },
-  "signal_composition": {
-    "style": 0.10,
-    "structural": 0.20,
-    "semantic": 0.65,
-    "duplication": 0.05,
-    "security": 0.0
-  },
-  "dominant_signals": ["semantic", "structural"],
-  "confidence": 0.82,
-  "agent_collaboration": {
-    "scope": "src/example.py",
-    "decision": "review_required",
-    "consensus_score": 0.44,
-    "confidence": 0.81,
-    "quorum": "5/5",
-    "participants": ["StyleAgent", "StructuralAgent", "SemanticAgent", "DuplicationAgent", "SecurityAgent"],
-    "top_findings": [],
-    "review_queue": [],
-    "protocol": "parallel_agents -> evidence_normalization -> weighted_consensus -> reviewer_handoff"
-  },
-  "explainability": {
-    "dominant_signals": ["semantic", "structural"],
-    "contributions": {},
-    "evidence_chain": [],
-    "confidence": 0.82,
-    "uncertainty_note": "Confidence is lower when historical baseline coverage is sparse or signals disagree."
+  "retrieval": {
+    "strategy": "hybrid_path_symbol_signal_callsite_ownership_local_similarity",
+    "context_budget_tokens": 2000,
+    "packs": [],
+    "summary": {
+      "files_with_evidence": 0,
+      "total_selected_evidence": 0,
+      "average_selected_evidence_count": 0.0,
+      "average_compression_ratio": 0.0
+    }
   }
 }
 ```
 
-## PR Report
+Each `file_deep_dive` item may also include `evidence_pack`.
 
-Important top-level keys:
-
-- `base_ref`
-- `head_ref`
-- `commit_count`
-- `avg_risk`
-- `max_risk`
-- `high_risk_commits`
-- `commits`
-- `commit_trend`
-- `risk_composition`
-- `evidence_summary`
-- `top_risky_files`
-- `file_deep_dive`
-- `security_findings`
-- `agent_collaboration`
-- `code_snippets`
-- `cache`
-
-## Multi-Agent Collaboration
-
-`agent_collaboration` appears on file results and PR reports.
-
-```json
-{
-  "scope": "pull_request",
-  "decision": "review_required",
-  "consensus_score": 0.44,
-  "confidence": 0.81,
-  "quorum": "5/5",
-  "participants": [
-    "StyleAgent",
-    "StructuralAgent",
-    "SemanticAgent",
-    "DuplicationAgent",
-    "SecurityAgent"
-  ],
-  "votes": [],
-  "top_findings": [
-    {
-      "signal_name": "semantic",
-      "agent_name": "SemanticAgent",
-      "severity": "medium",
-      "title": "SemanticAgent voted needs_attention",
-      "evidence": ["src/example.py: API usage changed"],
-      "recommendation": "Trace changed behavior and API usage against the intended PR design."
-    }
-  ],
-  "disagreements": [],
-  "next_actions": [],
-  "review_queue": [],
-  "protocol": "parallel_agents -> evidence_normalization -> weighted_consensus -> reviewer_handoff"
-}
-```
-
-## Deep Dive
-
-The first deep-dive item should contain:
-
-- `file`
-- `risk`
-- `rank_in_pr`
-- `total_pr_files`
-- `risk_breakdown`
-- `signal_contributions`
-- `dominant_signals`
-- `confidence`
-- `evidence_chain`
-- `risky_lines`
-- `primary_risk_region`
-- `estimated_review_effort`
-- `structural_signals`
-- `semantic_signals`
-- `code_excerpt`
-- `diff_excerpt`
+Older reports without `retrieval` remain valid.

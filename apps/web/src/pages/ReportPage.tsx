@@ -2,6 +2,7 @@ import type { ReviewJob, ReviewReport } from "@consistency/schema";
 import { ArrowLeft, GitBranch, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { AgentRuns } from "../components/AgentRuns";
+import { EvidencePanel } from "../components/EvidencePanel";
 import { FindingItem } from "../components/FindingItem";
 import { StatusBadge } from "../components/StatusBadge";
 
@@ -39,6 +40,7 @@ export function ReportPage({ job, report, onBack }: { job?: ReviewJob; report?: 
           <h3>{group}<span>{findings.length}</span></h3>{findings.map(finding => <FindingItem finding={finding} key={finding.id} />)}
         </div>)}
       </section>
+      <EvidencePanel retrieval={report.retrieval} />
       <section className="section-block"><div className="section-heading"><div><h2>Agent runs</h2><p>Execution timeline and per-agent output</p></div></div><AgentRuns runs={report.agentRuns} /></section>
     </>}
   </div>;

@@ -1,6 +1,7 @@
 import analysisResultJsonSchema from "../../../schemas/analysis_result.schema.json" assert { type: "json" };
 import prReportJsonSchema from "../../../schemas/pr_report.schema.json" assert { type: "json" };
 import { z } from "zod";
+import { retrievalTraceSchema } from "./report";
 
 const scoreSchema = z.number().min(0).max(1);
 const stringListSchema = z.array(z.string());
@@ -132,6 +133,7 @@ export const legacyPRReportSchema = z
     evidence_summary: z.array(z.record(z.unknown())),
     top_risky_files: z.array(topRiskyFileSchema),
     file_deep_dive: z.array(z.record(z.unknown())),
+    retrieval: retrievalTraceSchema.optional(),
     security_findings: z.array(z.record(z.unknown())),
     agent_collaboration: agentCollaborationSchema,
     code_snippets: z.array(z.record(z.unknown())),

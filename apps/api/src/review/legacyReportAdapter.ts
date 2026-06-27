@@ -106,7 +106,7 @@ export function adaptLegacyReport(
     riskLevel: riskLevelForScore(score),
     agentRuns: [agentRun],
     findings,
+    retrieval: legacyReport.retrieval,
     createdAt: metadata.createdAt
   });
 }
-

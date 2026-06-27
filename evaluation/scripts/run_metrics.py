@@ -45,6 +45,61 @@ def _gold_files(annotations: list[dict[str, Any]]) -> list[str]:
     return files
 
 
+def _reviewer_touched_files(sample: dict[str, Any], annotations: list[dict[str, Any]]) -> list[str]:
+    """Return weak reviewer-attention labels, not gold-standard defects."""
+    files = _gold_files(annotations)
+    for key in ("reviewer_touched_files", "review_comment_files", "comment_paths"):
+        for filepath in sample.get(key, []) or []:
+            if filepath and filepath not in files:
+                files.append(filepath)
+    return files
+
+
+def _retrieved_evidence_files(report: dict[str, Any], *, k: int) -> list[str]:
+    files: list[str] = []
+    packs = report.get("retrieval", {}).get("packs", [])
+    for pack in packs[:k]:
+        pack_file = pack.get("file")
+        if pack_file and pack_file not in files:
+            files.append(pack_file)
+        for item in pack.get("selected_evidence", []):
+            candidate = item.get("candidate", {}) if isinstance(item, dict) else {}
+            filepath = candidate.get("file")
+            if filepath and filepath not in files:
+                files.append(filepath)
+    return files
+
+
+def _retrieval_metrics_for_report(
+    report: dict[str, Any],
+    reviewer_touched_files: list[str],
+    *,
+    k: int,
+) -> dict[str, Any]:
+    retrieval = report.get("retrieval") or {}
+    summary = retrieval.get("summary") or {}
+    packs = retrieval.get("packs") or []
+    selected_counts = [
+        int((pack.get("compression") or {}).get("selected_count", len(pack.get("selected_evidence", []))))
+        for pack in packs
+        if isinstance(pack, dict)
+    ]
+    compression_ratios = [
+        float((pack.get("compression") or {}).get("compression_ratio", 0.0))
+        for pack in packs
+        if isinstance(pack, dict)
+    ]
+    retrieved_files = _retrieved_evidence_files(report, k=k)
+    return {
+        "files_with_evidence": int(summary.get("files_with_evidence", sum(1 for count in selected_counts if count > 0))),
+        "average_selected_evidence_count": mean(selected_counts),
+        "average_compression_ratio": mean(compression_ratios),
+        "evidence_recall_at_k": recall_at_k(retrieved_files, reviewer_touched_files, k=k)
+        if reviewer_touched_files else None,
+        "retrieved_evidence_files": retrieved_files[:k],
+    }
+
+
 def _gold_overall_score(annotations: list[dict[str, Any]]) -> float | None:
     scores = [
         RISK_TO_SCORE[str(annotation.get("overall_risk", "")).lower()]
@@ -77,6 +132,10 @@ def evaluate_manifest(manifest_path: Path, *, k: int = 3) -> dict[str, Any]:
     gold_overall: list[float] = []
     precision_values: list[float] = []
     recall_values: list[float] = []
+    retrieval_recall_values: list[float] = []
+    retrieval_compression_values: list[float] = []
+    retrieval_selected_values: list[float] = []
+    retrieval_files_with_evidence: list[float] = []
 
     for sample in samples:
         report_path = _resolve(sample.get("model_report_path"))
@@ -91,6 +150,7 @@ def evaluate_manifest(manifest_path: Path, *, k: int = 3) -> dict[str, Any]:
             if row.get("file")
         ]
         gold_files = _gold_files(annotations)
+        reviewer_touched_files = _reviewer_touched_files(sample, annotations)
         gold_score = _gold_overall_score(annotations)
         if gold_score is None:
             continue
@@ -102,6 +162,16 @@ def evaluate_manifest(manifest_path: Path, *, k: int = 3) -> dict[str, Any]:
         recall = recall_at_k(predicted_files, gold_files, k=k)
         precision_values.append(precision)
         recall_values.append(recall)
+        retrieval_metrics = _retrieval_metrics_for_report(
+            report,
+            reviewer_touched_files,
+            k=k,
+        )
+        if retrieval_metrics["evidence_recall_at_k"] is not None:
+            retrieval_recall_values.append(float(retrieval_metrics["evidence_recall_at_k"]))
+        retrieval_compression_values.append(float(retrieval_metrics["average_compression_ratio"]))
+        retrieval_selected_values.append(float(retrieval_metrics["average_selected_evidence_count"]))
+        retrieval_files_with_evidence.append(float(retrieval_metrics["files_with_evidence"]))
         evaluated.append(
             {
                 "repo": sample.get("repo"),
@@ -111,8 +181,10 @@ def evaluate_manifest(manifest_path: Path, *, k: int = 3) -> dict[str, Any]:
                 "gold_overall_risk_score": gold_score,
                 "precision_at_k": precision,
                 "recall_at_k": recall,
+                "retrieval": retrieval_metrics,
                 "predicted_top_files": predicted_files[:k],
                 "gold_top_files": gold_files,
+                "reviewer_touched_files": reviewer_touched_files,
             }
         )
 
@@ -123,6 +195,14 @@ def evaluate_manifest(manifest_path: Path, *, k: int = 3) -> dict[str, Any]:
         "overall_spearman": spearman_rank_correlation(predicted_overall, gold_overall),
         "mean_precision_at_k": mean(precision_values),
         "mean_recall_at_k": mean(recall_values),
+        "retrieval": {
+            "average_compression_ratio": mean(retrieval_compression_values),
+            "average_selected_evidence_count": mean(retrieval_selected_values),
+            "files_with_evidence": int(sum(retrieval_files_with_evidence)),
+            "evidence_recall_at_k": mean(retrieval_recall_values) if retrieval_recall_values else None,
+            "false_evidence_rate": None,
+            "evidence_usefulness_score": None,
+        },
         "pairwise_cohens_kappa": _pairwise_kappa(samples),
         "samples": evaluated,
     }
@@ -169,6 +249,11 @@ def render_markdown(summary: dict[str, Any]) -> str:
         summary.get("mean_precision_at_k") if evaluated > 0 else None
     )
     recall = summary.get("mean_recall_at_k") if evaluated > 0 else None
+    retrieval = summary.get("retrieval", {})
+    evidence_recall = retrieval.get("evidence_recall_at_k") if evaluated > 0 else None
+    avg_compression = retrieval.get("average_compression_ratio") if evaluated > 0 else None
+    avg_selected = retrieval.get("average_selected_evidence_count") if evaluated > 0 else None
+    files_with_evidence = retrieval.get("files_with_evidence") if evaluated > 0 else None
 
     lines = [
         "# ConsistenCy Public PR Evaluation",
@@ -179,12 +264,22 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"| Evaluated | {evaluated} |",
         f"| Precision@{k} | {_format_metric(precision)} |",
         f"| Recall@{k} | {_format_metric(recall)} |",
+        f"| Evidence Recall@{k} | {_format_metric(evidence_recall)} |",
+        f"| Average Compression Ratio | {_format_metric(avg_compression)} |",
+        f"| Average Selected Evidence Count | {_format_metric(avg_selected)} |",
+        f"| Files With Evidence | {_format_metric(files_with_evidence, '{:.0f}')} |",
+        "| False Evidence Rate | n/a |",
+        "| Evidence Usefulness Score | n/a |",
         f"| Spearman | {_format_metric(spearman_value)} |",
         f"| Cohen's Kappa | {_format_metric(kappa_value)} |",
         "",
         "## Notes",
         "",
         "- Labels are weak labels derived from public human review comments.",
+        "- Public review comments are weak supervision for reviewer-attention "
+        "alignment, not gold-standard defect labels.",
+        "- False Evidence Rate and Evidence Usefulness Score stay n/a without "
+        "a separate manual audit.",
         "- Samples marked needs_manual_audit can still be used for the "
         "automatic weak-label benchmark; manual audit is only required for "
         "stronger gold-standard research claims.",

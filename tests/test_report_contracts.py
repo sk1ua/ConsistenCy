@@ -41,6 +41,22 @@ def test_pr_report_fixture_matches_schema():
     _assert_valid(report, "pr_report.schema.json")
 
 
+def test_pr_report_retrieval_schema_is_additive():
+    report = _load_json(PROJECT_ROOT / "tests" / "fixtures" / "pr_report_minimal.json")
+    report["retrieval"] = {
+        "strategy": "hybrid_path_symbol_signal_callsite_ownership_local_similarity",
+        "context_budget_tokens": 2000,
+        "packs": [],
+        "summary": {
+            "files_with_evidence": 0,
+            "total_selected_evidence": 0,
+            "average_selected_evidence_count": 0.0,
+            "average_compression_ratio": 0.0,
+        },
+    }
+    _assert_valid(report, "pr_report.schema.json")
+
+
 def test_analyze_sources_demo_output_matches_schema():
     source_now = (PROJECT_ROOT / "examples" / "demo_new.py").read_text(encoding="utf-8")
     source_base = (PROJECT_ROOT / "examples" / "demo_base.py").read_text(encoding="utf-8")
@@ -71,4 +87,6 @@ def test_pipeline_pr_report_matches_schema_when_git_history_available():
         max_commits=5,
     )
 
+    assert report["retrieval"]["strategy"] == "hybrid_path_symbol_signal_callsite_ownership_local_similarity"
+    assert "files_with_evidence" in report["retrieval"]["summary"]
     _assert_valid(report, "pr_report.schema.json")

@@ -61,6 +61,12 @@ def test_pr_consensus_builds_review_queue_from_top_files():
                 "rank_in_pr": 1,
                 "dominant_signals": ["structural", "semantic"],
                 "agent_collaboration": file_consensus,
+                "evidence_pack": {
+                    "compression": {
+                        "selected_count": 3,
+                        "compression_ratio": 0.25,
+                    }
+                },
             }
         ],
         commit_entries=[{"sha": "abc12345"}],
@@ -70,4 +76,5 @@ def test_pr_consensus_builds_review_queue_from_top_files():
     assert pr["scope"] == "pull_request"
     assert pr["decision"] in {"review_required", "request_changes"}
     assert pr["review_queue"][0]["scope"] == "src/service.py"
+    assert "grounded by 3 selected evidence" in pr["review_queue"][0]["why"]
     assert "collaboration_value" in pr

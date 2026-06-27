@@ -560,16 +560,26 @@ def build_pr_consensus(
         dominant = file_row.get("dominant_signals", [])
         owner_signal = dominant[0] if dominant else "semantic"
         profile = AGENT_PROFILES.get(owner_signal, AGENT_PROFILES["semantic"])
+        evidence_pack = file_row.get("evidence_pack", {})
+        compression = evidence_pack.get("compression", {}) if isinstance(evidence_pack, dict) else {}
+        selected_count = int(compression.get("selected_count", 0) or 0)
+        compression_ratio = float(compression.get("compression_ratio", 0.0) or 0.0)
+        why = (
+            f"rank #{file_row.get('rank_in_pr', '?')} with avg risk "
+            f"{float(file_row.get('avg_risk', 0.0)):.3f}"
+        )
+        if selected_count:
+            why += (
+                f"; grounded by {selected_count} selected evidence item(s) "
+                f"after {compression_ratio:.0%} context compression"
+            )
         review_queue.append(
             {
                 "owner": profile["agent_name"],
                 "scope": file_row.get("file", "?"),
                 "focus": profile["focus"],
                 "stance": file_row.get("agent_collaboration", {}).get("decision", "review_required"),
-                "why": (
-                    f"rank #{file_row.get('rank_in_pr', '?')} with avg risk "
-                    f"{float(file_row.get('avg_risk', 0.0)):.3f}"
-                ),
+                "why": why,
             }
         )
 
@@ -603,6 +613,6 @@ def build_pr_consensus(
     data["commit_count"] = len(commit_entries)
     data["collaboration_value"] = (
         "Specialist agents review in parallel, then a deterministic consensus "
-        "layer routes evidence to the right human reviewer."
+        "layer routes evidence packs to the right human reviewer."
     )
     return data

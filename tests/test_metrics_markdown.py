@@ -43,6 +43,12 @@ def test_render_markdown_with_evaluated_samples():
         "overall_spearman": 0.4321,
         "mean_precision_at_k": 0.6543,
         "mean_recall_at_k": 0.7654,
+        "retrieval": {
+            "evidence_recall_at_k": 0.6111,
+            "average_compression_ratio": 0.247,
+            "average_selected_evidence_count": 2.7,
+            "files_with_evidence": 33,
+        },
         "pairwise_cohens_kappa": 0.5111,
     }
     md = render_markdown(summary)
@@ -52,6 +58,11 @@ def test_render_markdown_with_evaluated_samples():
     assert "| Evaluated | 47 |" in md
     assert "| Precision@3 | 0.654 |" in md
     assert "| Recall@3 | 0.765 |" in md
+    assert "| Evidence Recall@3 | 0.611 |" in md
+    assert "| Average Compression Ratio | 0.247 |" in md
+    assert "| Average Selected Evidence Count | 2.700 |" in md
+    assert "| Files With Evidence | 33 |" in md
+    assert "| False Evidence Rate | n/a |" in md
     assert "| Spearman | 0.432 |" in md
     assert "| Cohen's Kappa | 0.511 |" in md
     assert "## Notes" in md
@@ -66,6 +77,7 @@ def test_render_markdown_handles_no_evaluated_samples():
         "overall_spearman": 0.0,
         "mean_precision_at_k": 0.0,
         "mean_recall_at_k": 0.0,
+        "retrieval": {},
         "pairwise_cohens_kappa": 0.0,
     }
     md = render_markdown(summary)
@@ -74,6 +86,7 @@ def test_render_markdown_handles_no_evaluated_samples():
     assert "| Cohen's Kappa | n/a |" in md
     assert "| Precision@3 | n/a |" in md
     assert "| Recall@3 | n/a |" in md
+    assert "| Evidence Recall@3 | n/a |" in md
 
 
 def test_render_markdown_handles_single_sample_for_spearman():
@@ -84,6 +97,12 @@ def test_render_markdown_handles_single_sample_for_spearman():
         "overall_spearman": 0.0,  # 1 sample - Spearman is meaningless
         "mean_precision_at_k": 0.5,
         "mean_recall_at_k": 0.5,
+        "retrieval": {
+            "evidence_recall_at_k": 1.0,
+            "average_compression_ratio": 0.3,
+            "average_selected_evidence_count": 2.0,
+            "files_with_evidence": 1,
+        },
         "pairwise_cohens_kappa": 0.0,
     }
     md = render_markdown(summary)

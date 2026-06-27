@@ -190,6 +190,43 @@ def _render_evidence_chain(lines: list[str], report: dict[str, Any]) -> None:
     lines.append("")
 
 
+def _render_retrieval_summary(lines: list[str], report: dict[str, Any]) -> None:
+    retrieval = report.get("retrieval", {})
+    packs = retrieval.get("packs", [])
+    summary = retrieval.get("summary", {})
+    if not retrieval:
+        return
+
+    lines.append("## Evidence Retrieval")
+    lines.append("")
+    lines.append(
+        "- **Strategy:** "
+        f"`{retrieval.get('strategy', 'hybrid_path_symbol_signal_callsite_ownership_local_similarity')}`"
+    )
+    lines.append(f"- **Context budget:** `{int(retrieval.get('context_budget_tokens', 0))}` tokens")
+    lines.append(f"- **Files with evidence:** `{int(summary.get('files_with_evidence', 0))}`")
+    lines.append(
+        "- **Average compression ratio:** "
+        f"`{float(summary.get('average_compression_ratio', 0.0)):.3f}`"
+    )
+    if packs:
+        first = packs[0]
+        lines.append("")
+        lines.append(f"**Why this file was retrieved:** `{first.get('file', '?')}`")
+        query = first.get("query", {})
+        if query.get("natural_query"):
+            lines.append(f"- Query: {query['natural_query']}")
+        selected = first.get("selected_evidence", [])
+        for item in selected[:3]:
+            candidate = item.get("candidate", {})
+            reasons = "; ".join(item.get("why_selected", [])[:3])
+            lines.append(
+                f"- `{candidate.get('kind', 'evidence')}` from `{candidate.get('source', 'unknown')}`"
+                f" selected because {reasons or 'it matched the retrieval query'}."
+            )
+    lines.append("")
+
+
 def _render_top_file_deep_dive(lines: list[str], report: dict[str, Any]) -> None:
     deep_dive = report.get("file_deep_dive", [])
     if not deep_dive:
@@ -375,6 +412,7 @@ def generate_review_comment(
     _render_highest_risk_files(lines, report)
     _render_security_override(lines, report)
     _render_evidence_chain(lines, report)
+    _render_retrieval_summary(lines, report)
     _render_top_file_deep_dive(lines, report)
 
     suggestions = _build_suggestions(report)

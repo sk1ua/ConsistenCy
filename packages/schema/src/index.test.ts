@@ -68,6 +68,7 @@ describe("@consistency/schema", () => {
     }).enabledAgents).toHaveLength(2);
     expect(agentRunSchema.parse(demoReviewReport.agentRuns[0]).status).toBe("succeeded");
     expect(reviewReportSchema.parse(demoReviewReport).score).toBe(74);
+    expect(reviewReportSchema.parse(demoReviewReport).retrieval?.packs[0]?.selected_evidence).toHaveLength(3);
     expect(errorResponseSchema.parse({ error: { code: "NOT_FOUND", message: "Missing" } }).error.code).toBe("NOT_FOUND");
   });
 

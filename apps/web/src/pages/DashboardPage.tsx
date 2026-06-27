@@ -1,5 +1,6 @@
 import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
 import { Activity, ArrowRight, CheckCircle2, Clock3, FileText, Github, GitPullRequest, Timer } from "lucide-react";
+import { EvidencePanel } from "../components/EvidencePanel";
 import { StatusBadge } from "../components/StatusBadge";
 
 function duration(milliseconds: number): string {
@@ -36,6 +37,7 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs }: {
   const recentFindings = reports.flatMap(report => report.findings.map(finding => ({ finding, report })))
     .sort((left, right) => severityWeight[right.finding.severity] - severityWeight[left.finding.severity])
     .slice(0, 5);
+  const retrievalReport = reports.find(report => report.retrieval?.packs.length);
 
   return <div className="page-stack dashboard-page">
     <section className="metric-grid" aria-label="Review statistics">
@@ -74,6 +76,8 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs }: {
         </div>
       </article>
     </section>
+
+    <EvidencePanel retrieval={retrievalReport?.retrieval} />
 
     <section className="section-block table-section">
       <div className="panel-title"><h2>Recent PR review jobs</h2><button className="link-button" type="button" onClick={onOpenJobs}>View all jobs <ArrowRight size={14} /></button></div>

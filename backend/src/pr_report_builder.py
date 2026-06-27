@@ -25,9 +25,11 @@ from .scoring import (
 )
 from .scoring.composer import DEFAULT_FILE_WEIGHTS
 from .models import score_to_risk_label as _score_to_level
+from .retrieval import build_retrieval_section
 
 _parser = ParserAgent()
 _LLM_REVIEW_TOP = 5
+_RETRIEVAL_CONTEXT_BUDGET_TOKENS = 2000
 
 
 def _snippet_around_line(source: str, line_no: int, context: int = 4) -> str:
@@ -99,13 +101,6 @@ class PRReportBuilder:
         file_rows = self._build_file_rows(file_data)
         top_risky_files = file_rows[:20]
 
-        # Agent consensus
-        agent_collaboration = build_pr_consensus(
-            top_risky_files,
-            commit_entries=commit_entries,
-            security_findings=security_findings,
-        )
-
         # Composition & contributions
         risk_composition = self._build_risk_composition(commit_entries, file_rows)
 
@@ -120,6 +115,19 @@ class PRReportBuilder:
         deep_dive = self._build_deep_dive(
             base_ref, head_ref, commits, top_risky_files,
             file_data, snippet_map, file_rows,
+        )
+        retrieval = self._build_retrieval(
+            deep_dive,
+            security_findings=security_findings,
+            evidence_summary=evidence_summary,
+        )
+        self._attach_retrieval_to_top_files(top_risky_files, retrieval)
+
+        # Agent consensus / handoff planner consumes evidence-pack summaries
+        agent_collaboration = build_pr_consensus(
+            top_risky_files,
+            commit_entries=commit_entries,
+            security_findings=security_findings,
         )
 
         # Commit trend
@@ -140,6 +148,7 @@ class PRReportBuilder:
             "evidence_summary": evidence_summary,
             "top_risky_files": top_risky_files,
             "file_deep_dive": deep_dive,
+            "retrieval": retrieval,
             "security_findings": security_findings,
             "agent_collaboration": agent_collaboration,
             "code_snippets": code_snippets,
@@ -171,6 +180,7 @@ class PRReportBuilder:
             "evidence_summary": [],
             "commit_trend": [],
             "file_deep_dive": [],
+            "retrieval": self._empty_retrieval(),
             "security_findings": [],
             "agent_collaboration": build_pr_consensus([]),
             "code_snippets": [],
@@ -473,6 +483,55 @@ class PRReportBuilder:
 
         return evidence_summary
 
+    @staticmethod
+    def _empty_retrieval() -> dict[str, Any]:
+        return {
+            "strategy": "hybrid_path_symbol_signal_callsite_ownership_local_similarity",
+            "context_budget_tokens": _RETRIEVAL_CONTEXT_BUDGET_TOKENS,
+            "packs": [],
+            "summary": {
+                "files_with_evidence": 0,
+                "total_selected_evidence": 0,
+                "average_selected_evidence_count": 0.0,
+                "average_compression_ratio": 0.0,
+            },
+        }
+
+    def _build_retrieval(
+        self,
+        deep_dive: list[dict[str, Any]],
+        *,
+        security_findings: list[dict[str, Any]],
+        evidence_summary: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build evidence packs without making report generation fragile."""
+        try:
+            return build_retrieval_section(
+                deep_dive,
+                security_findings=security_findings,
+                evidence_summary=evidence_summary,
+                context_budget_tokens=_RETRIEVAL_CONTEXT_BUDGET_TOKENS,
+            )
+        except Exception as exc:  # noqa: BLE001
+            fallback = self._empty_retrieval()
+            fallback["summary"]["error"] = f"retrieval_unavailable: {exc}"
+            return fallback
+
+    @staticmethod
+    def _attach_retrieval_to_top_files(
+        top_risky_files: list[dict[str, Any]],
+        retrieval: dict[str, Any],
+    ) -> None:
+        packs_by_file = {
+            pack.get("file"): pack
+            for pack in retrieval.get("packs", [])
+            if isinstance(pack, dict)
+        }
+        for item in top_risky_files:
+            pack = packs_by_file.get(item.get("file"))
+            if pack:
+                item["evidence_pack"] = pack
+
     def _build_code_snippets(
         self,
         commits: list,
@@ -491,6 +550,80 @@ class PRReportBuilder:
             if src:
                 code_snippets.append(prepare_code_for_llm(src, filepath=item["file"]))
         return code_snippets
+
+    def _find_cross_file_callsites(
+        self,
+        head_commit: Any,
+        filepath: str,
+        symbols: list[str],
+        *,
+        max_files: int = 40,
+        max_hints: int = 6,
+    ) -> list[dict[str, Any]]:
+        """Find lightweight cross-file references for changed symbols."""
+        if not head_commit or not symbols:
+            return []
+        supported_suffixes = (".py", ".js", ".jsx", ".ts", ".tsx")
+        hints: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, int]] = set()
+
+        for blob in head_commit.tree.traverse():
+            other_path = getattr(blob, "path", "")
+            if (
+                not other_path
+                or other_path == filepath
+                or not other_path.lower().endswith(supported_suffixes)
+            ):
+                continue
+            if len(hints) >= max_hints:
+                break
+            if max_files <= 0:
+                break
+            max_files -= 1
+            source = self._pipeline._source_at_commit(head_commit, other_path)
+            if not source:
+                continue
+            lines = source.splitlines()
+            for symbol in symbols:
+                if len(symbol) < 3 or symbol not in source:
+                    continue
+                for line_no, line in enumerate(lines, start=1):
+                    if symbol not in line:
+                        continue
+                    key = (other_path, symbol, line_no)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    hints.append(
+                        {
+                            "file": other_path,
+                            "line": line_no,
+                            "symbol": symbol,
+                            "content": (
+                                f"`{symbol}` is referenced by `{other_path}` "
+                                f"at line {line_no}: {line.strip()[:180]}"
+                            ),
+                        }
+                    )
+                    break
+                if len(hints) >= max_hints:
+                    break
+        return hints
+
+    @staticmethod
+    def _ownership_hints(item: dict[str, Any]) -> list[str]:
+        hints: list[str] = []
+        owner = item.get("owner", "unknown")
+        owner_share = float(item.get("owner_share", 0.0) or 0.0)
+        churn = int(item.get("churn_lines", 0) or 0)
+        hotspot = float(item.get("hotspot_impact", 0.0) or 0.0)
+        if owner != "unknown":
+            hints.append(f"Primary owner `{owner}` accounts for {owner_share:.0%} of recent touches.")
+        if churn > 0:
+            hints.append(f"Historical churn for this file is {churn} changed lines across the PR window.")
+        if hotspot > 0:
+            hints.append(f"Hotspot impact score is {hotspot:.2f}, combining churn and complexity.")
+        return hints
 
     def _build_deep_dive(
         self,
@@ -539,6 +672,15 @@ class PRReportBuilder:
             functions = code_meta.get("functions", [])
             classes = code_meta.get("classes", [])
             risky_snippets = code_meta.get("risky_snippets", [])
+            symbol_names = [
+                str(func.get("name", ""))
+                for func in functions
+                if func.get("name")
+            ] + [
+                str(cls.get("name", ""))
+                for cls in classes
+                if cls.get("name")
+            ]
 
             if imports and len(imports) >= 5:
                 msg = f"{len(imports)} imports detected (dependency surface expanded)."
@@ -579,6 +721,12 @@ class PRReportBuilder:
                 "estimated_review_effort": f"{effort_min}-{effort_max} minutes",
                 "structural_signals": structural_signals[:5],
                 "semantic_signals": semantic_signals[:5],
+                "callsite_hints": self._find_cross_file_callsites(
+                    head_commit,
+                    filepath,
+                    symbol_names[:8],
+                ) if head_commit else [],
+                "ownership_hints": self._ownership_hints(item),
                 "code_excerpt": snippet_text,
                 "diff_excerpt": diff_excerpt,
             })
