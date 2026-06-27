@@ -1,33 +1,35 @@
-# Project Overview
+# 项目概览
 
-ConsistenCy is an evidence-grounded multi-agent PR review assistant. It helps reviewers prioritize files by combining deterministic specialist analyzers, local evidence retrieval, compact Evidence Packs, and weighted consensus.
+ConsistenCy 是一个基于证据的多信号 PR 审查助手。它通过确定性专家分析器、本地证据检索、压缩后的 Evidence Pack 和加权共识，帮助审查者优先查看高风险文件。
 
-## Review Flow
+## 审查流程
 
 ```text
-git diff -> project-history baseline -> evidence retrieval -> Evidence Pack -> deterministic analyzers -> weighted consensus -> reviewer handoff
+git diff -> 项目历史基线 -> 证据检索 -> Evidence Pack -> 确定性分析器 -> 加权共识 -> 审查者移交
 ```
 
-Evidence Retrieval is not an agent. It supplies context for specialist analyzers and the reviewer handoff.
+Evidence Retrieval 不是 Agent。它负责为专家分析器和审查者移交提供上下文。
 
-## Specialist Signals
+## 专家信号
 
-| Signal | Purpose |
+| 信号 | 用途 |
 | --- | --- |
-| `style` | naming, docs, convention drift |
-| `structural` | imports, coupling, module boundaries |
-| `semantic` | AST/API/control-flow proxy changes |
-| `duplication` | clone and repeated implementation risk |
-| `security` | unsafe patterns and security override hints |
-| `evolution` | churn, hotspots, ownership, history risk |
+| `style` | 命名、文档、约定漂移 |
+| `structural` | import、耦合、模块边界 |
+| `semantic` | AST、API、控制流代理变化 |
+| `duplication` | 克隆和重复实现风险 |
+| `security` | 不安全模式和安全覆盖提示 |
+| `evolution` | churn、热点、ownership、历史风险 |
 
-## Evidence Retrieval
+## 证据检索
 
-The retrieval layer is deterministic and local. It uses changed hunks, file snippets, baseline/history hints, agent findings, security findings, cross-file call-site hints, ownership hints, and local similarity scoring. It does not require a vector database or external API.
+检索层是确定性、本地化的。它使用变更 hunk、文件片段、baseline/history hint、agent finding、security finding、跨文件 call-site hint、ownership hint 和本地相似度评分。
 
-## Product Surfaces
+它不需要向量数据库，也不需要外部 API。
 
-- `apps/api`: GitHub App webhook API, worker, SQLite persistence.
-- `apps/web`: React/Vite dashboard.
-- `packages/schema`: shared TypeScript zod contracts.
-- `backend`: Python analyzers, CLI, retrieval, evaluation support.
+## 产品组成
+
+- `apps/api`：GitHub App webhook API、worker、SQLite 持久化。
+- `apps/web`：React/Vite 仪表盘。
+- `packages/schema`：共享 TypeScript zod 契约。
+- `backend`：Python 分析器、CLI、检索和评估支持。

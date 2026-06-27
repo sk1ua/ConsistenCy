@@ -1,17 +1,17 @@
-# Output Schema
+# 输出 Schema
 
-Machine-readable contracts:
+机器可读契约：
 
 - `schemas/analysis_result.schema.json`
 - `schemas/pr_report.schema.json`
 - `packages/schema/src/report.ts`
 - `packages/schema/src/legacy.ts`
 
-Schemas are additive where possible. Existing required fields should not change meaning.
+Schema 应尽量保持增量兼容。已有必填字段不应改变语义。
 
-## PR Report Retrieval Field
+## PR Report Retrieval 字段
 
-New PR reports may include:
+新的 PR report 可以包含：
 
 ```json
 {
@@ -29,6 +29,6 @@ New PR reports may include:
 }
 ```
 
-Each `file_deep_dive` item may also include `evidence_pack`.
+每个 `file_deep_dive` 项也可以包含 `evidence_pack`。
 
-Older reports without `retrieval` remain valid.
+不带 `retrieval` 的旧报告仍然有效。

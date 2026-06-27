@@ -1,8 +1,8 @@
-# Evaluation
+# 评估
 
-ConsistenCy evaluates reviewer-attention alignment, not perfect defect detection.
+ConsistenCy 评估的是“审查者注意力排序是否合理”，不是完美缺陷检测。
 
-## Workflow
+## 工作流
 
 ```bash
 python evaluation/scripts/build_public_pr_manifest.py --output evaluation/sampled_prs.json
@@ -10,7 +10,7 @@ python evaluation/scripts/run_public_pr_reports.py --manifest evaluation/sampled
 python evaluation/scripts/run_metrics.py --manifest evaluation/sampled_prs.json --markdown-output evaluation/results/metrics_summary.md
 ```
 
-## Metrics
+## 指标
 
 - `Precision@K`
 - `Recall@K`
@@ -19,8 +19,8 @@ python evaluation/scripts/run_metrics.py --manifest evaluation/sampled_prs.json 
 - `Average Selected Evidence Count`
 - `Files With Evidence`
 
-`false_evidence_rate` and `evidence_usefulness_score` remain `n/a` unless a manual audit provides labels.
+`false_evidence_rate` 和 `evidence_usefulness_score` 需要人工审计标签；没有标签时保持 `n/a`。
 
-## Weak Labels
+## 弱标签
 
-Public review comments are weak supervision for reviewer-attention alignment, not gold-standard defect labels. Manual audit is required before making stronger research claims.
+公开 PR 评论只能作为审查者注意力的弱监督信号，不是缺陷金标准。更强的研究结论需要人工审计。

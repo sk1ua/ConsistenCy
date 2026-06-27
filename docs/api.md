@@ -1,14 +1,14 @@
-# Web API
+# 接口
 
-Default API URL: `http://127.0.0.1:8787`.
+默认 API 地址：`http://127.0.0.1:8787`。
 
-Protected routes require:
+受保护路由需要：
 
 ```http
 Authorization: Bearer <CONSISTENCY_API_TOKEN>
 ```
 
-## Routes
+## 路由
 
 - `GET /health`
 - `GET /jobs`
@@ -22,4 +22,4 @@ Authorization: Bearer <CONSISTENCY_API_TOKEN>
 - `POST /jobs/run-next`
 - `POST /jobs/:id/run`
 
-Shared API schemas live in `packages/schema/src/api.ts`.
+共享 API schema 位于 `packages/schema/src/api.ts`。

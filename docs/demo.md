@@ -1,26 +1,26 @@
-# Demo
+# 演示
 
-Start services:
+启动服务：
 
 ```powershell
 npm run dev:api
 npm run dev:web
 ```
 
-Seed demo data:
+写入演示数据：
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:CONSISTENCY_API_TOKEN" }
 Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed -Headers $headers
 ```
 
-Open `http://127.0.0.1:5173`.
+打开 `http://127.0.0.1:5173`。
 
-Demo flow:
+演示顺序：
 
-1. Dashboard metrics.
-2. Evidence retrieval panel.
-3. Jobs table.
-4. Report detail.
-5. Agent runs and findings.
-6. Settings status.
+1. 仪表盘指标。
+2. Evidence Retrieval 面板。
+3. Jobs 表格。
+4. Report 详情。
+5. Agent runs 和 findings。
+6. Settings 状态。

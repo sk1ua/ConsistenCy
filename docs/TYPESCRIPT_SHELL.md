@@ -1,10 +1,10 @@
-# TypeScript Shell
+# TypeScript 外壳
 
-The TypeScript product shell owns the GitHub App API, worker, persistence, web dashboard, and shared zod contracts.
+TypeScript 产品外壳负责 GitHub App API、worker、持久化、Web 仪表盘和共享 zod 契约。
 
-Python remains available through compatibility paths for deterministic analysis and PR report generation.
+Python 仍通过兼容路径提供确定性分析和 PR report 生成。
 
-Important packages:
+关键包：
 
 - `apps/api`
 - `apps/web`

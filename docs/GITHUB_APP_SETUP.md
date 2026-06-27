@@ -1,24 +1,24 @@
-# GitHub App Setup
+# GitHub App 设置
 
-## Required Settings
+## 必要设置
 
-Webhook URL:
+Webhook URL：
 
 ```text
 https://your-server.example.com/github/webhook
 ```
 
-Permissions:
+权限：
 
-| Permission | Access |
+| 权限 | 访问级别 |
 | --- | --- |
 | Metadata | Read |
 | Contents | Read |
 | Pull requests | Read and write |
 
-Events: pull request, push, installation.
+事件：pull request、push、installation。
 
-## Environment
+## 环境变量
 
 ```bash
 GITHUB_APP_ID=123456
@@ -28,7 +28,7 @@ CONSISTENCY_API_TOKEN=replace-me
 CONSISTENCY_ALLOWED_ORIGINS=https://your-web.example.com
 ```
 
-## Run Locally
+## 本地运行
 
 ```bash
 npm install
@@ -36,4 +36,4 @@ npm run dev:api
 npm run dev:web
 ```
 
-Use HTTPS and a process manager in production.
+生产环境应使用 HTTPS 和进程管理器。
