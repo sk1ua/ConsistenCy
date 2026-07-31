@@ -1,34 +1,14 @@
-# 输出 Schema
+# ConsistenCy V2 输出 Schema
 
-机器可读契约：
+ConsistenCy V2 的机器可读契约由 `@consistency/schema` 统一声明：
 
-- `schemas/analysis_result.schema.json`
-- `schemas/pr_report.schema.json`
-- `packages/schema/src/report.ts`
-- `packages/schema/src/legacy.ts`
+- `packages/schema/src/protocol.ts`：TypeScript 与 Python Engine stdio 进程协议契约（JSON-over-stdio snake_case wire contract）。
+- `packages/schema/src/report.ts`：审查报告结构及度量指标契约。
+- `packages/schema/src/review.ts`：审查计划 (Plan)、Agent 运行状态与 Finding 契约。
+- `packages/schema/src/job.ts`：Job 状态与 Webhook 事件契约。
 
-Schema 应尽量保持增量兼容。已有必填字段不应改变语义。
+## PR Report 结构
 
-## PR Report Retrieval 字段
+V2 报告由 TypeScript `ReviewReport` Schema 约束，包含检索度量、Agent runs 记录与确凿/假设级别 Finding。
 
-新的 PR report 可以包含：
-
-```json
-{
-  "retrieval": {
-    "strategy": "hybrid_path_symbol_signal_callsite_ownership_local_similarity",
-    "context_budget_tokens": 2000,
-    "packs": [],
-    "summary": {
-      "files_with_evidence": 0,
-      "total_selected_evidence": 0,
-      "average_selected_evidence_count": 0.0,
-      "average_compression_ratio": 0.0
-    }
-  }
-}
-```
-
-每个 `file_deep_dive` 项也可以包含 `evidence_pack`。
-
-不带 `retrieval` 的旧报告仍然有效。
+Schema 应保持强类型强约束，所有新增字段需使用 `zod` 进行定义与自动化测试校验。

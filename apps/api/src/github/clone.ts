@@ -41,6 +41,7 @@ export function workspacePathForJob(workspaceRoot: string, jobId: string): strin
 export async function clonePullRequestWorkspace(options: {
   repositoryFullName: string;
   headSha: string;
+  baseSha?: string;
   jobId: string;
   token: string;
   workspaceRoot?: string;
@@ -49,6 +50,9 @@ export async function clonePullRequestWorkspace(options: {
   const { owner, repo } = splitRepositoryFullName(options.repositoryFullName);
   if (!/^[0-9a-f]{7,64}$/i.test(options.headSha)) {
     throw new Error("headSha must be a hexadecimal Git object id");
+  }
+  if (options.baseSha && !/^[0-9a-f]{7,64}$/i.test(options.baseSha)) {
+    throw new Error("baseSha must be a hexadecimal Git object id");
   }
   const workspaceRoot = resolve(options.workspaceRoot ?? ".consistency/workspaces");
   const workspacePath = workspacePathForJob(workspaceRoot, options.jobId);
@@ -66,7 +70,11 @@ export async function clonePullRequestWorkspace(options: {
   const url = `https://github.com/${owner}/${repo}.git`;
   try {
     await runGit(["clone", "--no-checkout", "--filter=blob:none", url, workspacePath], { env });
-    await runGit(["fetch", "origin", options.headSha, "--depth=1"], { cwd: workspacePath, env });
+    if (options.baseSha) {
+      await runGit(["fetch", "origin", options.headSha, options.baseSha, "--depth=1"], { cwd: workspacePath, env });
+    } else {
+      await runGit(["fetch", "origin", options.headSha, "--depth=1"], { cwd: workspacePath, env });
+    }
     await runGit(["checkout", "--detach", options.headSha], { cwd: workspacePath, env });
     return workspacePath;
   } catch (error) {

@@ -10,11 +10,10 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BACKEND = PROJECT_ROOT / "backend"
-if str(BACKEND) not in sys.path:
-    sys.path.insert(0, str(BACKEND))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.evaluation.metrics import (  # noqa: E402
+from engine.evaluation.metrics import (  # noqa: E402
     cohens_kappa,
     mean,
     precision_at_k,

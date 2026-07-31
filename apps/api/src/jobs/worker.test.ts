@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PRReviewContext } from "@consistency/schema";
 import { InMemoryJobQueue } from "../jobQueue";
 import { MockLLMProvider } from "../review/llm/mockProvider";
 import { ReviewWorker } from "./worker";
+import { DeterministicAnalyzer } from "../review/deterministic";
 
 function enqueue(store: InMemoryJobQueue, suffix: string) {
   return store.acceptWebhookJob({
@@ -30,35 +31,58 @@ function context(jobId: string, pullRequestNumber: number): PRReviewContext {
     changedFiles: [],
     diff: "",
     fileContents: {},
+    baseFileContents: {},
     projectMetadata: {},
     workspacePath: `C:/consistency/workspaces/${jobId}`
   };
 }
 
+function createMockAnalyzer() {
+  const analyzer = new DeterministicAnalyzer("python", "engine");
+  vi.spyOn(analyzer, "analyze").mockResolvedValue({
+    id: "req_1",
+    ok: true,
+    files: []
+  });
+  vi.spyOn(analyzer, "composeReview").mockResolvedValue({
+    id: "req_2",
+    ok: true,
+    overallScore: 100,
+    riskLevel: "low",
+    summary: "Mock analysis summary",
+    recommendations: []
+  });
+  return analyzer;
+}
+
 describe("ReviewWorker", () => {
-  it("automatically executes a queued job to a persisted report", async () => {
+  it("automatically executes a queued job to awaiting_publish and outbox entry", async () => {
     const store = new InMemoryJobQueue();
     const job = enqueue(store, "34");
+    const analyzer = createMockAnalyzer();
     const worker = new ReviewWorker({
       jobStore: store,
       workflow: {
         provider: new MockLLMProvider(),
+        deterministicAnalyzer: analyzer,
         contextBuilder: input => Promise.resolve(context(input.jobId, input.pullRequestNumber))
       }
     });
 
     await expect(worker.runOnce()).resolves.toBe(1);
-    expect(store.get(job.id)).toMatchObject({ status: "succeeded", result: { score: 100 } });
+    expect(store.get(job.id)).toMatchObject({ status: "awaiting_publish", result: { score: 100 } });
     expect(worker.status().activeJobs).toBe(0);
   });
 
   it("marks a job failed when context construction fails", async () => {
     const store = new InMemoryJobQueue();
     const job = enqueue(store, "35");
+    const analyzer = createMockAnalyzer();
     const worker = new ReviewWorker({
       jobStore: store,
       workflow: {
         provider: new MockLLMProvider(),
+        deterministicAnalyzer: analyzer,
         contextBuilder: async () => { throw new Error("GitHub clone failed"); }
       }
     });
@@ -73,11 +97,13 @@ describe("ReviewWorker", () => {
     enqueue(store, "37");
     let active = 0;
     let maximumActive = 0;
+    const analyzer = createMockAnalyzer();
     const worker = new ReviewWorker({
       jobStore: store,
       concurrency: 2,
       workflow: {
         provider: new MockLLMProvider(),
+        deterministicAnalyzer: analyzer,
         contextBuilder: async input => {
           active += 1;
           maximumActive = Math.max(maximumActive, active);
@@ -90,6 +116,6 @@ describe("ReviewWorker", () => {
 
     await expect(worker.runOnce()).resolves.toBe(2);
     expect(maximumActive).toBe(2);
-    expect(store.list().every(job => job.status === "succeeded")).toBe(true);
+    expect(store.list().every(job => job.status === "awaiting_publish")).toBe(true);
   });
 });

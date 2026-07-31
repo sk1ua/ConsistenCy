@@ -11,7 +11,8 @@ export const reviewAgentNameSchema = z.enum([
   "Maintainability",
   "Style",
   "Synthesizer",
-  "PythonCompatibilityAdapter"
+  "PythonCompatibilityAdapter",
+  "DeterministicAnalyzer"
 ]);
 
 const nonEmpty = z.string().trim().min(1);

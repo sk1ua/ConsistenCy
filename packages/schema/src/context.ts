@@ -20,6 +20,7 @@ export const prReviewContextSchema = z.object({
   changedFiles: z.array(changedFileSchema),
   diff: z.string(),
   fileContents: z.record(z.string()),
+  baseFileContents: z.record(z.string()),
   projectMetadata: z.record(z.string()),
   workspacePath: nonEmpty
 }).strict();

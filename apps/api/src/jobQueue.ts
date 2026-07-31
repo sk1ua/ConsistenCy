@@ -1,7 +1,23 @@
 import { randomUUID } from "node:crypto";
-import type { AgentRun, ReviewReport } from "@consistency/schema";
+import { publishOutboxItemSchema, reviewReportSchema, type AgentRun, type PublishOutboxItem, type ReviewReport } from "@consistency/schema";
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+export type JobStatus =
+  | "queued"
+  | "running"
+  | "awaiting_publish"
+  | "publishing"
+  | "succeeded"
+  | "failed"
+  | "publish_failed"
+  | "cancelled";
+
+export type PublishOutboxStatus =
+  | "pending"
+  | "leased"
+  | "retrying"
+  | "published"
+  | "failed"
+  | "skipped";
 
 export type ReviewJobKind = "pull_request" | "push";
 
@@ -60,6 +76,12 @@ export interface ReviewJobStore {
   markRunning(id: string): ReviewJob | undefined;
   markSucceeded(id: string, result: ReviewReport): ReviewJob | undefined;
   markFailed(id: string, error: string): ReviewJob | undefined;
+  persistReportAndEnqueuePublish(id: string, result: ReviewReport): ReviewJob | undefined;
+  getPublishOutbox(jobId: string): PublishOutboxItem[];
+  claimPublishOutboxItem(owner: string, leaseDurationMs: number, limit?: number): PublishOutboxItem[];
+  markPublishOutboxSuccess(id: string, owner: string, leaseGeneration: number, status: "published" | "skipped", externalId?: string): boolean;
+  markPublishOutboxRetry(id: string, owner: string, leaseGeneration: number, error: string, backoffMs: number): boolean;
+  markPublishOutboxFailed(id: string, owner: string, leaseGeneration: number, error: string): boolean;
   updateStatus(id: string, status: JobStatus, error?: string): ReviewJob | undefined;
   acceptWebhookJob(input: WebhookJobInput): WebhookAcceptance;
   recordWebhookDelivery(input: Omit<WebhookDelivery, "receivedAt"> & { receivedAt?: string }): WebhookAcceptance;
@@ -75,6 +97,8 @@ export class InMemoryJobQueue implements ReviewJobStore {
   private readonly deliveries = new Map<string, WebhookDelivery>();
   private readonly agentRuns = new Map<string, AgentRun>();
   private readonly commentStatuses = new Map<string, { status: GitHubCommentStatus; error?: string }>();
+  private readonly publishOutbox = new Map<string, PublishOutboxItem[]>();
+
   enqueue(input: CreateReviewJobInput): ReviewJob {
     const now = new Date().toISOString();
     const job: ReviewJob = {
@@ -88,43 +112,10 @@ export class InMemoryJobQueue implements ReviewJobStore {
     return job;
   }
 
-  acceptWebhookJob(input: WebhookJobInput): WebhookAcceptance {
-    const existing = this.deliveries.get(input.delivery.deliveryId);
-    if (existing) {
-      return { duplicate: true, delivery: existing };
-    }
-
-    const delivery: WebhookDelivery = {
-      ...input.delivery,
-      receivedAt: new Date().toISOString(),
-      status: "enqueued"
-    };
-    const job = this.enqueue({ ...input.job, deliveryId: delivery.deliveryId });
-    this.deliveries.set(delivery.deliveryId, delivery);
-    return { duplicate: false, delivery, job };
-  }
-
-  recordWebhookDelivery(
-    input: Omit<WebhookDelivery, "receivedAt"> & { receivedAt?: string }
-  ): WebhookAcceptance {
-    const existing = this.deliveries.get(input.deliveryId);
-    if (existing) {
-      return { duplicate: true, delivery: existing };
-    }
-    const delivery: WebhookDelivery = {
-      ...input,
-      receivedAt: input.receivedAt ?? new Date().toISOString()
-    };
-    this.deliveries.set(delivery.deliveryId, delivery);
-    return { duplicate: false, delivery };
-  }
-
-  getWebhookDelivery(deliveryId: string): WebhookDelivery | undefined {
-    return this.deliveries.get(deliveryId);
-  }
-
   list(): ReviewJob[] {
-    return [...this.jobs.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    return Array.from(this.jobs.values()).sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt)
+    );
   }
 
   get(id: string): ReviewJob | undefined {
@@ -135,18 +126,21 @@ export class InMemoryJobQueue implements ReviewJobStore {
     return this.list().find(job => job.status === "queued");
   }
 
+  claimNextQueued(): ReviewJob | undefined {
+    const job = this.nextQueued();
+    if (!job) return undefined;
+    return this.markRunning(job.id);
+  }
+
   markRunning(id: string): ReviewJob | undefined {
     const job = this.jobs.get(id);
-    if (!job) {
-      return undefined;
-    }
+    if (!job || job.status !== "queued") return undefined;
     const now = new Date().toISOString();
     const updated: ReviewJob = {
       ...job,
       status: "running",
-      startedAt: job.startedAt ?? now,
-      updatedAt: now,
-      error: undefined
+      startedAt: now,
+      updatedAt: now
     };
     this.jobs.set(id, updated);
     return updated;
@@ -154,17 +148,15 @@ export class InMemoryJobQueue implements ReviewJobStore {
 
   markSucceeded(id: string, result: ReviewReport): ReviewJob | undefined {
     const job = this.jobs.get(id);
-    if (!job) {
-      return undefined;
-    }
+    if (!job) return undefined;
+    const validatedReport = reviewReportSchema.parse(result);
     const now = new Date().toISOString();
     const updated: ReviewJob = {
       ...job,
       status: "succeeded",
-      result,
+      result: validatedReport,
       finishedAt: now,
-      updatedAt: now,
-      error: undefined
+      updatedAt: now
     };
     this.jobs.set(id, updated);
     return updated;
@@ -172,9 +164,7 @@ export class InMemoryJobQueue implements ReviewJobStore {
 
   markFailed(id: string, error: string): ReviewJob | undefined {
     const job = this.jobs.get(id);
-    if (!job) {
-      return undefined;
-    }
+    if (!job) return undefined;
     const now = new Date().toISOString();
     const updated: ReviewJob = {
       ...job,
@@ -187,30 +177,285 @@ export class InMemoryJobQueue implements ReviewJobStore {
     return updated;
   }
 
-  updateStatus(id: string, status: JobStatus, error?: string): ReviewJob | undefined {
-    if (status === "running") {
-      return this.markRunning(id);
-    }
-    if (status === "failed") {
-      return this.markFailed(id, error ?? "Job failed");
-    }
+  persistReportAndEnqueuePublish(id: string, result: ReviewReport): ReviewJob | undefined {
     const job = this.jobs.get(id);
     if (!job) {
-      return undefined;
+      throw new Error(`Job not found for persistReportAndEnqueuePublish: ${id}`);
     }
+
+    if (job.status === "publishing" || job.status === "succeeded" || job.status === "publish_failed") {
+      // Terminal or active publish phase: complete no-op without report validation or state mutation
+      return job;
+    }
+
+    if (job.status !== "running" && job.status !== "awaiting_publish") {
+      throw new Error(`Invalid job status '${job.status}' for persistReportAndEnqueuePublish`);
+    }
+
+    // Validate report schema AFTER passing job status checks
+    const validatedReport = reviewReportSchema.parse(result);
+
+    const now = new Date().toISOString();
+    const updated: ReviewJob = {
+      ...job,
+      status: "awaiting_publish",
+      result: validatedReport,
+      updatedAt: now
+    };
+    this.jobs.set(id, updated);
+    this.commentStatuses.set(id, { status: "pending" });
+
+    // Deduplicated Outbox insertion (target: 'github_comment')
+    const existingOutbox = this.publishOutbox.get(id) ?? [];
+    if (!existingOutbox.some(item => item.target === "github_comment")) {
+      const outboxItem: PublishOutboxItem = {
+        id: `outbox_${randomUUID()}`,
+        jobId: id,
+        target: "github_comment",
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        leaseGeneration: 0,
+        lastError: null,
+        externalId: null,
+        createdAt: now,
+        updatedAt: now
+      };
+      this.publishOutbox.set(id, [...existingOutbox, outboxItem]);
+    }
+
+    return updated;
+  }
+
+  getPublishOutbox(jobId: string): PublishOutboxItem[] {
+    const items = this.publishOutbox.get(jobId) ?? [];
+    return items.map(item => publishOutboxItemSchema.parse(item));
+  }
+
+  claimPublishOutboxItem(owner: string, leaseDurationMs: number, limit = 1): PublishOutboxItem[] {
+    if (limit <= 0) return [];
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const leaseExpiresAtIso = new Date(now.getTime() + leaseDurationMs).toISOString();
+
+    const claimedItems: PublishOutboxItem[] = [];
+
+    for (const [jobId, outboxItems] of this.publishOutbox.entries()) {
+      const job = this.jobs.get(jobId);
+      if (!job) continue;
+
+      for (let i = 0; i < outboxItems.length; i++) {
+        if (claimedItems.length >= limit) break;
+        const item = outboxItems[i]!;
+
+        const isPendingOrRetrying =
+          (item.status === "pending" || item.status === "retrying") &&
+          (item.nextAttemptAt === null || item.nextAttemptAt <= nowIso) &&
+          job.status === "awaiting_publish";
+
+        const isExpiredLease =
+          item.status === "leased" &&
+          Boolean(item.leaseExpiresAt) &&
+          item.leaseExpiresAt! <= nowIso &&
+          job.status === "publishing";
+
+        if (isPendingOrRetrying || isExpiredLease) {
+          const updatedItem: PublishOutboxItem = {
+            ...item,
+            status: "leased",
+            leaseOwner: owner,
+            leaseExpiresAt: leaseExpiresAtIso,
+            leaseGeneration: item.leaseGeneration + 1,
+            updatedAt: nowIso
+          };
+          outboxItems[i] = updatedItem;
+          claimedItems.push(publishOutboxItemSchema.parse(updatedItem));
+
+          // Update job status to publishing
+          if (job.status === "awaiting_publish") {
+            this.jobs.set(jobId, { ...job, status: "publishing", updatedAt: nowIso });
+          }
+        }
+      }
+      if (claimedItems.length >= limit) break;
+    }
+
+    return claimedItems;
+  }
+
+  markPublishOutboxSuccess(
+    id: string,
+    owner: string,
+    leaseGeneration: number,
+    status: "published" | "skipped",
+    externalId?: string
+  ): boolean {
+    const nowIso = new Date().toISOString();
+    for (const [jobId, outboxItems] of this.publishOutbox.entries()) {
+      const index = outboxItems.findIndex(item => item.id === id);
+      if (index !== -1) {
+        const item = outboxItems[index]!;
+        const job = this.jobs.get(jobId);
+
+        // Fencing token & job status checks
+        if (item.status !== "leased" || item.leaseOwner !== owner || item.leaseGeneration !== leaseGeneration || !job || job.status !== "publishing") {
+          return false;
+        }
+
+        const updatedItem: PublishOutboxItem = {
+          ...item,
+          status,
+          externalId: externalId ?? item.externalId,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          updatedAt: nowIso
+        };
+        outboxItems[index] = updatedItem;
+
+        this.jobs.set(jobId, {
+          ...job,
+          status: "succeeded",
+          finishedAt: nowIso,
+          updatedAt: nowIso
+        });
+        this.commentStatuses.set(jobId, { status });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  markPublishOutboxRetry(
+    id: string,
+    owner: string,
+    leaseGeneration: number,
+    error: string,
+    backoffMs: number
+  ): boolean {
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const nextAttemptAtIso = new Date(now.getTime() + backoffMs).toISOString();
+
+    for (const [jobId, outboxItems] of this.publishOutbox.entries()) {
+      const index = outboxItems.findIndex(item => item.id === id);
+      if (index !== -1) {
+        const item = outboxItems[index]!;
+        const job = this.jobs.get(jobId);
+
+        if (item.status !== "leased" || item.leaseOwner !== owner || item.leaseGeneration !== leaseGeneration || !job || job.status !== "publishing") {
+          return false;
+        }
+
+        const updatedItem: PublishOutboxItem = {
+          ...item,
+          attemptCount: item.attemptCount + 1,
+          status: "retrying",
+          nextAttemptAt: nextAttemptAtIso,
+          lastError: error.slice(0, 500),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          updatedAt: nowIso
+        };
+        outboxItems[index] = updatedItem;
+
+        this.jobs.set(jobId, {
+          ...job,
+          status: "awaiting_publish",
+          updatedAt: nowIso
+        });
+        this.commentStatuses.set(jobId, { status: "pending", error: error.slice(0, 500) });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  markPublishOutboxFailed(
+    id: string,
+    owner: string,
+    leaseGeneration: number,
+    error: string
+  ): boolean {
+    const nowIso = new Date().toISOString();
+    for (const [jobId, outboxItems] of this.publishOutbox.entries()) {
+      const index = outboxItems.findIndex(item => item.id === id);
+      if (index !== -1) {
+        const item = outboxItems[index]!;
+        const job = this.jobs.get(jobId);
+
+        if (item.status !== "leased" || item.leaseOwner !== owner || item.leaseGeneration !== leaseGeneration || !job || job.status !== "publishing") {
+          return false;
+        }
+
+        const updatedItem: PublishOutboxItem = {
+          ...item,
+          attemptCount: item.attemptCount + 1,
+          status: "failed",
+          lastError: error.slice(0, 500),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          updatedAt: nowIso
+        };
+        outboxItems[index] = updatedItem;
+
+        this.jobs.set(jobId, {
+          ...job,
+          status: "publish_failed",
+          error: error.slice(0, 500),
+          finishedAt: nowIso,
+          updatedAt: nowIso
+        });
+        this.commentStatuses.set(jobId, { status: "failed", error: error.slice(0, 500) });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  updateStatus(id: string, status: JobStatus, error?: string): ReviewJob | undefined {
+    if (status === "running") return this.markRunning(id);
+    if (status === "failed") return this.markFailed(id, error ?? "Job failed");
+    const now = new Date().toISOString();
+    const job = this.jobs.get(id);
+    if (!job) return undefined;
     const updated: ReviewJob = {
       ...job,
       status,
       error,
-      updatedAt: new Date().toISOString()
+      updatedAt: now
     };
     this.jobs.set(id, updated);
     return updated;
   }
 
-  claimNextQueued(): ReviewJob | undefined {
-    const job = this.nextQueued();
-    return job ? this.markRunning(job.id) : undefined;
+  acceptWebhookJob(input: WebhookJobInput): WebhookAcceptance {
+    const existing = this.deliveries.get(input.delivery.deliveryId);
+    if (existing) {
+      const job = Array.from(this.jobs.values()).find(item => item.deliveryId === input.delivery.deliveryId);
+      return { duplicate: true, delivery: existing, job };
+    }
+    const delivery = this.recordWebhookDelivery({ ...input.delivery, status: "enqueued" }).delivery;
+    const job = this.enqueue({ ...input.job, deliveryId: input.delivery.deliveryId });
+    return { duplicate: false, delivery, job };
+  }
+
+  recordWebhookDelivery(input: Omit<WebhookDelivery, "receivedAt"> & { receivedAt?: string }): WebhookAcceptance {
+    const existing = this.deliveries.get(input.deliveryId);
+    if (existing) {
+      return { duplicate: true, delivery: existing };
+    }
+    const delivery: WebhookDelivery = {
+      ...input,
+      receivedAt: input.receivedAt ?? new Date().toISOString()
+    };
+    this.deliveries.set(input.deliveryId, delivery);
+    return { duplicate: false, delivery };
+  }
+
+  getWebhookDelivery(deliveryId: string): WebhookDelivery | undefined {
+    return this.deliveries.get(deliveryId);
   }
 
   saveAgentRun(agentRun: AgentRun): void {
@@ -218,23 +463,14 @@ export class InMemoryJobQueue implements ReviewJobStore {
   }
 
   listAgentRuns(jobId: string): AgentRun[] {
-    return [...this.agentRuns.values()]
-      .filter(agentRun => agentRun.jobId === jobId)
-      .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
+    return Array.from(this.agentRuns.values()).filter(run => run.jobId === jobId);
   }
 
   recoverStaleRunningJobs(cutoff: Date): number {
     let recovered = 0;
     for (const job of this.jobs.values()) {
       if (job.status === "running" && job.startedAt && new Date(job.startedAt) < cutoff) {
-        this.jobs.set(job.id, {
-          ...job,
-          status: "queued",
-          startedAt: undefined,
-          finishedAt: undefined,
-          updatedAt: new Date().toISOString(),
-          error: "Recovered after an interrupted worker run"
-        });
+        this.markFailed(job.id, "Job execution timed out while running");
         recovered += 1;
       }
     }

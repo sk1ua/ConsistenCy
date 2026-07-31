@@ -12,9 +12,21 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
   DATABASE_PATH: z.string().trim().min(1).default(".consistency/consistency.db"),
   CONSISTENCY_WORKSPACE_ROOT: z.string().trim().min(1).default(".consistency/workspaces"),
+  CONSISTENCY_PYTHON_PATH: z.string().trim().min(1).default("python"),
+  CONSISTENCY_ENGINE_MODULE: z.string().trim().min(1).default("engine"),
+  CONSISTENCY_ENGINE_ROOT: z.string().trim().min(1).optional(),
   LLM_PROVIDER: z.enum(["mock", "deepseek", "openai"]).optional(),
+  CONSISTENCY_WORKERS_ENABLED: z
+    .enum(["true", "false"])
+    .transform(value => value === "true")
+    .default("true"),
   CONSISTENCY_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
   CONSISTENCY_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(1_000),
+  CONSISTENCY_PUBLISH_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(1),
+  CONSISTENCY_PUBLISH_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(1_000),
+  CONSISTENCY_PUBLISH_LEASE_DURATION_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
+  CONSISTENCY_PUBLISH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
+  CONSISTENCY_PUBLISH_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   CONSISTENCY_API_TOKEN: optionalSecret,
   CONSISTENCY_ALLOWED_ORIGINS: z.string().trim().default("http://127.0.0.1:5173,http://localhost:5173"),
   CONSISTENCY_WEB_URL: z.string().url().default("http://127.0.0.1:5173"),
@@ -30,9 +42,10 @@ export const envSchema = z.object({
 
 export type RawEnvironment = z.input<typeof envSchema>;
 
-export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_WORKSPACE_ROOT" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER"> & {
+export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_WORKSPACE_ROOT" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER" | "CONSISTENCY_ENGINE_ROOT"> & {
   databasePath: string;
   workspaceRoot: string;
+  engineRoot?: string;
   allowedOrigins: string[];
   LLM_PROVIDER: "mock" | "deepseek" | "openai";
 };
@@ -69,6 +82,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     LLM_PROVIDER: llmProvider,
     databasePath: resolve(parsed.DATABASE_PATH),
     workspaceRoot: resolve(parsed.CONSISTENCY_WORKSPACE_ROOT),
+    engineRoot: parsed.CONSISTENCY_ENGINE_ROOT ? resolve(parsed.CONSISTENCY_ENGINE_ROOT) : undefined,
     allowedOrigins
   };
 }

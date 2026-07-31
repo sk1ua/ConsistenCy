@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
-import type { RunProcess } from "./pythonBridge";
 import prReportFixture from "../../../tests/fixtures/pr_report_minimal.json";
 
 const validAnalysisResult = {
@@ -121,8 +120,8 @@ function enqueuePullRequestJob(jobs: InMemoryJobQueue) {
     deliveryId: "delivery-queued",
     repository: "sk1ua/ConsistenCy",
     pullRequestNumber: 31,
-    baseSha: "base123",
-    headSha: "head456",
+    baseSha: "abcdef1",
+    headSha: "1234567",
     installationId: 123
   });
 }
@@ -142,55 +141,6 @@ describe("createApiServer", () => {
     );
     servers.length = 0;
     for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
-  });
-
-  it("serves POST /analyze-file through the Python bridge", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "consistency-http-workspace-"));
-    tempDirectories.push(workspace);
-    mkdirSync(join(workspace, "job-1"));
-    writeFileSync(join(workspace, "job-1", "new.py"), "print('new')");
-    writeFileSync(join(workspace, "job-1", "old.py"), "print('old')");
-    const runProcess: RunProcess = async () => ({
-      exitCode: 0,
-      stdout: JSON.stringify(validAnalysisResult),
-      stderr: ""
-    });
-    const server = createApiServer({ runProcess, workspaceRoot: workspace, nodeEnv: "development" });
-    servers.push(server);
-    const port = await listen(server);
-
-    const response = await postJson(port, "/analyze-file", {
-      currentFile: "job-1/new.py",
-      baselineFile: "job-1/old.py"
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ risk_score: 0.1 });
-  });
-
-  it("blocks analyze-file outside development and rejects workspace traversal", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "consistency-http-secure-"));
-    tempDirectories.push(workspace);
-    mkdirSync(join(workspace, "job-1"));
-    writeFileSync(join(workspace, "job-1", "old.py"), "print('old')");
-
-    const production = createApiServer({ nodeEnv: "production", workspaceRoot: workspace });
-    servers.push(production);
-    const productionPort = await listen(production);
-    expect((await postJson(productionPort, "/analyze-file", {
-      currentFile: "job-1/old.py",
-      baselineFile: "job-1/old.py"
-    })).body).toMatchObject({ error: { code: "ANALYZE_FILE_DISABLED" } });
-
-    const development = createApiServer({ nodeEnv: "development", workspaceRoot: workspace });
-    servers.push(development);
-    const developmentPort = await listen(development);
-    const traversal = await postJson(developmentPort, "/analyze-file", {
-      currentFile: "../outside.py",
-      baselineFile: "job-1/old.py"
-    });
-    expect(traversal.status).toBe(400);
-    expect(traversal.body).toMatchObject({ error: { code: "WORKSPACE_PATH_INVALID" } });
   });
 
   it("enforces CORS allow lists and the request body limit", async () => {
@@ -221,8 +171,8 @@ describe("createApiServer", () => {
       sender: { login: "octocat" },
       pull_request: {
         number: 31,
-        base: { sha: "base123" },
-        head: { sha: "head456" }
+        base: { sha: "abcdef1" },
+        head: { sha: "1234567" }
       }
     };
 
@@ -241,8 +191,8 @@ describe("createApiServer", () => {
         status: "queued",
         repository: "sk1ua/ConsistenCy",
         pullRequestNumber: 31,
-        baseSha: "base123",
-        headSha: "head456",
+        baseSha: "abcdef1",
+        headSha: "1234567",
         installationId: 123
       }
     });
@@ -337,86 +287,40 @@ describe("createApiServer", () => {
     });
 
     expect(response.status).toBe(400);
+    expect(jobs.list()).toHaveLength(0);
     expect(jobs.getWebhookDelivery("delivery-invalid")?.status).toBe("failed");
   });
 
-  it("runs the next queued PR job and exposes the generated report", async () => {
+  it("rejects webhooks with an invalid SHA format (e.g., non-hex or bad length)", async () => {
     const jobs = new InMemoryJobQueue();
-    const queued = enqueuePullRequestJob(jobs);
-    const calls: Array<{ command: string; args: string[] }> = [];
-    const runProcess: RunProcess = async (command, args) => {
-      calls.push({ command, args });
-      return {
-        exitCode: 0,
-        stdout: JSON.stringify(prReportFixture),
-        stderr: ""
-      };
+    const server = createApiServer({ jobs, githubWebhookSecret: "secret" });
+    servers.push(server);
+    const port = await listen(server);
+
+    const payload = {
+      action: "opened",
+      repository: { full_name: "sk1ua/ConsistenCy" },
+      installation: { id: 123 },
+      sender: { login: "octocat" },
+      pull_request: {
+        number: 31,
+        base: { sha: "abcdefg" }, // "g" is non-hex, also not 40 chars
+        head: { sha: "1234567" }
+      }
     };
-    const server = createApiServer({ jobs, runProcess });
-    servers.push(server);
-    const port = await listen(server);
 
-    const notReady = await getJson(port, `/jobs/${queued.id}/report`);
-    expect(notReady.status).toBe(409);
-    expect(notReady.body).toMatchObject({ error: { code: "JOB_NOT_READY" } });
-
-    const response = await postJson(port, "/jobs/run-next", {});
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      job: {
-        id: queued.id,
-        status: "succeeded",
-        report: {
-          jobId: queued.id,
-          repositoryFullName: "sk1ua/ConsistenCy",
-          pullRequestNumber: 31,
-          baseSha: "base123",
-          headSha: "head456"
-        }
-      }
+    const response = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-bad-sha",
+      "x-hub-signature-256": githubSignature(payload, "secret")
     });
-    expect(calls[0]?.command).toBe("python");
-    expect(calls[0]?.args).toEqual(
-      expect.arrayContaining(["pr-report", "--base", "base123", "--head", "head456", "--json-output"])
-    );
 
-    const report = await getJson(port, `/jobs/${queued.id}/report`);
-    expect(report.status).toBe(200);
-    expect(report.body).toMatchObject({
-      report: {
-        jobId: queued.id,
-        baseSha: "base123",
-        headSha: "head456",
-        findings: [{ file: "docs/EVALUATION.md", confidence: "hypothesis" }]
-      }
-    });
+    expect(response.status).toBe(400);
+    expect(jobs.list()).toHaveLength(0);
+    expect(jobs.getWebhookDelivery("delivery-bad-sha")?.status).toBe("failed");
   });
 
-  it("marks a job failed when Python PR report generation fails", async () => {
-    const jobs = new InMemoryJobQueue();
-    const queued = enqueuePullRequestJob(jobs);
-    const runProcess: RunProcess = async () => ({
-      exitCode: 1,
-      stdout: "",
-      stderr: "fatal: bad revision"
-    });
-    const server = createApiServer({ jobs, runProcess });
-    servers.push(server);
-    const port = await listen(server);
 
-    const response = await postJson(port, `/jobs/${queued.id}/run`, {});
-    expect(response.status).toBe(502);
-    expect(response.body).toMatchObject({ error: { code: "PYTHON_PR_REPORT_EXIT_NONZERO" } });
-
-    const job = await getJson(port, `/jobs/${queued.id}`);
-    expect(job.status).toBe(200);
-    expect(job.body).toMatchObject({
-      job: {
-        id: queued.id,
-        status: "failed"
-      }
-    });
-  });
 
   it("protects management routes with a bearer token", async () => {
     const server = createApiServer({ apiToken: "api-secret" });
@@ -456,5 +360,37 @@ describe("createApiServer", () => {
     const recent = (reports.body as { reports: Array<{ repositoryFullName: string }> }).reports;
     expect(recent).toHaveLength(2);
     expect(recent[0]?.repositoryFullName).toBe("sk1ua/ConsistenCy");
+  });
+
+  it("serves review report when job status is awaiting_publish", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs });
+    servers.push(server);
+    const port = await listen(server);
+
+    const job = enqueuePullRequestJob(jobs);
+    jobs.markRunning(job.id);
+    jobs.persistReportAndEnqueuePublish(job.id, {
+      jobId: job.id,
+      repositoryFullName: "sk1ua/ConsistenCy",
+      pullRequestNumber: 31,
+      baseSha: "abcdef1",
+      headSha: "1234567",
+      summary: "Awaiting publish report test",
+      score: 92,
+      riskLevel: "low",
+      agentRuns: [],
+      findings: [],
+      createdAt: "2026-07-30T12:00:00.000Z"
+    });
+
+    const res = await getJson(port, `/jobs/${job.id}/report`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      report: {
+        score: 92,
+        summary: "Awaiting publish report test"
+      }
+    });
   });
 });

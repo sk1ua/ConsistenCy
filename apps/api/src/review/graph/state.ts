@@ -1,6 +1,8 @@
 import { Annotation } from "@langchain/langgraph";
 import type {
   AgentRun,
+  DomainAnalyzeSuccess,
+  DomainComposeReviewSuccess,
   PRReviewContext,
   ReviewFinding,
   ReviewPlan,
@@ -15,6 +17,8 @@ export const ReviewGraphState = Annotation.Root({
   baseSha: Annotation<string>,
   headSha: Annotation<string>,
   context: Annotation<PRReviewContext | undefined>,
+  deterministicResult: Annotation<DomainAnalyzeSuccess | undefined>,
+  composedReview: Annotation<DomainComposeReviewSuccess | undefined>,
   plan: Annotation<ReviewPlan | undefined>,
   agentRuns: Annotation<AgentRun[]>({
     reducer: (left, right) => left.concat(right),

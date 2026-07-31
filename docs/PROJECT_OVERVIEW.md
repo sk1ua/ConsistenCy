@@ -32,4 +32,4 @@ Evidence Retrieval 不是 Agent。它负责为专家分析器和审查者移交�
 - `apps/api`：GitHub App webhook API、worker、SQLite 持久化。
 - `apps/web`：React/Vite 仪表盘。
 - `packages/schema`：共享 TypeScript zod 契约。
-- `backend`：Python 分析器、CLI、检索和评估支持。
+- `engine`：Python 分析器、检索和协议 runner（通过 JSON-over-stdio 与 TypeScript 编排层交互）。

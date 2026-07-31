@@ -2,12 +2,12 @@
 
 This folder contains the optional reproducibility scaffold for public PR weak-label risk ranking studies. Generated reports, sampled manifests, and local repository clones are ignored so the GitHub repository stays small.
 
-**Important:** The scaffold is ready for automatic weak-label evaluation. Build `sampled_prs.json` from SWE-PRBench or a compatible public PR dataset, generate model reports, and then run metrics. Manual labels are optional and only needed for stronger gold-standard research claims.
+**Important:** The evaluation scaffold consumes pre-generated V2 `ReviewReport` JSON artifacts (produced by TypeScript `apps/api` orchestration or saved evaluation benchmarks). Legacy Python Git pipeline generators have been removed in V2.
 
 ## Workflow
 
 1. Build sampled PR metadata and weak labels into `sampled_prs.json`.
-2. Generate one model report JSON per PR into `evaluation/results/`.
+2. Export or place V2 model report JSON files into `evaluation/results/`.
 3. Run ranking metrics:
 
 ```bash

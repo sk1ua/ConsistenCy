@@ -1,5 +1,9 @@
 import { resolve } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { prReviewContextSchema, type PRReviewContext } from "@consistency/schema";
+
+const execFileAsync = promisify(execFile);
 import type { GitHubAppAuthenticator } from "../../github/auth";
 import {
   OctokitPullRequestClient,
@@ -7,7 +11,7 @@ import {
   type PullRequestClient
 } from "../../github/client";
 import { clonePullRequestWorkspace } from "../../github/clone";
-import { loadWorkspaceFiles } from "./fileLoader";
+import { loadWorkspaceFiles, isSecretPath } from "./fileLoader";
 
 const PROJECT_METADATA_FILES = [
   "package.json",
@@ -47,6 +51,7 @@ export async function buildPRContext(
     authenticator: Pick<GitHubAppAuthenticator, "getInstallationToken">;
     clientFactory?: (token: string) => PullRequestClient;
     cloneWorkspace?: typeof clonePullRequestWorkspace;
+    runGitFile?: (executable: string, args: string[], options: { cwd: string; maxBuffer: number; encoding: "buffer"; windowsHide: boolean }) => Promise<{ stdout: Buffer }>;
     workspaceRoot?: string;
     maxFileBytes?: number;
     maxTotalBytes?: number;
@@ -67,26 +72,37 @@ export async function buildPRContext(
   if (pullRequest.baseSha !== input.baseSha || pullRequest.headSha !== input.headSha) {
     throw new Error("Pull request SHAs changed before context construction completed");
   }
-  const changedFiles = rawChangedFiles.map(file => ({
-    ...file,
-    patch: file.patch === undefined
-      ? undefined
-      : truncateUtf8(file.patch, dependencies.maxPatchBytes ?? DEFAULT_MAX_PATCH_BYTES)
-  }));
+  const changedFiles = rawChangedFiles.map(file => {
+    if (file.path.includes("\0")) {
+      throw new Error("File path contains NUL character");
+    }
+    return {
+      ...file,
+      patch: file.patch === undefined
+        ? undefined
+        : truncateUtf8(file.patch, dependencies.maxPatchBytes ?? DEFAULT_MAX_PATCH_BYTES)
+    };
+  });
   const diff = truncateUtf8(rawDiff, dependencies.maxDiffBytes ?? DEFAULT_MAX_DIFF_BYTES);
 
   const workspaceRoot = resolve(dependencies.workspaceRoot ?? ".consistency/workspaces");
   const workspacePath = await (dependencies.cloneWorkspace ?? clonePullRequestWorkspace)({
     repositoryFullName: input.repositoryFullName,
     headSha: input.headSha,
+    baseSha: input.baseSha,
     jobId: input.jobId,
     token: authentication.token,
     workspaceRoot
   });
+  const budget = {
+    limit: dependencies.maxTotalBytes ?? 2 * 1024 * 1024,
+    used: 0
+  };
+
   const loaderOptions = {
     workspacePath,
     maxFileBytes: dependencies.maxFileBytes,
-    maxTotalBytes: dependencies.maxTotalBytes
+    budget
   };
   const fileContents = loadWorkspaceFiles({
     ...loaderOptions,
@@ -97,6 +113,41 @@ export async function buildPRContext(
     paths: PROJECT_METADATA_FILES
   });
 
+  const baseFileContents: Record<string, string> = {};
+  for (const file of changedFiles) {
+    if (file.status === "added") continue;
+    if (isSecretPath(file.path)) continue;
+
+    try {
+      let stdout: Buffer;
+      const maxBuffer = dependencies.maxFileBytes ?? 256 * 1024;
+      const args = ["show", `${input.baseSha}:${file.path}`];
+      const execOptions = { cwd: workspacePath, maxBuffer, encoding: "buffer" as const, windowsHide: true };
+
+      if (dependencies.runGitFile) {
+        const result = await dependencies.runGitFile("git", args, execOptions);
+        stdout = result.stdout;
+      } else {
+        const result = await execFileAsync("git", args, execOptions);
+        stdout = result.stdout;
+      }
+
+      const rawSize = stdout.length;
+      if (rawSize > maxBuffer) continue;
+      if (stdout.includes(0)) continue;
+
+      const content = stdout.toString("utf8");
+      const outputSize = Buffer.byteLength(content, "utf8");
+
+      if (budget.used + outputSize > budget.limit) continue;
+
+      baseFileContents[file.path] = content;
+      budget.used += outputSize;
+    } catch {
+      // Ignore errors if git show fails
+    }
+  }
+
   return prReviewContextSchema.parse({
     jobId: input.jobId,
     repositoryFullName: input.repositoryFullName,
@@ -106,6 +157,7 @@ export async function buildPRContext(
     changedFiles,
     diff,
     fileContents,
+    baseFileContents,
     projectMetadata,
     workspacePath
   });

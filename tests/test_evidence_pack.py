@@ -1,8 +1,8 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from src.retrieval.evidence_pack import build_evidence_pack, build_retrieval_section
-from src.retrieval.models import EvidenceCandidate, EvidenceQuery
+from engine.retrieval.evidence_pack import build_evidence_pack, build_retrieval_section
+from engine.retrieval.models import EvidenceCandidate, EvidenceQuery
 
 
 def test_evidence_pack_respects_context_budget_and_reports_compression():

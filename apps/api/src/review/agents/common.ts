@@ -27,7 +27,7 @@ export function createReviewAgentNode(agent: ExecutableReviewAgent, dependencies
       return { agentRuns: [skipped] };
     }
 
-    const prompt = buildAgentPrompt(agent, state.context);
+    const prompt = buildAgentPrompt(agent, state.context, state.deterministicResult);
     try {
       const result = await dependencies.provider.generateAgentRun({ agent, ...prompt });
       const run: AgentRun = {

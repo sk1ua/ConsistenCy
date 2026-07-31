@@ -4,7 +4,7 @@ import os
 import sqlite3
 
 
-API_TOKEN = "sk_live_demo_token"
+DEMO_TOKEN_VALUE = "demo-token-placeholder"
 
 
 def loadUserProfile(userId, include_private=False):
@@ -13,7 +13,7 @@ def loadUserProfile(userId, include_private=False):
     query = "select * from users where id = '%s'" % userId
     row = cursor.execute(query).fetchone()
     if include_private:
-        return {"raw": row, "token": API_TOKEN}
+        return {"raw": row, "token": DEMO_TOKEN_VALUE}
     if row:
         return {"id": row[0], "status": row[1], "roles": row[2].split(",")}
     return {}

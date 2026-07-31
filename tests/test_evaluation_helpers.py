@@ -4,16 +4,14 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
-
 import pytest
 
-from src.evaluation.ablation import (  # noqa: E402
+from engine.evaluation.ablation import (
     AblationConfig,
     ablate_report,
     score_file_breakdown,
 )
-from src.evaluation.metrics import (  # noqa: E402
+from engine.evaluation.metrics import (
     cohens_kappa,
     precision_at_k,
     recall_at_k,

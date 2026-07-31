@@ -1,13 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { ZodError } from "zod";
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
 import { seedDemoData } from "./api/demoSeed";
 import { buildHealthPayload } from "./health";
-import { processGitHubWebhook, WebhookError } from "./githubWebhook";
+import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
-import { JobRunnerError, runNextReviewJob, runReviewJob } from "./jobRunner";
-import { analyzeFileWithPython, parseAnalyzeFileRequest, PythonBridgeError, resolveAnalyzeFileRequest, type RunProcess } from "./pythonBridge";
 import { sanitizePublicError } from "./security/redact";
+import { settingsPatchSchema, type SettingsSnapshot } from "./config/settings";
+import type { RealDataSnapshot } from "./data/realData";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -44,7 +45,7 @@ function responseHeaders(request: IncomingMessage, allowedOrigins: string[]): Re
   const origin = request.headers.origin;
   return {
     "access-control-allow-headers": "authorization,content-type,x-github-event,x-github-delivery,x-hub-signature-256",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
     ...(origin && allowedOrigins.includes(origin) ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
     "content-type": "application/json; charset=utf-8"
   };
@@ -60,13 +61,12 @@ function errorPayload(code: string, message: string) {
 }
 
 function sendError(request: IncomingMessage, response: ServerResponse, error: unknown, allowedOrigins: string[]): void {
-  if (error instanceof ApiError || error instanceof JobRunnerError || error instanceof WebhookError) {
-    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
+  if (error instanceof ZodError) {
+    sendJson(request, response, 400, errorPayload("INVALID_SETTINGS", error.issues[0]?.message ?? "Settings are invalid"), allowedOrigins);
     return;
   }
-  if (error instanceof PythonBridgeError) {
-    const statusCode = error.code.startsWith("INVALID_") || error.code === "WORKSPACE_PATH_INVALID" || error.code === "SECRET_FILE_BLOCKED" ? 400 : 502;
-    sendJson(request, response, statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
+  if (error instanceof ApiError || error instanceof WebhookError) {
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
     return;
   }
   sendJson(request, response, 500, errorPayload("INTERNAL_ERROR", "Unexpected API error"), allowedOrigins);
@@ -96,8 +96,8 @@ export type ApiHealthDetails = {
   };
 };
 
-export function createApiServer(options: {
-  runProcess?: RunProcess;
+export type CreateApiServerOptions = {
+  runProcess?: any;
   jobs?: ReviewJobStore;
   githubWebhookSecret?: string;
   apiToken?: string;
@@ -105,7 +105,161 @@ export function createApiServer(options: {
   allowedOrigins?: string[];
   healthDetails?: () => ApiHealthDetails;
   workspaceRoot?: string;
-} = {}) {
+  settings?: {
+    get: () => SettingsSnapshot;
+    update: (patch: unknown) => SettingsSnapshot;
+  };
+  realData?: () => RealDataSnapshot | undefined;
+};
+
+type RequestContext = {
+  request: IncomingMessage;
+  response: ServerResponse;
+  url: URL;
+  path: string;
+  allowedOrigins: string[];
+  options: CreateApiServerOptions;
+  jobs: ReviewJobStore;
+  githubWebhookSecret?: string;
+  apiToken?: string;
+  nodeEnv: "development" | "test" | "production";
+  match?: RegExpExecArray | null;
+};
+
+type Route = {
+  method: string;
+  path: string | RegExp;
+  handler: (ctx: RequestContext) => Promise<void> | void;
+  auth?: boolean;
+};
+
+const routes: Route[] = [
+  {
+    method: "POST",
+    path: "/github/webhook",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, githubWebhookSecret, jobs }) => {
+      if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
+      const result = processGitHubWebhook({
+        headers: request.headers,
+        body: await readBody(request),
+        secret: githubWebhookSecret,
+        jobs
+      });
+      sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/health",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, githubWebhookSecret }) => {
+      sendJson(request, response, 200, {
+        ...buildHealthPayload(),
+        ...(options.healthDetails?.() ?? {
+          database: { ok: true },
+          worker: { running: false, activeJobs: 0, concurrency: 1 },
+          llmProvider: "mock",
+          configuration: {
+            githubAppConfigured: false,
+            webhookSecretConfigured: Boolean(githubWebhookSecret),
+            databasePath: ":memory:",
+            workerConcurrency: 1,
+            demoMode: true
+          }
+        })
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/settings",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.settings) throw new ApiError("Settings service is unavailable", "SETTINGS_UNAVAILABLE", 404);
+      sendJson(request, response, 200, { settings: options.settings.get() }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/real-data",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      sendJson(request, response, 200, { realData: options.realData?.() ?? null }, allowedOrigins);
+    }
+  },
+  {
+    method: "PUT",
+    path: "/settings",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, nodeEnv }) => {
+      if (!options.settings || nodeEnv === "production") {
+        throw new ApiError("Settings updates are disabled", "SETTINGS_READ_ONLY", 404);
+      }
+      const patch = settingsPatchSchema.parse(await readJson(request));
+      sendJson(request, response, 200, { settings: options.settings.update(patch) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/jobs",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, url, jobs }) => {
+      sendJson(request, response, 200, { jobs: filterJobs(jobs.list(), url.searchParams).map(toApiJob) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/reports/recent",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, url, jobs }) => {
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 10) || 10));
+      sendJson(request, response, 200, { reports: recentReports(jobs.list(), limit) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/stats",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, jobs }) => {
+      sendJson(request, response, 200, buildStats(jobs.list()), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/demo/seed",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, nodeEnv, jobs }) => {
+      if (nodeEnv === "production") throw new ApiError("Demo seed is disabled in production", "DEMO_DISABLED", 404);
+      sendJson(request, response, 201, seedDemoData(jobs), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/report$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      if (!job.result) throw new ApiError("Job report is not ready", "JOB_NOT_READY", 409);
+      sendJson(request, response, 200, { report: job.result }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
+    }
+  }
+];
+
+export function createApiServer(options: CreateApiServerOptions = {}) {
   const jobs = options.jobs ?? new InMemoryJobQueue();
   const githubWebhookSecret = options.githubWebhookSecret ?? process.env.GITHUB_WEBHOOK_SECRET;
   const apiToken = options.apiToken ?? process.env.CONSISTENCY_API_TOKEN;
@@ -126,104 +280,50 @@ export function createApiServer(options: {
         return;
       }
 
-      if (request.method === "POST" && path === "/github/webhook") {
-        if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
-        const result = processGitHubWebhook({
-          headers: request.headers,
-          body: await readBody(request),
-          secret: githubWebhookSecret,
-          jobs
-        });
-        sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
-        return;
+      let matchedRoute: Route | undefined;
+      let routeMatch: RegExpExecArray | null = null;
+
+      for (const route of routes) {
+        if (route.method === request.method) {
+          if (typeof route.path === "string") {
+            if (route.path === path) {
+              matchedRoute = route;
+              break;
+            }
+          } else {
+            const match = route.path.exec(path);
+            if (match) {
+              matchedRoute = route;
+              routeMatch = match;
+              break;
+            }
+          }
+        }
       }
 
-      if (apiToken && !isAuthorized(request, apiToken)) {
+      if (!matchedRoute) {
+        throw new ApiError("Not found", "NOT_FOUND", 404);
+      }
+
+      const requiresAuth = matchedRoute.auth !== false;
+      if (requiresAuth && apiToken && !isAuthorized(request, apiToken)) {
         throw new ApiError("A valid bearer token is required", "UNAUTHORIZED", 401);
       }
 
-      if (request.method === "GET" && path === "/health") {
-        sendJson(request, response, 200, {
-          ...buildHealthPayload(),
-          ...(options.healthDetails?.() ?? {
-            database: { ok: true },
-            worker: { running: false, activeJobs: 0, concurrency: 1 },
-            llmProvider: "mock",
-            configuration: {
-              githubAppConfigured: false,
-              webhookSecretConfigured: Boolean(githubWebhookSecret),
-              databasePath: ":memory:",
-              workerConcurrency: 1,
-              demoMode: true
-            }
-          })
-        }, allowedOrigins);
-        return;
-      }
+      await matchedRoute.handler({
+        request,
+        response,
+        url,
+        path,
+        allowedOrigins,
+        options,
+        jobs,
+        githubWebhookSecret,
+        apiToken,
+        nodeEnv,
+        match: routeMatch
+      });
 
-      if (request.method === "GET" && path === "/jobs") {
-        sendJson(request, response, 200, { jobs: filterJobs(jobs.list(), url.searchParams).map(toApiJob) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path === "/reports/recent") {
-        const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 10) || 10));
-        sendJson(request, response, 200, { reports: recentReports(jobs.list(), limit) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path === "/stats") {
-        sendJson(request, response, 200, buildStats(jobs.list()), allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path === "/demo/seed") {
-        if (nodeEnv === "production") throw new ApiError("Demo seed is disabled in production", "DEMO_DISABLED", 404);
-        sendJson(request, response, 201, seedDemoData(jobs), allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path === "/analyze-file") {
-        if (nodeEnv !== "development") throw new ApiError("File analysis is only available in development", "ANALYZE_FILE_DISABLED", 404);
-        const workspaceRoot = options.workspaceRoot ?? ".consistency/workspaces";
-        const input = resolveAnalyzeFileRequest(workspaceRoot, parseAnalyzeFileRequest(await readJson(request)));
-        const report = await analyzeFileWithPython(input, {
-          runProcess: options.runProcess
-        });
-        sendJson(request, response, 200, report, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path === "/jobs/run-next") {
-        const job = await runNextReviewJob(jobs, { runProcess: options.runProcess });
-        if (!job) throw new ApiError("No queued jobs", "NO_QUEUED_JOBS", 404);
-        sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path.startsWith("/jobs/") && path.endsWith("/run")) {
-        const id = decodeURIComponent(path.slice("/jobs/".length, -"/run".length));
-        sendJson(request, response, 200, { job: toApiJob(await runReviewJob(jobs, id, { runProcess: options.runProcess })) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path.startsWith("/jobs/") && path.endsWith("/report")) {
-        const id = decodeURIComponent(path.slice("/jobs/".length, -"/report".length));
-        const job = jobs.get(id);
-        if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
-        if (job.status !== "succeeded" || !job.result) throw new ApiError("Job report is not ready", "JOB_NOT_READY", 409);
-        sendJson(request, response, 200, { report: job.result }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path.startsWith("/jobs/")) {
-        const job = jobs.get(decodeURIComponent(path.slice("/jobs/".length)));
-        if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
-        sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
-        return;
-      }
-
-      throw new ApiError("Not found", "NOT_FOUND", 404);
     } catch (error) {
       sendError(request, response, error, allowedOrigins);
     }

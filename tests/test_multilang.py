@@ -4,15 +4,10 @@ Multi-language Parser Tests
 ============================
 验证多语言解析器（Python、JavaScript、TypeScript）的正确性。
 """
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
-
 import pytest
 
-from src.parsers import get_parser_for_file, is_supported_file, get_supported_extensions
-from src.parsers.base_parser import ParseSnapshot
+from engine.parsers import get_parser_for_file, is_supported_file, get_supported_extensions
+from engine.parsers.base_parser import ParseSnapshot
 
 
 # -----------------------------------------------------------------------------
@@ -89,7 +84,7 @@ def test_get_parser_for_unsupported():
 
 def test_python_parse_function():
     """Python parser should extract function info."""
-    from src.parsers.python_parser import PythonParser
+    from engine.parsers.python_parser import PythonParser
     
     parser = PythonParser()
     source = '''
@@ -120,7 +115,7 @@ async def async_func():
 
 def test_python_parse_class():
     """Python parser should extract class info."""
-    from src.parsers.python_parser import PythonParser
+    from engine.parsers.python_parser import PythonParser
     
     parser = PythonParser()
     source = '''
@@ -141,7 +136,7 @@ class Child(Base):
 
 def test_python_parse_imports():
     """Python parser should extract imports."""
-    from src.parsers.python_parser import PythonParser
+    from engine.parsers.python_parser import PythonParser
     
     parser = PythonParser()
     source = '''
@@ -159,7 +154,7 @@ import sys, json
 
 def test_python_loc_counting():
     """Python parser should count lines correctly."""
-    from src.parsers.python_parser import PythonParser
+    from engine.parsers.python_parser import PythonParser
     
     parser = PythonParser()
     source = '''# Comment
@@ -184,7 +179,7 @@ def func():
 
 def test_typescript_parse_function():
     """TypeScript parser should extract function info."""
-    from src.parsers.tree_sitter_parser import TreeSitterParser
+    from engine.parsers.tree_sitter_parser import TreeSitterParser
     
     parser = TreeSitterParser(language_hint=".ts")
     if parser._parser is None:
@@ -212,7 +207,7 @@ async function asyncFunc(): Promise<void> {
 
 def test_typescript_parse_class():
     """TypeScript parser should extract class info."""
-    from src.parsers.tree_sitter_parser import TreeSitterParser
+    from engine.parsers.tree_sitter_parser import TreeSitterParser
     
     parser = TreeSitterParser(language_hint=".ts")
     if parser._parser is None:
@@ -243,7 +238,7 @@ class Dog extends Animal {
 
 def test_javascript_security_patterns():
     """JavaScript should be scanned for security patterns."""
-    from src.agents.security_agent import SecurityAgent
+    from engine.agents.security_agent import SecurityAgent
     
     agent = SecurityAgent()
     
@@ -262,7 +257,7 @@ function dangerous(userInput) {
 
 def test_javascript_xss_patterns():
     """JavaScript should detect XSS vulnerabilities."""
-    from src.agents.security_agent import SecurityAgent
+    from engine.agents.security_agent import SecurityAgent
     
     agent = SecurityAgent()
     
@@ -284,7 +279,7 @@ function render(userContent) {
 
 def test_parser_agent_multilang():
     """ParserAgent should handle multiple languages via parse_file."""
-    from src.agents.parser_agent import ParserAgent
+    from engine.agents.parser_agent import ParserAgent
     
     agent = ParserAgent()
     
@@ -302,7 +297,7 @@ def test_parser_agent_multilang():
 
 def test_analyze_sources_multilang():
     """analyze_sources should work with TypeScript files."""
-    from src.pipeline import analyze_sources
+    from engine import analyze_sources
     
     ts_now = '''
 function process(data: string): string {
@@ -325,7 +320,7 @@ function process(data) {
 
 def test_analyze_sources_javascript_end_to_end():
     """End-to-end: analyze_sources with JS file should run all agents."""
-    from src.pipeline import analyze_sources
+    from engine import analyze_sources
 
     js_now = '''
 function processData(userId) {
@@ -353,7 +348,7 @@ function processData(id) {
 
 def test_analyze_sources_typescript_inheritance_end_to_end():
     """End-to-end: analyze_sources with TS class hierarchy."""
-    from src.pipeline import analyze_sources
+    from engine import analyze_sources
 
     ts_now = '''
 class BaseService {

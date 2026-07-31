@@ -64,7 +64,7 @@ export class ReviewWorker {
       });
     } catch (error) {
       const current = this.options.jobStore.get(job.id);
-      if (current?.status !== "succeeded") {
+      if (current?.status !== "succeeded" && current?.status !== "awaiting_publish" && current?.status !== "publishing") {
         this.options.jobStore.markFailed(job.id, errorMessage(error));
       }
       this.options.onError?.(error, job);

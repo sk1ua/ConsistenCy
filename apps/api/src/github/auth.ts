@@ -10,6 +10,7 @@ export type InstallationToken = {
 export type AppAuth = (options: {
   type: "installation";
   installationId: number;
+  refresh?: boolean;
 }) => Promise<InstallationToken>;
 
 export type AppAuthFactory = (options: {
@@ -43,15 +44,40 @@ export class GitHubAppAuthenticator {
     this.auth = authFactory({ appId: options.appId, privateKey });
   }
 
-  async getInstallationToken(installationId: number): Promise<InstallationToken> {
+  async getInstallationToken(installationId: number, signal?: AbortSignal, forceRefresh = false): Promise<InstallationToken> {
     if (!Number.isInteger(installationId) || installationId <= 0) {
       throw new Error("installationId must be a positive integer");
     }
-    const authentication = await this.auth({ type: "installation", installationId });
-    return {
-      token: authentication.token,
-      createdAt: authentication.createdAt,
-      expiresAt: authentication.expiresAt
-    };
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    }
+
+    const tokenPromise = (async () => {
+      const authentication = await this.auth({ type: "installation", installationId, refresh: forceRefresh });
+      return {
+        token: authentication.token,
+        createdAt: authentication.createdAt,
+        expiresAt: authentication.expiresAt
+      };
+    })();
+
+    if (!signal) {
+      return tokenPromise;
+    }
+
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      signal.addEventListener("abort", onAbort, { once: true });
+
+      tokenPromise
+        .then(res => {
+          signal.removeEventListener("abort", onAbort);
+          if (!signal.aborted) resolve(res);
+        })
+        .catch(err => {
+          signal.removeEventListener("abort", onAbort);
+          if (!signal.aborted) reject(err);
+        });
+    });
   }
 }

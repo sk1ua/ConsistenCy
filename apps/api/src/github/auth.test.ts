@@ -45,7 +45,10 @@ describe("GitHubAppAuthenticator", () => {
       appId: "123",
       privateKey: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"
     });
-    expect(auth).toHaveBeenCalledWith({ type: "installation", installationId: 456 });
+    expect(auth).toHaveBeenCalledWith({ type: "installation", installationId: 456, refresh: false });
+
+    await authenticator.getInstallationToken(456, undefined, true);
+    expect(auth).toHaveBeenLastCalledWith({ type: "installation", installationId: 456, refresh: true });
   });
 
   it("rejects malformed keys and installation ids before making a request", async () => {

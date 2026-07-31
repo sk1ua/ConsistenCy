@@ -2,7 +2,7 @@ const SECRET_VALUE_PATTERN = /\b(api[_-]?key|token|access[_-]?token|auth[_-]?tok
 
 const CREDENTIAL_PATTERNS = [
   /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi,
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b/g,
+  /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b/g,
   /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi
 ];
 
@@ -22,4 +22,12 @@ export function sanitizePublicError(value: string): string {
   let sanitized = redactSensitiveText(value);
   for (const pattern of ABSOLUTE_PATH_PATTERNS) sanitized = sanitized.replace(pattern, " [PATH_REDACTED]");
   return sanitized.trim() || "Request failed";
+}
+
+export function sanitizePublishFailure(error: unknown, token?: string): string {
+  let message = error instanceof Error ? error.message : String(error);
+  if (token) {
+    message = message.split(token).join("[REDACTED]");
+  }
+  return sanitizePublicError(message).slice(0, 500);
 }

@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { END, START, StateGraph } from "@langchain/langgraph";
-import type { ReviewReport } from "@consistency/schema";
+import type { AgentRun } from "@consistency/schema";
 import type { ReviewJobStore } from "../../jobQueue";
 import { createCorrectnessAgentNode } from "../agents/correctness";
 import { createMaintainabilityAgentNode } from "../agents/maintainability";
@@ -11,13 +12,14 @@ import { createTestAgentNode } from "../agents/test";
 import type { ContextBuilder } from "../agents/types";
 import type { LLMProvider } from "../llm/types";
 import { ReviewGraphState, type ReviewGraphStateValue } from "./state";
-import { sanitizePublicError } from "../../security/redact";
+import { DeterministicAnalyzer, type DeterministicFileInput } from "../deterministic";
+import { buildComposeReviewFileResults } from "./composeBuilder";
 
 export type ReviewWorkflowDependencies = {
   contextBuilder: ContextBuilder;
   provider: LLMProvider;
   jobStore: ReviewJobStore;
-  publishReport?: (report: ReviewReport) => Promise<void>;
+  deterministicAnalyzer: DeterministicAnalyzer;
 };
 
 export type ReviewWorkflowInput = Pick<
@@ -27,6 +29,7 @@ export type ReviewWorkflowInput = Pick<
 
 export function createReviewWorkflow(dependencies: ReviewWorkflowDependencies) {
   const agentDependencies = { provider: dependencies.provider, jobStore: dependencies.jobStore };
+
   return new StateGraph(ReviewGraphState)
     .addNode("loadContext", async (state: ReviewGraphStateValue) => ({
       context: await dependencies.contextBuilder({
@@ -38,45 +41,98 @@ export function createReviewWorkflow(dependencies: ReviewWorkflowDependencies) {
         headSha: state.headSha
       })
     }))
+    .addNode("deterministic", async (state: ReviewGraphStateValue) => {
+      if (!state.context) {
+        throw new Error("Context is missing for deterministic analysis");
+      }
+
+      const startedAt = new Date().toISOString();
+      const ctx = state.context;
+      const files: DeterministicFileInput[] = ctx.changedFiles.map((cf) => ({
+        path: cf.path,
+        content: ctx.fileContents[cf.path] || "",
+        baseline: ctx.baseFileContents[cf.path] ?? "",
+        diffHunks: cf.patch ? cf.patch.split("\n@@").map((h, i) => i === 0 ? h : "@@" + h) : []
+      }));
+
+      const response = await dependencies.deterministicAnalyzer.analyze(files);
+      if (!response.ok) {
+        const errorMsg = `Deterministic analysis failed: ${response.error}`;
+        const run: AgentRun = {
+          id: `agent_${randomUUID()}`,
+          jobId: state.jobId,
+          agentName: "DeterministicAnalyzer",
+          status: "failed",
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          inputSummary: `Analyzed ${files.length} changed files`,
+          findings: [],
+          error: errorMsg
+        };
+        dependencies.jobStore.saveAgentRun(run);
+        throw new Error(errorMsg);
+      }
+
+      const run: AgentRun = {
+        id: `agent_${randomUUID()}`,
+        jobId: state.jobId,
+        agentName: "DeterministicAnalyzer",
+        status: "succeeded",
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        inputSummary: `Analyzed ${files.length} changed files`,
+        findings: []
+      };
+      dependencies.jobStore.saveAgentRun(run);
+
+      return {
+        deterministicResult: response,
+        agentRuns: [run]
+      };
+    })
     .addNode("planner", createPlannerNode(agentDependencies))
     .addNode("security", createSecurityAgentNode(agentDependencies))
     .addNode("correctness", createCorrectnessAgentNode(agentDependencies))
     .addNode("maintainability", createMaintainabilityAgentNode(agentDependencies))
     .addNode("test", createTestAgentNode(agentDependencies))
     .addNode("style", createStyleAgentNode(agentDependencies))
-    .addNode("synthesizer", createSynthesizerNode(agentDependencies))
-    .addNode("persistReport", async (state: ReviewGraphStateValue) => {
-      if (!state.report) throw new Error("Synthesizer did not produce a report");
-      dependencies.jobStore.markSucceeded(state.jobId, state.report);
-      return {};
+    .addNode("composeReview", async (state: ReviewGraphStateValue) => {
+      if (!state.deterministicResult) {
+        throw new Error("Deterministic analysis result is required before composeReview");
+      }
+
+      const fileResults = buildComposeReviewFileResults(
+        state.deterministicResult.files,
+        state.findings
+      );
+
+      const response = await dependencies.deterministicAnalyzer.composeReview(fileResults);
+      if (!response.ok) {
+        throw new Error(`Compose review failed: ${response.error}`);
+      }
+
+      return { composedReview: response };
     })
-    .addNode("publishComment", async (state: ReviewGraphStateValue) => {
-      if (!state.report) throw new Error("Report is missing before publication");
-      if (!dependencies.publishReport) {
-        dependencies.jobStore.updateReportCommentStatus(state.jobId, "skipped");
-        return {};
+    .addNode("synthesizer", createSynthesizerNode(agentDependencies))
+    .addNode("persistReportAndEnqueuePublish", async (state: ReviewGraphStateValue) => {
+      if (!state.report) {
+        throw new Error("Synthesizer did not produce a report");
       }
-      try {
-        await dependencies.publishReport(state.report);
-        dependencies.jobStore.updateReportCommentStatus(state.jobId, "published");
-      } catch (error) {
-        const message = error instanceof Error ? sanitizePublicError(error.message) : "Unknown GitHub comment failure";
-        dependencies.jobStore.updateReportCommentStatus(state.jobId, "failed", message);
-        return { errors: [`GitHub comment: ${message}`] };
-      }
+      dependencies.jobStore.persistReportAndEnqueuePublish(state.jobId, state.report);
       return {};
     })
     .addEdge(START, "loadContext")
-    .addEdge("loadContext", "planner")
+    .addEdge("loadContext", "deterministic")
+    .addEdge("deterministic", "planner")
     .addEdge("planner", "security")
     .addEdge("security", "correctness")
     .addEdge("correctness", "maintainability")
     .addEdge("maintainability", "test")
     .addEdge("test", "style")
-    .addEdge("style", "synthesizer")
-    .addEdge("synthesizer", "persistReport")
-    .addEdge("persistReport", "publishComment")
-    .addEdge("publishComment", END)
+    .addEdge("style", "composeReview")
+    .addEdge("composeReview", "synthesizer")
+    .addEdge("synthesizer", "persistReportAndEnqueuePublish")
+    .addEdge("persistReportAndEnqueuePublish", END)
     .compile();
 }
 

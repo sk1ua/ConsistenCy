@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from src.retrieval.hybrid_retriever import retrieve_evidence
-from src.retrieval.models import EvidenceCandidate, EvidenceQuery
-from src.retrieval.reranker import score_candidate
+from engine.retrieval.hybrid_retriever import retrieve_evidence
+from engine.retrieval.models import EvidenceCandidate, EvidenceQuery
+from engine.retrieval.reranker import score_candidate
 
 
 def test_hybrid_retriever_ranks_security_symbol_match_first():

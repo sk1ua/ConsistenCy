@@ -17,9 +17,16 @@ export function seedDemoData(store: ReviewJobStore): { created: number } {
   for (const [index, definition] of definitions.entries()) {
     const baseSha = `demo-base-${index + 1}`;
     if (existing.has(baseSha)) continue;
+    const deliveryId = `manual:demo:${index + 1}`;
+    store.recordWebhookDelivery({
+      deliveryId,
+      event: "pull_request",
+      action: "opened",
+      status: "enqueued"
+    });
     const job = store.enqueue({
       kind: "pull_request",
-      deliveryId: `manual:demo:${index + 1}`,
+      deliveryId,
       repository: definition.repository,
       pullRequestNumber: definition.pullRequestNumber,
       installationId: 1,

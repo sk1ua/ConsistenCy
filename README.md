@@ -42,8 +42,8 @@ python -m pytest -q
 - `apps/api`：TypeScript API、GitHub App webhook、worker、持久化。
 - `apps/web`：React/Vite 仪表盘。
 - `packages/schema`：共享 zod 契约。
-- `backend/src/retrieval`：确定性证据检索和 Evidence Pack。
-- `backend/src/pr_report_builder.py`：Python PR 报告生成。
+- `engine/retrieval`：确定性证据检索和 Evidence Pack。
+- `engine`：Python 多信号分析引擎。
 - `evaluation/scripts/run_metrics.py`：排序和检索评估指标。
 
 ## 文档

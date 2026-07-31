@@ -44,6 +44,8 @@ chroma_db/
 .coverage
 htmlcov/
 pytest-cache-files-*/
+test-results/
+playwright-report/
 
 # Node / TypeScript workspace
 node_modules/

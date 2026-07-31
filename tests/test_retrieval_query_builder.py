@@ -1,8 +1,8 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from src.retrieval.evidence_index import build_evidence_candidates
-from src.retrieval.query_builder import build_evidence_query
+from engine.retrieval.evidence_index import build_evidence_candidates
+from engine.retrieval.query_builder import build_evidence_query
 
 
 def test_query_builder_extracts_path_symbols_imports_and_risk_terms():

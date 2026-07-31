@@ -1,11 +1,11 @@
-# 远程分析
+# 远程与 GitHub PR 分析
 
-远程分析路径允许 ConsistenCy 在没有完整本地 checkout 的情况下检查 GitHub PR。
+ConsistenCy V2 通过 TypeScript 编排层 (`apps/api`) 统一处理 GitHub PR 分析。
 
-它适合数据采集和评估，依赖仓库访问权限以及可用的 base/head refs。
+当接收到 GitHub Webhook 或触发审查任务时，TypeScript API 会在临时工作区中拉取代码变更，并调用 Python 分析引擎 (`engine`) 进行多信号分析，最后通过 Outbox 机制发布 GitHub 评论。
 
-本地确定性分析仍可通过以下命令使用：
+在本地直接运行无 Git 的示例分析可使用：
 
 ```bash
-python backend/cli.py pr-report --repo . --base <base> --head <head> --json-output
+python examples/multi_agent_demo.py
 ```

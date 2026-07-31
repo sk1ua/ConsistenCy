@@ -17,6 +17,10 @@ export function createPlannerNode(dependencies: AgentDependencies) {
   return async (state: ReviewGraphStateValue) => {
     if (!state.context) throw new Error("Planner requires PR context");
     const startedAt = new Date().toISOString();
+    const staticSummary = state.deterministicResult?.files
+      ? `Static Analysis Summary: High-risk files: ${state.deterministicResult.files.filter(f => f.riskScore >= 0.5).map(f => `${f.path} (score: ${f.riskScore})`).join(", ") || "none"}`
+      : "";
+
     try {
       const result = await dependencies.provider.invokeWithSchema({
         schema: reviewPlanSchema,
@@ -24,9 +28,10 @@ export function createPlannerNode(dependencies: AgentDependencies) {
         systemPrompt: "You are the ConsistenCy review planner. Select only relevant review agents. Use the exact agent names Security, Correctness, Maintainability, Test, and Style.",
         userPrompt: [
           `Changed files: ${state.context.changedFiles.map(file => file.path).join(", ")}`,
+          staticSummary,
           `Project metadata: ${Object.keys(state.context.projectMetadata).join(", ") || "none"}`,
           `Diff excerpt:\n${state.context.diff.slice(0, 30_000)}`
-        ].join("\n\n")
+        ].filter(Boolean).join("\n\n")
       });
       const enabled = REVIEW_AGENT_NAMES.filter(agent => result.data.enabledAgents.includes(agent));
       const plan: ReviewPlan = {
