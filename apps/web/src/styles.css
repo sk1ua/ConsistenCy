@@ -75,6 +75,7 @@ code, pre { font-family: var(--mono); }
 .language-select select { min-width: 68px; border: 0; outline: 0; background: transparent; color: var(--foreground); font-size: 10px; font-weight: 700; cursor: pointer; }
 .language-select:focus-within { border-color: #7397f1; box-shadow: 0 0 0 3px rgba(47,107,255,.1); }
 .demo-indicator { height: 34px; padding: 0 11px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #aed3c6; border-radius: 7px; background: var(--success-soft); color: #126e59; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.demo-indicator.snapshot { border-color: #b9c9ec; background: var(--primary-soft); color: #2b4fa0; }
 .api-status, .header-time { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .api-status { padding-right: 13px; border-right: 1px solid var(--border); }
 .api-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 3px rgba(209,77,62,.1); }.api-status i.online { background: var(--success); box-shadow: 0 0 0 3px rgba(22,133,107,.1); }

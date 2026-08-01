@@ -52,8 +52,8 @@ function getAllSourceFiles(dir: string): string[] {
     if (stat && stat.isDirectory()) {
       results = results.concat(getAllSourceFiles(filePath));
     } else if (/\.(ts|tsx|py|yml|yaml|md|json|toml|txt)$/.test(file)) {
-      // Exclude historical audit reports and static test assertion files
-      if (!file.endsWith("Audit_Report.md") && !file.endsWith("cleanup.test.ts") && !file.endsWith("ciWorkflow.test.ts")) {
+      // Exclude static test assertion files; generated evaluation content is excluded above.
+      if (!file.endsWith("cleanup.test.ts") && !file.endsWith("ciWorkflow.test.ts")) {
         results.push(filePath);
       }
     }
@@ -61,7 +61,7 @@ function getAllSourceFiles(dir: string): string[] {
   return results;
 }
 
-describe("Phase 6 Cleanup Static Audit Gate", () => {
+describe("V1 legacy-removal regression guard", () => {
   it("verifies all V1 legacy files and directories are physically deleted", () => {
     for (const relPath of REMOVED_PATHS) {
       const fullPath = resolve(ROOT, relPath);
@@ -69,7 +69,7 @@ describe("Phase 6 Cleanup Static Audit Gate", () => {
     }
   });
 
-  it("verifies zero non-historical references to legacy V1 patterns remain", () => {
+  it("verifies zero non-test references to legacy V1 patterns remain", () => {
     const targetDirs = [
       resolve(ROOT, "apps"),
       resolve(ROOT, "packages"),

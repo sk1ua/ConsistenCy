@@ -1,4 +1,4 @@
-"""Run a no-Git ConsistenCy analysis demo using the V2 Python Engine protocol."""
+"""Run a no-Git ConsistenCy analysis demo using the Python Engine protocol."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def main() -> None:
     highest_risk = max(files, key=lambda item: item.get("risk_score", 0), default=None)
     finding_count = sum(len(item.get("findings", [])) for item in files)
 
-    print("ConsistenCy V2 engine analysis demo")
+    print("ConsistenCy engine analysis demo")
     print("===================================")
     print(f"Status: {'ok' if data.get('ok') else 'error'}")
     print(f"Files Analyzed: {len(files)}")

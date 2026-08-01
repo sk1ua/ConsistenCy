@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for the ConsistenCy V2 engine package."""
+"""Tests for the ConsistenCy engine package."""
 
 import json
 from engine.protocol import AnalyzeRequest, FileInput, AnalyzeResponse

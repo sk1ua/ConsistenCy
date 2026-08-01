@@ -33,6 +33,9 @@ config.local.py
 # Logs and local databases
 *.log
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite
 *.sqlite3
 .consistency_baseline.db
@@ -46,6 +49,7 @@ htmlcov/
 pytest-cache-files-*/
 test-results/
 playwright-report/
+/output/
 
 # Node / TypeScript workspace
 node_modules/
@@ -70,3 +74,6 @@ data/cache/*.json
 # Others
 .claude
 .specify
+
+# WorkBuddy agent workspace
+.workbuddy/

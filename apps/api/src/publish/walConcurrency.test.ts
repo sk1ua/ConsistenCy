@@ -10,6 +10,31 @@ async function terminateWorkers(workers: Worker[]): Promise<void> {
   await Promise.allSettled(workers.map((worker) => worker.terminate()));
 }
 
+// Windows 下 SQLite sidecar 可能因句柄释放延迟而短暂无法删除：对测试自身创建的
+// 精确路径做有限次数重试；最终仍失败则抛出明确错误，不允许静默残留。
+async function removeDbFilesWithRetry(dbPath: string, attempts = 10, delayMs = 100): Promise<void> {
+  const targets = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    lastError = undefined;
+    for (const target of targets) {
+      if (!existsSync(target)) continue;
+      try {
+        unlinkSync(target);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (targets.every((target) => !existsSync(target))) return;
+    await new Promise((res) => setTimeout(res, delayMs));
+  }
+  const remaining = targets.filter((target) => existsSync(target));
+  throw new Error(
+    `Failed to clean up WAL test database files: ${remaining.join(", ")}` +
+    (lastError ? ` (last error: ${String(lastError)})` : "")
+  );
+}
+
 async function waitForWorkersReady(
   state: Int32Array,
   expectedReady: number,
@@ -66,18 +91,7 @@ describe("Multi-Thread WAL SQLite Claim Concurrency Test", () => {
   it("concurrent worker threads safely claim single outbox item via production SQLiteJobStore without SQLITE_BUSY or double claim", async () => {
     const dbPath = resolve(__dirname, `../../test_wal_claim_${Date.now()}.db`);
 
-    const cleanupDbFiles = () => {
-      for (const suffix of ["", "-wal", "-shm"]) {
-        const target = `${dbPath}${suffix}`;
-        if (existsSync(target)) {
-          try {
-            unlinkSync(target);
-          } catch {}
-        }
-      }
-    };
-
-    cleanupDbFiles();
+    await removeDbFilesWithRetry(dbPath);
 
     const db = openDatabase(dbPath);
     runMigrations(db);
@@ -140,38 +154,28 @@ describe("Multi-Thread WAL SQLite Claim Concurrency Test", () => {
       expect(totalClaimed).toBe(1);
 
       const verifyDb = openDatabase(dbPath);
-      const verifyStore = new SQLiteJobStore(verifyDb);
-      const updatedJob = verifyStore.get(job.id)!;
-      const outbox = verifyStore.getPublishOutbox(job.id)[0]!;
+      try {
+        const verifyStore = new SQLiteJobStore(verifyDb);
+        const updatedJob = verifyStore.get(job.id)!;
+        const outbox = verifyStore.getPublishOutbox(job.id)[0]!;
 
-      expect(updatedJob.status).toBe("publishing");
-      expect(outbox.status).toBe("leased");
-      expect(outbox.leaseGeneration).toBe(1);
-      expect(["worker-A", "worker-B"]).toContain(outbox.leaseOwner);
-
-      verifyDb.close();
+        expect(updatedJob.status).toBe("publishing");
+        expect(outbox.status).toBe("leased");
+        expect(outbox.leaseGeneration).toBe(1);
+        expect(["worker-A", "worker-B"]).toContain(outbox.leaseOwner);
+      } finally {
+        verifyDb.close();
+      }
     } finally {
       await terminateWorkers(workers);
-      await new Promise((r) => setTimeout(r, 50));
-      cleanupDbFiles();
+      await removeDbFilesWithRetry(dbPath);
     }
   });
 
   it("fails fast on worker bootstrap error before ready without unhandled rejections", async () => {
     const dbPath = resolve(__dirname, `../../test_wal_bootstrap_err_${Date.now()}.db`);
 
-    const cleanupDbFiles = () => {
-      for (const suffix of ["", "-wal", "-shm"]) {
-        const target = `${dbPath}${suffix}`;
-        if (existsSync(target)) {
-          try {
-            unlinkSync(target);
-          } catch {}
-        }
-      }
-    };
-
-    cleanupDbFiles();
+    await removeDbFilesWithRetry(dbPath);
 
     const db = openDatabase(dbPath);
     runMigrations(db);
@@ -185,26 +189,14 @@ describe("Multi-Thread WAL SQLite Claim Concurrency Test", () => {
       await expect(threadFailing).rejects.toThrow("Simulated worker failure before ready");
     } finally {
       await terminateWorkers(workers);
-      await new Promise((r) => setTimeout(r, 50));
-      cleanupDbFiles();
+      await removeDbFilesWithRetry(dbPath);
     }
   });
 
   it("terminates blocked workers and cleans up temp DB files when a worker times out waiting to be ready", async () => {
     const dbPath = resolve(__dirname, `../../test_wal_timeout_${Date.now()}.db`);
 
-    const cleanupDbFiles = () => {
-      for (const suffix of ["", "-wal", "-shm"]) {
-        const target = `${dbPath}${suffix}`;
-        if (existsSync(target)) {
-          try {
-            unlinkSync(target);
-          } catch {}
-        }
-      }
-    };
-
-    cleanupDbFiles();
+    await removeDbFilesWithRetry(dbPath);
 
     const db = openDatabase(dbPath);
     runMigrations(db);
@@ -248,8 +240,7 @@ describe("Multi-Thread WAL SQLite Claim Concurrency Test", () => {
       );
     } finally {
       await terminateWorkers(workers);
-      await new Promise((r) => setTimeout(r, 50));
-      cleanupDbFiles();
+      await removeDbFilesWithRetry(dbPath);
 
       // Assert all temp database files are cleanly deleted
       expect(existsSync(dbPath)).toBe(false);

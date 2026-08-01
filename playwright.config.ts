@@ -13,6 +13,7 @@ process.once("exit", () => {
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: /capture-screenshots\.spec\.ts$/,
   fullyParallel: false,
   workers: 1,
   use: {

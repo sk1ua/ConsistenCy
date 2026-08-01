@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test.describe("ConsistenCy V2 Full-Stack Integration E2E Suite", () => {
+test.describe("ConsistenCy Full-Stack Integration E2E Suite", () => {
   test("executes deterministic E2E flow: seeds demo, asserts workers are disabled, verifies reports and badges without external requests", async ({ page, request }) => {
     // 1. Error tracking & Host Isolation
     const uncaughtErrors: Error[] = [];

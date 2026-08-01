@@ -1,26 +1,17 @@
 # 评估
 
-ConsistenCy 评估的是“审查者注意力排序是否合理”，不是完美缺陷检测。
-
-## 工作流
-
-```bash
-python evaluation/scripts/build_public_pr_manifest.py --output evaluation/sampled_prs.json
-python evaluation/scripts/run_public_pr_reports.py --manifest evaluation/sampled_prs.json
-python evaluation/scripts/run_metrics.py --manifest evaluation/sampled_prs.json --markdown-output evaluation/results/metrics_summary.md
-```
+ConsistenCy 评估的是“审查者注意力排序是否合理”，不是完美缺陷检测。评估输入是 `ReviewReport` JSON，报告生成与指标计算可以分开执行；运行步骤与目录约定见 [evaluation/README.md](../evaluation/README.md)。
 
 ## 指标
 
-- `Precision@K`
-- `Recall@K`
+- `Precision@K` / `Recall@K`
 - `Evidence Recall@K`
 - `Average Compression Ratio`
 - `Average Selected Evidence Count`
 - `Files With Evidence`
 
-`false_evidence_rate` 和 `evidence_usefulness_score` 需要人工审计标签；没有标签时保持 `n/a`。
+## 边界
 
-## 弱标签
+公开 PR Review 的文件位置是弱标签，不是缺陷金标准。`false_evidence_rate` 与 `evidence_usefulness_score` 在缺少人工标注时保持 `n/a`；任何更强的研究结论都需要独立的人工审核。
 
-公开 PR 评论只能作为审查者注意力的弱监督信号，不是缺陷金标准。更强的研究结论需要人工审计。
+评估生成的 manifest、结果与本地仓库 clone 均被 `.gitignore` 忽略，不会进入仓库。数据集记录格式见 [dataset_schema.md](../evaluation/dataset_schema.md)。

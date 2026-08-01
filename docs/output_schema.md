@@ -1,14 +1,20 @@
-# ConsistenCy V2 输出 Schema
+# 输出 Schema
 
-ConsistenCy V2 的机器可读契约由 `@consistency/schema` 统一声明：
+机器可读契约由 `@consistency/schema` 统一声明：
 
-- `packages/schema/src/protocol.ts`：TypeScript 与 Python Engine stdio 进程协议契约（JSON-over-stdio snake_case wire contract）。
-- `packages/schema/src/report.ts`：审查报告结构及度量指标契约。
-- `packages/schema/src/review.ts`：审查计划 (Plan)、Agent 运行状态与 Finding 契约。
-- `packages/schema/src/job.ts`：Job 状态与 Webhook 事件契约。
+- `packages/schema/src/protocol.ts`：TypeScript 与 Python Engine 的 JSON-over-stdio wire contract，字段使用 `snake_case`。
+- `packages/schema/src/report.ts`：ReviewReport、检索度量和 Finding。
+- `packages/schema/src/review.ts`：审查计划、Agent run 和 Compose/Synthesizer 输出。
+- `packages/schema/src/job.ts`：Job 状态与 Webhook 事件。
 
-## PR Report 结构
+TypeScript 业务对象在 Schema 边界使用显式 `camelCase` ↔ `snake_case` 转换。新增字段必须通过 Zod 定义和自动化测试校验。
 
-V2 报告由 TypeScript `ReviewReport` Schema 约束，包含检索度量、Agent runs 记录与确凿/假设级别 Finding。
+## ReviewReport 关注点
 
-Schema 应保持强类型强约束，所有新增字段需使用 `zod` 进行定义与自动化测试校验。
+- `jobId`、仓库、PR、commit 和分析时间。
+- 证据检索统计与 Evidence Pack 摘要。
+- `findings`：风险等级、置信度、文件位置、证据和说明。
+- `agentRuns`：每个阶段的状态、耗时、输入/输出摘要和错误。
+- 发布状态与可追溯 metadata。
+
+Risk score 用于审查注意力排序，不是自动化安全结论；UI 会把事实证据、模型推导和弱标签边界分开呈现。

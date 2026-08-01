@@ -1,25 +1,23 @@
 # ConsistenCy Evaluation Workspace
 
-This folder contains the optional reproducibility scaffold for public PR weak-label risk ranking studies. Generated reports, sampled manifests, and local repository clones are ignored so the GitHub repository stays small.
+这里是可选的公开 PR 弱标签评估脚手架。它消费 TypeScript 编排生成的 `ReviewReport` JSON，生成的 manifest、结果、本地仓库 clone 和中间数据均被忽略，以保持 GitHub 仓库轻量。
 
-**Important:** The evaluation scaffold consumes pre-generated V2 `ReviewReport` JSON artifacts (produced by TypeScript `apps/api` orchestration or saved evaluation benchmarks). Legacy Python Git pipeline generators have been removed in V2.
+## 工作流
 
-## Workflow
+1. 用 `build_public_pr_manifest.py` 生成公开 PR 元数据和弱标签。
+2. 将报告 JSON 放入 `evaluation/results/`。
+3. 运行排序指标：
 
-1. Build sampled PR metadata and weak labels into `sampled_prs.json`.
-2. Export or place V2 model report JSON files into `evaluation/results/`.
-3. Run ranking metrics:
-
-```bash
+```powershell
 python evaluation/scripts/run_metrics.py --manifest evaluation/sampled_prs.json --output evaluation/results/metrics_summary.json
 ```
 
-4. Run report-level signal ablations:
+4. 运行信号消融：
 
-```bash
+```powershell
 python evaluation/scripts/run_ablation.py --manifest evaluation/sampled_prs.json --output evaluation/results/ablation_summary.json
 ```
 
-## Notes
+`generic_baseline` 只有在使用真正 generic baseline 重新生成报告时才是严格对照；现有报告可用于信号移除消融，因为信号分数已保存在报告中。
 
-The `generic_baseline` ablation is approximate unless reports are regenerated with a true generic baseline. Signal-removal ablations can be computed from existing reports because extracted signal scores are already stored in the report schema.
+评估结果描述的是排序重合度。公开 Review 位置是弱标签，任何缺陷检测或安全有效性结论都需要额外的人工标注与审查。

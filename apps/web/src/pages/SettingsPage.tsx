@@ -10,8 +10,14 @@ type ClearSecrets = Record<SecretName, boolean>;
 const emptySecrets: SecretDrafts = { deepseekApiKey: "", openaiApiKey: "", privateKey: "", webhookSecret: "" };
 const keepSecrets: ClearSecrets = { deepseekApiKey: false, openaiApiKey: false, privateKey: false, webhookSecret: false };
 
-function ConfigRow({ icon: Icon, label, value, ok }: { icon: typeof Github; label: string; value: string; ok?: boolean }) {
-  return <div className="config-row"><Icon size={18} /><span><strong>{label}</strong><small>{value}</small></span>{ok === undefined ? null : ok ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}</div>;
+function safeEditablePath(value: string, fallback: string): string {
+  const normalized = value.replaceAll("\\", "/");
+  return /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("/") ? fallback : value;
+}
+
+function ConfigRow({ icon: Icon, label, value, ok, redact }: { icon: typeof Github; label: string; value: string; ok?: boolean; redact?: boolean }) {
+  const { t } = useI18n();
+  return <div className="config-row"><Icon size={18} /><span><strong>{label}</strong><small>{redact ? t("Local database configured") : value}</small></span>{ok === undefined ? null : ok ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}</div>;
 }
 
 function SecretField({ name, label, configured, value, clear, multiline = false, onValue, onClear }: {
@@ -142,7 +148,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     {draft.overriddenByEnvironment.length > 0 && <div className="settings-message warning">{t("Environment variables override: {keys}", { keys: draft.overriddenByEnvironment.join(", ") })}</div>}
 
     <section className="settings-group section-block">
-      <div className="settings-group-title"><Sparkles size={18} /><div><span>{t("01 · Model")}</span><h3>{t("Review intelligence heading")}</h3><p>{t("Choose the model used for evidence synthesis and reviewer handoff.")}</p></div></div>
+      <div className="settings-group-title"><Sparkles size={18} /><div><span>{t("01 · Model")}</span><h3>{t("Evidence synthesis model")}</h3><p>{t("Choose the model used for evidence synthesis and reviewer handoff.")}</p></div></div>
       <div className="settings-fields">
         <div className="setting-field"><label htmlFor="setting-provider">{t("Provider")}</label><select id="setting-provider" value={draft.llm.provider} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, provider: event.target.value as SettingsSnapshot["llm"]["provider"] } }) : current)}><option value="mock">{t("Mock · no external model")}</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select></div>
         {draft.llm.provider === "deepseek" && <>
@@ -160,7 +166,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     <section className="settings-group section-block">
       <div className="settings-group-title"><Github size={18} /><div><span>{t("02 · GitHub")}</span><h3>{t("Pull request connection")}</h3><p>{t("Connect signed webhook events to authenticated repository analysis.")}</p></div></div>
       <div className="settings-fields">
-        <div className="setting-field"><label htmlFor="setting-app-id">{t("GitHub App ID")}</label><input id="setting-app-id" value={draft.github.appId} onChange={event => setDraft(current => current ? ({ ...current, github: { ...current.github, appId: event.target.value } }) : current)} placeholder="123456" /></div>
+        <div className="setting-field"><label htmlFor="setting-app-id">{t("GitHub App ID")}</label><input id="setting-app-id" value={draft.github.appId} onChange={event => setDraft(current => current ? ({ ...current, github: { ...current.github, appId: event.target.value } }) : current)} placeholder={t("Only for GitHub App mode")} /></div>
         <SecretField name="webhookSecret" label="Webhook secret" configured={settings.github.webhookSecretConfigured} value={secrets.webhookSecret} clear={clearSecrets.webhookSecret} onValue={updateSecret} onClear={updateClear} />
         <div className="setting-field-wide"><SecretField name="privateKey" label="Private key" configured={settings.github.privateKeyConfigured} value={secrets.privateKey} clear={clearSecrets.privateKey} multiline onValue={updateSecret} onClear={updateClear} /></div>
       </div>
@@ -169,8 +175,8 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     <section className="settings-group section-block">
       <div className="settings-group-title"><ServerCog size={18} /><div><span>{t("03 · Runtime")}</span><h3>{t("Local service")}</h3><p>{t("Control storage, workspace isolation and worker throughput.")}</p></div></div>
       <div className="settings-fields">
-        <div className="setting-field"><label htmlFor="setting-database">{t("Database path")}</label><input id="setting-database" value={draft.runtime.databasePath} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, databasePath: event.target.value } }) : current)} /></div>
-        <div className="setting-field"><label htmlFor="setting-workspace">{t("Workspace root")}</label><input id="setting-workspace" value={draft.runtime.workspaceRoot} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workspaceRoot: event.target.value } }) : current)} /></div>
+        <div className="setting-field"><label htmlFor="setting-database">{t("Database path")}</label><input id="setting-database" value={safeEditablePath(draft.runtime.databasePath, "./.consistency/consistency.db")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, databasePath: event.target.value } }) : current)} /></div>
+        <div className="setting-field"><label htmlFor="setting-workspace">{t("Workspace root")}</label><input id="setting-workspace" value={safeEditablePath(draft.runtime.workspaceRoot, "./.consistency/workspaces")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workspaceRoot: event.target.value } }) : current)} /></div>
         <div className="setting-field"><label htmlFor="setting-concurrency">{t("Worker concurrency")}</label><input id="setting-concurrency" type="number" min="1" max="16" value={draft.runtime.workerConcurrency} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerConcurrency: Number(event.target.value) } }) : current)} /></div>
         <div className="setting-field"><label htmlFor="setting-poll">{t("Poll interval (ms)")}</label><input id="setting-poll" type="number" min="50" max="60000" value={draft.runtime.workerPollIntervalMs} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerPollIntervalMs: Number(event.target.value) } }) : current)} /></div>
         <div className="setting-field setting-field-wide"><label htmlFor="setting-web-url">{t("Web URL")}</label><input id="setting-web-url" type="url" value={draft.runtime.webUrl} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, webUrl: event.target.value } }) : current)} /></div>
@@ -185,7 +191,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
         <ConfigRow icon={KeyRound} label={t("Webhook secret")} value={t(health.configuration.webhookSecretConfigured ? "Configured" : "Not configured")} ok={health.configuration.webhookSecretConfigured} />
         <ConfigRow icon={ServerCog} label={t("LLM provider")} value={health.llmProvider} />
         <ConfigRow icon={ServerCog} label={t("Worker")} value={t(health.worker.running ? "Running · concurrency {count}" : "Stopped · concurrency {count}", { count: health.worker.concurrency })} ok={health.worker.running} />
-        <ConfigRow icon={Database} label={t("Database")} value={health.configuration.databasePath} ok={health.database.ok} />
+        <ConfigRow icon={Database} label={t("Database")} value={health.configuration.databasePath} ok={health.database.ok} redact />
       </div>
     </section>
 

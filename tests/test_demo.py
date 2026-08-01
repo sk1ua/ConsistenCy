@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Test for V2 multi_agent_demo script."""
+"""Tests for the multi_agent_demo example script."""
 
 import subprocess
 import sys

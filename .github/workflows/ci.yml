@@ -51,6 +51,9 @@ jobs:
       - name: Verify fixed runtime baseline
         run: npm run verify:runtime
 
+      - name: Verify documentation hygiene
+        run: npm run verify:docs
+
       - name: Install TypeScript workspace dependencies
         run: npm ci
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
-import { Activity, BarChart3, BriefcaseBusiness, ChartNoAxesCombined, ChevronDown, Clock3, FlaskConical, Globe2, Menu, RefreshCw, Settings, X } from "lucide-react";
+import { Activity, BadgeCheck, BarChart3, BriefcaseBusiness, ChartNoAxesCombined, ChevronDown, Clock3, FlaskConical, Globe2, Menu, RefreshCw, Settings, X } from "lucide-react";
 import { api, type HealthResponse, type RealDataSnapshot } from "./api/client";
 import { mockJobs, mockReports, mockStats } from "./demo/mockReports";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -135,7 +135,8 @@ export function App() {
         </div>
         <div className="header-actions">
           <label className="language-select"><Globe2 size={15} /><span className="sr-only">{t("Language")}</span><select aria-label={t("Language")} value={locale} onChange={event => setLocale(event.target.value as "en-US" | "zh-CN")}><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
-          {demoMode && <span className="demo-indicator"><FlaskConical size={15} />{t("Demo Mode")}</span>}
+          {demoMode && view !== "real-data" && <span className="demo-indicator"><FlaskConical size={15} />{t("Demo Mode")}</span>}
+          {demoMode && view === "real-data" && <span className="demo-indicator snapshot"><BadgeCheck size={15} />{t("Public snapshot")}</span>}
           <span className="api-status"><i className={health?.database.ok ? "online" : "offline"} /> {t(health?.database.ok ? "API connected" : "Demo data")}</span>
           <span className="header-time"><Clock3 size={16} />{now.toLocaleString(locale, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
           {jobs.length === 0 && !loading && <button className="secondary-button" onClick={() => void seedDemo()}>{t("Load demo data")}</button>}
