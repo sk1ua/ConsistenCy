@@ -1,88 +1,56 @@
-# GitHub App Setup
+# GitHub App 设置
 
-ConsistenCy can run as a GitHub App and post PR review comments automatically.
+ConsistenCy 有两条独立的 GitHub 访问路径：
 
-The GitHub App surface is owned by `apps/api`: it verifies webhooks, creates
-durable review jobs, runs the worker-backed review workflow, stores reports,
-and posts PR comments. Python remains available behind the compatibility bridge
-for parser, agent, scoring, evaluation, and model-heavy analysis code.
+- **Webhook Review**：需要 GitHub App，用于接收事件和按既有策略发布评论；
+- **Public Read**：只分析公开 PR，不需要安装 App，不发布评论。默认匿名读取，也可以配置服务端只读 PAT。
 
-## Prerequisites
+## Webhook Review 的必要设置
 
-- Python 3.12+
-- Node.js 22+
-- npm
-- Git
-- A public webhook URL
-- A GitHub account with permission to create GitHub Apps
-
-## Create The App
-
-1. Open GitHub Settings -> Developer settings -> GitHub Apps.
-2. Create a new app.
-3. Set the webhook URL to:
+Webhook URL：
 
 ```text
 https://your-server.example.com/github/webhook
 ```
 
-4. Add permissions:
+| 权限 | 访问级别 | 用途 |
+| --- | --- | --- |
+| Metadata | Read | 读取仓库基础信息 |
+| Contents | Read | 构建 PR workspace |
+| Pull requests | Read and write | 读取 PR；Webhook 模式按策略发布评论 |
 
-| Permission | Access |
-| --- | --- |
-| Metadata | Read |
-| Contents | Read |
-| Pull requests | Read and write |
+事件：`pull_request`、`push`、`installation`。
 
-5. Subscribe to pull request, push, and installation events.
-6. Generate and download a private key.
-
-## Configure Environment
-
-Copy the example file:
+环境变量：
 
 ```bash
-cp .env.example .env
-```
-
-Set these values:
-
-```bash
-GITHUB_APP_ID=123456
-GITHUB_PRIVATE_KEY=/path/to/consistency-app.pem
-GITHUB_WEBHOOK_SECRET=your-webhook-secret
-```
-
-For production, also set an API token and allowed origins:
-
-```bash
-CONSISTENCY_API_TOKEN=replace-with-a-long-random-token
+GITHUB_APP_ID=<your-app-id>
+GITHUB_PRIVATE_KEY=/secure/path/private-key.pem
+GITHUB_WEBHOOK_SECRET=replace-me
+CONSISTENCY_API_TOKEN=replace-me
 CONSISTENCY_ALLOWED_ORIGINS=https://your-web.example.com
 ```
 
-## Run
+不要把私钥提交到仓库；Settings 页面只显示 secret 是否配置，不会回显值。
+
+## 不安装 App 的公开 PR 读取
+
+如果只想分析公开 PR，不需要填写 `GITHUB_APP_ID` 或 `GITHUB_PRIVATE_KEY`：
 
 ```bash
-npm install
-python -m pip install -r requirements-dev.txt
-npm run dev:api
-npm run dev:web
+CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED=true
+CONSISTENCY_NOTEBOOK_ENABLED=true
+GITHUB_PUBLIC_READ_TOKEN=
 ```
 
-For production, run the API behind HTTPS with a process manager and point the
-GitHub App webhook URL at `/github/webhook`.
+`GITHUB_PUBLIC_READ_TOKEN` 留空时使用匿名 GitHub API 和匿名 clone；配置本地只读 PAT 后，API 会使用 PAT 提高读取限额。PAT 只存在 API 进程，不传给浏览器，不写入数据库或日志，也不能启用评论发布。PAT 认证失败不会退回匿名读取。
 
-## Security Checklist
+公开 PR URL 必须指向公开仓库，例如：
 
-- Webhook secret is set.
-- Private key file permissions are restricted.
-- `CONSISTENCY_API_TOKEN` is set for non-webhook API routes.
-- `CONSISTENCY_ALLOWED_ORIGINS` is explicit.
-- HTTPS terminates before the webhook endpoint.
-- Repository access is limited to intended installations.
+```text
+https://github.com/espnet/espnet/pull/6327
+```
 
-## Troubleshooting
+## 本地运行
 
-- Signature failures usually mean the webhook secret differs from GitHub settings.
-- Missing PR comments usually mean the app lacks pull request write permission.
-- Clone or API errors usually mean the private key, installation, or repository permission is wrong.
+启动步骤见 [Demo 与截图](demo.md)。API 默认监听 `127.0.0.1:8787`，Web 默认监听 `127.0.0.1:5173`。生产环境使用 HTTPS、secret manager、进程管理器和隔离 workspace。

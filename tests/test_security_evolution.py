@@ -4,13 +4,8 @@ SecurityAgent / EvolutionAgent 回归测试
 ====================================
 覆盖 SQL 注入规则扩展（f-string / .format / %）与演化熵计算逻辑。
 """
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
-
-from src.agents.security_agent import SecurityAgent
-from src.agents.evolution_agent import EvolutionAgent
+from engine.agents.security_agent import SecurityAgent
+from engine.agents.evolution_agent import EvolutionAgent
 
 
 def test_security_detects_sql_fstring():

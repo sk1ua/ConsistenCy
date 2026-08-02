@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   lint-and-test:
@@ -29,11 +28,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt ruff
+          python -m pip install -r requirements-lock.txt
+
+      - name: Verify editable project metadata
+        run: python -m pip install --no-deps -e .
 
       - name: Lint (syntax and undefined-name gate)
         run: |
-          ruff check backend tests
+          ruff check engine tests evaluation/scripts examples
+
+      - name: Python entrypoint smoke tests
+        run: |
+          python examples/multi_agent_demo.py
+          python evaluation/scripts/run_ablation.py --help
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -41,8 +48,17 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Verify fixed runtime baseline
+        run: npm run verify:runtime
+
+      - name: Verify documentation hygiene
+        run: npm run verify:docs
+
       - name: Install TypeScript workspace dependencies
         run: npm ci
+
+      - name: Audit Node dependencies
+        run: npm run audit:deps
 
       - name: TypeScript typecheck
         run: npm run typecheck
@@ -53,62 +69,12 @@ jobs:
       - name: TypeScript build
         run: npm run build
 
-      - name: Run tests
-        env:
-          PYTHONPATH: backend
+      - name: Run Python unit tests
         run: |
           python -m pytest -q
 
-      # PR Risk Analysis (only on pull_request events)
-      - name: ConsistenCy PR Risk Analysis
-        if: github.event_name == 'pull_request'
-        env:
-          PYTHONPATH: backend
-        run: |
-          mkdir -p artifacts
-          if ! python backend/cli.py pr-report \
-            --repo . \
-            --base ${{ github.event.pull_request.base.sha }} \
-            --head ${{ github.event.pull_request.head.sha }} \
-            --max-commits 20 \
-            --json-output > artifacts/pr_report.json 2> artifacts/pr_report.stderr; then
-            echo "ERROR: PR analysis failed" >&2
-            cat artifacts/pr_report.stderr >&2
-            exit 1
-          fi
-          python - <<'PYEOF'
-          import json, sys
-          sys.path.insert(0, 'backend')
-          from src.review_suggestions import generate_review_comment
-          with open('artifacts/pr_report.json') as f:
-              report = json.load(f)
-          comment = generate_review_comment(report, use_llm=False)
-          with open('artifacts/pr_comment.md', 'w') as f:
-              f.write(comment)
-          PYEOF
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
 
-      - name: Upload ConsistenCy report artifact
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: consistency-pr-review-${{ github.event.pull_request.number }}
-          path: artifacts/
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Post ConsistenCy Review Comment
-        if: success() && github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const comment = fs.readFileSync('artifacts/pr_comment.md', 'utf8').trim();
-            if (comment.length > 0) {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: comment,
-              });
-            }
+      - name: Full-stack E2E
+        run: npm run test:e2e

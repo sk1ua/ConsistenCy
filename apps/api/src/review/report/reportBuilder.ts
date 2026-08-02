@@ -1,8 +1,14 @@
-import { riskLevelForScore, reviewReportSchema, type AgentRun, type ReviewFinding, type ReviewReport } from "@consistency/schema";
+import {
+  reviewReportSchema,
+  type AgentRun,
+  type RetrievalTrace,
+  type ReviewFinding,
+  type ReviewReport,
+  type RiskLevel
+} from "@consistency/schema";
 
 const severityRank = { critical: 5, high: 4, medium: 3, low: 2, info: 1 } as const;
 const confidenceRank = { confirmed: 3, likely: 2, hypothesis: 1 } as const;
-const confirmedDeductions = { critical: 30, high: 20, medium: 10, low: 3, info: 0 } as const;
 
 function findingKey(finding: ReviewFinding): string {
   return [finding.file.toLowerCase(), finding.title.toLowerCase()].join(":");
@@ -25,16 +31,6 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[]): ReviewFin
   );
 }
 
-export function scoreFindings(findings: ReviewFinding[]): number {
-  const deduction = findings.reduce((total, finding) => {
-    const base = confirmedDeductions[finding.severity];
-    if (finding.confidence === "confirmed") return total + base;
-    if (finding.confidence === "likely") return total + Math.ceil(base / 2);
-    return total;
-  }, 0);
-  return Math.max(0, 100 - deduction);
-}
-
 export function buildReviewReport(input: {
   jobId: string;
   repositoryFullName: string;
@@ -44,15 +40,25 @@ export function buildReviewReport(input: {
   summary: string;
   agentRuns: AgentRun[];
   findings: ReviewFinding[];
+  score: number;
+  riskLevel: RiskLevel;
+  retrieval?: RetrievalTrace;
   createdAt?: string;
 }): ReviewReport {
   const findings = deduplicateAndSortFindings(input.findings);
-  const score = scoreFindings(findings);
+
   return reviewReportSchema.parse({
-    ...input,
+    jobId: input.jobId,
+    repositoryFullName: input.repositoryFullName,
+    pullRequestNumber: input.pullRequestNumber,
+    baseSha: input.baseSha,
+    headSha: input.headSha,
+    summary: input.summary,
+    score: input.score,
+    riskLevel: input.riskLevel,
+    agentRuns: input.agentRuns,
     findings,
-    score,
-    riskLevel: riskLevelForScore(score),
+    retrieval: input.retrieval,
     createdAt: input.createdAt ?? new Date().toISOString()
   });
 }

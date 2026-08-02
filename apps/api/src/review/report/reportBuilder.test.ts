@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewFinding } from "@consistency/schema";
-import { deduplicateAndSortFindings, scoreFindings } from "./reportBuilder";
+import { buildReviewReport, deduplicateAndSortFindings } from "./reportBuilder";
 
 const confirmedHigh: ReviewFinding = {
   id: "finding-high",
@@ -39,15 +39,22 @@ describe("reportBuilder", () => {
     expect(deduplicateAndSortFindings([duplicateLikely, confirmedHigh])).toEqual([confirmedHigh]);
   });
 
-  it("scores confirmed and likely findings without charging hypotheses", () => {
-    expect(scoreFindings([confirmedHigh])).toBe(80);
-    expect(scoreFindings([{ ...confirmedHigh, confidence: "likely" }])).toBe(90);
-    expect(scoreFindings([{
-      ...confirmedHigh,
-      confidence: "hypothesis",
-      startLine: undefined,
-      endLine: undefined,
-      uncertainty: "Runtime controls were not visible."
-    }])).toBe(100);
+  it("builds review report requiring mandatory score and riskLevel", () => {
+    const report = buildReviewReport({
+      jobId: "job-1",
+      repositoryFullName: "sk1ua/ConsistenCy",
+      pullRequestNumber: 1,
+      baseSha: "base",
+      headSha: "head",
+      summary: "Canonical report",
+      agentRuns: [],
+      findings: [confirmedHigh],
+      score: 42,
+      riskLevel: "high"
+    });
+
+    expect(report.score).toBe(42);
+    expect(report.riskLevel).toBe("high");
+    expect(report.findings).toEqual([confirmedHigh]);
   });
 });

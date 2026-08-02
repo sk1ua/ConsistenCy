@@ -9,6 +9,7 @@ const secretPaths = [
   "config.CONSISTENCY_API_TOKEN",
   "config.GITHUB_PRIVATE_KEY",
   "config.GITHUB_WEBHOOK_SECRET",
+  "config.GITHUB_PUBLIC_READ_TOKEN",
   "config.DEEPSEEK_API_KEY",
   "config.OPENAI_API_KEY"
 ];

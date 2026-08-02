@@ -1,13 +1,19 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { ZodError } from "zod";
+import { notebookCardRequestSchema, notebookMessageRequestSchema, publicPrRequestSchema } from "@consistency/schema";
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
 import { seedDemoData } from "./api/demoSeed";
 import { buildHealthPayload } from "./health";
-import { processGitHubWebhook, WebhookError } from "./githubWebhook";
+import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
-import { JobRunnerError, runNextReviewJob, runReviewJob } from "./jobRunner";
-import { analyzeFileWithPython, parseAnalyzeFileRequest, PythonBridgeError, resolveAnalyzeFileRequest, type RunProcess } from "./pythonBridge";
 import { sanitizePublicError } from "./security/redact";
+import { settingsPatchSchema, type SettingsSnapshot } from "./config/settings";
+import type { RealDataSnapshot } from "./data/realData";
+import { PublicPrError } from "./review/publicPr";
+import type { NotebookGraph } from "./notebook/graph";
+import type { NotebookStore } from "./notebook/store";
+import type { ReviewJob } from "./jobQueue";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -44,7 +50,7 @@ function responseHeaders(request: IncomingMessage, allowedOrigins: string[]): Re
   const origin = request.headers.origin;
   return {
     "access-control-allow-headers": "authorization,content-type,x-github-event,x-github-delivery,x-hub-signature-256",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
     ...(origin && allowedOrigins.includes(origin) ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
     "content-type": "application/json; charset=utf-8"
   };
@@ -55,18 +61,37 @@ function sendJson(request: IncomingMessage, response: ServerResponse, statusCode
   response.end(statusCode === 204 ? undefined : JSON.stringify(payload));
 }
 
-function errorPayload(code: string, message: string) {
-  return { error: { code, message } };
+function startSse(request: IncomingMessage, response: ServerResponse, allowedOrigins: string[]): void {
+  const headers = responseHeaders(request, allowedOrigins);
+  response.writeHead(200, {
+    ...headers,
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-accel-buffering": "no"
+  });
+}
+
+function writeSse(response: ServerResponse, event: string, data: unknown): void {
+  if (response.writableEnded) return;
+  response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function errorPayload(code: string, message: string, details?: Record<string, unknown>) {
+  return { error: { code, message, ...(details ? { details } : {}) } };
 }
 
 function sendError(request: IncomingMessage, response: ServerResponse, error: unknown, allowedOrigins: string[]): void {
-  if (error instanceof ApiError || error instanceof JobRunnerError || error instanceof WebhookError) {
+  if (error instanceof ZodError) {
+    sendJson(request, response, 400, errorPayload("INVALID_SETTINGS", error.issues[0]?.message ?? "Settings are invalid"), allowedOrigins);
+    return;
+  }
+  if (error instanceof ApiError || error instanceof WebhookError) {
     sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
     return;
   }
-  if (error instanceof PythonBridgeError) {
-    const statusCode = error.code.startsWith("INVALID_") || error.code === "WORKSPACE_PATH_INVALID" || error.code === "SECRET_FILE_BLOCKED" ? 400 : 502;
-    sendJson(request, response, statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
+  if (error instanceof PublicPrError) {
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error.details), allowedOrigins);
     return;
   }
   sendJson(request, response, 500, errorPayload("INTERNAL_ERROR", "Unexpected API error"), allowedOrigins);
@@ -87,17 +112,22 @@ export type ApiHealthDetails = {
   database: { ok: boolean };
   worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
   llmProvider: string;
+  llmModel?: string;
+  publicPrAnalysis?: boolean;
+  publicPrAccessMode?: "anonymous" | "pat" | "disabled";
+  notebook?: boolean;
   configuration: {
     githubAppConfigured: boolean;
     webhookSecretConfigured: boolean;
+    publicReadTokenConfigured: boolean;
     databasePath: string;
     workerConcurrency: number;
     demoMode: boolean;
   };
 };
 
-export function createApiServer(options: {
-  runProcess?: RunProcess;
+export type CreateApiServerOptions = {
+  runProcess?: any;
   jobs?: ReviewJobStore;
   githubWebhookSecret?: string;
   apiToken?: string;
@@ -105,14 +135,285 @@ export function createApiServer(options: {
   allowedOrigins?: string[];
   healthDetails?: () => ApiHealthDetails;
   workspaceRoot?: string;
-} = {}) {
+  settings?: {
+    get: () => SettingsSnapshot;
+    update: (patch: unknown) => SettingsSnapshot;
+  };
+  realData?: () => RealDataSnapshot | undefined;
+  publicPr?: (url: string) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
+  publicPrAnalysisEnabled?: boolean;
+  notebookEnabled?: boolean;
+  notebookStore?: NotebookStore;
+  notebookGraph?: NotebookGraph;
+};
+
+type RequestContext = {
+  request: IncomingMessage;
+  response: ServerResponse;
+  url: URL;
+  path: string;
+  allowedOrigins: string[];
+  options: CreateApiServerOptions;
+  jobs: ReviewJobStore;
+  githubWebhookSecret?: string;
+  apiToken?: string;
+  nodeEnv: "development" | "test" | "production";
+  match?: RegExpExecArray | null;
+};
+
+type Route = {
+  method: string;
+  path: string | RegExp;
+  handler: (ctx: RequestContext) => Promise<void> | void;
+  auth?: boolean;
+};
+
+const routes: Route[] = [
+  {
+    method: "POST",
+    path: "/reviews/public-pr",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, nodeEnv }) => {
+      if (options.publicPrAnalysisEnabled === false || (nodeEnv === "production" && options.publicPrAnalysisEnabled !== true)) {
+        throw new ApiError("Public PR analysis is disabled", "PUBLIC_PR_ANALYSIS_DISABLED", 404);
+      }
+      if (!options.publicPr || !options.notebookStore) {
+        throw new ApiError("Public PR analysis requires a configured public GitHub read source", "PUBLIC_PR_ANALYSIS_UNAVAILABLE", 503);
+      }
+      let body;
+      try {
+        body = publicPrRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("A GitHub pull request URL is required", "INVALID_PUBLIC_PR_REQUEST", 400);
+        throw error;
+      }
+      const result = await options.publicPr(body.url);
+      const ensured = options.notebookStore.ensureForJob(result.job);
+      sendJson(request, response, 202, {
+        jobId: result.job.id,
+        notebookId: ensured.notebook.id,
+        repository: result.coordinates.repository,
+        pullRequestNumber: result.coordinates.pullRequestNumber,
+        baseSha: result.job.baseSha,
+        headSha: result.job.headSha,
+        publicationPolicy: "disabled",
+        status: "queued"
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/github/webhook",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, githubWebhookSecret, jobs }) => {
+      if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
+      const result = processGitHubWebhook({
+        headers: request.headers,
+        body: await readBody(request),
+        secret: githubWebhookSecret,
+        jobs
+      });
+      sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/notebooks\/([^/]+)\/sources$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const notebook = options.notebookStore.get(id);
+      if (!notebook) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      sendJson(request, response, 200, { sources: notebook.sources }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/notebooks\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const notebook = options.notebookStore.get(id);
+      if (!notebook) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      sendJson(request, response, 200, { notebook }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/notebooks\/([^/]+)\/messages$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore || !options.notebookGraph) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const notebookId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.notebookStore.get(notebookId)) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      let body;
+      try {
+        body = notebookMessageRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("Notebook message content is invalid", "INVALID_NOTEBOOK_MESSAGE", 400);
+        throw error;
+      }
+      startSse(request, response, allowedOrigins);
+      try {
+        for await (const event of options.notebookGraph.streamMessage({ notebookId, content: body.content, sourceJobIds: body.sourceJobIds })) {
+          writeSse(response, event.event, event.data);
+        }
+      } catch (error) {
+        writeSse(response, "run.failed", { error: sanitizePublicError(error instanceof Error ? error.message : "Notebook run failed") });
+      } finally {
+        response.end();
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/notebooks\/([^/]+)\/cards$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore || !options.notebookGraph) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const notebookId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.notebookStore.get(notebookId)) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      let body;
+      try {
+        body = notebookCardRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("Notebook card request is invalid", "INVALID_NOTEBOOK_CARD", 400);
+        throw error;
+      }
+      startSse(request, response, allowedOrigins);
+      try {
+        for await (const event of options.notebookGraph.streamCard({ notebookId, kind: body.kind, sourceJobIds: body.sourceJobIds })) {
+          writeSse(response, event.event, event.data);
+        }
+      } catch (error) {
+        writeSse(response, "card.failed", { error: sanitizePublicError(error instanceof Error ? error.message : "Notebook card failed") });
+      } finally {
+        response.end();
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: "/health",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, githubWebhookSecret }) => {
+      sendJson(request, response, 200, {
+        ...buildHealthPayload(),
+        ...(options.healthDetails?.() ?? {
+          database: { ok: true },
+          worker: { running: false, activeJobs: 0, concurrency: 1 },
+          llmProvider: "mock",
+          publicPrAccessMode: "disabled",
+          configuration: {
+            githubAppConfigured: false,
+            webhookSecretConfigured: Boolean(githubWebhookSecret),
+            publicReadTokenConfigured: false,
+            databasePath: ":memory:",
+            workerConcurrency: 1,
+            demoMode: true
+          }
+        })
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/settings",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.settings) throw new ApiError("Settings service is unavailable", "SETTINGS_UNAVAILABLE", 404);
+      sendJson(request, response, 200, { settings: options.settings.get() }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/real-data",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      sendJson(request, response, 200, { realData: options.realData?.() ?? null }, allowedOrigins);
+    }
+  },
+  {
+    method: "PUT",
+    path: "/settings",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, nodeEnv }) => {
+      if (!options.settings || nodeEnv === "production") {
+        throw new ApiError("Settings updates are disabled", "SETTINGS_READ_ONLY", 404);
+      }
+      const patch = settingsPatchSchema.parse(await readJson(request));
+      sendJson(request, response, 200, { settings: options.settings.update(patch) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/jobs",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, url, jobs }) => {
+      sendJson(request, response, 200, { jobs: filterJobs(jobs.list(), url.searchParams).map(toApiJob) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/reports/recent",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, url, jobs }) => {
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 10) || 10));
+      sendJson(request, response, 200, { reports: recentReports(jobs.list(), limit) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/stats",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, jobs }) => {
+      sendJson(request, response, 200, buildStats(jobs.list()), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/demo/seed",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, nodeEnv, jobs, options }) => {
+      if (nodeEnv === "production") throw new ApiError("Demo seed is disabled in production", "DEMO_DISABLED", 404);
+      sendJson(request, response, 201, seedDemoData(jobs, options.notebookStore), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/report$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      if (!job.result) throw new ApiError("Job report is not ready", "JOB_NOT_READY", 409);
+      sendJson(request, response, 200, { report: job.result }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
+    }
+  }
+];
+
+export function createApiServer(options: CreateApiServerOptions = {}) {
   const jobs = options.jobs ?? new InMemoryJobQueue();
   const githubWebhookSecret = options.githubWebhookSecret ?? process.env.GITHUB_WEBHOOK_SECRET;
   const apiToken = options.apiToken ?? process.env.CONSISTENCY_API_TOKEN;
   const nodeEnv = options.nodeEnv ?? (process.env.NODE_ENV as "development" | "test" | "production" | undefined) ?? "development";
   const allowedOrigins = options.allowedOrigins ?? ["http://127.0.0.1:5173", "http://localhost:5173"];
 
-  return createServer(async (request, response) => {
+      return createServer(async (request, response) => {
     try {
       const contentLength = Number(request.headers["content-length"] ?? 0);
       if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
@@ -126,104 +427,50 @@ export function createApiServer(options: {
         return;
       }
 
-      if (request.method === "POST" && path === "/github/webhook") {
-        if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
-        const result = processGitHubWebhook({
-          headers: request.headers,
-          body: await readBody(request),
-          secret: githubWebhookSecret,
-          jobs
-        });
-        sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
-        return;
+      let matchedRoute: Route | undefined;
+      let routeMatch: RegExpExecArray | null = null;
+
+      for (const route of routes) {
+        if (route.method === request.method) {
+          if (typeof route.path === "string") {
+            if (route.path === path) {
+              matchedRoute = route;
+              break;
+            }
+          } else {
+            const match = route.path.exec(path);
+            if (match) {
+              matchedRoute = route;
+              routeMatch = match;
+              break;
+            }
+          }
+        }
       }
 
-      if (apiToken && !isAuthorized(request, apiToken)) {
+      if (!matchedRoute) {
+        throw new ApiError("Not found", "NOT_FOUND", 404);
+      }
+
+      const requiresAuth = matchedRoute.auth !== false;
+      if (requiresAuth && apiToken && !isAuthorized(request, apiToken)) {
         throw new ApiError("A valid bearer token is required", "UNAUTHORIZED", 401);
       }
 
-      if (request.method === "GET" && path === "/health") {
-        sendJson(request, response, 200, {
-          ...buildHealthPayload(),
-          ...(options.healthDetails?.() ?? {
-            database: { ok: true },
-            worker: { running: false, activeJobs: 0, concurrency: 1 },
-            llmProvider: "mock",
-            configuration: {
-              githubAppConfigured: false,
-              webhookSecretConfigured: Boolean(githubWebhookSecret),
-              databasePath: ":memory:",
-              workerConcurrency: 1,
-              demoMode: true
-            }
-          })
-        }, allowedOrigins);
-        return;
-      }
+      await matchedRoute.handler({
+        request,
+        response,
+        url,
+        path,
+        allowedOrigins,
+        options,
+        jobs,
+        githubWebhookSecret,
+        apiToken,
+        nodeEnv,
+        match: routeMatch
+      });
 
-      if (request.method === "GET" && path === "/jobs") {
-        sendJson(request, response, 200, { jobs: filterJobs(jobs.list(), url.searchParams).map(toApiJob) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path === "/reports/recent") {
-        const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 10) || 10));
-        sendJson(request, response, 200, { reports: recentReports(jobs.list(), limit) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path === "/stats") {
-        sendJson(request, response, 200, buildStats(jobs.list()), allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path === "/demo/seed") {
-        if (nodeEnv === "production") throw new ApiError("Demo seed is disabled in production", "DEMO_DISABLED", 404);
-        sendJson(request, response, 201, seedDemoData(jobs), allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path === "/analyze-file") {
-        if (nodeEnv !== "development") throw new ApiError("File analysis is only available in development", "ANALYZE_FILE_DISABLED", 404);
-        const workspaceRoot = options.workspaceRoot ?? ".consistency/workspaces";
-        const input = resolveAnalyzeFileRequest(workspaceRoot, parseAnalyzeFileRequest(await readJson(request)));
-        const report = await analyzeFileWithPython(input, {
-          runProcess: options.runProcess
-        });
-        sendJson(request, response, 200, report, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path === "/jobs/run-next") {
-        const job = await runNextReviewJob(jobs, { runProcess: options.runProcess });
-        if (!job) throw new ApiError("No queued jobs", "NO_QUEUED_JOBS", 404);
-        sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "POST" && path.startsWith("/jobs/") && path.endsWith("/run")) {
-        const id = decodeURIComponent(path.slice("/jobs/".length, -"/run".length));
-        sendJson(request, response, 200, { job: toApiJob(await runReviewJob(jobs, id, { runProcess: options.runProcess })) }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path.startsWith("/jobs/") && path.endsWith("/report")) {
-        const id = decodeURIComponent(path.slice("/jobs/".length, -"/report".length));
-        const job = jobs.get(id);
-        if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
-        if (job.status !== "succeeded" || !job.result) throw new ApiError("Job report is not ready", "JOB_NOT_READY", 409);
-        sendJson(request, response, 200, { report: job.result }, allowedOrigins);
-        return;
-      }
-
-      if (request.method === "GET" && path.startsWith("/jobs/")) {
-        const job = jobs.get(decodeURIComponent(path.slice("/jobs/".length)));
-        if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
-        sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
-        return;
-      }
-
-      throw new ApiError("Not found", "NOT_FOUND", 404);
     } catch (error) {
       sendError(request, response, error, allowedOrigins);
     }

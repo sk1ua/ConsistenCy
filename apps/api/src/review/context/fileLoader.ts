@@ -5,6 +5,11 @@ import { redactSensitiveText } from "../../security/redact";
 export const DEFAULT_MAX_FILE_BYTES = 256 * 1024;
 export const DEFAULT_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 
+export type ByteBudget = {
+  limit: number;
+  used: number;
+};
+
 const SECRET_BASENAMES = new Set([
   ".env",
   "credentials.json",
@@ -52,10 +57,11 @@ export function loadWorkspaceFiles(options: {
   paths: string[];
   maxFileBytes?: number;
   maxTotalBytes?: number;
+  budget?: ByteBudget;
 }): Record<string, string> {
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
-  const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
-  let totalBytes = 0;
+  const maxTotalBytes = options.budget?.limit ?? options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  let totalBytes = options.budget?.used ?? 0;
   const contents: Record<string, string> = {};
 
   for (const path of [...new Set(options.paths)]) {
@@ -67,12 +73,25 @@ export function loadWorkspaceFiles(options: {
       if (error instanceof Error && /ENOENT/.test(error.message)) continue;
       throw error;
     }
-    const size = statSync(absolutePath).size;
-    if (size > maxFileBytes || totalBytes + size > maxTotalBytes) continue;
+    const rawSize = statSync(absolutePath).size;
+    if (rawSize > maxFileBytes) continue;
+
     const buffer = readFileSync(absolutePath);
     if (buffer.includes(0)) continue;
-    contents[path] = redactSensitiveText(buffer.toString("utf8"));
-    totalBytes += size;
+
+    const content = redactSensitiveText(buffer.toString("utf8"));
+    const outputSize = Buffer.byteLength(content, "utf8");
+
+    if (
+      outputSize > maxFileBytes
+      || totalBytes + outputSize > maxTotalBytes
+    ) {
+      continue;
+    }
+
+    contents[path] = content;
+    totalBytes += outputSize;
+    if (options.budget) options.budget.used = totalBytes;
   }
   return contents;
 }

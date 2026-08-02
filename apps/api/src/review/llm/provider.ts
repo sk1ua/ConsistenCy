@@ -3,6 +3,7 @@ import {
   reviewFindingSchema,
   reviewAgentNameSchema,
   tokenUsageSchema,
+  type LLMStreamEvent,
   type ReviewFinding,
   type TokenUsage
 } from "@consistency/schema";
@@ -11,6 +12,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type {
   FindingGenerationRequest,
   LLMProvider,
+  LLMStreamRequest,
   StructuredInvocation,
   StructuredResult
 } from "./types";
@@ -53,6 +55,7 @@ function extractJson(content: string): unknown {
 
 export abstract class BaseLLMProvider implements LLMProvider {
   abstract readonly name: LLMProvider["name"];
+  readonly model?: string;
   protected abstract complete(input: {
     systemPrompt: string;
     userPrompt: string;
@@ -108,9 +111,30 @@ export abstract class BaseLLMProvider implements LLMProvider {
   generateSummary(request: { systemPrompt: string; userPrompt: string }): Promise<StructuredResult<{ summary: string }>> {
     return this.invokeWithSchema({ ...request, schema: summarySchema, schemaName: "review-summary" });
   }
+
+  async *stream(request: LLMStreamRequest): AsyncIterable<LLMStreamEvent> {
+    try {
+      const completion = await this.complete({
+        systemPrompt: request.systemPrompt,
+        userPrompt: request.userPrompt,
+        schemaName: "notebook-response",
+        jsonSchema: undefined
+      });
+      const chunkSize = 160;
+      for (let offset = 0; offset < completion.content.length; offset += chunkSize) {
+        if (request.signal?.aborted) throw request.signal.reason ?? new DOMException("Aborted", "AbortError");
+        yield { kind: "text_delta", text: completion.content.slice(offset, offset + chunkSize) };
+      }
+      if (completion.tokenUsage) yield { kind: "usage", usage: completion.tokenUsage };
+      yield { kind: "completed" };
+    } catch (error) {
+      yield { kind: "failed", error: error instanceof Error ? error.message : "LLM stream failed" };
+    }
+  }
 }
 
 export function parseTokenUsage(input: unknown): TokenUsage | undefined {
   const parsed = tokenUsageSchema.safeParse(input);
-  return parsed.success ? parsed.data : undefined;
+  if (!parsed.success) return undefined;
+  return Object.values(parsed.data).some(value => value !== undefined) ? parsed.data : undefined;
 }

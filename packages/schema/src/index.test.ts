@@ -1,12 +1,8 @@
-import prReportFixture from "../../../tests/fixtures/pr_report_minimal.json" assert { type: "json" };
 import { describe, expect, it } from "vitest";
 import {
   agentRunSchema,
   demoReviewReport,
   errorResponseSchema,
-  jsonSchemas,
-  legacyPRReportSchema,
-  parseLegacyPRReport,
   prReviewContextSchema,
   reviewFindingSchema,
   reviewPlanSchema,
@@ -26,12 +22,6 @@ const findingBase = {
 } as const;
 
 describe("@consistency/schema", () => {
-  it("keeps the Python JSON contracts available at the compatibility boundary", () => {
-    expect(jsonSchemas.prReport.title).toBe("ConsistenCy PR risk report");
-    expect(parseLegacyPRReport(prReportFixture).base_ref).toBe("base123");
-    expect(() => legacyPRReportSchema.parse({ base_ref: "main" })).toThrow();
-  });
-
   it("enforces evidence requirements for confirmed findings", () => {
     const confirmed = reviewFindingSchema.parse({
       ...findingBase,
@@ -68,6 +58,7 @@ describe("@consistency/schema", () => {
     }).enabledAgents).toHaveLength(2);
     expect(agentRunSchema.parse(demoReviewReport.agentRuns[0]).status).toBe("succeeded");
     expect(reviewReportSchema.parse(demoReviewReport).score).toBe(74);
+    expect(reviewReportSchema.parse(demoReviewReport).retrieval?.packs[0]?.selected_evidence).toHaveLength(3);
     expect(errorResponseSchema.parse({ error: { code: "NOT_FOUND", message: "Missing" } }).error.code).toBe("NOT_FOUND");
   });
 
@@ -94,6 +85,7 @@ describe("@consistency/schema", () => {
       }],
       diff: "diff --git a/apps/api/src/http.ts b/apps/api/src/http.ts",
       fileContents: { "apps/api/src/http.ts": "export {};" },
+      baseFileContents: { "apps/api/src/http.ts": "" },
       projectMetadata: { "package.json": "{}" },
       workspacePath: "C:/workspace/job-1"
     }).changedFiles).toHaveLength(1);

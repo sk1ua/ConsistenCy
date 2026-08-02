@@ -41,7 +41,7 @@ describe("secure workspace file loading", () => {
       workspacePath: workspace,
       paths: ["src/small.ts", "src/token.ts", "src/large.ts", ".env", "src/binary.dat"],
       maxFileBytes: 100,
-      maxTotalBytes: 150
+      maxTotalBytes: 140
     })).toEqual({
       "src/small.ts": "export const ok = true;",
       "src/token.ts": "const token=[REDACTED];"

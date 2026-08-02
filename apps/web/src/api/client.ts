@@ -4,7 +4,12 @@ import {
   recentReportsResponseSchema,
   reportResponseSchema,
   statsResponseSchema,
+  publicPrResponseSchema,
+  notebookResponseSchema,
+  notebookSourcesResponseSchema,
   type JobStatus,
+  type Notebook,
+  type NotebookCardKind,
   type ReviewJob,
   type ReviewReport,
   type Severity,
@@ -20,14 +25,91 @@ export type HealthResponse = {
   database: { ok: boolean };
   worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
   llmProvider: string;
+  llmModel?: string;
+  publicPrAnalysis?: boolean;
+  publicPrAccessMode?: "anonymous" | "pat" | "disabled";
+  notebook?: boolean;
   configuration: {
     githubAppConfigured: boolean;
     webhookSecretConfigured: boolean;
+    publicReadTokenConfigured: boolean;
     databasePath: string;
     workerConcurrency: number;
     demoMode: boolean;
   };
 };
+
+export type SettingsSnapshot = {
+  llm: {
+    provider: "mock" | "deepseek" | "openai";
+    deepseekBaseUrl: string;
+    deepseekModel: string;
+    openaiModel: string;
+    deepseekApiKeyConfigured: boolean;
+    openaiApiKeyConfigured: boolean;
+  };
+  github: {
+    appId: string;
+    privateKeyConfigured: boolean;
+    webhookSecretConfigured: boolean;
+  };
+  runtime: {
+    databasePath: string;
+    workspaceRoot: string;
+    workerConcurrency: number;
+    workerPollIntervalMs: number;
+    webUrl: string;
+    apiTokenConfigured: boolean;
+  };
+  overriddenByEnvironment: string[];
+  restartRequired: boolean;
+};
+
+export type SettingsPatch = {
+  llm?: {
+    provider?: SettingsSnapshot["llm"]["provider"];
+    deepseekBaseUrl?: string;
+    deepseekModel?: string;
+    openaiModel?: string;
+    deepseekApiKey?: string | null;
+    openaiApiKey?: string | null;
+  };
+  github?: {
+    appId?: string | null;
+    privateKey?: string | null;
+    webhookSecret?: string | null;
+  };
+  runtime?: {
+    databasePath?: string;
+    workspaceRoot?: string;
+    workerConcurrency?: number;
+    workerPollIntervalMs?: number;
+    webUrl?: string;
+    apiToken?: string | null;
+  };
+};
+
+export type RealDataSnapshot = {
+  version: 1;
+  importedAt: string;
+  source: {
+    provider: "github"; repository: string; pullRequestNumber: number; url: string; fetchedAt: string; title: string; author: string;
+    state: string; createdAt: string; updatedAt: string; mergedAt: string | null; baseSha: string; headSha: string;
+    commits: number; changedFiles: number; additions: number; deletions: number; reviewCount: number;
+  };
+  analysis: {
+    reportPath: string; generatedAt: string; method: string; commitCount: number; averageRisk: number; maxRisk: number; riskScale: "0-1";
+    commits: Array<{ sha: string; date: string; author: string; message: string; risk_score: number; risk_level: string; files_analyzed: number }>;
+    topRiskyFiles: Array<{ file: string; avg_risk: number; max_risk: number; hits: number; churn_lines?: number; complexity?: number; owner?: string }>;
+    components: Record<string, number>;
+  };
+  validation: {
+    sourceDataset: string; labelSource: string; needsManualAudit: boolean; sampleCount: number; evaluatedCount: number; k: number;
+    precisionAtK: number; recallAtK: number; goldOverallRisk: string; predictedTopFiles: string[]; goldTopFiles: string[];
+  };
+};
+
+export type NotebookStreamEvent = { event: string; data: unknown };
 
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -46,6 +128,50 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
     throw new Error(message ?? `API request failed with ${response.status}`);
   }
   return payload;
+}
+
+async function* readSse(response: Response): AsyncIterable<NotebookStreamEvent> {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) {
+      const event = block.match(/^event:\s*(.+)$/m)?.[1]?.trim() ?? "message";
+      const data = block.match(/^data:\s*(.+)$/m)?.[1]?.trim();
+      if (!data) continue;
+      try {
+        yield { event, data: JSON.parse(data) };
+      } catch {
+        yield { event, data: { text: data } };
+      }
+    }
+  }
+}
+
+async function openSse(path: string, payload: unknown): Promise<Response> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "text/event-stream",
+      ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const message = typeof body === "object" && body && "error" in body
+      ? (body as { error?: { message?: string } }).error?.message
+      : undefined;
+    throw new Error(message ?? `Notebook stream failed with ${response.status}`);
+  }
+  return response;
 }
 
 export const api = {
@@ -72,7 +198,33 @@ export const api = {
   async health(): Promise<HealthResponse> {
     return await request("/health") as HealthResponse;
   },
-  async seedDemo(): Promise<{ created: number }> {
-    return await request("/demo/seed", { method: "POST", body: "{}" }) as { created: number };
+  async settings(): Promise<SettingsSnapshot> {
+    return (await request("/settings") as { settings: SettingsSnapshot }).settings;
+  },
+  async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
+    return (await request("/settings", { method: "PUT", body: JSON.stringify(patch) }) as { settings: SettingsSnapshot }).settings;
+  },
+  async realData(): Promise<RealDataSnapshot | undefined> {
+    return (await request("/real-data") as { realData: RealDataSnapshot | null }).realData ?? undefined;
+  },
+  async seedDemo(): Promise<{ created: number; notebooks?: Array<{ jobId: string; notebookId: string }> }> {
+    return await request("/demo/seed", { method: "POST", body: "{}" }) as { created: number; notebooks?: Array<{ jobId: string; notebookId: string }> };
+  },
+  async analyzePublicPr(url: string) {
+    return publicPrResponseSchema.parse(await request("/reviews/public-pr", { method: "POST", body: JSON.stringify({ url }) }));
+  },
+  async notebook(id: string): Promise<Notebook> {
+    return notebookResponseSchema.parse(await request(`/notebooks/${encodeURIComponent(id)}`)).notebook;
+  },
+  async notebookSources(id: string) {
+    return notebookSourcesResponseSchema.parse(await request(`/notebooks/${encodeURIComponent(id)}/sources`)).sources;
+  },
+  async *streamNotebookMessage(id: string, content: string, sourceJobIds?: string[]): AsyncIterable<NotebookStreamEvent> {
+    const response = await openSse(`/notebooks/${encodeURIComponent(id)}/messages`, { content, sourceJobIds });
+    yield* readSse(response);
+  },
+  async *streamNotebookCard(id: string, kind: NotebookCardKind, sourceJobIds: string[]): AsyncIterable<NotebookStreamEvent> {
+    const response = await openSse(`/notebooks/${encodeURIComponent(id)}/cards`, { kind, sourceJobIds });
+    yield* readSse(response);
   }
 };

@@ -1,155 +1,20 @@
-# Output Schema
+# 输出 Schema
 
-This document describes the stable report fields used by the CLI, TypeScript API, Markdown review comments, and React WebApp.
+机器可读契约由 `@consistency/schema` 统一声明：
 
-Machine-readable contracts live in:
+- `packages/schema/src/protocol.ts`：TypeScript 与 Python Engine 的 JSON-over-stdio wire contract，字段使用 `snake_case`。
+- `packages/schema/src/report.ts`：ReviewReport、检索度量和 Finding。
+- `packages/schema/src/review.ts`：审查计划、Agent run 和 Compose/Synthesizer 输出。
+- `packages/schema/src/job.ts`：Job 状态与 Webhook 事件。
 
-- `schemas/analysis_result.schema.json` for `backend/cli.py analyze-file`
-  and `src.pipeline.analyze_sources` output.
-- `schemas/pr_report.schema.json` for `AnalysisPipeline.pr_risk_report`
-  and `backend/cli.py pr-report --json-output`.
+TypeScript 业务对象在 Schema 边界使用显式 `camelCase` ↔ `snake_case` 转换。新增字段必须通过 Zod 定义和自动化测试校验。
 
-These schemas are the compatibility boundary for the TypeScript product
-shell. Additive fields are allowed because downstream consumers validate
-with `additionalProperties: true`; removing or changing the type of an
-existing required field is a breaking change and should be treated as a
-schema-versioned migration.
+## ReviewReport 关注点
 
-Contract tests live in `tests/test_report_contracts.py`. They validate a
-golden PR report fixture, the deterministic demo `analyze_sources`
-output, and a real local Git PR report when repository history is
-available.
+- `jobId`、仓库、PR、commit 和分析时间。
+- 证据检索统计与 Evidence Pack 摘要。
+- `findings`：风险等级、置信度、文件位置、证据和说明。
+- `agentRuns`：每个阶段的状态、耗时、输入/输出摘要和错误。
+- 发布状态与可追溯 metadata。
 
-## Signal Result
-
-```json
-{
-  "signal_name": "semantic",
-  "score": 0.47,
-  "evidence": ["AST structure diverged significantly"],
-  "confidence": 0.82,
-  "metadata": {"agent_name": "SemanticAgent"}
-}
-```
-
-## File Result
-
-```json
-{
-  "file": "src/example.py",
-  "risk_score": 0.651,
-  "risk_level": "Significant Drift",
-  "breakdown": {
-    "style": 0.08,
-    "structural": 0.19,
-    "semantic": 0.47,
-    "duplication": 0.03,
-    "security": 0.0
-  },
-  "signal_composition": {
-    "style": 0.10,
-    "structural": 0.20,
-    "semantic": 0.65,
-    "duplication": 0.05,
-    "security": 0.0
-  },
-  "dominant_signals": ["semantic", "structural"],
-  "confidence": 0.82,
-  "agent_collaboration": {
-    "scope": "src/example.py",
-    "decision": "review_required",
-    "consensus_score": 0.44,
-    "confidence": 0.81,
-    "quorum": "5/5",
-    "participants": ["StyleAgent", "StructuralAgent", "SemanticAgent", "DuplicationAgent", "SecurityAgent"],
-    "top_findings": [],
-    "review_queue": [],
-    "protocol": "parallel_agents -> evidence_normalization -> weighted_consensus -> reviewer_handoff"
-  },
-  "explainability": {
-    "dominant_signals": ["semantic", "structural"],
-    "contributions": {},
-    "evidence_chain": [],
-    "confidence": 0.82,
-    "uncertainty_note": "Confidence is lower when historical baseline coverage is sparse or signals disagree."
-  }
-}
-```
-
-## PR Report
-
-Important top-level keys:
-
-- `base_ref`
-- `head_ref`
-- `commit_count`
-- `avg_risk`
-- `max_risk`
-- `high_risk_commits`
-- `commits`
-- `commit_trend`
-- `risk_composition`
-- `evidence_summary`
-- `top_risky_files`
-- `file_deep_dive`
-- `security_findings`
-- `agent_collaboration`
-- `code_snippets`
-- `cache`
-
-## Multi-Agent Collaboration
-
-`agent_collaboration` appears on file results and PR reports.
-
-```json
-{
-  "scope": "pull_request",
-  "decision": "review_required",
-  "consensus_score": 0.44,
-  "confidence": 0.81,
-  "quorum": "5/5",
-  "participants": [
-    "StyleAgent",
-    "StructuralAgent",
-    "SemanticAgent",
-    "DuplicationAgent",
-    "SecurityAgent"
-  ],
-  "votes": [],
-  "top_findings": [
-    {
-      "signal_name": "semantic",
-      "agent_name": "SemanticAgent",
-      "severity": "medium",
-      "title": "SemanticAgent voted needs_attention",
-      "evidence": ["src/example.py: API usage changed"],
-      "recommendation": "Trace changed behavior and API usage against the intended PR design."
-    }
-  ],
-  "disagreements": [],
-  "next_actions": [],
-  "review_queue": [],
-  "protocol": "parallel_agents -> evidence_normalization -> weighted_consensus -> reviewer_handoff"
-}
-```
-
-## Deep Dive
-
-The first deep-dive item should contain:
-
-- `file`
-- `risk`
-- `rank_in_pr`
-- `total_pr_files`
-- `risk_breakdown`
-- `signal_contributions`
-- `dominant_signals`
-- `confidence`
-- `evidence_chain`
-- `risky_lines`
-- `primary_risk_region`
-- `estimated_review_effort`
-- `structural_signals`
-- `semantic_signals`
-- `code_excerpt`
-- `diff_excerpt`
+Risk score 用于审查注意力排序，不是自动化安全结论；UI 会把事实证据、模型推导和弱标签边界分开呈现。

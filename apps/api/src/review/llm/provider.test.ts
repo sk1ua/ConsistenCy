@@ -53,4 +53,19 @@ describe("LLM providers", () => {
     expect(deepseek.name).toBe("deepseek");
     expect(openai.name).toBe("openai");
   });
+
+  it("normalizes OpenAI-compatible SSE deltas and usage into Notebook stream events", async () => {
+    const fetchMock = vi.fn(async () => new Response([
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "hello " } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "evidence" } }] })}`,
+      `data: ${JSON.stringify({ usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } })}`,
+      "data: [DONE]"
+    ].join("\n\n"), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    const provider = new DeepSeekProvider({ apiKey: "stream-key", fetch: fetchMock as typeof fetch });
+    const events = [] as Array<{ kind: string; [key: string]: unknown }>;
+    for await (const event of provider.stream!({ systemPrompt: "system", userPrompt: "question" })) events.push(event);
+    expect(events.filter(event => event.kind === "text_delta").map(event => event.text).join("")).toBe("hello evidence");
+    expect(events.find(event => event.kind === "usage")).toMatchObject({ usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 } });
+    expect(events.at(-1)).toEqual({ kind: "completed" });
+  });
 });

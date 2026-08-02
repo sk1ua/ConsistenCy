@@ -1,51 +1,40 @@
-# Demo Guide
+# Demo 与截图
 
-## Start
+Demo 使用固定 seed 和 MockLLM。它展示完整的 Dashboard → Jobs → Report → Settings 流程，API 在开发模式下使用 `8787`；Playwright E2E 使用隔离的临时 `3001`，并关闭 ReviewWorker/PublishWorker，因此不会访问外部 GitHub。
+
+## 运行 Demo
 
 ```powershell
-npm install
+npm ci
+python -m pip install -r requirements-lock.txt
 Copy-Item .env.example .env
 npm run dev:api
-```
-
-In a second terminal:
-
-```powershell
 npm run dev:web
 ```
 
-Open `http://127.0.0.1:5173`.
-
-## Seed Data
-
 ```powershell
-$headers = @{ Authorization = "Bearer $env:CONSISTENCY_API_TOKEN" }
+$headers = if ($env:CONSISTENCY_API_TOKEN) { @{ Authorization = "Bearer $env:CONSISTENCY_API_TOKEN" } } else { @{} }
 Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed -Headers $headers
 ```
 
-The operation is idempotent and inserts succeeded, queued, running, and failed examples. It is disabled in production.
+打开 <http://127.0.0.1:5173>，进入 Jobs 查看 `queued`、`running`、`succeeded` 和 `publish_failed` 等固定状态，再打开成功 Job 的报告。
 
-## Suggested Recording Flow
+## 公开 PR 分析
 
-1. Show Dashboard metrics, risk distribution, recent findings, and eight jobs.
-2. Open Jobs and filter by repository, status, and severity.
-3. Open a succeeded review report.
-4. Expand a finding to show evidence, reasoning, recommendation, and confidence.
-5. Switch grouping from severity to agent.
-6. Show the agent-run timeline.
-7. Open Settings to show configuration presence without exposing secret values.
-8. Show a GitHub PR comment or the Markdown renderer test output.
+公开 PR 入口不是 Demo seed 的别名。它不需要 GitHub App 安装：默认使用匿名 GitHub API/clone，也可以通过 `GITHUB_PUBLIC_READ_TOKEN` 使用服务端只读 PAT。它只创建 `accessMode=public_read`、`publicationPolicy=disabled` 的 analysis-only Job：报告会持久化，但不会进入 GitHub 评论 Outbox。分析完成后，Report 右侧的 Repository Notebook 使用该 PR 的 head SHA 建立懒加载索引。
 
-## Demo Talking Points
+Notebook 可以生成 Change Map、Architecture Impact、Risk Brief 和 Fix Plan，也可以流式回答“为什么修改这些模块”等问题。每条代码结论都显示文件和行号；Fix Plan 只展示建议 unified diff，不会改动本地工作区。
 
-- Webhook delivery and job state are durable, not in-memory only.
-- Every confirmed finding must point to evidence and lines.
-- MockLLM makes tests and the demo deterministic.
-- GitHub comment failure is isolated from report persistence.
-- Python analysis remains available without owning the main orchestration flow.
+## 生成项目截图
 
-## Screenshots
+截图全部来自当前运行的真实页面，可随时复现：
 
-- Approved reference: `docs/design/dashboard-reference.jpg`
-- Current implementation: `docs/design/dashboard-implementation.png`
-- Side-by-side QA: `docs/design/dashboard-comparison.jpg`
+```powershell
+npm run capture:screenshots
+```
+
+该命令会写入 `docs/screenshots/`。若本地已经导入公开 PR 快照，还会生成 `espnet/espnet #6327` 的公开数据页截图；没有快照时只生成 Demo 截图，并打印跳过提示。
+
+所有截图都必须脱敏：不出现绝对路径、API token、私钥或真实 App ID；Settings 页只展示脱敏后的配置摘要。
+
+截图清单与来源边界见 [screenshots/README.md](screenshots/README.md)。

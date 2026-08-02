@@ -1,0 +1,19 @@
+flowchart LR
+  trigger["Trigger"] --> context["Context"]
+  context --> deterministic["Deterministic"]
+  deterministic --> planner["Planner"]
+  planner --> agents["LLM Agents"]
+  agents --> compose["Compose"]
+  compose --> synth["Synthesizer"]
+  synth --> persist["Persist ReviewReport"]
+  persist --> enqueue["Enqueue Outbox"]
+  enqueue --> publish["Publish / Idempotent Update"]
+
+  optional["LLM is optional"] -.-> agents
+  evidence["Evidence Pack"] -.-> planner
+  evidence -.-> compose
+
+  classDef stage fill:#17202a,color:#f6f8f5,stroke:#2f6bff,stroke-width:2px;
+  classDef side fill:#e8f5f1,color:#17202a,stroke:#16856b,stroke-width:2px;
+  class trigger,context,deterministic,planner,agents,compose,synth,persist,enqueue,publish stage;
+  class optional,evidence side;

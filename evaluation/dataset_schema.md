@@ -1,6 +1,8 @@
-# Evaluation Dataset Schema
+# 评估数据集 Schema
 
-Each sampled PR entry should follow this shape:
+本文件定义 `evaluation/sampled_prs.json` 中每条 sampled PR 记录的结构。字段名保持英文 snake_case，与生成脚本和 `ReviewReport` 契约一致；`annotations` 来自公开 Review 弱标签或人工标注，用于排序指标计算，不代表缺陷金标准。
+
+每条 sampled PR 记录应遵循以下结构：
 
 ```json
 {
@@ -13,7 +15,7 @@ Each sampled PR entry should follow this shape:
   "model_report_path": "evaluation/results/owner_name_pr123.json",
   "annotations": [
     {
-      "annotator_id": "a1",
+      "annotator_id": "public-review-weak-label",
       "overall_risk": "medium",
       "top_risky_files": ["src/example.py"],
       "reasons": ["semantic", "evolution"],
@@ -23,8 +25,8 @@ Each sampled PR entry should follow this shape:
 }
 ```
 
-Allowed `overall_risk` values: `low`, `medium`, `high`.
+`model_report_path` 必须指向由 TypeScript 编排流程产生的 `ReviewReport` JSON，或结构兼容的固定 benchmark 报告。
 
-Allowed reason labels: `structural`, `semantic`, `security`, `evolution/churn`, `duplication`, `unclear`.
+允许的 `overall_risk`：`low`、`medium`、`high`。
 
-`model_report_path` should point to a JSON file produced by `AnalysisPipeline.pr_risk_report()`.
+允许的 reason label：`structural`、`semantic`、`security`、`evolution/churn`、`duplication`、`unclear`。

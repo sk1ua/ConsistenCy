@@ -2,6 +2,9 @@
   "name": "consistency-workspace",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -9,14 +12,28 @@
   "scripts": {
     "dev": "npm run dev:web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "test:workspaces": "npm run test --workspaces --if-present",
+    "test:runtime-gate": "vitest run scripts/verify-baseline.test.mjs",
+    "test": "npm run test:workspaces && npm run test:runtime-gate",
     "build": "npm run build --workspaces --if-present",
     "test:python": "python -m pytest -q",
-    "verify": "npm run typecheck && npm test && npm run build && npm run test:python",
+    "test:e2e": "playwright test",
+    "capture:screenshots": "playwright test --config=playwright.capture.config.ts tests/e2e/capture-screenshots.spec.ts",
+    "audit:deps": "npm audit --audit-level=high",
+    "verify:runtime": "node scripts/verify-baseline.mjs",
+    "verify:docs": "node scripts/verify-docs.mjs",
+    "verify": "npm run verify:runtime && npm run verify:docs && npm run audit:deps && npm run typecheck && npm test && npm run build && npm run test:python && npm run test:e2e",
+    "setup": "tsx apps/api/src/config/cli.ts setup",
+    "config": "tsx apps/api/src/config/cli.ts config",
+    "data:import": "tsx apps/api/src/data/importRealData.ts",
     "dev:api": "npm run dev -w @consistency/api",
     "dev:web": "npm run dev -w @consistency/web"
   },
+  "overrides": {
+    "postcss": "8.5.18"
+  },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.10.7",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
@@ -24,7 +41,7 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "react": "^19.0.0",

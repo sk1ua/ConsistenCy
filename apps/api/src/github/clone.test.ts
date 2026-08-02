@@ -48,4 +48,26 @@ describe("clonePullRequestWorkspace", () => {
       token: "token"
     })).rejects.toThrow(/owner\/repository/);
   });
+
+  it("does not add an Authorization header for anonymous public clones", async () => {
+    const root = mkdtempSync(join(tmpdir(), "consistency-public-workspaces-"));
+    directories.push(root);
+    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv; cwd?: string }> = [];
+    const runGit: RunGit = async (args, options) => {
+      calls.push({ args, ...options });
+      if (args[0] === "clone") mkdirSync(args.at(-1)!);
+    };
+
+    await clonePullRequestWorkspace({
+      repositoryFullName: "espnet/espnet",
+      headSha: "abcdef1234567",
+      jobId: "public_job",
+      workspaceRoot: root,
+      runGit
+    });
+
+    expect(calls[0]?.env.GIT_TERMINAL_PROMPT).toBe("0");
+    expect(calls[0]?.env.GIT_CONFIG_COUNT).toBeUndefined();
+    expect(calls[0]?.env.GIT_CONFIG_VALUE_0).toBeUndefined();
+  });
 });

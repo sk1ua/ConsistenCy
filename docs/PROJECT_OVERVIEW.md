@@ -1,91 +1,36 @@
-# Project Overview
+# 项目概览
 
-ConsistenCy frames pull request review as a multi-signal coordination problem. Each specialist deterministic analyzer owns one review perspective, emits evidence, and lets a deterministic coordinator convert those findings into a shared decision. An optional LLM review pass can augment the analyzers when configured.
+ConsistenCy 是一个 GitHub Pull Request 审查平台。它的产品价值不是替代审查者下结论，而是把变更、历史、确定性分析、Agent 运行和发布状态组织成一份可追溯的证据包，让审查者自己更快地下结论。
 
-## Review Flow
+## 为什么拆成两层
 
-```text
-git diff -> specialist agents -> normalized evidence -> weighted consensus -> reviewer handoff
-```
+编排是不确定的：Webhook 会重放，GitHub 会限流，LLM 会超时。分析必须是确定的：同一份代码必须算出同样的风险。ConsistenCy 按这个差异切分系统：
 
-1. The pipeline loads changed files and a project-specific baseline from history.
-2. Specialist agents score drift from their perspective.
-3. The scoring layer normalizes signal contributions and confidence.
-4. The collaboration coordinator asks each agent to vote.
-5. The final report ranks risky files and assigns human review focus.
+- **TypeScript 编排服务**处理 Webhook、GitHub API、Job 状态、临时工作区、LLM provider、报告持久化和 GitHub 发布。这一层允许失败、重试和独立演进。
+- **Python 引擎**只处理确定性代码分析、证据检索和分析报告生成，通过 JSON-over-stdio 与 TypeScript 通信。这一层不访问 GitHub、不依赖 LLM key，同样的输入永远产生同样的输出。
 
-## Core Signals
+这条边界带来两个直接收益：分析层的输入、输出和错误行为可以被测试锁定；MockLLM 可以在完整流程中替换真实模型，编排行为因此也能进 CI。
 
-| Signal | What it catches |
-| --- | --- |
-| `style` | naming, docstring, and convention drift |
-| `structural` | import surface, coupling, inheritance, module shape |
-| `semantic/behavioral` | behavior-level and API usage changes (proxy signals) |
-| `duplication` | repeated implementation and clone risk |
-| `security` | hardcoded secrets, unsafe calls, injection-like patterns |
-| `evolution` | churn, hotspots, ownership, and history anomalies |
+## 一次审查如何流动
 
-## Consensus Protocol
+1. GitHub Webhook 或本地 API 创建 Job。
+2. ReviewWorker 准备 PR context 和隔离工作区。
+3. Python Engine 返回确定性信号与 Evidence Pack。
+4. Planner、可选 LLM Agents、Compose 和 Synthesizer 形成 ReviewReport。
+5. 报告在 SQLite 中持久化，并以原子事务写入 Outbox。
+6. PublishWorker 获得租约后发布或幂等更新 GitHub 评论。
 
-The coordinator produces:
+发布失败进入 `publish_failed`，不会抹掉已完成的报告。完整生命周期图与发布状态机见[架构](architecture.md)。
 
-- `votes`: one vote per specialist agent
-- `quorum`: participating agents over expected agents
-- `decision`: `approve`, `monitor`, `request_changes`, or `block_merge`
-- `top_findings`: highest-priority evidence snippets
-- `review_queue`: suggested human review ownership
-- `disagreements`: signals that conflict or need manual attention
+## 术语边界
 
-Security evidence can override lower-priority signals. Structural and semantic drift receive more weight than style-only drift. This keeps the output closer to how real code reviews are triaged.
+- **Demo Mode**：固定 seed、MockLLM、无外部 GitHub 请求，适合快速体验和 E2E。
+- **Verified public source**：由公开 GitHub PR 快照导入的事实，页面会分开显示 GitHub 观测值和 ConsistenCy 模型推导值。
+- **Evidence Pack**：供分析器和审查编排使用的压缩证据集合，不等于最终缺陷结论。
+- **弱标签评估**：用公开 Review 文件位置近似审查者关注点，只能评估排序重合度。
 
-## Product Surfaces
+## 继续阅读
 
-The supported user-facing surfaces are:
-
-- `apps/web`: React/Vite WebApp for dashboard, job history, report detail, and runtime settings.
-- `apps/api`: TypeScript API and GitHub App webhook receiver.
-- `POST /github/webhook`: signed GitHub App webhook entrypoint for PR review jobs.
-- `backend/cli.py`: retained Python CLI for deterministic analysis, evaluation, and the TypeScript compatibility bridge.
-
-Run the product UI locally with:
-
-```bash
-npm run dev:api
-npm run dev:web
-```
-
-Open `http://127.0.0.1:5173`.
-
-The retired Flask dashboard and Python/Flask GitHub App server were removed so
-the project has one WebApp and one webhook implementation.
-
-## Figma Handoff Notes
-
-When a Figma workspace is available, recreate the WebApp review dashboard with these constraints:
-
-| Token | Value | Usage |
-| --- | --- | --- |
-| `surface/background` | `#f5f7f4` | page background |
-| `surface/panel` | `#ffffff` | dashboard panels |
-| `text/primary` | `#17201b` | headings and high-emphasis text |
-| `text/muted` | `#627069` | secondary labels |
-| `border/default` | `#dbe2dd` | panel borders and chart grid |
-| `signal/style` | `#2f78ba` | style signal |
-| `signal/structural` | `#16878a` | structural signal |
-| `signal/semantic` | `#1f9d73` | semantic signal |
-| `signal/duplication` | `#c98719` | duplication signal |
-| `signal/security` | `#cf4a3a` | security signal |
-
-Recommended frames:
-
-- Desktop: `1440 x 1024`, left sidebar `260px`
-- Tablet: `1024 x 900`
-- Mobile: `390 x 1200`
-
-Use component instances for sidebar, topbar, decision panel, signal chart, agent vote card, finding card, and handoff card. Keep all panel and control radii at `8px`.
-
-## Design Notes
-
-- The project favors deterministic scoring over opaque ranking models so reports are reproducible.
-- The backend is organized around stable product surfaces: TypeScript API, GitHub App webhook handling, retained Python analysis CLI, report rendering, and evaluation helpers.
-- The WebApp is intentionally operational rather than marketing-heavy: it is meant to look like a real review board, not a landing page.
+- 使用：[Demo](demo.md) · [GitHub App 设置](GITHUB_APP_SETUP.md) · [HTTP API](api.md)
+- 深入：[架构](architecture.md) · [输出 Schema](output_schema.md) · [安全](security.md)
+- 评估：[评估边界](EVALUATION.md)

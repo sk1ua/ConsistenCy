@@ -1,6 +1,8 @@
 import type { ReviewJob, ReviewJobStore } from "../jobQueue";
 import type { ReviewWorkflowDependencies } from "../review/graph/workflow";
 import { runReviewWorkflow } from "../review/graph/workflow";
+import { PublicPrSnapshotChangedError } from "../review/context/buildPRContext";
+import { PublicPrError } from "../review/publicPr";
 import { sanitizePublicError } from "../security/redact";
 
 export type WorkerStatus = {
@@ -15,18 +17,24 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function errorMessage(error: unknown): string {
+  if (error instanceof PublicPrSnapshotChangedError) return `${error.code}: ${error.message}`;
+  if (error instanceof PublicPrError) return `${error.code}: ${error.message}`;
   return error instanceof Error ? sanitizePublicError(error.message) : "Unknown review worker failure";
 }
 
 function workflowInput(job: ReviewJob) {
-  if (!job.pullRequestNumber || !job.installationId || !job.baseSha || !job.headSha) {
-    throw new Error("PR review job is missing pull request metadata or installation id");
+  if (!job.pullRequestNumber || !job.baseSha || !job.headSha) {
+    throw new Error("PR review job is missing pull request metadata");
+  }
+  if (job.accessMode === "github_app" && !job.installationId) {
+    throw new Error("GitHub App review job is missing installation id");
   }
   return {
     jobId: job.id,
     repositoryFullName: job.repository,
     pullRequestNumber: job.pullRequestNumber,
     installationId: job.installationId,
+    accessMode: job.accessMode,
     baseSha: job.baseSha,
     headSha: job.headSha
   };
@@ -64,7 +72,7 @@ export class ReviewWorker {
       });
     } catch (error) {
       const current = this.options.jobStore.get(job.id);
-      if (current?.status !== "succeeded") {
+      if (current?.status !== "succeeded" && current?.status !== "awaiting_publish" && current?.status !== "publishing") {
         this.options.jobStore.markFailed(job.id, errorMessage(error));
       }
       this.options.onError?.(error, job);

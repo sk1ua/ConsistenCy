@@ -9,8 +9,10 @@ export function toApiJob(job: ReviewJob): ApiReviewJob {
     repositoryFullName: job.repository,
     pullRequestNumber: job.pullRequestNumber!,
     installationId: job.installationId,
+    accessMode: job.accessMode,
     baseSha: job.baseSha!,
     headSha: job.headSha!,
+    publicationPolicy: job.publicationPolicy,
     createdAt: job.createdAt,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
@@ -52,8 +54,8 @@ export function buildStats(jobs: ReviewJob[]): StatsResponse {
   return {
     totalJobs: jobs.length,
     succeededJobs: jobs.filter(job => job.status === "succeeded").length,
-    failedJobs: jobs.filter(job => job.status === "failed").length,
-    runningJobs: jobs.filter(job => job.status === "running").length,
+    failedJobs: jobs.filter(job => job.status === "failed" || job.status === "publish_failed").length,
+    runningJobs: jobs.filter(job => job.status === "running" || job.status === "awaiting_publish" || job.status === "publishing").length,
     averageDuration: completedDurations.length > 0
       ? completedDurations.reduce((sum, duration) => sum + duration, 0) / completedDurations.length
       : 0,

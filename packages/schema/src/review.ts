@@ -11,7 +11,8 @@ export const reviewAgentNameSchema = z.enum([
   "Maintainability",
   "Style",
   "Synthesizer",
-  "PythonCompatibilityAdapter"
+  "PythonCompatibilityAdapter",
+  "DeterministicAnalyzer"
 ]);
 
 const nonEmpty = z.string().trim().min(1);
@@ -88,7 +89,9 @@ export const agentRunSchema = z.object({
   inputSummary: nonEmpty,
   findings: z.array(reviewFindingSchema),
   error: nonEmpty.optional(),
-  tokenUsage: tokenUsageSchema.optional()
+  tokenUsage: tokenUsageSchema.optional(),
+  provider: z.enum(["mock", "deepseek", "openai"]).optional(),
+  model: nonEmpty.optional()
 }).strict();
 
 export const reviewPlanSchema = z.object({

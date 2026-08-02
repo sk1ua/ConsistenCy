@@ -1,45 +1,38 @@
-# Security Model
+# 安全边界
 
-## Controls
+## 控制点
 
-- API and Vite dev servers bind to `127.0.0.1` by default.
-- Production requires explicit CORS origins; `*` and an empty list are rejected.
-- Production requires API token, GitHub App ID, private key, and webhook secret.
-- GitHub webhook bodies are verified with HMAC SHA-256 before JSON parsing.
-- Delivery IDs are persisted for replay protection.
-- Management routes require `Authorization: Bearer <CONSISTENCY_API_TOKEN>` when configured.
-- Request bodies are limited to 1 MB.
-- `/analyze-file` is development-only and resolves regular files inside `CONSISTENCY_WORKSPACE_ROOT`.
-- PR workspaces are isolated under `.consistency/workspaces/{jobId}`.
-- Symlink escapes, absolute paths, traversal, binary files, oversized files, and known secret files are rejected or skipped.
-- Common tokens, bearer credentials, private keys, and secret assignments are redacted before LLM context or logs.
-- Public error messages remove credential fragments and local absolute paths.
-- LLM and API payloads are validated by strict zod schemas.
+- API 与 Vite dev server 默认绑定 loopback；生产环境需要显式 CORS origin、API token 和 HTTPS。
+- GitHub Webhook body 使用 HMAC-SHA-256 校验，Delivery ID 持久化用于防重放。
+- 外部命令使用 `execFile`，并校验 SHA、NUL 路径、参数、Secret、Binary 和 UTF-8 字节预算。
+- 仓库文件、diff、评论和静态分析输出都按不可信输入处理；送入 LLM 时带有边界和长度预算。
+- JSON-over-stdio 的 stdout 只允许协议消息；未知 ID、错误 Schema、非 JSON 或超长输出会触发协议熔断。
+- LLM 输出使用共享 Zod Schema 解析；LLM 不是安全策略的唯一执行点。
+- 公开 PR URL 只接受 canonical `https://github.com/{owner}/{repo}/pull/{number}`。
+- 公开读取模式不需要 GitHub App installation；可使用匿名 GitHub API，或使用仅保存在 API 进程中的 `GITHUB_PUBLIC_READ_TOKEN`。
+- PAT 认证失败不会静默降级为匿名；PAT 不进入 WebUI、数据库、日志、SSE 或错误响应。
+- 公开 Job 固定 `accessMode=public_read` 和 `publicationPolicy=disabled`；内存 Store 与 SQLite Store 都会再次强制这一边界。
+- Notebook 来源绑定 repository、PR、base/head SHA；文件读取拒绝绝对路径、路径穿越、Secret 路径、二进制和超出预算的内容。
+- Notebook Agent 只读、无 shell、无工作区写入、无测试执行、无补丁应用和无 GitHub 发布权限；补丁建议只是文本。
+- SQLite、workspace、Outbox 和本地评估结果不应直接暴露给公网。
 
-## Secret Handling
+## 访问模式
 
-Never commit `.env`, GitHub private keys, installation tokens, API tokens, or provider keys. Installation tokens are short-lived and generated dynamically. Logs use pino redaction and should receive structured fields rather than raw environment objects.
+| 模式 | App 安装 | 读取凭据 | 评论 |
+| --- | ---: | --- | ---: |
+| Demo Mode | 否 | 固定本地数据 | 否 |
+| Public Read — Anonymous | 否 | 匿名公开 API/clone | 否 |
+| Public Read — PAT | 否 | 服务端本地只读 PAT | 否 |
+| Webhook Review | 是 | GitHub App installation token | 按发布策略 |
 
-Do not place `VITE_API_TOKEN` in a publicly distributed production bundle. Use an authenticated reverse proxy or a server-side session layer for production browser access.
+匿名 GitHub REST API 和 authenticated API 遵守 GitHub 官方限流规则；应用不通过并发或重试绕过限流。[GitHub rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
 
-## LLM Boundary
+## 生产检查清单
 
-Repository content is untrusted. ConsistenCy limits file and total context size, skips secret-like paths, redacts high-confidence credential patterns, and rejects invalid structured model output. Agents cannot create confirmed findings without file, line, and evidence fields.
-
-## External Failures
-
-GitHub comment publication is best-effort. A report is persisted first; publication failure is stored separately and does not change a succeeded job to failed.
-
-## Production Checklist
-
-- Set `NODE_ENV=production`.
-- Use explicit HTTPS origins.
-- Store secrets in the deployment secret manager.
-- Put the loopback API behind TLS and authenticated ingress.
-- Do not expose SQLite or workspace directories through a static server.
-- Rotate the API token and webhook secret after suspected disclosure.
-- Run `npm audit --omit=dev`, `npm run verify`, and CI before release.
-
-## Remaining Boundaries
-
-ConsistenCy does not execute checked-out repository code during TypeScript context construction. The retained Python analyzer must continue to treat repository input as untrusted. Production multi-user identity and tenant isolation remain future work; the current API token represents a single operator boundary.
+- 设置 `NODE_ENV=production`，使用 HTTPS、secret manager 和进程管理器。
+- Webhook Review 需要 GitHub App、`GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY` 和 webhook secret。
+- 公开读取可不配置 App，但必须显式启用 `CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED`，并接受公开 API 限流。
+- 如果配置 `GITHUB_PUBLIC_READ_TOKEN`，选择最小权限、只读目标公开仓库的 PAT，并定期轮换。[GitHub personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
+- 限制 `CONSISTENCY_ALLOWED_ORIGINS`，不要使用通配符。
+- 检查 workspace、SQLite、日志和截图中没有 token、私钥、绝对路径或不必要的 App ID。
+- 疑似泄露后立即轮换 API token、Webhook secret、GitHub private key、public read token 和模型 key。

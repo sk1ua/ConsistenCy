@@ -5,21 +5,16 @@ Agent 单元测试
 覆盖 ParserAgent、StyleAgent、StructuralAgent、SemanticAgent、
 DuplicationAgent、RiskScoringAgent 的核心逻辑。
 """
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
-
 import pytest
 
-from src.agents.base_agent import AgentBase, AgentResult
-from src.agents.parser_agent import ParserAgent, compute_halstead, count_loc
-from src.agents.style_agent import StyleAgent
-from src.agents.structural_agent import StructuralAgent
-from src.agents.semantic_agent import SemanticAgent
-from src.agents.duplication_agent import DuplicationAgent
-from src.agents.risk_scoring_agent import RiskScoringAgent
-from src.models import score_to_risk_colour, score_to_risk_label
+from engine.agents.base_agent import AgentBase, AgentResult
+from engine.agents.parser_agent import ParserAgent, compute_halstead, count_loc
+from engine.agents.style_agent import StyleAgent
+from engine.agents.structural_agent import StructuralAgent
+from engine.agents.semantic_agent import SemanticAgent
+from engine.agents.duplication_agent import DuplicationAgent
+from engine.agents.risk_scoring_agent import RiskScoringAgent
+from engine.models import score_to_risk_colour, score_to_risk_label
 
 # ───────────────────────────── fixtures ─────────────────────────────────────
 
@@ -205,7 +200,7 @@ def test_structural_same_zero():
 
 def test_structural_cross_file_inheritance():
     """Cross-file class map should resolve deeper inheritance chains."""
-    from src.agents.structural_agent import _inheritance_depths
+    from engine.agents.structural_agent import _inheritance_depths
 
     # File A defines Base → Child
     # File B defines GrandChild(Child) — but Child is not defined in file B
@@ -376,7 +371,7 @@ def test_risk_breakdown_keys():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_analyze_sources_smoke():
-    from src.pipeline import analyze_sources
+    from engine import analyze_sources
     result = analyze_sources(COMPLEX_SRC, SIMPLE_SRC)
     assert "risk_score" in result
     assert "risk_level" in result
@@ -386,6 +381,6 @@ def test_analyze_sources_smoke():
 
 
 def test_analyze_sources_identical():
-    from src.pipeline import analyze_sources
+    from engine import analyze_sources
     result = analyze_sources(SIMPLE_SRC, SIMPLE_SRC)
     assert result["risk_score"] < 0.20, "Identical sources should have low risk"
