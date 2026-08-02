@@ -39,6 +39,7 @@ describe("App", () => {
       configuration: {
         githubAppConfigured: false,
         webhookSecretConfigured: false,
+        publicReadTokenConfigured: false,
         databasePath: ".consistency/consistency.db",
         workerConcurrency: 1,
         demoMode: true

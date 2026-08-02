@@ -64,7 +64,9 @@ export function createSynthesizerNode(dependencies: AgentDependencies) {
       inputSummary: `Synthesized ${state.findings.length} raw findings`,
       findings,
       error,
-      tokenUsage
+      tokenUsage,
+      provider: dependencies.provider.name,
+      model: dependencies.provider.model
     };
     dependencies.jobStore.saveAgentRun(run);
 

@@ -43,7 +43,7 @@ export async function clonePullRequestWorkspace(options: {
   headSha: string;
   baseSha?: string;
   jobId: string;
-  token: string;
+  token?: string;
   workspaceRoot?: string;
   runGit?: RunGit;
 }): Promise<string> {
@@ -60,13 +60,14 @@ export async function clonePullRequestWorkspace(options: {
   if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
 
   const runGit = options.runGit ?? defaultRunGit;
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.extraHeader",
-    GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`
-  };
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.GITHUB_PUBLIC_READ_TOKEN;
+  env.GIT_TERMINAL_PROMPT = "0";
+  if (options.token) {
+    env.GIT_CONFIG_COUNT = "1";
+    env.GIT_CONFIG_KEY_0 = "http.extraHeader";
+    env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`;
+  }
   const url = `https://github.com/${owner}/${repo}.git`;
   try {
     await runGit(["clone", "--no-checkout", "--filter=blob:none", url, workspacePath], { env });

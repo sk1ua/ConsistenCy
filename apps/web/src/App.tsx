@@ -43,11 +43,15 @@ export function App() {
   const [health, setHealth] = useState<HealthResponse>();
   const [realData, setRealData] = useState<RealDataSnapshot>();
   const [selectedJobId, setSelectedJobId] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("job") ?? "");
+  const [selectedNotebookId, setSelectedNotebookId] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("notebook") ?? "");
+  const [notebooksByJob, setNotebooksByJob] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState<string>();
   const [now, setNow] = useState(() => new Date());
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [publicPrAnalyzing, setPublicPrAnalyzing] = useState(false);
+  const [publicPrError, setPublicPrError] = useState<string>();
 
   async function loadData() {
     setLoading(true);
@@ -67,7 +71,7 @@ export function App() {
       setReports(mockReports);
       setStats(mockStats);
       setDemoMode(true);
-      setError(caught instanceof Error ? caught.message : "API unavailable");
+      setError(caught instanceof Error ? caught.message : t("API unavailable"));
     } finally {
       setLoading(false);
     }
@@ -84,31 +88,51 @@ export function App() {
     const params = new URLSearchParams();
     if (view !== "dashboard") params.set("view", view);
     if (selectedJobId && view === "report") params.set("job", selectedJobId);
+    if (selectedNotebookId && view === "report") params.set("notebook", selectedNotebookId);
     window.history.replaceState(null, "", params.size ? `?${params}` : window.location.pathname);
-  }, [view, selectedJobId]);
+  }, [view, selectedJobId, selectedNotebookId]);
 
   const selectedJob = useMemo(() => jobs.find(job => job.id === selectedJobId), [jobs, selectedJobId]);
   const selectedReport = useMemo(() => selectedJob?.report ?? reports.find(report => report.jobId === selectedJobId), [reports, selectedJob, selectedJobId]);
 
   async function openJob(job: ReviewJob) {
     setSelectedJobId(job.id);
+    setSelectedNotebookId(notebooksByJob[job.id] ?? "");
     setView("report");
     if (job.status === "succeeded" && !job.report && !reports.some(report => report.jobId === job.id)) {
       try {
         const report = await api.report(job.id);
         setReports(current => [report, ...current.filter(item => item.jobId !== report.jobId)]);
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not load report");
+        setError(caught instanceof Error ? caught.message : t("Could not load report"));
       }
+    }
+  }
+
+  async function analyzePublicPr(url: string) {
+    setPublicPrAnalyzing(true);
+    setPublicPrError(undefined);
+    try {
+      const result = await api.analyzePublicPr(url);
+      setNotebooksByJob(current => ({ ...current, [result.jobId]: result.notebookId }));
+      setSelectedJobId(result.jobId);
+      setSelectedNotebookId(result.notebookId);
+      setView("report");
+      await loadData();
+    } catch (caught) {
+      setPublicPrError(caught instanceof Error ? caught.message : t("Could not analyze public PR"));
+    } finally {
+      setPublicPrAnalyzing(false);
     }
   }
 
   async function seedDemo() {
     try {
-      await api.seedDemo();
+      const result = await api.seedDemo();
+      if (result.notebooks) setNotebooksByJob(current => ({ ...current, ...Object.fromEntries(result.notebooks!.map(item => [item.jobId, item.notebookId])) }));
       await loadData();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not seed demo data");
+      setError(caught instanceof Error ? caught.message : t("Could not seed demo data"));
     }
   }
 
@@ -146,11 +170,11 @@ export function App() {
       <div className="app-content">
         {error && <div className="notice" role="status"><span className="notice-mark">!</span><span><strong>{t("Showing a local review snapshot")}</strong><small>{t("The API is unavailable. Live data will return after the next successful refresh.")}</small></span></div>}
         {loading ? <div className="loading-state"><RefreshCw size={22} /><span>{t("Loading review workspace")}</span></div> :
-          view === "dashboard" ? <DashboardPage stats={stats} jobs={jobs} reports={reports} onOpenJob={job => void openJob(job)} onOpenJobs={() => setView("jobs")} /> :
+          view === "dashboard" ? <DashboardPage stats={stats} jobs={jobs} reports={reports} onOpenJob={job => void openJob(job)} onOpenJobs={() => setView("jobs")} onAnalyzePublicPr={analyzePublicPr} publicPrAnalyzing={publicPrAnalyzing} publicPrError={publicPrError} publicPrAccessMode={health?.publicPrAccessMode} /> :
           view === "jobs" ? <JobsPage jobs={jobs} onOpenJob={job => void openJob(job)} /> :
           view === "real-data" ? <RealDataPage data={realData} /> :
           view === "settings" ? <SettingsPage health={health} /> :
-          <ReportPage job={selectedJob ?? jobs.find(job => job.status === "succeeded")} report={selectedReport ?? reports[0]} onBack={() => setView("jobs")} />}
+          <ReportPage job={selectedJob ?? (selectedJobId ? undefined : jobs.find(job => job.status === "succeeded"))} report={selectedReport ?? (selectedJobId ? undefined : reports[0])} notebookId={selectedNotebookId || undefined} llmProvider={health?.llmProvider} llmModel={health?.llmModel} onBack={() => setView("jobs")} />}
       </div>
     </main>
   </div>;

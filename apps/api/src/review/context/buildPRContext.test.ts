@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prReviewContextSchema } from "@consistency/schema";
 import type { PullRequestClient } from "../../github/client";
-import { buildPRContext } from "./buildPRContext";
+import { buildPRContext, PublicPrSnapshotChangedError } from "./buildPRContext";
 import { execSync } from "node:child_process";
 
 const directories: string[] = [];
@@ -84,6 +84,47 @@ describe("buildPRContext", () => {
       }) },
       clientFactory: () => client
     })).rejects.toThrow(/SHAs changed/);
+  });
+
+  it("uses an explicit safe error for a moved public snapshot", async () => {
+    const client: PullRequestClient = {
+      getPullRequest: async () => ({ baseSha: "different", headSha: "abcdef1234567" }),
+      listChangedFiles: async () => [],
+      getDiff: async () => ""
+    };
+    await expect(buildPRContext({
+      jobId: "job_public",
+      repositoryFullName: "espnet/espnet",
+      pullRequestNumber: 6327,
+      accessMode: "public_read",
+      baseSha: "base123",
+      headSha: "abcdef1234567"
+    }, {
+      clientFactory: () => client
+    })).rejects.toBeInstanceOf(PublicPrSnapshotChangedError);
+  });
+
+  it("maps public clone failures to a safe unavailable error", async () => {
+    const client: PullRequestClient = {
+      getPullRequest: async () => ({ baseSha: "base123", headSha: "abcdef1234567" }),
+      listChangedFiles: async () => [],
+      getDiff: async () => ""
+    };
+
+    await expect(buildPRContext({
+      jobId: "job_public_clone",
+      repositoryFullName: "espnet/espnet",
+      pullRequestNumber: 6327,
+      accessMode: "public_read",
+      baseSha: "base123",
+      headSha: "abcdef1234567"
+    }, {
+      clientFactory: () => client,
+      cloneWorkspace: async () => { throw new Error("git failed at C:\\private\\workspace"); }
+    })).rejects.toMatchObject({
+      code: "PUBLIC_GITHUB_UNAVAILABLE",
+      statusCode: 502
+    });
   });
 
   it("rejects file paths containing NUL bytes before executing git", async () => {

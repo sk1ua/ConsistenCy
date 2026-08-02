@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { publishOutboxItemSchema, reviewReportSchema, type AgentRun, type PublishOutboxItem, type ReviewReport } from "@consistency/schema";
+import { publishOutboxItemSchema, reviewReportSchema, type AgentRun, type PublishOutboxItem, type PublicationPolicy, type ReviewAccessMode, type ReviewReport } from "@consistency/schema";
 
 export type JobStatus =
   | "queued"
@@ -25,16 +25,18 @@ export type ReviewJob = {
   id: string;
   kind: ReviewJobKind;
   status: JobStatus;
-  deliveryId: string;
+  deliveryId?: string;
   repository: string;
   repoPath?: string;
   installationId?: number;
+  accessMode: ReviewAccessMode;
   senderLogin?: string;
   action?: string;
   pullRequestNumber?: number;
   baseSha?: string;
   headSha?: string;
   ref?: string;
+  publicationPolicy: PublicationPolicy;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -43,7 +45,8 @@ export type ReviewJob = {
   error?: string;
 };
 
-export type CreateReviewJobInput = Omit<ReviewJob, "id" | "status" | "createdAt" | "updatedAt">;
+export type CreateReviewJobInput = Omit<ReviewJob, "id" | "status" | "createdAt" | "updatedAt" | "publicationPolicy" | "accessMode">
+  & { publicationPolicy?: PublicationPolicy; accessMode?: ReviewAccessMode };
 
 export type WebhookDeliveryStatus = "enqueued" | "ignored" | "failed";
 export type GitHubCommentStatus = "pending" | "published" | "failed" | "skipped";
@@ -101,8 +104,12 @@ export class InMemoryJobQueue implements ReviewJobStore {
 
   enqueue(input: CreateReviewJobInput): ReviewJob {
     const now = new Date().toISOString();
+    const accessMode = input.accessMode ?? "github_app";
     const job: ReviewJob = {
       ...input,
+      installationId: accessMode === "public_read" ? undefined : input.installationId,
+      publicationPolicy: accessMode === "public_read" ? "disabled" : input.publicationPolicy ?? "github_comment",
+      accessMode,
       id: `job_${randomUUID()}`,
       status: "queued",
       createdAt: now,
@@ -196,6 +203,19 @@ export class InMemoryJobQueue implements ReviewJobStore {
     const validatedReport = reviewReportSchema.parse(result);
 
     const now = new Date().toISOString();
+    if (job.publicationPolicy === "disabled") {
+      const updated: ReviewJob = {
+        ...job,
+        status: "succeeded",
+        result: validatedReport,
+        finishedAt: now,
+        updatedAt: now
+      };
+      this.jobs.set(id, updated);
+      this.commentStatuses.set(id, { status: "skipped" });
+      return updated;
+    }
+
     const updated: ReviewJob = {
       ...job,
       status: "awaiting_publish",

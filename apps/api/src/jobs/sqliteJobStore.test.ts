@@ -63,6 +63,45 @@ describe("SQLiteJobStore", () => {
     }
   });
 
+  it("forces public-read jobs to remain analysis-only in SQLite", () => {
+    const { database, store } = createStore();
+    try {
+      store.recordWebhookDelivery({ deliveryId: "public-read-sqlite", event: "pull_request", status: "enqueued" });
+      const job = store.enqueue({
+        kind: "pull_request",
+        deliveryId: "public-read-sqlite",
+        repository: "espnet/espnet",
+        pullRequestNumber: 6327,
+        accessMode: "public_read",
+        publicationPolicy: "github_comment",
+        baseSha: "base123",
+        headSha: "head456",
+        installationId: 999
+      });
+      expect(job).toMatchObject({ accessMode: "public_read", publicationPolicy: "disabled" });
+      expect(job.installationId).toBeUndefined();
+
+      store.markRunning(job.id);
+      store.persistReportAndEnqueuePublish(job.id, {
+        jobId: job.id,
+        repositoryFullName: job.repository,
+        pullRequestNumber: 6327,
+        baseSha: job.baseSha!,
+        headSha: job.headSha!,
+        summary: "Public read report",
+        score: 100,
+        riskLevel: "low",
+        agentRuns: [],
+        findings: [],
+        createdAt: "2026-08-01T00:00:00.000Z"
+      });
+      expect(store.getPublishOutbox(job.id)).toHaveLength(0);
+      expect(store.get(job.id)?.status).toBe("succeeded");
+    } finally {
+      database.close();
+    }
+  });
+
   it("persists job state, reports, and agent runs across restarts", () => {
     const directory = mkdtempSync(join(tmpdir(), "consistency-db-"));
     tempDirectories.push(directory);

@@ -244,8 +244,12 @@ export class DeterministicAnalyzer {
     const moduleDirectory = dirname(fileURLToPath(import.meta.url));
     const projectRoot = this.cwd ?? resolve(moduleDirectory, "../../../..");
 
+    const inheritedEnv = { ...process.env };
+    // Public GitHub credentials belong only to the TypeScript API process;
+    // the deterministic Python engine never needs repository read tokens.
+    delete inheritedEnv.GITHUB_PUBLIC_READ_TOKEN;
     const env = {
-      ...process.env,
+      ...inheritedEnv,
       PYTHONPATH: process.env.PYTHONPATH
         ? `${projectRoot}${delimiter}${process.env.PYTHONPATH}`
         : projectRoot

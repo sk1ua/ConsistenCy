@@ -1,4 +1,4 @@
-import type { PRReviewContext, ReviewAgentName } from "@consistency/schema";
+import type { PRReviewContext, ReviewAccessMode, ReviewAgentName } from "@consistency/schema";
 import type { ReviewJobStore } from "../../jobQueue";
 import type { LLMProvider } from "../llm/types";
 
@@ -21,7 +21,8 @@ export type ContextBuilder = (input: {
   jobId: string;
   repositoryFullName: string;
   pullRequestNumber: number;
-  installationId: number;
+  installationId?: number;
+  accessMode?: ReviewAccessMode;
   baseSha: string;
   headSha: string;
 }) => Promise<PRReviewContext>;

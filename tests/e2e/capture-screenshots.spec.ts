@@ -54,8 +54,18 @@ test.describe("public project screenshot capture", () => {
     const succeededJob = page.locator(".jobs-table button.table-row").filter({ hasText: /succeeded|已完成|已成功/i }).first();
     await expect(succeededJob).toBeVisible();
     await succeededJob.click();
-    await stabilize(page, ".page-stack.report-page", [".report-header"]);
+    await stabilize(page, ".report-workspace", [".report-header", ".notebook-panel"]);
+    await expect(page.locator(".notebook-source-bar")).toBeVisible();
     await capture(page, "report-demo-desktop.png");
+
+    const notebookQuestion = page.locator("textarea[aria-label='Ask Repository Notebook']");
+    await notebookQuestion.fill("Why should a reviewer inspect the selected evidence first?");
+    await page.locator(".notebook-composer button[type='submit']").click();
+    await expect(page.locator(".notebook-message.assistant").last()).toContainText(/evidence|证据/i, { timeout: 15_000 });
+    await expect(page.locator(".notebook-citations").last()).toBeVisible();
+    await page.getByRole("button", { name: "Change Map" }).click();
+    await expect(page.locator(".notebook-card").first()).toBeVisible();
+    await capture(page, "report-notebook-demo-desktop.png");
 
     await page.getByRole("button", { name: /Settings|设置/ }).click();
     await expect(page.locator("h1")).toContainText(/System status|系统状态/i);
@@ -83,5 +93,12 @@ test.describe("public project screenshot capture", () => {
         "(run npm run data:import). Existing screenshot left untouched."
       );
     }
+
+    // Capture Chinese mode screenshot for CJK verification
+    await page.locator("select[aria-label='Language'], select[aria-label='语言']").selectOption("zh-CN");
+    await page.getByRole("button", { name: /Dashboard|仪表盘/ }).click();
+    await expect(page.locator("h1")).toContainText("审查概览");
+    await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro"]);
+    await capture(page, "dashboard-demo-zh-desktop.png");
   });
 });

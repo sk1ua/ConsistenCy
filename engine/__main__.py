@@ -3,7 +3,7 @@ import json
 import sys
 import traceback
 from typing import Optional
-from engine.protocol import AnalyzeRequest, ComposeReviewRequest, AnalyzeResponse, ComposeReviewResponse
+from engine.protocol import AnalyzeRequest, ComposeReviewRequest, AnalyzeResponse, ComposeReviewResponse, normalise_protocol_strings
 from engine.runner import run_analysis, compose_review
 
 def write_stdout(data: dict) -> None:
@@ -43,7 +43,7 @@ def main():
         req_id = None
         action = None
         try:
-            raw_data = json.loads(line_str)
+            raw_data = normalise_protocol_strings(json.loads(line_str))
             if isinstance(raw_data, dict):
                 raw_id = raw_data.get("id")
                 if isinstance(raw_id, str) and raw_id.strip():

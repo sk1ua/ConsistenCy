@@ -33,22 +33,26 @@ export class SQLiteJobStore implements ReviewJobStore {
   enqueue(input: CreateReviewJobInput): ReviewJob {
     const id = `job_${randomUUID()}`;
     const now = new Date().toISOString();
+    const accessMode = input.accessMode ?? "github_app";
+    const publicationPolicy = accessMode === "public_read" ? "disabled" : input.publicationPolicy ?? "github_comment";
     this.database.prepare(`
       INSERT INTO jobs (
         id, type, status, repository_full_name, pull_request_number,
-        installation_id, base_sha, head_sha, delivery_id, sender_login,
-        action, created_at, updated_at
-      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        installation_id, access_mode, base_sha, head_sha, delivery_id, sender_login,
+        action, publication_policy, created_at, updated_at
+      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.repository,
       input.pullRequestNumber,
-      input.installationId ?? null,
+      accessMode === "public_read" ? null : input.installationId ?? null,
+      accessMode,
       input.baseSha,
       input.headSha,
       input.deliveryId ?? null,
       input.senderLogin ?? null,
       input.action ?? null,
+      publicationPolicy,
       now,
       now
     );
@@ -144,6 +148,16 @@ export class SQLiteJobStore implements ReviewJobStore {
         VALUES (?, ?, ?, ?, 'pending')
         ON CONFLICT(job_id) DO UPDATE SET report_json = excluded.report_json, created_at = excluded.created_at
       `).run(`report_${randomUUID()}`, id, JSON.stringify(report), report.createdAt);
+
+      if (job.publicationPolicy === "disabled") {
+        this.database.prepare(`
+          UPDATE reports SET github_comment_status = 'skipped', github_comment_error = NULL WHERE job_id = ?
+        `).run(id);
+        this.database.prepare(`
+          UPDATE jobs SET status = 'succeeded', finished_at = ?, updated_at = ? WHERE id = ?
+        `).run(now, now, id);
+        return this.get(id);
+      }
 
       // Step 2: Insert outbox row ON CONFLICT DO NOTHING
       this.database.prepare(`
@@ -497,14 +511,16 @@ export class SQLiteJobStore implements ReviewJobStore {
     this.database.prepare(`
       INSERT INTO agent_runs (
         id, job_id, agent_name, status, started_at, finished_at,
-        input_summary, findings_json, error, token_usage_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        input_summary, findings_json, error, token_usage_json, provider, model
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = excluded.status,
         finished_at = excluded.finished_at,
         findings_json = excluded.findings_json,
         error = excluded.error,
-        token_usage_json = excluded.token_usage_json
+        token_usage_json = excluded.token_usage_json,
+        provider = excluded.provider,
+        model = excluded.model
     `).run(
       validated.id,
       validated.jobId,
@@ -515,7 +531,9 @@ export class SQLiteJobStore implements ReviewJobStore {
       validated.inputSummary,
       JSON.stringify(validated.findings),
       validated.error ?? null,
-      validated.tokenUsage ? JSON.stringify(validated.tokenUsage) : null
+      validated.tokenUsage ? JSON.stringify(validated.tokenUsage) : null,
+      validated.provider ?? null,
+      validated.model ?? null
     );
   }
 
@@ -531,7 +549,9 @@ export class SQLiteJobStore implements ReviewJobStore {
       inputSummary: row.input_summary,
       findings: JSON.parse(row.findings_json),
       error: row.error ?? undefined,
-      tokenUsage: row.token_usage_json ? JSON.parse(row.token_usage_json) : undefined
+      tokenUsage: row.token_usage_json ? JSON.parse(row.token_usage_json) : undefined,
+      provider: row.provider ?? undefined,
+      model: row.model ?? undefined
     }));
   }
 
@@ -561,14 +581,16 @@ export class SQLiteJobStore implements ReviewJobStore {
       id: row.id,
       kind: row.type === "PR_REVIEW" ? "pull_request" : "push",
       status: row.status,
-      deliveryId: row.delivery_id ?? "",
+      deliveryId: row.delivery_id ?? undefined,
       repository: row.repository_full_name,
       installationId: row.installation_id ?? undefined,
+      accessMode: row.access_mode === "public_read" ? "public_read" : "github_app",
       senderLogin: row.sender_login ?? undefined,
       action: row.action ?? undefined,
       pullRequestNumber: row.pull_request_number,
       baseSha: row.base_sha,
       headSha: row.head_sha,
+      publicationPolicy: row.publication_policy === "disabled" ? "disabled" : "github_comment",
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       startedAt: row.started_at ?? undefined,

@@ -21,7 +21,9 @@ export function createReviewAgentNode(agent: ExecutableReviewAgent, dependencies
         startedAt,
         finishedAt: startedAt,
         inputSummary: "Skipped by the review plan",
-        findings: []
+        findings: [],
+        provider: dependencies.provider.name,
+        model: dependencies.provider.model
       };
       dependencies.jobStore.saveAgentRun(skipped);
       return { agentRuns: [skipped] };
@@ -39,7 +41,9 @@ export function createReviewAgentNode(agent: ExecutableReviewAgent, dependencies
         finishedAt: new Date().toISOString(),
         inputSummary: `Reviewed ${state.context.changedFiles.length} changed files`,
         findings: result.data.findings,
-        tokenUsage: result.tokenUsage
+        tokenUsage: result.tokenUsage,
+        provider: dependencies.provider.name,
+        model: dependencies.provider.model
       };
       dependencies.jobStore.saveAgentRun(run);
       return { agentRuns: [run], findings: run.findings };
@@ -54,7 +58,9 @@ export function createReviewAgentNode(agent: ExecutableReviewAgent, dependencies
         finishedAt: new Date().toISOString(),
         inputSummary: `Reviewed ${state.context.changedFiles.length} changed files`,
         findings: [],
-        error: message
+        error: message,
+        provider: dependencies.provider.name,
+        model: dependencies.provider.model
       };
       dependencies.jobStore.saveAgentRun(run);
       return { agentRuns: [run], errors: [`${agent}: ${message}`] };

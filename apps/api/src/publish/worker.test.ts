@@ -47,7 +47,13 @@ describe("PublishWorker & Outbox Pipeline Test Suite", () => {
       expect(row.lease_generation).toBe(0);
       expect(row.external_id).toBeNull();
 
-      expect(runMigrations(database)).toEqual([]);
+      expect(runMigrations(database)).toEqual([
+        "0004_review_publication_policy",
+        "0005_repository_notebook",
+        "0006_agent_run_provider_metadata",
+        "0007_notebook_citations",
+        "0008_public_read_access_mode"
+      ]);
     } finally {
       database.close();
     }

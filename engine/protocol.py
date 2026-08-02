@@ -3,6 +3,26 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 
+def normalise_protocol_strings(value: Any) -> Any:
+    """Replace lone UTF-16 surrogate code points at the stdio boundary.
+
+    GitHub snapshots can contain malformed or escaped Unicode. Python's UTF-8
+    encoder cannot represent lone surrogates, so normalising them once at the
+    untrusted JSON boundary keeps the deterministic engine total without
+    allowing invalid text to poison stdout or parser inputs.
+    """
+    if isinstance(value, str):
+        return "".join("\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char for char in value)
+    if isinstance(value, list):
+        return [normalise_protocol_strings(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            normalise_protocol_strings(key): normalise_protocol_strings(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _check_keys(data: Dict[str, Any], allowed_keys: Set[str], context: str) -> None:
     extra = set(data.keys()) - allowed_keys
     if extra:

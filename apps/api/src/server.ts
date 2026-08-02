@@ -14,11 +14,17 @@ import { createLLMProvider } from "./review/llm/factory";
 import { redactSensitiveText, sanitizePublishFailure } from "./security/redact";
 import { loadRealData } from "./data/realData";
 import { DeterministicAnalyzer } from "./review/deterministic";
+import { SQLiteNotebookStore } from "./notebook/store";
+import { RepositorySnapshotIndexer } from "./notebook/indexer";
+import { NotebookGraph } from "./notebook/graph";
+import { enqueuePublicPrReview } from "./review/publicPr";
+import { fileURLToPath } from "node:url";
 
 const { config, store: settingsStore } = loadRuntimeConfig();
 const database = openDatabase(config.databasePath);
 runMigrations(database);
 const jobs = new SQLiteJobStore(database);
+const notebookStore = new SQLiteNotebookStore(database);
 const recoveredJobs = jobs.recoverStaleRunningJobs(new Date(Date.now() - 15 * 60 * 1_000));
 if (recoveredJobs > 0) {
   logger.warn({ recoveredJobs }, "Recovered interrupted review jobs");
@@ -36,6 +42,23 @@ const authenticator = config.GITHUB_APP_ID && config.GITHUB_PRIVATE_KEY
   ? new GitHubAppAuthenticator({ appId: config.GITHUB_APP_ID, privateKey: config.GITHUB_PRIVATE_KEY })
   : undefined;
 
+const snapshotIndexer = new RepositorySnapshotIndexer({
+  store: notebookStore,
+  authenticator,
+  publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
+  workspaceRoot: config.workspaceRoot,
+  demoWorkspacePath: fileURLToPath(new URL("./notebook/demo-snapshot", import.meta.url)),
+  maxBytes: config.CONSISTENCY_NOTEBOOK_INDEX_MAX_BYTES
+});
+const notebookGraph = new NotebookGraph({
+  provider,
+  jobs,
+  notebookStore,
+  indexer: snapshotIndexer,
+  maxToolCalls: config.CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS,
+  maxContextChars: config.CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS * 4
+});
+
 export const worker = new ReviewWorker({
   jobStore: jobs,
   concurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
@@ -44,8 +67,11 @@ export const worker = new ReviewWorker({
     provider,
     deterministicAnalyzer,
     contextBuilder: input => {
-      if (!authenticator) throw new Error("GitHub App credentials are required to build PR context");
-      return buildPRContext(input, { authenticator, workspaceRoot: config.workspaceRoot });
+      return buildPRContext(input, {
+        authenticator,
+        publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
+        workspaceRoot: config.workspaceRoot
+      });
     }
   },
   onError: (error, job) => {
@@ -96,15 +122,31 @@ export const server = createApiServer({
     update: patch => settingsStore.update(patch)
   },
   realData: () => loadRealData(),
+  publicPrAnalysisEnabled: config.publicPrAnalysisEnabled,
+  notebookEnabled: config.notebookEnabled,
+  notebookStore,
+  notebookGraph,
+  publicPr: url => enqueuePublicPrReview({
+    url,
+    jobs,
+    publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN
+  }),
   healthDetails: () => ({
     database: { ok: database.open },
     worker: worker.status(),
     publishWorker: publishWorker.status(),
     deterministicAnalyzer: deterministicAnalyzer.status(),
     llmProvider: provider.name,
+    llmModel: provider.model,
+    publicPrAnalysis: config.publicPrAnalysisEnabled,
+    publicPrAccessMode: config.publicPrAnalysisEnabled
+      ? config.GITHUB_PUBLIC_READ_TOKEN ? "pat" : "anonymous"
+      : "disabled",
+    notebook: config.notebookEnabled,
     configuration: {
       githubAppConfigured: Boolean(config.GITHUB_APP_ID && config.GITHUB_PRIVATE_KEY),
       webhookSecretConfigured: Boolean(config.GITHUB_WEBHOOK_SECRET),
+      publicReadTokenConfigured: Boolean(config.GITHUB_PUBLIC_READ_TOKEN),
       databasePath: config.databasePath,
       workerConcurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
       publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY,

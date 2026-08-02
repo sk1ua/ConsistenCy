@@ -1,4 +1,4 @@
-import { Check, CheckCircle2, Database, Github, KeyRound, LoaderCircle, LockKeyhole, RotateCcw, Save, ServerCog, Sparkles, XCircle } from "lucide-react";
+import { Check, CheckCircle2, Database, Globe2, Github, KeyRound, LoaderCircle, LockKeyhole, RotateCcw, Save, ServerCog, Sparkles, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, type HealthResponse, type SettingsPatch, type SettingsSnapshot } from "../api/client";
 import { useI18n } from "../i18n";
@@ -153,7 +153,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
         <div className="setting-field"><label htmlFor="setting-provider">{t("Provider")}</label><select id="setting-provider" value={draft.llm.provider} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, provider: event.target.value as SettingsSnapshot["llm"]["provider"] } }) : current)}><option value="mock">{t("Mock · no external model")}</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select></div>
         {draft.llm.provider === "deepseek" && <>
           <div className="setting-field"><label htmlFor="setting-deepseek-model">{t("Model")}</label><input id="setting-deepseek-model" value={draft.llm.deepseekModel} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekModel: event.target.value } }) : current)} /></div>
-          <div className="setting-field setting-field-wide"><label htmlFor="setting-deepseek-url">Base URL</label><input id="setting-deepseek-url" type="url" value={draft.llm.deepseekBaseUrl} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekBaseUrl: event.target.value } }) : current)} /></div>
+          <div className="setting-field setting-field-wide"><label htmlFor="setting-deepseek-url">{t("Base URL")}</label><input id="setting-deepseek-url" type="url" value={draft.llm.deepseekBaseUrl} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekBaseUrl: event.target.value } }) : current)} /></div>
           <SecretField name="deepseekApiKey" label="DeepSeek API key" configured={settings.llm.deepseekApiKeyConfigured} value={secrets.deepseekApiKey} clear={clearSecrets.deepseekApiKey} onValue={updateSecret} onClear={updateClear} />
         </>}
         {draft.llm.provider === "openai" && <>
@@ -189,6 +189,8 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       <div className="config-list">
         <ConfigRow icon={Github} label={t("GitHub App")} value={t(health.configuration.githubAppConfigured ? "Configured" : "Not configured")} ok={health.configuration.githubAppConfigured} />
         <ConfigRow icon={KeyRound} label={t("Webhook secret")} value={t(health.configuration.webhookSecretConfigured ? "Configured" : "Not configured")} ok={health.configuration.webhookSecretConfigured} />
+        <ConfigRow icon={Globe2} label={t("Public PR access")} value={health.publicPrAccessMode === "pat" ? t("PAT read") : health.publicPrAccessMode === "disabled" ? t("Disabled") : t("Anonymous read")} ok={health.publicPrAccessMode !== "disabled"} />
+        <ConfigRow icon={KeyRound} label={t("Public read token")} value={t(health.configuration.publicReadTokenConfigured ? "Configured" : "Not configured")} ok={health.configuration.publicReadTokenConfigured} />
         <ConfigRow icon={ServerCog} label={t("LLM provider")} value={health.llmProvider} />
         <ConfigRow icon={ServerCog} label={t("Worker")} value={t(health.worker.running ? "Running · concurrency {count}" : "Stopped · concurrency {count}", { count: health.worker.concurrency })} ok={health.worker.running} />
         <ConfigRow icon={Database} label={t("Database")} value={health.configuration.databasePath} ok={health.database.ok} redact />

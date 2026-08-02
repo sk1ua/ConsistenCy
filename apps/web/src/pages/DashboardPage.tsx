@@ -1,5 +1,6 @@
 import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
 import { Activity, ArrowRight, CheckCircle2, FileText, Github, GitPullRequest, Radar, Timer } from "lucide-react";
+import { useState } from "react";
 import { EvidencePanel } from "../components/EvidencePanel";
 import { StatusBadge } from "../components/StatusBadge";
 import { useI18n } from "../i18n";
@@ -17,14 +18,19 @@ function jobDuration(job: ReviewJob): string {
   return duration(new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime());
 }
 
-export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs }: {
+export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onAnalyzePublicPr, publicPrAnalyzing, publicPrError, publicPrAccessMode }: {
   stats: StatsResponse;
   jobs: ReviewJob[];
   reports: ReviewReport[];
   onOpenJob: (job: ReviewJob) => void;
   onOpenJobs: () => void;
+  onAnalyzePublicPr?: (url: string) => Promise<void>;
+  publicPrAnalyzing?: boolean;
+  publicPrError?: string;
+  publicPrAccessMode?: "anonymous" | "pat" | "disabled";
 }) {
   const { locale, t } = useI18n();
+  const [publicPrUrl, setPublicPrUrl] = useState("");
   const severityWeight = { critical: 4, high: 3, medium: 2, low: 1, info: 0 } as const;
   const successRate = stats.totalJobs ? Math.round(stats.succeededJobs / stats.totalJobs * 1000) / 10 : 0;
   const queuedJobs = jobs.filter(job => job.status === "queued").length;
@@ -47,6 +53,11 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs }: {
       <div className="intro-copy"><span className="eyebrow"><Radar size={15} />{t("Review pulse")}</span><h2>{t("Put reviewer attention where the evidence is strongest.")}</h2><p>{t("One operational view for review throughput, risk concentration and the context behind every finding.")}</p></div>
       <div className="attention-signal"><span>{t("Needs attention")}</span><strong>{elevatedReviews}</strong><small>{t(elevatedReviews === 1 ? "elevated review" : "elevated reviews")}</small></div>
       <div className="review-track" aria-label={t("Review workflow")}><span className="done">{t("Intake")}</span><span className="done">{t("Analysis")}</span><span className="active">{t("Evidence")}</span><span>{t("Decision")}</span></div>
+    </section>
+    <section className="public-pr-intake">
+      <div className="public-pr-copy"><span className="panel-kicker">{t("Public PR analysis")} · {publicPrAccessMode === "pat" ? t("PAT read") : publicPrAccessMode === "disabled" ? t("disabled") : t("anonymous read")}</span><h2>{t("Bring a public pull request into the evidence workspace.")}</h2><p>{t("No GitHub App installation is required. The URL flow reads public code, creates an analysis-only job and never posts a comment.")}</p></div>
+      <form onSubmit={event => { event.preventDefault(); if (publicPrUrl.trim() && onAnalyzePublicPr) void onAnalyzePublicPr(publicPrUrl.trim()); }}><label><Github size={15} /><span className="sr-only">{t("GitHub pull request URL")}</span><input aria-label={t("GitHub pull request URL")} value={publicPrUrl} onChange={event => setPublicPrUrl(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" /></label><button type="submit" disabled={!onAnalyzePublicPr || publicPrAnalyzing || !publicPrUrl.trim()}>{publicPrAnalyzing ? t("Resolving…") : t("Analyze PR")}<ArrowRight size={14} /></button></form>
+      {publicPrError && <small className="public-pr-error">{publicPrError}</small>}
     </section>
     <section className="metric-grid" aria-label={t("Review statistics")}>
       {metrics.map(({ label, value, note, icon: Icon, tone }) => <article className="metric-card" key={label}>
@@ -95,7 +106,7 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs }: {
           <span className="repository-cell"><Github size={17} /><strong>{job.repositoryFullName}</strong></span>
           <span className="pr-cell"><b>#{job.pullRequestNumber}</b><small>{job.report?.summary ?? t("Pull request review in progress")}</small></span>
           <span><StatusBadge value={job.status} /></span>
-          <span className="risk-cell">{job.report ? <><i className={`risk-dot risk-${job.report.riskLevel}`} />{job.report.riskLevel}</> : "-"}</span>
+          <span className="risk-cell">{job.report ? <><i className={`risk-dot risk-${job.report.riskLevel}`} />{t(job.report.riskLevel)}</> : "-"}</span>
           <span className="score-cell">{job.report?.score ?? "-"}</span>
           <span>{jobDuration(job)}</span>
           <span>{new Date(job.createdAt).toLocaleString(locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>

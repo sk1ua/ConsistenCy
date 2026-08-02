@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ZodError } from "zod";
+import { notebookCardRequestSchema, notebookMessageRequestSchema, publicPrRequestSchema } from "@consistency/schema";
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
 import { seedDemoData } from "./api/demoSeed";
 import { buildHealthPayload } from "./health";
@@ -9,6 +10,10 @@ import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
 import { sanitizePublicError } from "./security/redact";
 import { settingsPatchSchema, type SettingsSnapshot } from "./config/settings";
 import type { RealDataSnapshot } from "./data/realData";
+import { PublicPrError } from "./review/publicPr";
+import type { NotebookGraph } from "./notebook/graph";
+import type { NotebookStore } from "./notebook/store";
+import type { ReviewJob } from "./jobQueue";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -56,8 +61,24 @@ function sendJson(request: IncomingMessage, response: ServerResponse, statusCode
   response.end(statusCode === 204 ? undefined : JSON.stringify(payload));
 }
 
-function errorPayload(code: string, message: string) {
-  return { error: { code, message } };
+function startSse(request: IncomingMessage, response: ServerResponse, allowedOrigins: string[]): void {
+  const headers = responseHeaders(request, allowedOrigins);
+  response.writeHead(200, {
+    ...headers,
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-accel-buffering": "no"
+  });
+}
+
+function writeSse(response: ServerResponse, event: string, data: unknown): void {
+  if (response.writableEnded) return;
+  response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function errorPayload(code: string, message: string, details?: Record<string, unknown>) {
+  return { error: { code, message, ...(details ? { details } : {}) } };
 }
 
 function sendError(request: IncomingMessage, response: ServerResponse, error: unknown, allowedOrigins: string[]): void {
@@ -67,6 +88,10 @@ function sendError(request: IncomingMessage, response: ServerResponse, error: un
   }
   if (error instanceof ApiError || error instanceof WebhookError) {
     sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
+    return;
+  }
+  if (error instanceof PublicPrError) {
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error.details), allowedOrigins);
     return;
   }
   sendJson(request, response, 500, errorPayload("INTERNAL_ERROR", "Unexpected API error"), allowedOrigins);
@@ -87,9 +112,14 @@ export type ApiHealthDetails = {
   database: { ok: boolean };
   worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
   llmProvider: string;
+  llmModel?: string;
+  publicPrAnalysis?: boolean;
+  publicPrAccessMode?: "anonymous" | "pat" | "disabled";
+  notebook?: boolean;
   configuration: {
     githubAppConfigured: boolean;
     webhookSecretConfigured: boolean;
+    publicReadTokenConfigured: boolean;
     databasePath: string;
     workerConcurrency: number;
     demoMode: boolean;
@@ -110,6 +140,11 @@ export type CreateApiServerOptions = {
     update: (patch: unknown) => SettingsSnapshot;
   };
   realData?: () => RealDataSnapshot | undefined;
+  publicPr?: (url: string) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
+  publicPrAnalysisEnabled?: boolean;
+  notebookEnabled?: boolean;
+  notebookStore?: NotebookStore;
+  notebookGraph?: NotebookGraph;
 };
 
 type RequestContext = {
@@ -136,6 +171,38 @@ type Route = {
 const routes: Route[] = [
   {
     method: "POST",
+    path: "/reviews/public-pr",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, nodeEnv }) => {
+      if (options.publicPrAnalysisEnabled === false || (nodeEnv === "production" && options.publicPrAnalysisEnabled !== true)) {
+        throw new ApiError("Public PR analysis is disabled", "PUBLIC_PR_ANALYSIS_DISABLED", 404);
+      }
+      if (!options.publicPr || !options.notebookStore) {
+        throw new ApiError("Public PR analysis requires a configured public GitHub read source", "PUBLIC_PR_ANALYSIS_UNAVAILABLE", 503);
+      }
+      let body;
+      try {
+        body = publicPrRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("A GitHub pull request URL is required", "INVALID_PUBLIC_PR_REQUEST", 400);
+        throw error;
+      }
+      const result = await options.publicPr(body.url);
+      const ensured = options.notebookStore.ensureForJob(result.job);
+      sendJson(request, response, 202, {
+        jobId: result.job.id,
+        notebookId: ensured.notebook.id,
+        repository: result.coordinates.repository,
+        pullRequestNumber: result.coordinates.pullRequestNumber,
+        baseSha: result.job.baseSha,
+        headSha: result.job.headSha,
+        publicationPolicy: "disabled",
+        status: "queued"
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
     path: "/github/webhook",
     auth: false,
     handler: async ({ request, response, allowedOrigins, githubWebhookSecret, jobs }) => {
@@ -151,6 +218,84 @@ const routes: Route[] = [
   },
   {
     method: "GET",
+    path: /^\/notebooks\/([^/]+)\/sources$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const notebook = options.notebookStore.get(id);
+      if (!notebook) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      sendJson(request, response, 200, { sources: notebook.sources }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/notebooks\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const notebook = options.notebookStore.get(id);
+      if (!notebook) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      sendJson(request, response, 200, { notebook }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/notebooks\/([^/]+)\/messages$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore || !options.notebookGraph) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const notebookId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.notebookStore.get(notebookId)) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      let body;
+      try {
+        body = notebookMessageRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("Notebook message content is invalid", "INVALID_NOTEBOOK_MESSAGE", 400);
+        throw error;
+      }
+      startSse(request, response, allowedOrigins);
+      try {
+        for await (const event of options.notebookGraph.streamMessage({ notebookId, content: body.content, sourceJobIds: body.sourceJobIds })) {
+          writeSse(response, event.event, event.data);
+        }
+      } catch (error) {
+        writeSse(response, "run.failed", { error: sanitizePublicError(error instanceof Error ? error.message : "Notebook run failed") });
+      } finally {
+        response.end();
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/notebooks\/([^/]+)\/cards$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore || !options.notebookGraph) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const notebookId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.notebookStore.get(notebookId)) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      let body;
+      try {
+        body = notebookCardRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("Notebook card request is invalid", "INVALID_NOTEBOOK_CARD", 400);
+        throw error;
+      }
+      startSse(request, response, allowedOrigins);
+      try {
+        for await (const event of options.notebookGraph.streamCard({ notebookId, kind: body.kind, sourceJobIds: body.sourceJobIds })) {
+          writeSse(response, event.event, event.data);
+        }
+      } catch (error) {
+        writeSse(response, "card.failed", { error: sanitizePublicError(error instanceof Error ? error.message : "Notebook card failed") });
+      } finally {
+        response.end();
+      }
+    }
+  },
+  {
+    method: "GET",
     path: "/health",
     auth: true,
     handler: ({ request, response, allowedOrigins, options, githubWebhookSecret }) => {
@@ -160,9 +305,11 @@ const routes: Route[] = [
           database: { ok: true },
           worker: { running: false, activeJobs: 0, concurrency: 1 },
           llmProvider: "mock",
+          publicPrAccessMode: "disabled",
           configuration: {
             githubAppConfigured: false,
             webhookSecretConfigured: Boolean(githubWebhookSecret),
+            publicReadTokenConfigured: false,
             databasePath: ":memory:",
             workerConcurrency: 1,
             demoMode: true
@@ -229,9 +376,9 @@ const routes: Route[] = [
     method: "POST",
     path: "/demo/seed",
     auth: true,
-    handler: ({ request, response, allowedOrigins, nodeEnv, jobs }) => {
+    handler: ({ request, response, allowedOrigins, nodeEnv, jobs, options }) => {
       if (nodeEnv === "production") throw new ApiError("Demo seed is disabled in production", "DEMO_DISABLED", 404);
-      sendJson(request, response, 201, seedDemoData(jobs), allowedOrigins);
+      sendJson(request, response, 201, seedDemoData(jobs, options.notebookStore), allowedOrigins);
     }
   },
   {
@@ -266,7 +413,7 @@ export function createApiServer(options: CreateApiServerOptions = {}) {
   const nodeEnv = options.nodeEnv ?? (process.env.NODE_ENV as "development" | "test" | "production" | undefined) ?? "development";
   const allowedOrigins = options.allowedOrigins ?? ["http://127.0.0.1:5173", "http://localhost:5173"];
 
-  return createServer(async (request, response) => {
+      return createServer(async (request, response) => {
     try {
       const contentLength = Number(request.headers["content-length"] ?? 0);
       if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {

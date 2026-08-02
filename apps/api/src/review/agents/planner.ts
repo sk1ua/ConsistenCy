@@ -49,7 +49,9 @@ export function createPlannerNode(dependencies: AgentDependencies) {
         finishedAt: new Date().toISOString(),
         inputSummary: `Planned review for ${state.context.changedFiles.length} changed files`,
         findings: [],
-        tokenUsage: result.tokenUsage
+        tokenUsage: result.tokenUsage,
+        provider: dependencies.provider.name,
+        model: dependencies.provider.model
       };
       dependencies.jobStore.saveAgentRun(run);
       return { plan, agentRuns: [run] };
@@ -64,7 +66,9 @@ export function createPlannerNode(dependencies: AgentDependencies) {
         finishedAt: new Date().toISOString(),
         inputSummary: `Planned review for ${state.context.changedFiles.length} changed files`,
         findings: [],
-        error: message
+        error: message,
+        provider: dependencies.provider.name,
+        model: dependencies.provider.model
       };
       dependencies.jobStore.saveAgentRun(run);
       return {

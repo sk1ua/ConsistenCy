@@ -165,6 +165,25 @@ class TestEngineProtocol(unittest.TestCase):
         self.assertIsNone(res_data["id"])
         self.assertIn("Invalid JSON payload", res_data["error"])
 
+    def test_main_stdio_normalises_lone_surrogates_from_json(self):
+        input_json = json.dumps({
+            "id": "req-surrogate",
+            "action": "analyze",
+            "files": [{"path": "a.py", "content": "value = '\udc80'"}]
+        }) + "\n"
+
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+
+        with patch("sys.stdin", io.StringIO(input_json)), \
+             patch("sys.stdout", stdout_buf), \
+             patch("sys.stderr", stderr_buf):
+            main()
+
+        res_data = json.loads(stdout_buf.getvalue().strip())
+        self.assertTrue(res_data["ok"])
+        self.assertNotIn("surrogates not allowed", stderr_buf.getvalue())
+
     def test_main_stdio_compose_validation_error_schema(self):
         # Passing invalid files array (risk_score = 2.0 out of range) to compose_review
         input_json = json.dumps({

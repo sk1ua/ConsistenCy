@@ -22,6 +22,8 @@ export const publishOutboxStatusSchema = z.enum([
 ]);
 
 export const jobTypeSchema = z.literal("PR_REVIEW");
+export const publicationPolicySchema = z.enum(["github_comment", "disabled"]);
+export const reviewAccessModeSchema = z.enum(["github_app", "public_read"]);
 
 export const reviewJobSchema = z.object({
   id: z.string().trim().min(1),
@@ -30,8 +32,10 @@ export const reviewJobSchema = z.object({
   repositoryFullName: z.string().trim().min(1),
   pullRequestNumber: z.number().int().positive(),
   installationId: z.number().int().positive().optional(),
+  accessMode: reviewAccessModeSchema.default("github_app"),
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
+  publicationPolicy: publicationPolicySchema.default("github_comment"),
   createdAt: z.string().datetime(),
   startedAt: z.string().datetime().optional(),
   finishedAt: z.string().datetime().optional(),
@@ -58,5 +62,7 @@ export const publishOutboxItemSchema = z.object({
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 export type PublishOutboxStatus = z.infer<typeof publishOutboxStatusSchema>;
 export type JobType = z.infer<typeof jobTypeSchema>;
+export type PublicationPolicy = z.infer<typeof publicationPolicySchema>;
+export type ReviewAccessMode = z.infer<typeof reviewAccessModeSchema>;
 export type ReviewJob = z.infer<typeof reviewJobSchema>;
 export type PublishOutboxItem = z.infer<typeof publishOutboxItemSchema>;

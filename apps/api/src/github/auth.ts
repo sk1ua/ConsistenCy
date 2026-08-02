@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createAppAuth } from "@octokit/auth-app";
+import { Octokit } from "@octokit/rest";
 
 export type InstallationToken = {
   token: string;
@@ -8,8 +9,8 @@ export type InstallationToken = {
 };
 
 export type AppAuth = (options: {
-  type: "installation";
-  installationId: number;
+  type: "installation" | "app";
+  installationId?: number;
   refresh?: boolean;
 }) => Promise<InstallationToken>;
 
@@ -79,5 +80,25 @@ export class GitHubAppAuthenticator {
           if (!signal.aborted) reject(err);
         });
     });
+  }
+
+  async getRepositoryInstallationId(owner: string, repo: string): Promise<number> {
+    if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) {
+      throw new Error("Repository coordinates are invalid");
+    }
+    const appAuthentication = await this.auth({ type: "app" });
+    const octokit = new Octokit({ auth: appAuthentication.token });
+    try {
+      const response = await octokit.rest.apps.getRepoInstallation({ owner, repo });
+      return response.data.id;
+    } catch (error) {
+      const status = typeof error === "object" && error && "status" in error
+        ? Number((error as { status?: unknown }).status)
+        : undefined;
+      if (status === 404) {
+        throw new Error("GitHub App is not installed on this repository");
+      }
+      throw error;
+    }
   }
 }

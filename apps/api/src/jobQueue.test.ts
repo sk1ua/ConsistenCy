@@ -2,6 +2,37 @@ import { describe, expect, it } from "vitest";
 import { InMemoryJobQueue } from "./jobQueue";
 
 describe("InMemoryJobQueue Outbox & Schema Parity", () => {
+  it("persists analysis-only reports without entering the GitHub comment outbox", () => {
+    const queue = new InMemoryJobQueue();
+    const job = queue.enqueue({
+      kind: "pull_request",
+      deliveryId: "public-url-1",
+      repository: "espnet/espnet",
+      pullRequestNumber: 6327,
+      installationId: 42,
+      baseSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+      publicationPolicy: "disabled"
+    });
+    queue.markRunning(job.id);
+    const updated = queue.persistReportAndEnqueuePublish(job.id, {
+      jobId: job.id,
+      repositoryFullName: job.repository,
+      pullRequestNumber: job.pullRequestNumber!,
+      baseSha: job.baseSha!,
+      headSha: job.headSha!,
+      summary: "Analysis-only report",
+      score: 88,
+      riskLevel: "low",
+      agentRuns: [],
+      findings: [],
+      createdAt: "2026-08-01T00:00:00.000Z"
+    });
+    expect(updated?.status).toBe("succeeded");
+    expect(queue.getPublishOutbox(job.id)).toHaveLength(0);
+    expect(queue.getReportCommentStatus(job.id)).toEqual({ status: "skipped" });
+  });
+
   it("enforces reviewReportSchema parsing before mutation and persists outbox item", () => {
     const queue = new InMemoryJobQueue();
     const acceptance = queue.acceptWebhookJob({

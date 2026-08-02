@@ -6,14 +6,19 @@ import type {
   PRReviewContext,
   ReviewFinding,
   ReviewPlan,
-  ReviewReport
+  ReviewReport,
+  ReviewAccessMode
 } from "@consistency/schema";
 
 export const ReviewGraphState = Annotation.Root({
   jobId: Annotation<string>,
   repositoryFullName: Annotation<string>,
   pullRequestNumber: Annotation<number>,
-  installationId: Annotation<number>,
+  installationId: Annotation<number | undefined>,
+  accessMode: Annotation<ReviewAccessMode>({
+    reducer: (left, right) => right,
+    default: () => "github_app"
+  }),
   baseSha: Annotation<string>,
   headSha: Annotation<string>,
   context: Annotation<PRReviewContext | undefined>,

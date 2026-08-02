@@ -1,7 +1,8 @@
 import { demoReviewReport } from "@consistency/schema";
 import type { ReviewJobStore } from "../jobQueue";
+import type { NotebookStore } from "../notebook/store";
 
-export function seedDemoData(store: ReviewJobStore): { created: number } {
+export function seedDemoData(store: ReviewJobStore, notebookStore?: NotebookStore): { created: number; notebooks?: Array<{ jobId: string; notebookId: string }> } {
   const definitions: Array<{ repository: string; pullRequestNumber: number; score?: number; status: "succeeded" | "running" | "queued" | "failed" }> = [
     { repository: "sk1ua/ConsistenCy", pullRequestNumber: 34, score: 74, status: "succeeded" as const },
     { repository: "acme/payments-api", pullRequestNumber: 182, score: 42, status: "succeeded" as const },
@@ -31,7 +32,9 @@ export function seedDemoData(store: ReviewJobStore): { created: number } {
       pullRequestNumber: definition.pullRequestNumber,
       installationId: 1,
       baseSha,
-      headSha: `demo-head-${index + 1}`
+      headSha: `demo-head-${index + 1}`,
+      senderLogin: "demo",
+      action: "demo"
     });
     created += 1;
     if (definition.status === "queued") continue;
@@ -60,5 +63,10 @@ export function seedDemoData(store: ReviewJobStore): { created: number } {
       createdAt: new Date(Date.now() - index * 3_600_000).toISOString()
     });
   }
-  return { created };
+  if (!notebookStore) return { created };
+  const notebooks = store.list().map(job => {
+    const ensured = notebookStore.ensureForJob(job);
+    return { jobId: job.id, notebookId: ensured.notebook.id };
+  });
+  return { created, notebooks };
 }

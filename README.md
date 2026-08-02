@@ -1,49 +1,81 @@
 # ConsistenCy
 
-**Evidence-driven review infrastructure for GitHub pull requests — deterministic analysis first, LLM as an optional layer.**
+**Evidence-driven review infrastructure for GitHub pull requests — deterministic analysis first, LLM as an optional reasoning layer.**
 
-GitHub Pull Request 的证据驱动审查基础设施：Python 确定性引擎产出可复现的风险信号与证据，TypeScript 编排服务负责任务、工作区与可靠发布——让审查者先看到最值得看的文件、证据和原因。
+ConsistenCy 把代码审查拆成两个清晰的职责：TypeScript 编排任务、上下文、LLM 和发布；Python 引擎只做可复现的确定性分析。结果不是一段没有出处的评论，而是带文件、行号、证据和风险边界的 ReviewReport。
 
 [![CI](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml/badge.svg)](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml)
 
-审查者的瓶颈不是写评论，而是判断**哪个 PR、哪个文件、哪一行值得花时间**。ConsistenCy 不替代审查者：它把确定性分析、证据检索和审查编排做成一条可测试、可复现的流水线，每个 finding 都带 Evidence Pack——文件、行号，以及选择它的原因。
+## 为什么不是普通的 LLM Code Review
 
-| | 普通 LLM Code Review | ConsistenCy |
+| 维度 | 普通 LLM Review | ConsistenCy |
 | --- | --- | --- |
-| 风险信号 | LLM 通读 diff 的直觉 | 确定性多信号分析，可复现、可测试 |
-| 输出 | 一段散文评论 | 结构化报告 + Evidence Pack（行号级证据） |
-| LLM 角色 | 唯一来源，不可替换 | 可选增强；MockLLM 可替换、测试可锁定 |
-| 评论发布 | 直接调 API，失败即丢 | SQLite Outbox + 租约 + fencing token + 幂等更新 |
-
-## 审查流水线
-
-```text
-Trigger → Context → Deterministic Analysis → Planner → Optional LLM Agents → Compose → Synthesizer → Persist → Outbox → PublishWorker → GitHub
-```
-
-确定性分析永远先于 LLM；LLM 不可用时，流水线仍然产出完整的风险报告。各阶段职责见[架构文档](docs/architecture.md)。
+| 风险信号 | 直接把 diff 交给模型判断 | 确定性分析先产出可复现信号 |
+| 输出 | 一段难以追溯的散文 | 结构化报告 + Evidence Pack + 文件行号 |
+| LLM 角色 | 常常是唯一判断来源 | 可选的解释、规划和综合层 |
+| 发布 | 请求成功就直接评论 | SQLite Outbox、租约、fencing token 和幂等更新 |
+| 公开 PR | 取决于部署方式 | 可匿名只读分析，永不发布评论 |
 
 ## 架构
 
+```text
+Web → TypeScript API → Review Worker → Python deterministic engine
+                                  → SQLite / ReviewReport
+                                  → Outbox → Publish Worker → GitHub comment
+```
+
 ![ConsistenCy system architecture](docs/diagrams/system-architecture.svg)
 
-实线为同步数据流，虚线为外部边界；三个 SQLite 存储分别承担 Job、Report 与 Outbox 职责。图源（Mermaid）：[system-architecture](docs/diagrams/system-architecture.mmd)、[review-lifecycle](docs/diagrams/review-lifecycle.mmd)、[job-state-machine](docs/diagrams/job-state-machine.mmd)。
+架构事实以 [system-architecture.mmd](docs/diagrams/system-architecture.mmd)、[review-lifecycle.mmd](docs/diagrams/review-lifecycle.mmd) 和 [job-state-machine.mmd](docs/diagrams/job-state-machine.mmd) 为准；SVG 只是便于在 GitHub 页面阅读的导出物。
+
+审查流水线为：
+
+```text
+Trigger → Context → Deterministic Analysis → Planner → Optional LLM Agents
+        → Compose → Synthesizer → Persist → Outbox → Publish Worker
+```
+
+确定性分析即使在 LLM 不可用时也会完成。Webhook 任务可以发布 GitHub 评论；公开 URL 任务使用独立的只读访问模式，不会创建评论 Outbox。
 
 ## Demo
 
-| Dashboard | Report |
+| Dashboard | Report + Repository Notebook |
 | --- | --- |
-| ![Demo Mode 下的 Dashboard](docs/screenshots/dashboard-demo-desktop.png) | ![Demo Mode 下的 Report](docs/screenshots/report-demo-desktop.png) |
+| ![Demo Dashboard](docs/screenshots/dashboard-demo-desktop.png) | ![Demo Report and Notebook](docs/screenshots/report-notebook-demo-desktop.png) |
 
-*Demo Mode：固定 seed + MockLLM，不访问 GitHub，覆盖 Dashboard → Jobs → Report 完整流程。*
+| Real Data (espnet/espnet #6327) |
+| --- |
+| ![Real Data Verification](docs/screenshots/real-data-espnet-pr6327-desktop.png) |
 
-## 已验证的公开数据
+这些截图来自固定 Demo seed、MockLLM 及可信公开数据集，不代表实时外部服务结果。更多页面证据位于 [docs/screenshots](docs/screenshots/README.md)。
 
-![espnet/espnet PR 6327 的公开数据页](docs/screenshots/real-data-espnet-pr6327-desktop.png)
+## 公开 PR与 Repository Review Notebook
 
-*[espnet/espnet #6327](https://github.com/espnet/espnet/pull/6327) 的本地导入快照（非实时 GitHub 连接）：GitHub 观测事实、模型推导排名与公开 Review 弱标签在页面中分栏标注；弱标签只是有限的基准信号，不是缺陷金标准。*
+在 Dashboard 的 **Analyze a public GitHub PR** 输入框中粘贴：
 
-## 30 秒运行
+```text
+https://github.com/espnet/espnet/pull/6327
+```
+
+公开读取支持两种服务端访问源：
+
+| 模式 | 需要 GitHub App 安装 | 需要 Token | 评论权限 |
+| --- | ---: | ---: | ---: |
+| Demo Mode | 否 | 否 | 无 |
+| Public Read — Anonymous | 否 | 否 | 无 |
+| Public Read — PAT | 否 | 本地只读 PAT | 无 |
+| Webhook Review | 是 | App 私钥 | 可按既有策略发布 |
+
+公开 URL 会锁定 repository、PR number、base SHA 和 head SHA，创建 `accessMode=public_read`、`publicationPolicy=disabled` 的 Job。它只读取公开 PR、生成报告和 Notebook，不调用 GitHub App installation API，不写文件，不执行命令，不应用补丁，也不发布评论。
+
+Notebook 是报告右侧的来源驱动研究空间：
+
+- Change Map、Architecture Impact、Risk Brief、Fix Plan 四类分析卡片；
+- 按 `repository + PR + head SHA` 隔离的索引和引用；
+- SSE 流式回答、工具事件、provider/model 和 token usage；
+- `generate_patch` 只返回 unified diff 文本，明确未应用、未执行测试。
+
+## 30 秒启动
 
 环境基线：Node.js 22.x、Python 3.12。
 
@@ -51,9 +83,9 @@ Trigger → Context → Deterministic Analysis → Planner → Optional LLM Agen
 npm ci
 python -m pip install -r requirements-lock.txt
 cp .env.example .env
-npm run dev:api    # 终端 1 · API: http://127.0.0.1:8787
-npm run dev:web    # 终端 2 · Web: http://127.0.0.1:5173
-curl -X POST http://127.0.0.1:8787/demo/seed   # 写入固定 Demo 数据
+npm run dev:api    # API: http://127.0.0.1:8787
+npm run dev:web    # Web: http://127.0.0.1:5173
+curl -X POST http://127.0.0.1:8787/demo/seed
 ```
 
 Windows PowerShell：
@@ -62,40 +94,65 @@ Windows PowerShell：
 npm ci
 python -m pip install -r requirements-lock.txt
 Copy-Item .env.example .env
-npm run dev:api    # 终端 1 · API: http://127.0.0.1:8787
-npm run dev:web    # 终端 2 · Web: http://127.0.0.1:5173
+npm run dev:api    # API: http://127.0.0.1:8787
+npm run dev:web    # Web: http://127.0.0.1:5173
 Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed
 ```
 
-打开 <http://127.0.0.1:5173>。配置了 `CONSISTENCY_API_TOKEN` 时，seed 请求需要 `Authorization: Bearer` 头。全栈 E2E 使用隔离的临时端口 `3001`，不会碰本地开发数据库。
+配置 `CONSISTENCY_API_TOKEN` 后，浏览器和 API 请求需要 `Authorization: Bearer <CONSISTENCY_API_TOKEN>`。公开 PR 分析默认在开发环境启用；如果配置 `GITHUB_PUBLIC_READ_TOKEN`，它只留在 API 进程中，不会传给 WebUI 或写入数据库。全栈 E2E 使用隔离数据和临时 API 端口 `3001`。
+
+## HTTP 入口
+
+| 能力 | 路径 |
+| --- | --- |
+| 健康状态 | `GET /health` |
+| Job 与报告 | `GET /jobs`、`GET /jobs/:id`、`GET /jobs/:id/report` |
+| 公开 PR 入队 | `POST /reviews/public-pr` |
+| Notebook | `GET /notebooks/:id`、`POST /notebooks/:id/messages`、`POST /notebooks/:id/cards` |
+| GitHub Webhook | `POST /github/webhook` |
+| Demo 数据 | `POST /demo/seed` |
+
+完整请求、SSE 事件和错误码见 [HTTP API](docs/api.md)。
 
 ## 能力矩阵
 
 | 能力 | 当前实现 |
 | --- | --- |
-| GitHub 入口 | Webhook（HMAC 校验）、PR Context、GitHub App 鉴权 |
-| 确定性分析 | Python 多信号风险分析、证据检索、Evidence Pack |
-| 审查编排 | Trigger → Context → Deterministic → Planner → Optional LLM Agents → Compose → Persist |
-| 可靠发布 | SQLite Outbox、租约、fencing token、幂等更新；崩溃恢复不产生重复评论 |
-| 跨语言协议 | 严格 JSON-over-stdio、Correlation ID、双端 Zod Schema 校验 |
-| 可复现 | MockLLM、固定 Demo Seed、隔离全栈 E2E、公开 PR 弱标签评估 |
+| GitHub 入口 | HMAC Webhook、PR Context、GitHub App 鉴权 |
+| 公开 PR | 严格 URL 校验、匿名/PAT 读取、SHA 锁定、analysis-only Job |
+| 确定性分析 | Python 多信号风险分析、Evidence Pack、边界预算 |
+| LLM 层 | Mock、DeepSeek、OpenAI；结构化输出和 Notebook SSE |
+| Repository Notebook | SHA 隔离索引、只读工具、强制引用、四类卡片 |
+| 可靠发布 | SQLite Outbox、租约、fencing token、重试和幂等评论 |
+| 跨语言协议 | JSON-over-stdio、Correlation ID、双端 Schema 校验 |
+| 可复现性 | Demo seed、固定 MockLLM、隔离全栈 E2E 和公开数据快照 |
 
-## 安全与评估边界
+## 安全与边界
 
-- 仓库内容、diff、Issue/Review 文本一律按不可信输入处理；进入 LLM 的静态分析内容有明确的边界与长度预算。
-- Demo 只验证产品流程与 UI，不代表真实 GitHub 发布能力；生产发布需要 GitHub App、HTTPS、密钥管理与显式 CORS。
-- 风险分数是审查注意力的排序信号，不是漏洞证明；公开 Review 只能作为弱标签，Precision/Recall 不能替代人工审查。
-- 本地运行不会自动清理被 `.gitignore` 忽略的评估 clone、缓存与 SQLite 数据。详见[安全边界](docs/security.md)。
+- 公开读取只接受 `https://github.com/{owner}/{repo}/pull/{number}`，遵守 GitHub API 限流；匿名读取约 60 次/小时/IP，可用本地只读 PAT 提高限额。
+- PAT 仅作为服务端环境变量使用；日志、错误、SSE 和 WebUI 不显示 token、私钥或 Authorization header。
+- 仓库内容、diff、评论和静态分析输出都按不可信输入处理；LLM 不是安全策略的唯一执行点。
+- Notebook 没有 shell、写文件、测试执行、补丁应用或 GitHub 评论权限。
+- 风险分数和公开 Review 只能作为审查排序信号，不能替代人工判断或缺陷金标准。
 
-## 文档
+详见 [安全边界](docs/security.md)、[公开 PR API](docs/api.md) 和 [Repository Notebook](docs/notebook.md)。
 
-- **使用**：[Demo](docs/demo.md) · [GitHub App 设置](docs/GITHUB_APP_SETUP.md) · [HTTP API](docs/api.md)
-- **架构**：[项目概览](docs/PROJECT_OVERVIEW.md) · [架构](docs/architecture.md) · [输出 Schema](docs/output_schema.md) · [安全](docs/security.md)
-- **评估**：[评估边界](docs/EVALUATION.md) · [评估工作区](evaluation/README.md) · [数据集 Schema](evaluation/dataset_schema.md)
-- **贡献**：[CONTRIBUTING](CONTRIBUTING.md)
+## 文档导航
 
-## 验证
+- **开始使用**：[Demo](docs/demo.md) · [HTTP API](docs/api.md) · [GitHub App 设置](docs/GITHUB_APP_SETUP.md)
+- **理解架构**：[项目概览](docs/PROJECT_OVERVIEW.md) · [架构](docs/architecture.md) · [Repository Notebook](docs/notebook.md)
+- **数据与评估**：[输出 Schema](docs/output_schema.md) · [评估边界](docs/EVALUATION.md) · [评估数据集 Schema](evaluation/dataset_schema.md)
+- **贡献与安全**：[CONTRIBUTING](CONTRIBUTING.md) · [安全边界](docs/security.md)
+
+## 验证命令
 
 ```bash
-npm run verify   # runtime 基线 + docs + 依赖审计 + typecheck + 单测 + build + pytest + E2E
+npm run verify:runtime
+npm run verify:docs
+npm run typecheck
+npm test
+npm run build
+python -m ruff check engine tests evaluation/scripts examples
+python -m pytest -q
+npm run test:e2e
 ```

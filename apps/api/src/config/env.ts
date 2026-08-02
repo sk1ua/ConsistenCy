@@ -30,9 +30,15 @@ export const envSchema = z.object({
   CONSISTENCY_API_TOKEN: optionalSecret,
   CONSISTENCY_ALLOWED_ORIGINS: z.string().trim().default("http://127.0.0.1:5173,http://localhost:5173"),
   CONSISTENCY_WEB_URL: z.string().url().default("http://127.0.0.1:5173"),
+  CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED: z.enum(["true", "false"]).default("true"),
+  CONSISTENCY_NOTEBOOK_ENABLED: z.enum(["true", "false"]).default("true"),
+  CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(32).default(8),
+  CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS: z.coerce.number().int().min(1_000).max(64_000).default(16_000),
+  CONSISTENCY_NOTEBOOK_INDEX_MAX_BYTES: z.coerce.number().int().min(1_024 * 1_024).max(512 * 1_024 * 1_024).default(64 * 1_024 * 1_024),
   GITHUB_APP_ID: optionalSecret,
   GITHUB_PRIVATE_KEY: optionalSecret,
   GITHUB_WEBHOOK_SECRET: optionalSecret,
+  GITHUB_PUBLIC_READ_TOKEN: optionalSecret,
   DEEPSEEK_API_KEY: optionalSecret,
   DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
   DEEPSEEK_MODEL: z.string().trim().min(1).default("deepseek-v4-flash"),
@@ -48,21 +54,26 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   engineRoot?: string;
   allowedOrigins: string[];
   LLM_PROVIDER: "mock" | "deepseek" | "openai";
+  publicPrAnalysisEnabled: boolean;
+  notebookEnabled: boolean;
 };
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.parse(input);
-  if (parsed.NODE_ENV === "production" && !parsed.GITHUB_WEBHOOK_SECRET) {
-    throw new Error("GITHUB_WEBHOOK_SECRET is required in production");
+  const hasAppId = Boolean(parsed.GITHUB_APP_ID);
+  const hasPrivateKey = Boolean(parsed.GITHUB_PRIVATE_KEY);
+  if (hasAppId !== hasPrivateKey) {
+    throw new Error("GITHUB_APP_ID and GITHUB_PRIVATE_KEY must be configured together");
   }
+  const githubAppConfigured = hasAppId && hasPrivateKey;
   if (parsed.NODE_ENV === "production" && !parsed.CONSISTENCY_API_TOKEN) {
     throw new Error("CONSISTENCY_API_TOKEN is required in production");
   }
-  if (parsed.NODE_ENV === "production" && !parsed.GITHUB_APP_ID) {
-    throw new Error("GITHUB_APP_ID is required in production");
+  if (parsed.NODE_ENV === "production" && githubAppConfigured && !parsed.GITHUB_WEBHOOK_SECRET) {
+    throw new Error("GITHUB_WEBHOOK_SECRET is required when GitHub App mode is enabled in production");
   }
-  if (parsed.NODE_ENV === "production" && !parsed.GITHUB_PRIVATE_KEY) {
-    throw new Error("GITHUB_PRIVATE_KEY is required in production");
+  if (parsed.NODE_ENV === "production" && !githubAppConfigured && parsed.GITHUB_WEBHOOK_SECRET) {
+    throw new Error("GITHUB_WEBHOOK_SECRET requires GitHub App credentials");
   }
   const llmProvider = parsed.LLM_PROVIDER ?? (parsed.DEEPSEEK_API_KEY ? "deepseek" : "mock");
   if (llmProvider === "deepseek" && !parsed.DEEPSEEK_API_KEY) {
@@ -77,12 +88,20 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.NODE_ENV === "production" && (allowedOrigins.length === 0 || allowedOrigins.includes("*"))) {
     throw new Error("CONSISTENCY_ALLOWED_ORIGINS must contain explicit origins in production");
   }
+  const publicPrAnalysisEnabled = parsed.NODE_ENV === "production"
+    ? input.CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED === "true"
+    : parsed.CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED === "true";
+  const notebookEnabled = parsed.NODE_ENV === "production"
+    ? input.CONSISTENCY_NOTEBOOK_ENABLED === "true"
+    : parsed.CONSISTENCY_NOTEBOOK_ENABLED === "true";
   return {
     ...parsed,
     LLM_PROVIDER: llmProvider,
     databasePath: resolve(parsed.DATABASE_PATH),
     workspaceRoot: resolve(parsed.CONSISTENCY_WORKSPACE_ROOT),
     engineRoot: parsed.CONSISTENCY_ENGINE_ROOT ? resolve(parsed.CONSISTENCY_ENGINE_ROOT) : undefined,
-    allowedOrigins
+    allowedOrigins,
+    publicPrAnalysisEnabled,
+    notebookEnabled
   };
 }

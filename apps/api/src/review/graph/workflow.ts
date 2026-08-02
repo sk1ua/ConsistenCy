@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { END, START, StateGraph } from "@langchain/langgraph";
-import type { AgentRun } from "@consistency/schema";
+import type { AgentRun, ReviewAccessMode } from "@consistency/schema";
 import type { ReviewJobStore } from "../../jobQueue";
 import { createCorrectnessAgentNode } from "../agents/correctness";
 import { createMaintainabilityAgentNode } from "../agents/maintainability";
@@ -22,10 +22,15 @@ export type ReviewWorkflowDependencies = {
   deterministicAnalyzer: DeterministicAnalyzer;
 };
 
-export type ReviewWorkflowInput = Pick<
-  ReviewGraphStateValue,
-  "jobId" | "repositoryFullName" | "pullRequestNumber" | "installationId" | "baseSha" | "headSha"
->;
+export type ReviewWorkflowInput = {
+  jobId: string;
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  installationId?: number;
+  accessMode?: ReviewAccessMode;
+  baseSha: string;
+  headSha: string;
+};
 
 export function createReviewWorkflow(dependencies: ReviewWorkflowDependencies) {
   const agentDependencies = { provider: dependencies.provider, jobStore: dependencies.jobStore };
@@ -37,6 +42,7 @@ export function createReviewWorkflow(dependencies: ReviewWorkflowDependencies) {
         repositoryFullName: state.repositoryFullName,
         pullRequestNumber: state.pullRequestNumber,
         installationId: state.installationId,
+        accessMode: state.accessMode,
         baseSha: state.baseSha,
         headSha: state.headSha
       })
@@ -140,5 +146,8 @@ export async function runReviewWorkflow(
   input: ReviewWorkflowInput,
   dependencies: ReviewWorkflowDependencies
 ): Promise<ReviewGraphStateValue> {
-  return createReviewWorkflow(dependencies).invoke(input);
+  return createReviewWorkflow(dependencies).invoke({
+    ...input,
+    accessMode: input.accessMode ?? "github_app"
+  });
 }

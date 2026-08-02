@@ -7,12 +7,24 @@ describe("SQLite foundation", () => {
     const database = openDatabase(":memory:");
     try {
       expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
-      expect(runMigrations(database)).toEqual(["0001_review_storage", "0002_publish_outbox", "0003_publish_outbox_leasing"]);
+      expect(runMigrations(database)).toEqual([
+        "0001_review_storage",
+        "0002_publish_outbox",
+        "0003_publish_outbox_leasing",
+        "0004_review_publication_policy",
+        "0005_repository_notebook",
+        "0006_agent_run_provider_metadata",
+        "0007_notebook_citations",
+        "0008_public_read_access_mode"
+      ]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
         .get();
       expect(table).toBeTruthy();
+      const accessModeColumn = (database.pragma("table_info(jobs)") as Array<{ name: string; dflt_value: string | null }>)
+        .find(column => column.name === "access_mode");
+      expect(accessModeColumn).toMatchObject({ name: "access_mode", dflt_value: "'github_app'" });
     } finally {
       database.close();
     }
@@ -51,7 +63,16 @@ describe("SQLite foundation", () => {
     const database = openDatabase(":memory:");
     try {
       const applied = runMigrations(database);
-      expect(applied).toEqual(["0001_review_storage", "0002_publish_outbox", "0003_publish_outbox_leasing"]);
+      expect(applied).toEqual([
+        "0001_review_storage",
+        "0002_publish_outbox",
+        "0003_publish_outbox_leasing",
+        "0004_review_publication_policy",
+        "0005_repository_notebook",
+        "0006_agent_run_provider_metadata",
+        "0007_notebook_citations",
+        "0008_public_read_access_mode"
+      ]);
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
         WHERE type = 'table' AND name IN ('webhook_deliveries', 'jobs', 'agent_runs', 'reports', 'publish_outbox')
@@ -86,7 +107,15 @@ describe("SQLite foundation", () => {
 
       // Step 2: Apply 0002 & 0003 migrations
       const applied = runMigrations(database, migrations);
-      expect(applied).toEqual(["0002_publish_outbox", "0003_publish_outbox_leasing"]);
+      expect(applied).toEqual([
+        "0002_publish_outbox",
+        "0003_publish_outbox_leasing",
+        "0004_review_publication_policy",
+        "0005_repository_notebook",
+        "0006_agent_run_provider_metadata",
+        "0007_notebook_citations",
+        "0008_public_read_access_mode"
+      ]);
 
       // Assert data preserved
       const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_1'").get() as any;
