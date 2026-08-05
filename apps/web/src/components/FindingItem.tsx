@@ -4,7 +4,7 @@ import { useState } from "react";
 import { StatusBadge } from "./StatusBadge";
 import { useI18n } from "../i18n";
 
-export function FindingItem({ finding }: { finding: ReviewFinding }) {
+export function FindingItem({ finding, onLocate }: { finding: ReviewFinding; onLocate?: (file: string, line: number | undefined) => void }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const line = finding.startLine === undefined
@@ -14,7 +14,14 @@ export function FindingItem({ finding }: { finding: ReviewFinding }) {
     <article className="finding-item">
       <button className="finding-summary" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
         <FileCode2 size={17} />
-        <span className="finding-title"><strong>{finding.title}</strong><small>{finding.file} / {line}</small></span>
+        <span className="finding-title"><strong>{finding.title}</strong>{onLocate
+          ? <span className="finding-locate" role="button" tabIndex={0} onClick={() => onLocate(finding.file, finding.startLine)} onKeyDown={event => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onLocate(finding.file, finding.startLine);
+            }
+          }}>{finding.file} / {line}</span>
+          : <small>{finding.file} / {line}</small>}</span>
         <span className="finding-badges">
           <StatusBadge value={finding.severity} />
           <StatusBadge value={finding.confidence} />

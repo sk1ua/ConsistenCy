@@ -2,6 +2,8 @@ import { z } from "zod";
 import { reviewJobSchema } from "./job";
 import { notebookCardKindSchema, notebookSchema, notebookSourceSchema } from "./notebook";
 import { reviewReportSchema, riskLevelSchema } from "./report";
+import { workflowSpecSchema } from "./workflow";
+import { vcsChangedFileSchema } from "./vcs";
 
 export const jobListResponseSchema = z.object({ jobs: z.array(reviewJobSchema) }).strict();
 export const jobDetailResponseSchema = z.object({ job: reviewJobSchema }).strict();
@@ -66,6 +68,31 @@ export const notebookCardRequestSchema = z.object({
   sourceJobIds: z.array(z.string().trim().min(1)).min(1).max(20)
 }).strict();
 
+export const workflowSourceSchema = z.enum(["builtin", "draft"]);
+export const workflowSummarySchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().optional(),
+  source: workflowSourceSchema,
+  nodeCount: z.number().int().nonnegative(),
+  verifierCount: z.number().int().nonnegative()
+}).strict();
+export const workflowListResponseSchema = z.object({
+  workflows: z.array(workflowSummarySchema)
+}).strict();
+export const workflowResponseSchema = z.object({
+  workflow: workflowSpecSchema,
+  source: workflowSourceSchema
+}).strict();
+/** PUT body for saving a workflow draft; the route name must equal `name`. */
+export const saveWorkflowRequestSchema = workflowSpecSchema;
+
+export const jobDiffResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  files: z.array(vcsChangedFileSchema),
+  /** False when the checkout is gone and no diff can be computed. */
+  available: z.boolean()
+}).strict();
+
 export type JobListResponse = z.infer<typeof jobListResponseSchema>;
 export type JobDetailResponse = z.infer<typeof jobDetailResponseSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;
@@ -78,3 +105,8 @@ export type LocalReviewRequest = z.infer<typeof localReviewRequestSchema>;
 export type LocalReviewResponse = z.infer<typeof localReviewResponseSchema>;
 export type NotebookMessageRequest = z.infer<typeof notebookMessageRequestSchema>;
 export type NotebookCardRequest = z.infer<typeof notebookCardRequestSchema>;
+export type WorkflowSource = z.infer<typeof workflowSourceSchema>;
+export type WorkflowSummary = z.infer<typeof workflowSummarySchema>;
+export type WorkflowListResponse = z.infer<typeof workflowListResponseSchema>;
+export type WorkflowResponse = z.infer<typeof workflowResponseSchema>;
+export type JobDiffResponse = z.infer<typeof jobDiffResponseSchema>;

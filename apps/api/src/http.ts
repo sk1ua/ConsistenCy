@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ZodError } from "zod";
-import { localReviewRequestSchema, notebookCardRequestSchema, notebookMessageRequestSchema, publicPrRequestSchema } from "@consistency/schema";
-import type { HeartbeatPulse, HeartbeatStreamEvent } from "@consistency/schema";
+import { localReviewRequestSchema, notebookCardRequestSchema, notebookMessageRequestSchema, publicPrRequestSchema, saveWorkflowRequestSchema } from "@consistency/schema";
+import type { HeartbeatPulse, HeartbeatStreamEvent, VcsChangedFile } from "@consistency/schema";
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
 import { seedDemoData } from "./api/demoSeed";
 import { buildHealthPayload } from "./health";
@@ -16,11 +16,13 @@ import { PublicPrError } from "./review/publicPr";
 import type { NotebookGraph } from "./notebook/graph";
 import type { NotebookStore } from "./notebook/store";
 import type { ReviewJob } from "./jobQueue";
+import type { WorkflowStore } from "./workflows/store";
+import { JobDiffError, type JobDiffResult } from "./review/jobDiff";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
 class ApiError extends Error {
-  constructor(message: string, public readonly code: string, public readonly statusCode: number) {
+  constructor(message: string, public readonly code: string, public readonly statusCode: number, public readonly details?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
   }
@@ -52,7 +54,7 @@ function responseHeaders(request: IncomingMessage, allowedOrigins: string[]): Re
   const origin = request.headers.origin;
   return {
     "access-control-allow-headers": "authorization,content-type,x-github-event,x-github-delivery,x-hub-signature-256",
-    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     ...(origin && allowedOrigins.includes(origin) ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
     "content-type": "application/json; charset=utf-8"
   };
@@ -89,7 +91,7 @@ function sendError(request: IncomingMessage, response: ServerResponse, error: un
     return;
   }
   if (error instanceof ApiError || error instanceof WebhookError) {
-    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error instanceof ApiError ? error.details : undefined), allowedOrigins);
     return;
   }
   if (error instanceof PublicPrError) {
@@ -149,6 +151,8 @@ export type CreateApiServerOptions = {
     latest: () => HeartbeatPulse | undefined;
     subscribe: (subscriber: (event: HeartbeatStreamEvent) => void) => () => void;
   };
+  workflows?: WorkflowStore;
+  jobDiff?: (jobId: string) => Promise<JobDiffResult>;
   notebookEnabled?: boolean;
   notebookStore?: NotebookStore;
   notebookGraph?: NotebookGraph;
@@ -296,6 +300,68 @@ const routes: Route[] = [
     }
   },
   {
+    method: "GET",
+    path: "/workflows",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      sendJson(request, response, 200, { workflows: options.workflows.list() }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflows\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const found = options.workflows.get(name);
+      if (!found) throw new ApiError("Workflow not found", "WORKFLOW_NOT_FOUND", 404);
+      sendJson(request, response, 200, { workflow: found.spec, source: found.source }, allowedOrigins);
+    }
+  },
+  {
+    method: "PUT",
+    path: /^\/workflows\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const body = await readJson(request);
+      const parsed = saveWorkflowRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new ApiError("Workflow is invalid", "INVALID_WORKFLOW", 400, {
+          issues: parsed.error.issues.map(issue => ({ path: issue.path, message: issue.message }))
+        });
+      }
+      if (parsed.data.name !== name) {
+        throw new ApiError("Workflow name in the body must match the route", "WORKFLOW_NAME_MISMATCH", 400);
+      }
+      try {
+        options.workflows.saveDraft(parsed.data);
+      } catch (error) {
+        throw new ApiError(error instanceof Error ? error.message : "Workflow draft could not be saved", "WORKFLOW_SAVE_FAILED", 400);
+      }
+      sendJson(request, response, 200, { workflow: parsed.data, source: "draft" }, allowedOrigins);
+    }
+  },
+  {
+    method: "DELETE",
+    path: /^\/workflows\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      const name = decodeURIComponent(match?.[1] ?? "");
+      if (options.workflows.isBuiltin(name)) {
+        throw new ApiError("Builtin workflows cannot be deleted", "BUILTIN_WORKFLOW_PROTECTED", 409);
+      }
+      if (!options.workflows.deleteDraft(name)) {
+        throw new ApiError("Workflow draft not found", "WORKFLOW_DRAFT_NOT_FOUND", 404);
+      }
+      sendJson(request, response, 204, undefined, allowedOrigins);
+    }
+  },
+  {
     method: "POST",
     path: "/github/webhook",
     auth: false,
@@ -320,6 +386,24 @@ const routes: Route[] = [
       const notebook = options.notebookStore.get(id);
       if (!notebook) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
       sendJson(request, response, 200, { sources: notebook.sources }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/diff$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.jobDiff) throw new ApiError("Diff is not configured", "DIFF_UNAVAILABLE", 503);
+      const jobId = decodeURIComponent(match?.[1] ?? "");
+      try {
+        const result = await options.jobDiff(jobId);
+        sendJson(request, response, 200, { jobId, files: result.files, available: result.available }, allowedOrigins);
+      } catch (error) {
+        if (error instanceof JobDiffError) {
+          throw new ApiError(error.message, error.code, error.statusCode);
+        }
+        throw error;
+      }
     }
   },
   {
@@ -582,6 +666,8 @@ export function createApiServer(options: CreateApiServerOptions = {}) {
       });
 
     } catch (error) {
+      console.error(`[api error] ${sanitizePublicError(error instanceof Error ? error.message : String(error))}`);
+      if (nodeEnv === "development" && error instanceof Error) console.error(error.stack);
       sendError(request, response, error, allowedOrigins);
     }
   });

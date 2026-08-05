@@ -131,11 +131,15 @@ class RunWorkflowRequest:
 
     Additive alongside `analyze`: the existing action keeps its response shape,
     so a caller opts into the DAG engine by choosing this action.
+
+    `spec` is optional. When present it carries a complete WorkflowSpec v2 and
+    takes precedence over `workflow`, which then only names the spec for logs.
     """
 
     id: str = "req_default"
     action: str = "run_workflow"
     workflow: str = ""
+    spec: Optional[Dict[str, Any]] = None
     files: List[FileInput] = field(default_factory=list)
     workspace_path: Optional[str] = None
     options: Dict[str, Any] = field(default_factory=dict)
@@ -146,7 +150,7 @@ class RunWorkflowRequest:
             raise ValueError("RunWorkflowRequest data must be a dictionary")
         _check_keys(
             data,
-            {"id", "action", "workflow", "files", "workspace_path", "options"},
+            {"id", "action", "workflow", "spec", "files", "workspace_path", "options"},
             "RunWorkflowRequest",
         )
 
@@ -161,6 +165,10 @@ class RunWorkflowRequest:
         workflow = data.get("workflow")
         if not isinstance(workflow, str) or not workflow.strip():
             raise ValueError("RunWorkflowRequest requires a non-empty string 'workflow'")
+
+        spec = data.get("spec")
+        if spec is not None and not isinstance(spec, dict):
+            raise ValueError("RunWorkflowRequest 'spec' must be a dictionary or null")
 
         if "files" not in data or not isinstance(data["files"], list):
             raise ValueError("RunWorkflowRequest requires a list for 'files'")
@@ -177,13 +185,14 @@ class RunWorkflowRequest:
             id=data["id"],
             action="run_workflow",
             workflow=workflow.strip(),
+            spec=spec,
             files=[FileInput.from_dict(f) for f in data["files"]],
             workspace_path=workspace_path,
             options=options,
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "id": self.id,
             "action": self.action,
             "workflow": self.workflow,
@@ -191,6 +200,9 @@ class RunWorkflowRequest:
             "workspace_path": self.workspace_path,
             "options": self.options,
         }
+        if self.spec is not None:
+            payload["spec"] = self.spec
+        return payload
 
 
 @dataclass

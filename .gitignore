@@ -36,6 +36,7 @@ probe-*.tmp.mjs
 verify-*.tmp.mjs
 /ui-*.png
 /.codex-screenshot-doc.diff
+/.playwright-cli/
 
 # Logs and local databases
 *.log

@@ -16,7 +16,8 @@ describe("SQLite foundation", () => {
         "0006_agent_run_provider_metadata",
         "0007_notebook_citations",
         "0008_public_read_access_mode",
-        "0009_local_git_jobs"
+        "0009_local_git_jobs",
+        "0010_local_notebook_sources"
       ]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
@@ -73,7 +74,8 @@ describe("SQLite foundation", () => {
         "0006_agent_run_provider_metadata",
         "0007_notebook_citations",
         "0008_public_read_access_mode",
-        "0009_local_git_jobs"
+        "0009_local_git_jobs",
+        "0010_local_notebook_sources"
       ]);
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
@@ -117,7 +119,8 @@ describe("SQLite foundation", () => {
         "0006_agent_run_provider_metadata",
         "0007_notebook_citations",
         "0008_public_read_access_mode",
-        "0009_local_git_jobs"
+        "0009_local_git_jobs",
+        "0010_local_notebook_sources"
       ]);
 
       // Assert data preserved
@@ -217,7 +220,7 @@ describe("0009_local_git_jobs", () => {
       runMigrations(database, upTo0008);
       seedGitHubJob(database);
 
-      expect(runMigrations(database, migrations)).toEqual(["0009_local_git_jobs"]);
+      expect(runMigrations(database, migrations)).toEqual(["0009_local_git_jobs", "0010_local_notebook_sources"]);
 
       const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_kept'").get() as any;
       expect(job).toMatchObject({

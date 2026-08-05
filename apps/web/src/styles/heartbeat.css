@@ -1,0 +1,149 @@
+/* ===== Heartbeat live status ===== */
+.heartbeat-card {
+  margin-bottom: var(--space-md);
+}
+
+.heartbeat-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.heartbeat-live i,
+.heartbeat-live-dot,
+.heartbeat-state i,
+.sidebar-signal-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.sidebar-signal-dot {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.sidebar-signal-dot.signal-degraded,
+.heartbeat-state-degraded i {
+  background: var(--warning);
+}
+
+.sidebar-signal-dot.signal-unavailable,
+.heartbeat-state-stopped i {
+  background: var(--danger);
+}
+
+.sidebar-signal-dot.signal-scanning,
+.sidebar-signal-dot.signal-indexing,
+.heartbeat-state-scanning i,
+.heartbeat-state-indexing i {
+  background: var(--primary);
+}
+
+.heartbeat-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.heartbeat-state-idle i {
+  background: var(--success);
+}
+
+.heartbeat-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-sm);
+  margin: var(--space-md) 0;
+}
+
+.heartbeat-metric {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.heartbeat-metric svg {
+  color: var(--muted);
+}
+
+.heartbeat-metric span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.heartbeat-metric strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.heartbeat-trend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
+.heartbeat-trend > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.heartbeat-trend span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.heartbeat-trend .trend-up {
+  color: var(--danger);
+}
+
+.heartbeat-trend .trend-down {
+  color: var(--success);
+}
+
+.heartbeat-sparkline {
+  color: var(--primary);
+  flex: 0 0 auto;
+}
+
+.heartbeat-observed {
+  display: block;
+  margin-top: var(--space-sm);
+  color: var(--muted);
+}
+
+.heartbeat-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@keyframes heartbeat-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(22, 133, 107, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(22, 133, 107, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(22, 133, 107, 0);
+  }
+}

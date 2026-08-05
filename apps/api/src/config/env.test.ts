@@ -14,6 +14,25 @@ describe("loadEnv", () => {
     expect(config.GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
   });
 
+  it("enables the heartbeat by default in development and stays opt-in in production", () => {
+    expect(loadEnv({}).heartbeatEnabled).toBe(true);
+    expect(loadEnv({ NODE_ENV: "test" }).heartbeatEnabled).toBe(true);
+    expect(loadEnv({ CONSISTENCY_HEARTBEAT_ENABLED: "false" }).heartbeatEnabled).toBe(false);
+    expect(loadEnv({
+      NODE_ENV: "production",
+      CONSISTENCY_API_TOKEN: "api-token",
+      CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED: "true",
+      CONSISTENCY_NOTEBOOK_ENABLED: "true"
+    }).heartbeatEnabled).toBe(false);
+    expect(loadEnv({
+      NODE_ENV: "production",
+      CONSISTENCY_API_TOKEN: "api-token",
+      CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED: "true",
+      CONSISTENCY_NOTEBOOK_ENABLED: "true",
+      CONSISTENCY_HEARTBEAT_ENABLED: "true"
+    }).heartbeatEnabled).toBe(true);
+  });
+
   it("parses origins and rejects invalid ports", () => {
     const config = loadEnv({
       PORT: "9000",

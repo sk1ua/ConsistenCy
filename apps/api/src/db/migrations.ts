@@ -437,6 +437,37 @@ export const migrations: readonly Migration[] = [
         throw new Error(`Foreign key integrity check failed after migration 0009_local_git_jobs: ${JSON.stringify(violations)}`);
       }
     }
+  },
+  {
+    id: "0010_local_notebook_sources",
+    up(database) {
+      // Local repository reviews have no pull request, so notebook sources
+      // must allow a NULL pull_request_number.
+      database.exec(`
+        CREATE TABLE notebook_sources_v2 (
+          id TEXT PRIMARY KEY,
+          notebook_id TEXT NOT NULL,
+          job_id TEXT NOT NULL,
+          repository_full_name TEXT NOT NULL,
+          pull_request_number INTEGER,
+          base_sha TEXT NOT NULL,
+          head_sha TEXT NOT NULL,
+          index_status TEXT NOT NULL CHECK (index_status IN ('queued', 'indexing', 'ready', 'failed')),
+          indexed_at TEXT,
+          error TEXT,
+          UNIQUE(notebook_id, job_id),
+          FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE,
+          FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO notebook_sources_v2 SELECT * FROM notebook_sources;
+        DROP TABLE notebook_sources;
+        ALTER TABLE notebook_sources_v2 RENAME TO notebook_sources;
+
+        CREATE INDEX notebook_sources_notebook_idx ON notebook_sources(notebook_id, head_sha);
+        PRAGMA foreign_key_check;
+      `);
+    }
   }
 ];
 

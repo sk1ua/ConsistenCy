@@ -30,7 +30,7 @@ export function JobsPage({ jobs, onOpenJob }: { jobs: ReviewJob[]; onOpenJob: (j
     <div className="data-table jobs-table">
       <div className="table-row table-head"><span>{t("Repository / PR")}</span><span>{t("Status")}</span><span>{t("Risk")}</span><span>{t("Findings")}</span><span>{t("Commit range")}</span><span>{t("Created")}</span></div>
       {filtered.map(job => <button className="table-row" key={job.id} type="button" onClick={() => onOpenJob(job)}>
-        <span><strong>{job.repositoryFullName}</strong><small>PR #{job.pullRequestNumber}</small></span>
+        <span><strong>{job.repositoryFullName}</strong><small>{job.pullRequestNumber === undefined ? t("Local repository") : `PR #${job.pullRequestNumber}`}</small></span>
         <span><StatusBadge value={job.status} /></span>
         <span>{job.report ? <StatusBadge value={job.report.riskLevel} /> : "-"}</span>
         <span>{job.report?.findings.length ?? "-"}</span>

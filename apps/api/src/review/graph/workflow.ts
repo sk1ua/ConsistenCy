@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { END, START, StateGraph } from "@langchain/langgraph";
-import type { AgentRun, DomainAnalyzeResponse, ReviewAccessMode } from "@consistency/schema";
+import type { AgentRun, DomainAnalyzeResponse, ReviewAccessMode, WorkflowSpec } from "@consistency/schema";
 import { workflowRunToAnalyzeResult } from "../workflowAdapter";
 import { knowledgeIndexPathFor } from "../knowledgeIndex";
 import type { ReviewJobStore } from "../../jobQueue";
@@ -31,6 +31,8 @@ export type ReviewWorkflowDependencies = {
    * single-shot `analyze` action; undefined uses `DEFAULT_REVIEW_WORKFLOW`.
    */
   reviewWorkflow?: string | null;
+  /** Resolves a draft workflow to its inline spec; builtins stay name-based. */
+  reviewWorkflowSpec?: (name: string) => WorkflowSpec | undefined;
   /** Used to locate the sibling `knowledge/` directory for project memory. */
   workspaceRoot?: string;
 };
@@ -42,9 +44,13 @@ export type ReviewWorkflowDependencies = {
 async function runWorkflowStage(
   analyzer: DeterministicAnalyzer,
   workflow: string,
-  files: DeterministicFileInput[]
+  files: DeterministicFileInput[],
+  resolveSpec?: (name: string) => WorkflowSpec | undefined
 ): Promise<DomainAnalyzeResponse> {
-  const response = await analyzer.runWorkflow(workflow, files);
+  const spec = resolveSpec?.(workflow);
+  const response = spec
+    ? await analyzer.runWorkflow(workflow, files, { spec })
+    : await analyzer.runWorkflow(workflow, files);
   if (!response.ok) return { id: "workflow", ok: false, error: response.error };
   if (response.run.status !== "succeeded") {
     return {
@@ -110,7 +116,8 @@ export function createReviewWorkflow(dependencies: ReviewWorkflowDependencies) {
         : await runWorkflowStage(
             dependencies.deterministicAnalyzer,
             dependencies.reviewWorkflow ?? DEFAULT_REVIEW_WORKFLOW,
-            files
+            files,
+            dependencies.reviewWorkflowSpec
           );
       if (!response.ok) {
         const errorMsg = `Deterministic analysis failed: ${response.error}`;

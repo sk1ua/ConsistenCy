@@ -7,13 +7,24 @@ import {
   publicPrResponseSchema,
   notebookResponseSchema,
   notebookSourcesResponseSchema,
+  workflowListResponseSchema,
+  workflowResponseSchema,
+  jobDiffResponseSchema,
+  heartbeatPulseSchema,
+  heartbeatStreamEventSchema,
   type JobStatus,
   type Notebook,
   type NotebookCardKind,
   type ReviewJob,
   type ReviewReport,
   type Severity,
-  type StatsResponse
+  type StatsResponse,
+  type HeartbeatPulse,
+  type HeartbeatStreamEvent,
+  type WorkflowResponse,
+  type WorkflowSpec,
+  type WorkflowSummary,
+  type JobDiffResponse
 } from "@consistency/schema";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8787";
@@ -156,6 +167,24 @@ async function openSse(path: string, payload: unknown): Promise<Response> {
   return response;
 }
 
+async function openGetSse(path: string, signal?: AbortSignal): Promise<Response> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    headers: {
+      accept: "text/event-stream",
+      ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {})
+    },
+    signal
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const message = typeof body === "object" && body && "error" in body
+      ? (body as { error?: { message?: string } }).error?.message
+      : undefined;
+    throw new Error(message ?? `Heartbeat stream failed with ${response.status}`);
+  }
+  return response;
+}
+
 export const api = {
   async jobs(filters: { status?: JobStatus; repository?: string; severity?: Severity } = {}): Promise<ReviewJob[]> {
     const query = new URLSearchParams();
@@ -171,6 +200,9 @@ export const api = {
   async report(id: string): Promise<ReviewReport> {
     return reportResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/report`)).report;
   },
+  async jobDiff(id: string): Promise<JobDiffResponse> {
+    return jobDiffResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/diff`));
+  },
   async jobNotebook(jobId: string): Promise<string | null> {
     return (await request(`/jobs/${encodeURIComponent(jobId)}/notebook`) as { notebookId: string | null }).notebookId;
   },
@@ -182,6 +214,16 @@ export const api = {
   },
   async health(): Promise<HealthResponse> {
     return await request("/health") as HealthResponse;
+  },
+  async heartbeat(): Promise<HeartbeatPulse | null> {
+    const payload = await request("/heartbeat") as { pulse?: HeartbeatPulse | null };
+    return payload.pulse === undefined || payload.pulse === null ? null : heartbeatPulseSchema.parse(payload.pulse);
+  },
+  async *heartbeatStream(signal?: AbortSignal): AsyncIterable<HeartbeatStreamEvent> {
+    const response = await openGetSse("/heartbeat/stream", signal);
+    for await (const event of readSse(response)) {
+      yield heartbeatStreamEventSchema.parse(event.data);
+    }
   },
   async settings(): Promise<SettingsSnapshot> {
     return (await request("/settings") as { settings: SettingsSnapshot }).settings;
@@ -208,5 +250,20 @@ export const api = {
   async *streamNotebookCard(id: string, kind: NotebookCardKind, sourceJobIds: string[]): AsyncIterable<NotebookStreamEvent> {
     const response = await openSse(`/notebooks/${encodeURIComponent(id)}/cards`, { kind, sourceJobIds });
     yield* readSse(response);
+  },
+  async workflows(): Promise<WorkflowSummary[]> {
+    return workflowListResponseSchema.parse(await request("/workflows")).workflows;
+  },
+  async workflow(name: string): Promise<WorkflowResponse> {
+    return workflowResponseSchema.parse(await request(`/workflows/${encodeURIComponent(name)}`));
+  },
+  async saveWorkflow(spec: WorkflowSpec): Promise<WorkflowResponse> {
+    return workflowResponseSchema.parse(await request(`/workflows/${encodeURIComponent(spec.name)}`, {
+      method: "PUT",
+      body: JSON.stringify(spec)
+    }));
+  },
+  async deleteWorkflow(name: string): Promise<void> {
+    await request(`/workflows/${encodeURIComponent(name)}`, { method: "DELETE" });
   }
 };

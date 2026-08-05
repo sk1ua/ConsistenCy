@@ -1,0 +1,66 @@
+/* ===== Motion: transitions and entrance/exit ===== */
+.app-view {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-sidebar {
+  transition: transform var(--duration-normal) var(--ease-standard);
+}
+
+.sidebar-backdrop {
+  transition: opacity var(--duration-normal) var(--ease-standard);
+}
+
+button,
+.secondary-button,
+.primary-button,
+.icon-button,
+.menu-button,
+.workflow-node {
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.app-sidebar nav button {
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.icon-button:hover {
+  transform: translateY(-1px);
+}
+
+.secondary-button:hover,
+.primary-button:hover {
+  transform: translateY(-1px);
+}
+
+.api-status i,
+.sidebar-signal strong i {
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning,
+  .heartbeat-live-dot {
+    animation: none;
+  }
+
+  button,
+  .secondary-button,
+  .primary-button,
+  .icon-button:hover,
+  .secondary-button:hover,
+  .primary-button:hover {
+    transform: none;
+  }
+}

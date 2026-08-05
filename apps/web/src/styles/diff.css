@@ -1,0 +1,230 @@
+/* ===== Diff workspace ===== */
+.finding-locate {
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.diff-viewer {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: var(--space-md);
+  align-items: stretch;
+  min-height: 420px;
+}
+
+.diff-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  max-height: 640px;
+  overflow: auto;
+}
+
+.diff-file-list h3 {
+  margin: 0 0 var(--space-sm);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.diff-file-list button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-file-list button:hover {
+  background: var(--surface-subtle);
+}
+
+.diff-file-list button.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.diff-file-list code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-file-list small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.diff-status-added,
+.diff-status-untracked {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.diff-status-modified,
+.diff-status-type_changed {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.diff-status-deleted {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.diff-status-renamed,
+.diff-status-copied {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.diff-content {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: auto;
+  max-height: 640px;
+}
+
+.diff-file-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.diff-file-head strong {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 52px minmax(0, 1fr);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diff-row {
+  display: contents;
+}
+
+.diff-row > span {
+  padding: 0 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.diff-ln {
+  color: var(--muted);
+  text-align: right;
+  user-select: none;
+  background: var(--surface-subtle);
+}
+
+.diff-code {
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-row-add .diff-code:nth-of-type(2),
+.diff-row-add .diff-code:nth-of-type(4) {
+  background: var(--success-soft);
+}
+
+.diff-row-del .diff-code:nth-of-type(2) {
+  background: var(--danger-soft);
+}
+
+.diff-row-add .diff-ln:nth-of-type(3) {
+  background: var(--success-soft);
+}
+
+.diff-row-del .diff-ln:nth-of-type(1) {
+  background: var(--danger-soft);
+}
+
+.diff-row.diff-finding .diff-code {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.diff-row.diff-finding-critical .diff-code {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.diff-row.diff-finding-high .diff-code {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
+.diff-row.diff-finding-medium .diff-code {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.diff-row.diff-finding-low .diff-code {
+  box-shadow: inset 3px 0 0 var(--success);
+}
+
+.diff-row.diff-active > span {
+  outline: 1px solid var(--primary);
+  outline-offset: -1px;
+}
+
+.diff-popover {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  padding: 8px 12px !important;
+  background: var(--surface) !important;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(23, 32, 42, 0.12);
+}
+
+.diff-popover span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  .diff-viewer {
+    grid-template-columns: 1fr;
+  }
+}

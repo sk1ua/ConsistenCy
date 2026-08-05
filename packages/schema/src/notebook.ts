@@ -32,7 +32,8 @@ export const notebookCitationSchema = z.object({
 export const notebookSourceSchema = z.object({
   id: z.string().trim().min(1),
   repository: z.string().trim().min(1),
-  pullRequestNumber: z.number().int().positive(),
+  /** Absent for local repository reviews, which have no pull request. */
+  pullRequestNumber: z.number().int().positive().optional(),
   jobId: z.string().trim().min(1),
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),

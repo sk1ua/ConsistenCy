@@ -6,6 +6,10 @@ import "./styles.css";
 import "./workspace-enhancements.css";
 import "./settings-guidance.css";
 import "./notebook-dialog.css";
+import "./styles/heartbeat.css";
+import "./styles/workflow.css";
+import "./styles/diff.css";
+import "./styles/motion.css";
 
 const root = document.getElementById("root");
 

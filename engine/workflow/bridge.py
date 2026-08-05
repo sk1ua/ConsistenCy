@@ -6,7 +6,9 @@ from ..protocol import RunWorkflowRequest, RunWorkflowResponse
 from .builtins import register_builtin_plugins
 from .plugins import AnalysisContext, BaseAnalyzerPlugin, PluginReport
 from .runner import run_workflow_sync
-from .spec import WorkflowSpecError, load_builtin_workflow
+from .spec import WorkflowSpecError, load_builtin_workflow, load_workflow_spec
+
+MAX_INLINE_SPEC_BYTES = 256 * 1024
 
 
 class _SynthesizerPlaceholder(BaseAnalyzerPlugin):
@@ -39,17 +41,36 @@ def _resolver():
 
 
 def run_workflow_request(request: RunWorkflowRequest) -> RunWorkflowResponse:
-    """Execute the named builtin workflow over the request's files."""
+    """Execute a builtin or inline workflow over the request's files."""
     register_builtin_plugins()
 
-    try:
-        spec = load_builtin_workflow(request.workflow)
-    except (WorkflowSpecError, FileNotFoundError) as error:
-        return RunWorkflowResponse(
-            id=request.id,
-            ok=False,
-            error=f"Unknown or invalid workflow '{request.workflow}': {error}",
-        )
+    if request.spec is not None:
+        import json
+
+        serialized = json.dumps(request.spec, ensure_ascii=False, separators=(",", ":"))
+        if len(serialized.encode("utf-8")) > MAX_INLINE_SPEC_BYTES:
+            return RunWorkflowResponse(
+                id=request.id,
+                ok=False,
+                error=f"Inline workflow spec exceeds the {MAX_INLINE_SPEC_BYTES} byte limit",
+            )
+        try:
+            spec = load_workflow_spec(request.spec)
+        except WorkflowSpecError as error:
+            return RunWorkflowResponse(
+                id=request.id,
+                ok=False,
+                error=f"Invalid inline workflow spec: {error}",
+            )
+    else:
+        try:
+            spec = load_builtin_workflow(request.workflow)
+        except (WorkflowSpecError, FileNotFoundError) as error:
+            return RunWorkflowResponse(
+                id=request.id,
+                ok=False,
+                error=f"Unknown or invalid workflow '{request.workflow}': {error}",
+            )
 
     files = {file_input.path: file_input.content for file_input in request.files}
     baselines = {

@@ -43,6 +43,26 @@ class RunWorkflowRequestParsingTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unexpected field"):
             RunWorkflowRequest.from_dict(_request(command="rm -rf /"))
 
+    def test_parses_and_round_trips_an_inline_spec(self):
+        spec = {
+            "version": 2,
+            "name": "inline-check",
+            "nodes": [{"id": "structure", "uses": "engine.structural", "timeoutMs": 120000}],
+            "verifiers": [],
+            "synthesizer": {"needs": ["structure"], "timeoutMs": 120000},
+        }
+        request = RunWorkflowRequest.from_dict(_request(spec=spec))
+        self.assertEqual(request.spec, spec)
+        self.assertEqual(request.to_dict()["spec"]["name"], "inline-check")
+
+    def test_omits_spec_from_wire_payload_when_absent(self):
+        payload = RunWorkflowRequest.from_dict(_request()).to_dict()
+        self.assertNotIn("spec", payload)
+
+    def test_rejects_a_non_dict_spec(self):
+        with self.assertRaisesRegex(ValueError, "'spec' must be a dictionary"):
+            RunWorkflowRequest.from_dict(_request(spec="not-a-spec"))
+
 
 class RunWorkflowBridgeTest(unittest.TestCase):
     def test_executes_a_builtin_workflow_and_reports_evidence(self):
@@ -78,7 +98,45 @@ class RunWorkflowBridgeTest(unittest.TestCase):
             RunWorkflowRequest.from_dict(_request(options={"max_parallelism": 0}))
         )
         self.assertFalse(response.ok)
-        self.assertIn("max_parallelism", response.error)
+
+    def test_executes_an_inline_spec_and_reports_evidence(self):
+        spec = {
+            "version": 2,
+            "name": "inline-drift",
+            "description": "Inline structural check",
+            "nodes": [{"id": "structure", "uses": "engine.structural", "timeoutMs": 120000}],
+            "verifiers": [],
+            "synthesizer": {"needs": ["structure"], "timeoutMs": 120000},
+        }
+        response = run_workflow_request(RunWorkflowRequest.from_dict(_request(spec=spec)))
+        self.assertTrue(response.ok, response.error)
+        self.assertEqual(response.run["specName"], "inline-drift")
+        self.assertEqual(response.run["status"], "succeeded")
+
+    def test_rejects_an_inline_spec_with_an_unknown_kind(self):
+        spec = {
+            "version": 2,
+            "name": "bad-kind",
+            "nodes": [{"id": "mystery", "uses": "engine.nope", "timeoutMs": 120000}],
+            "verifiers": [],
+            "synthesizer": {"needs": ["mystery"], "timeoutMs": 120000},
+        }
+        response = run_workflow_request(RunWorkflowRequest.from_dict(_request(spec=spec)))
+        self.assertFalse(response.ok)
+        self.assertIn("Invalid inline workflow spec", response.error)
+
+    def test_rejects_an_oversized_inline_spec(self):
+        spec = {
+            "version": 2,
+            "name": "huge",
+            "description": "x" * (300 * 1024),
+            "nodes": [{"id": "structure", "uses": "engine.structural", "timeoutMs": 120000}],
+            "verifiers": [],
+            "synthesizer": {"needs": ["structure"], "timeoutMs": 120000},
+        }
+        response = run_workflow_request(RunWorkflowRequest.from_dict(_request(spec=spec)))
+        self.assertFalse(response.ok)
+        self.assertIn("byte limit", response.error)
 
     def test_every_artifact_carries_the_same_input_digest(self):
         response = run_workflow_request(RunWorkflowRequest.from_dict(_request()))

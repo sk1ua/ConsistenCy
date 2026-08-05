@@ -8,6 +8,7 @@ export function toApiJob(job: ReviewJob): ApiReviewJob {
     status: job.status,
     repositoryFullName: job.repository,
     pullRequestNumber: job.pullRequestNumber!,
+    repoPath: job.repoPath,
     installationId: job.installationId,
     accessMode: job.accessMode,
     baseSha: job.baseSha!,

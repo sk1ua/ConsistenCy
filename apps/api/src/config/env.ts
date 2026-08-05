@@ -34,7 +34,7 @@ export const envSchema = z.object({
   CONSISTENCY_PUBLISH_LEASE_DURATION_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   CONSISTENCY_PUBLISH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
   CONSISTENCY_PUBLISH_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
-  /** The daemon reads a live working tree, so it stays opt-in. */
+  /** The daemon reads a live working tree. Defaults to enabled in development; production stays opt-in. */
   CONSISTENCY_HEARTBEAT_ENABLED: z.enum(["true", "false"]).default("false"),
   CONSISTENCY_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(30_000),
   /**
@@ -130,6 +130,11 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   const notebookEnabled = parsed.NODE_ENV === "production"
     ? input.CONSISTENCY_NOTEBOOK_ENABLED === "true"
     : parsed.CONSISTENCY_NOTEBOOK_ENABLED === "true";
+  // Development defaults to enabled so the live dashboard works out of the box;
+  // production requires an explicit opt-in because the daemon reads a working tree.
+  const heartbeatEnabled = input.CONSISTENCY_HEARTBEAT_ENABLED !== undefined
+    ? parsed.CONSISTENCY_HEARTBEAT_ENABLED === "true"
+    : parsed.NODE_ENV !== "production";
   return {
     ...parsed,
     LLM_PROVIDER: llmProvider,
@@ -142,7 +147,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     publicPrAnalysisEnabled,
     reportLanguage: parsed.CONSISTENCY_REPORT_LANGUAGE,
     notebookEnabled,
-    heartbeatEnabled: parsed.CONSISTENCY_HEARTBEAT_ENABLED === "true",
+    heartbeatEnabled,
     heartbeatRepoPath: findProjectRoot(),
     reviewWorkflow: parsed.CONSISTENCY_REVIEW_WORKFLOW === "legacy"
       ? null

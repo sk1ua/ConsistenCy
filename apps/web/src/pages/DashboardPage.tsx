@@ -2,8 +2,10 @@ import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema
 import { Activity, ArrowRight, CheckCircle2, FileText, Github, GitPullRequest, Radar, Timer } from "lucide-react";
 import { useState } from "react";
 import { EvidencePanel } from "../components/EvidencePanel";
+import { HeartbeatWidget } from "../components/HeartbeatWidget";
 import { StatusBadge } from "../components/StatusBadge";
 import { useI18n } from "../i18n";
+import type { HeartbeatPulse } from "@consistency/schema";
 
 function duration(milliseconds: number): string {
   if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
@@ -18,7 +20,7 @@ function jobDuration(job: ReviewJob): string {
   return duration(new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime());
 }
 
-export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onAnalyzePublicPr, publicPrAnalyzing, publicPrError, publicPrAccessMode }: {
+export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onAnalyzePublicPr, publicPrAnalyzing, publicPrError, publicPrAccessMode, heartbeat }: {
   stats: StatsResponse;
   jobs: ReviewJob[];
   reports: ReviewReport[];
@@ -28,6 +30,7 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onA
   publicPrAnalyzing?: boolean;
   publicPrError?: string;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
+  heartbeat?: { pulse: HeartbeatPulse | null; history: HeartbeatPulse[]; unavailable: boolean };
 }) {
   const { locale, t } = useI18n();
   const [publicPrUrl, setPublicPrUrl] = useState("");
@@ -66,6 +69,7 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onA
         <small>{note}</small>
       </article>)}
     </section>
+    {heartbeat && <HeartbeatWidget pulse={heartbeat.pulse} history={heartbeat.history} unavailable={heartbeat.unavailable} />}
 
     <section className="dashboard-split">
       <article className="section-block risk-panel">

@@ -1,7 +1,10 @@
 import type { ReviewJob, ReviewReport } from "@consistency/schema";
+import type { VcsChangedFile } from "@consistency/schema";
 import { ArrowLeft, BookOpenText, FileSearch2, GitBranch, LoaderCircle, ShieldCheck, Sparkles } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api/client";
 import { AgentRuns } from "../components/AgentRuns";
+import { DiffViewer } from "../components/DiffViewer";
 import { EvidencePanel } from "../components/EvidencePanel";
 import { FindingItem } from "../components/FindingItem";
 import { StatusBadge } from "../components/StatusBadge";
@@ -12,7 +15,9 @@ const NotebookPanel = lazy(() => import("../components/NotebookPanel").then(modu
 export function ReportPage({ job, report, notebookId, llmProvider, llmModel, onBack }: { job?: ReviewJob; report?: ReviewReport; notebookId?: string; llmProvider?: string; llmModel?: string; onBack: () => void }) {
   const { t } = useI18n();
   const [groupBy, setGroupBy] = useState<"severity" | "agent">("severity");
-  const [workspaceView, setWorkspaceView] = useState<"notebook" | "report">(notebookId ? "notebook" : "report");
+  const [workspaceView, setWorkspaceView] = useState<"notebook" | "report" | "diff">(notebookId ? "notebook" : "report");
+  const [diffFiles, setDiffFiles] = useState<VcsChangedFile[] | null | undefined>();
+  const [diffFocus, setDiffFocus] = useState<{ file: string; line?: number }>();
   const hasNotebookRef = useRef(Boolean(notebookId));
   useEffect(() => {
     // notebookId 异步到达（从 Jobs 列表打开 job 时）自动切到 Notebook 视图
@@ -21,6 +26,19 @@ export function ReportPage({ job, report, notebookId, llmProvider, llmModel, onB
       setWorkspaceView("notebook");
     }
   }, [notebookId]);
+  useEffect(() => {
+    let cancelled = false;
+    setDiffFiles(undefined);
+    setDiffFocus(undefined);
+    if (!job) {
+      setDiffFiles(null);
+      return;
+    }
+    api.jobDiff(job.id)
+      .then(response => { if (!cancelled) setDiffFiles(response.available ? response.files : null); })
+      .catch(() => { if (!cancelled) setDiffFiles(null); });
+    return () => { cancelled = true; };
+  }, [job?.id]);
   const groups = useMemo(() => {
     if (!report) return [];
     const map = new Map<string, typeof report.findings>();
@@ -32,6 +50,7 @@ export function ReportPage({ job, report, notebookId, llmProvider, llmModel, onB
   }, [report, groupBy]);
 
   if (!job) return <div className="empty-state">{t("Select a review job to inspect its report.")}</div>;
+  const diffAvailable = diffFiles !== null;
   return <div className="page-stack report-page report-workspace">
     <button className="text-button report-back" type="button" onClick={onBack}><ArrowLeft size={17} />{t("Back to jobs")}</button>
     <section className="report-header">
@@ -47,14 +66,17 @@ export function ReportPage({ job, report, notebookId, llmProvider, llmModel, onB
       <div><span>{t("Source")}</span><span className={`badge ${job.accessMode === "public_read" ? "badge-public-read" : "badge-queued"}`}>{job.accessMode === "public_read" ? t("PUBLIC READ-ONLY") : t("GitHub App")}</span></div>
       <div><span>{t("Publication")}</span><span className="badge badge-queued">{job.publicationPolicy === "disabled" ? t("analysis only") : t("GitHub comment")}</span></div>
     </section>
-    {notebookId && <div className="workspace-mode-bar" aria-label={t("Review workspace view")}>
+    {(notebookId || diffAvailable) && <div className="workspace-mode-bar" aria-label={t("Review workspace view")}>
       <div className="workspace-mode-tabs">
-        <button type="button" className={workspaceView === "notebook" ? "active" : ""} aria-pressed={workspaceView === "notebook"} onClick={() => setWorkspaceView("notebook")}><BookOpenText size={16} />{t("Notebook workspace")}</button>
+        {notebookId && <button type="button" className={workspaceView === "notebook" ? "active" : ""} aria-pressed={workspaceView === "notebook"} onClick={() => setWorkspaceView("notebook")}><BookOpenText size={16} />{t("Notebook workspace")}</button>}
+        {diffAvailable && <button type="button" className={workspaceView === "diff" ? "active" : ""} aria-pressed={workspaceView === "diff"} onClick={() => setWorkspaceView("diff")}><FileSearch2 size={16} />{t("Diff")}</button>}
         <button type="button" className={workspaceView === "report" ? "active" : ""} aria-pressed={workspaceView === "report"} onClick={() => setWorkspaceView("report")}><FileSearch2 size={16} />{t("Review report")}</button>
       </div>
       <span className="workspace-mode-note"><Sparkles size={14} />{t("LLM dialogue, deterministic evidence")}</span>
     </div>}
-    {workspaceView === "notebook" && notebookId
+    {workspaceView === "diff"
+      ? <DiffViewer files={diffFiles ?? []} findings={report?.findings ?? []} focus={diffFocus} />
+      : workspaceView === "notebook" && notebookId
       ? <Suspense fallback={<div className="loading-state"><LoaderCircle className="spinning" size={22} /><span>{t("Loading review workspace")}</span></div>}><NotebookPanel notebookId={notebookId} /></Suspense>
       : <div className="page-stack report-details">
         {!report ? <div className="empty-state">{t("The report will appear when the review worker finishes.")}</div> : <>
@@ -63,7 +85,7 @@ export function ReportPage({ job, report, notebookId, llmProvider, llmModel, onB
               <div className="segmented"><button className={groupBy === "severity" ? "active" : ""} onClick={() => setGroupBy("severity")}>{t("Severity")}</button><button className={groupBy === "agent" ? "active" : ""} onClick={() => setGroupBy("agent")}>{t("Agent")}</button></div>
             </div>
             {groups.length === 0 ? <div className="empty-inline">{t("No findings were reported.")}</div> : groups.map(([group, findings]) => <div className="finding-group" key={group}>
-              <h3>{t(group)}<span>{findings.length}</span></h3>{findings.map(finding => <FindingItem finding={finding} key={finding.id} />)}
+              <h3>{t(group)}<span>{findings.length}</span></h3>{findings.map(finding => <FindingItem finding={finding} key={finding.id} onLocate={(file, line) => { setDiffFocus({ file, line }); setWorkspaceView("diff"); }} />)}
             </div>)}
           </section>
           <EvidencePanel retrieval={report.retrieval} />

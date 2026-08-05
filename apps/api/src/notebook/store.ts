@@ -219,7 +219,7 @@ export class SQLiteNotebookStore implements NotebookStore {
             id, notebook_id, job_id, repository_full_name, pull_request_number,
             base_sha, head_sha, index_status
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(source.id, notebookRow.id, source.jobId, source.repository, source.pullRequestNumber, source.baseSha, source.headSha, source.indexStatus);
+        `).run(source.id, notebookRow.id, source.jobId, source.repository, source.pullRequestNumber ?? null, source.baseSha, source.headSha, source.indexStatus);
         sourceRow = this.database.prepare("SELECT * FROM notebook_sources WHERE id = ?").get(source.id) as any;
       }
       this.database.prepare("UPDATE notebooks SET updated_at = ? WHERE id = ?").run(timestamp, notebookRow.id);
@@ -344,7 +344,7 @@ export class SQLiteNotebookStore implements NotebookStore {
     return notebookSourceSchema.parse({
       id: row.id,
       repository: row.repository_full_name,
-      pullRequestNumber: row.pull_request_number,
+      pullRequestNumber: row.pull_request_number ?? undefined,
       jobId: row.job_id,
       baseSha: row.base_sha,
       headSha: row.head_sha,

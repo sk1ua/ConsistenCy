@@ -11,6 +11,11 @@ test.describe("ConsistenCy Full-Stack Integration E2E Suite", () => {
         consoleErrors.push(msg.text());
       }
     });
+    page.on("response", (res) => {
+      if (res.status() === 404) {
+        consoleErrors.push(`404 ${res.url()}`);
+      }
+    });
 
     const externalRequests: string[] = [];
     page.on("request", (req) => {

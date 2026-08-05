@@ -17,6 +17,7 @@
     "@octokit/auth-app": "^8.2.0",
     "@octokit/rest": "^22.0.1",
     "better-sqlite3": "^12.10.0",
+    "js-yaml": "^5.2.3",
     "langchain": "^1.4.4",
     "pino": "^10.3.1",
     "zod": "^3.25.76",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.7",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",

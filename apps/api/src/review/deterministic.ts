@@ -18,7 +18,8 @@ import {
   type WireAnalyzeRequest,
   type WireComposeReviewRequest,
   type WireRelevantContextResponse,
-  type WireRunWorkflowResponse
+  type WireRunWorkflowResponse,
+  type WorkflowSpec
 } from "@consistency/schema";
 
 export type DeterministicFileInput = {
@@ -585,7 +586,7 @@ export class DeterministicAnalyzer {
   async runWorkflow(
     workflow: string,
     files: DeterministicFileInput[],
-    options?: { workspacePath?: string; maxParallelism?: number; timeoutMs?: number }
+    options?: { workspacePath?: string; maxParallelism?: number; timeoutMs?: number; spec?: WorkflowSpec }
   ): Promise<WireRunWorkflowResponse> {
     const timeoutMs = parseTimeoutMs(options?.timeoutMs);
     const managedProc = await this.ensureProcess();
@@ -594,7 +595,8 @@ export class DeterministicAnalyzer {
     const validatedRequest = wireRunWorkflowRequestSchema.parse({
       id,
       action: "run_workflow",
-      workflow,
+      workflow: options?.spec?.name ?? workflow,
+      ...(options?.spec ? { spec: options.spec } : {}),
       files: files.map(file => ({
         path: file.path,
         content: file.content,

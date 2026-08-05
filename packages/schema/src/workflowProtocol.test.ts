@@ -58,6 +58,24 @@ describe("run_workflow wire protocol", () => {
     expect(wireProtocolRequestSchema.parse(request).action).toBe("run_workflow");
   });
 
+  it("accepts an inline workflow spec alongside the name", () => {
+    const request = {
+      id: "req_1",
+      action: "run_workflow" as const,
+      workflow: "custom-check",
+      spec: {
+        version: 2,
+        name: "custom-check",
+        nodes: [{ id: "security", uses: "engine.security" }],
+        verifiers: [],
+        synthesizer: { needs: ["security"] }
+      },
+      files: [{ path: "a.py", content: "x = 1\n" }]
+    };
+    const parsed = wireRunWorkflowRequestSchema.parse(request);
+    expect(parsed.spec?.name).toBe("custom-check");
+  });
+
   it("rejects a request that omits the workflow name", () => {
     expect(() => wireRunWorkflowRequestSchema.parse({
       id: "req_1",

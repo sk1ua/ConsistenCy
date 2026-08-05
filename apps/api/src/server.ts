@@ -22,6 +22,8 @@ import { RepositorySnapshotIndexer } from "./notebook/indexer";
 import { NotebookGraph } from "./notebook/graph";
 import { enqueuePublicPrReview } from "./review/publicPr";
 import { fileURLToPath } from "node:url";
+import { WorkflowStore } from "./workflows/store";
+import { resolveJobDiff } from "./review/jobDiff";
 
 const { config, store: settingsStore } = loadRuntimeConfig();
 const database = openDatabase(config.databasePath);
@@ -63,6 +65,8 @@ const notebookGraph = new NotebookGraph({
   reportLanguage: config.reportLanguage
 });
 
+export const workflows = new WorkflowStore();
+
 export const worker = new ReviewWorker({
   jobStore: jobs,
   concurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
@@ -72,6 +76,10 @@ export const worker = new ReviewWorker({
     deterministicAnalyzer,
     reportLanguage: config.reportLanguage,
     reviewWorkflow: config.reviewWorkflow,
+    reviewWorkflowSpec: name => {
+      const found = workflows.get(name);
+      return found?.source === "draft" ? found.spec : undefined;
+    },
     workspaceRoot: config.workspaceRoot,
     contextBuilder: createContextBuilder({
       github: {
@@ -174,6 +182,11 @@ export const server = createApiServer({
   }),
   localReview: input => triggerLocalReview(jobs, input, {
     allowedRoots: config.localReviewRoots
+  }),
+  workflows,
+  jobDiff: jobId => resolveJobDiff(jobId, {
+    jobs,
+    workspaceRoot: config.workspaceRoot
   }),
   heartbeat: {
     latest: () => heartbeat.latest(),

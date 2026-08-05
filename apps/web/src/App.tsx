@@ -1,20 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
-import { Activity, BarChart3, BriefcaseBusiness, Clock3, FlaskConical, Globe2, Menu, RefreshCw, Settings, X } from "lucide-react";
+import { Activity, BarChart3, BriefcaseBusiness, Clock3, FlaskConical, Globe2, Menu, RefreshCw, Settings, Workflow, X } from "lucide-react";
 import { api, type HealthResponse } from "./api/client";
 import { mockJobs, mockReports, mockStats } from "./demo/mockReports";
 import { DashboardPage } from "./pages/DashboardPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ReportPage } from "./pages/ReportPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { HeartbeatWidget, heartbeatStateLabel } from "./components/HeartbeatWidget";
+import { useHeartbeat } from "./hooks/useHeartbeat";
 import { useI18n } from "./i18n";
 
-type View = "dashboard" | "jobs" | "report" | "settings";
+const WorkflowPage = lazy(() => import("./pages/WorkflowPage").then(module => ({ default: module.WorkflowPage })));
+
+type View = "dashboard" | "jobs" | "report" | "workflows" | "settings";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: BarChart3 },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "report", label: "Reports", icon: Activity },
+  { id: "workflows", label: "Workflows", icon: Workflow },
   { id: "settings", label: "Settings", icon: Settings }
 ] as const satisfies ReadonlyArray<{ id: View; label: string; icon: typeof BarChart3 }>;
 
@@ -22,17 +28,19 @@ const pageMeta: Record<View, { title: string; description: string }> = {
   dashboard: { title: "Review overview", description: "Evidence-backed signals across active pull requests" },
   jobs: { title: "Review queue", description: "Track every review from intake to decision" },
   report: { title: "Review report", description: "Inspect findings, evidence and agent decisions" },
+  workflows: { title: "Workflow builder", description: "Visualize and edit deterministic analysis workflows" },
   settings: { title: "System status", description: "Runtime readiness without exposing secret values" }
 };
 
 function initialView(): View {
   if (typeof window === "undefined") return "dashboard";
   const value = new URLSearchParams(window.location.search).get("view");
-  return value === "jobs" || value === "report" || value === "settings" ? value : "dashboard";
+  return value === "jobs" || value === "report" || value === "workflows" || value === "settings" ? value : "dashboard";
 }
 
 export function App() {
   const { locale, setLocale, t } = useI18n();
+  const { pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable } = useHeartbeat();
   const [view, setView] = useState<View>(initialView);
   const [jobs, setJobs] = useState<ReviewJob[]>([]);
   const [reports, setReports] = useState<ReviewReport[]>([]);
@@ -155,7 +163,7 @@ export function App() {
     <aside className={`app-sidebar${sidebarOpen ? " open" : ""}`}>
       <div className="brand"><img src="/consistency-logo.png" alt="" /><span><strong>Consisten<span>Cy</span></strong><small>{t("Review intelligence")}</small></span></div>
       <nav aria-label={t("Primary navigation")}>{navItems.map(({ id, label, icon: Icon }) => <button aria-current={view === id ? "page" : undefined} className={view === id ? "active" : ""} key={id} type="button" onClick={() => navigate(id)} title={t(label)}><Icon aria-hidden="true" size={18} /><span>{t(label)}</span></button>)}</nav>
-      <div className="sidebar-signal"><span>{t("Workspace signal")}</span><strong><i /> {t("Operational")}</strong><small>{t("{count} reviews observed", { count: jobs.length })}</small></div>
+      <div className="sidebar-signal"><span>{t("Workspace signal")}</span><strong><i className={`sidebar-signal-dot signal-${heartbeatUnavailable ? "unavailable" : heartbeatPulse?.state ?? "idle"}`} /> {heartbeatUnavailable ? t("Heartbeat disabled") : heartbeatPulse ? t(heartbeatStateLabel(heartbeatPulse.state)) : t("Operational")}</strong><small>{t("{count} reviews observed", { count: jobs.length })}</small></div>
     </aside>
     {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label={t("Close navigation")} onClick={() => setSidebarOpen(false)} />}
     <main className="app-main">
@@ -182,10 +190,22 @@ export function App() {
       <div className="app-content">
         {error && <div className="notice" role="status"><span className="notice-mark">!</span><span><strong>{t("Showing a local review snapshot")}</strong><small>{t("The API is unavailable. Live data will return after the next successful refresh.")}</small></span></div>}
         {loading ? <div className="loading-state"><RefreshCw size={22} /><span>{t("Loading review workspace")}</span></div> :
-          view === "dashboard" ? <DashboardPage stats={stats} jobs={jobs} reports={reports} onOpenJob={job => void openJob(job)} onOpenJobs={() => setView("jobs")} onAnalyzePublicPr={analyzePublicPr} publicPrAnalyzing={publicPrAnalyzing} publicPrError={publicPrError} publicPrAccessMode={health?.publicPrAccessMode} /> :
-          view === "jobs" ? <JobsPage jobs={jobs} onOpenJob={job => void openJob(job)} /> :
-          view === "settings" ? <SettingsPage health={health} /> :
-          <ReportPage job={selectedJob ?? (selectedJobId ? undefined : jobs.find(job => job.status === "succeeded"))} report={selectedReport ?? (selectedJobId ? undefined : reports[0])} notebookId={selectedNotebookId || undefined} llmProvider={health?.llmProvider} llmModel={health?.llmModel} onBack={() => setView("jobs")} />}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={view}
+              className="app-view"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+            >
+              {view === "dashboard" ? <DashboardPage stats={stats} jobs={jobs} reports={reports} onOpenJob={job => void openJob(job)} onOpenJobs={() => setView("jobs")} onAnalyzePublicPr={analyzePublicPr} publicPrAnalyzing={publicPrAnalyzing} publicPrError={publicPrError} publicPrAccessMode={health?.publicPrAccessMode} heartbeat={{ pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable }} /> :
+              view === "jobs" ? <JobsPage jobs={jobs} onOpenJob={job => void openJob(job)} /> :
+              view === "workflows" ? <Suspense fallback={<div className="loading-state"><RefreshCw size={22} /><span>{t("Loading workflow")}</span></div>}><WorkflowPage /></Suspense> :
+              view === "settings" ? <SettingsPage health={health} /> :
+              <ReportPage job={selectedJob ?? (selectedJobId ? undefined : jobs.find(job => job.status === "succeeded"))} report={selectedReport ?? (selectedJobId ? undefined : reports[0])} notebookId={selectedNotebookId || undefined} llmProvider={health?.llmProvider} llmModel={health?.llmModel} onBack={() => setView("jobs")} />}
+            </motion.div>
+          </AnimatePresence>}
       </div>
     </main>
   </div>;

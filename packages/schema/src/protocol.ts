@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workflowSpecSchema } from "./workflow";
 import { retrievalTraceSchema, riskLevelSchema, type RetrievalTrace, type RiskLevel } from "./report";
 import { workflowRunSchema } from "./workflow";
 import { relevantContextSchema } from "./heartbeat";
@@ -41,6 +42,8 @@ export const wireRunWorkflowRequestSchema = z.object({
   id: nonBlankStringSchema,
   action: z.literal("run_workflow"),
   workflow: nonBlankStringSchema,
+  /** Inline WorkflowSpec v2; when present the engine runs it instead of the named builtin. */
+  spec: workflowSpecSchema.optional(),
   files: z.array(wireFileInputSchema),
   workspace_path: z.string().optional().nullable(),
   options: z.record(z.unknown()).optional()

@@ -53,7 +53,8 @@ describe("PublishWorker & Outbox Pipeline Test Suite", () => {
         "0006_agent_run_provider_metadata",
         "0007_notebook_citations",
         "0008_public_read_access_mode",
-        "0009_local_git_jobs"
+        "0009_local_git_jobs",
+        "0010_local_notebook_sources"
       ]);
     } finally {
       database.close();
