@@ -34,7 +34,8 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[]): ReviewFin
 export function buildReviewReport(input: {
   jobId: string;
   repositoryFullName: string;
-  pullRequestNumber: number;
+  /** Absent for local reviews, which have no pull request. */
+  pullRequestNumber?: number;
   baseSha: string;
   headSha: string;
   summary: string;

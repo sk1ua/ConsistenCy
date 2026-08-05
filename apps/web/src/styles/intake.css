@@ -1,0 +1,85 @@
+/* ===== Public PR Intake ===== */
+.public-pr-intake {
+  position: relative;
+  overflow: hidden;
+  padding: 19px 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(390px, .95fr);
+  align-items: center;
+  gap: 18px 26px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.public-pr-intake::after {
+  display: none;
+}
+.public-pr-copy, .public-pr-intake form, .public-pr-error {
+  position: relative;
+  z-index: 1;
+}
+.public-pr-copy h2 {
+  margin: 5px 0 5px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.15;
+}
+.public-pr-copy p {
+  max-width: 640px;
+  margin: 0;
+  color: #617188;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.public-pr-intake form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.public-pr-intake label {
+  min-width: 0;
+  height: 39px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #b9c9e8;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .9);
+  color: #4b6fb9;
+}
+.public-pr-intake input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: 13px/1.4 var(--font-mono);
+}
+.public-pr-intake button {
+  height: 39px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid #2457ce;
+  border-radius: 7px;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.public-pr-intake button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+.public-pr-error {
+  grid-column: 2;
+  margin-top: -7px;
+  color: #b83b2f;
+  font-size: 12px;
+}

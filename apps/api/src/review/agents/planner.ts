@@ -25,7 +25,9 @@ export function createPlannerNode(dependencies: AgentDependencies) {
       const result = await dependencies.provider.invokeWithSchema({
         schema: reviewPlanSchema,
         schemaName: "review-plan",
-        systemPrompt: "You are the ConsistenCy review planner. Select only relevant review agents. Use the exact agent names Security, Correctness, Maintainability, Test, and Style.",
+        // Derived from the registry so a newly added agent cannot be invisible
+        // to the planner because someone forgot to update a hardcoded list.
+        systemPrompt: `You are the ConsistenCy review planner. Select only relevant review agents. Use the exact agent names ${REVIEW_AGENT_NAMES.join(", ")}.`,
         userPrompt: [
           `Changed files: ${state.context.changedFiles.map(file => file.path).join(", ")}`,
           staticSummary,

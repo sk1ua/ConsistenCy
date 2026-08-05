@@ -43,7 +43,7 @@ CONSISTENCY_NOTEBOOK_ENABLED=true
 GITHUB_PUBLIC_READ_TOKEN=
 ```
 
-`GITHUB_PUBLIC_READ_TOKEN` 留空时使用匿名 GitHub API 和匿名 clone；配置本地只读 PAT 后，API 会使用 PAT 提高读取限额。PAT 只存在 API 进程，不传给浏览器，不写入数据库或日志，也不能启用评论发布。PAT 认证失败不会退回匿名读取。
+`GITHUB_PUBLIC_READ_TOKEN` 留空时使用匿名 GitHub API 和匿名 clone；配置本地只读 PAT 后，API 会使用 PAT 提高读取限额。可在 Settings 页面录入，值会写入本地加密配置；API 和 WebUI 之后只显示配置状态，不回显明文，也不会写入数据库、日志或评论。PAT 不能启用评论发布，认证失败也不会退回匿名读取。
 
 公开 PR URL 必须指向公开仓库，例如：
 

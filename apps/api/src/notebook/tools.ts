@@ -40,13 +40,16 @@ function citationFor(
   selection: NotebookSourceSelection,
   input: Omit<NotebookCitation, "id" | "repository" | "pullRequestNumber" | "jobId" | "headSha">
 ): NotebookCitation {
+  // excerpt 必须非空：空文件或行区间超出时回退到文件路径
+  const excerpt = input.excerpt.trim().length > 0 ? input.excerpt : input.file;
   return notebookCitationSchema.parse({
     id: `citation_${randomUUID()}`,
     repository: selection.job.repository,
     pullRequestNumber: selection.job.pullRequestNumber,
     jobId: selection.job.id,
     headSha: selection.source.headSha,
-    ...input
+    ...input,
+    excerpt
   });
 }
 

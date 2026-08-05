@@ -16,7 +16,7 @@ const mockComposedReview: DomainComposeReviewSuccess = {
 describe("Synthesizer Node", () => {
   it("throws error when state.composedReview is missing", async () => {
     const store = new InMemoryJobQueue();
-    const synthesizer = createSynthesizerNode({ provider: new MockLLMProvider(), jobStore: store });
+    const synthesizer = createSynthesizerNode({ provider: new MockLLMProvider(), jobStore: store, reportLanguage: "en-US" });
     const state: any = {
       jobId: "job-1",
       repositoryFullName: "sk1ua/ConsistenCy",
@@ -49,7 +49,7 @@ describe("Synthesizer Node", () => {
       generateSummary: generateSummarySpy
     };
 
-    const synthesizer = createSynthesizerNode({ provider, jobStore: store });
+    const synthesizer = createSynthesizerNode({ provider, jobStore: store, reportLanguage: "en-US" });
     const state: any = {
       jobId: "job-1",
       repositoryFullName: "sk1ua/ConsistenCy",
@@ -78,7 +78,7 @@ describe("Synthesizer Node", () => {
       generateSummary: async () => { throw new Error("LLM Rate Limited"); }
     };
 
-    const synthesizer = createSynthesizerNode({ provider, jobStore: store });
+    const synthesizer = createSynthesizerNode({ provider, jobStore: store, reportLanguage: "en-US" });
     const state: any = {
       jobId: "job-1",
       repositoryFullName: "sk1ua/ConsistenCy",

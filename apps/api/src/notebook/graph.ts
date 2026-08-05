@@ -16,6 +16,7 @@ import {
   type NotebookSourceSelection,
   validateNotebookAnswer
 } from "./tools";
+import { reportLanguageInstruction } from "../review/agents/prompt";
 
 export type NotebookStreamEvent = {
   event: string;
@@ -29,6 +30,7 @@ export type NotebookGraphOptions = {
   indexer: RepositorySnapshotIndexer;
   maxToolCalls?: number;
   maxContextChars?: number;
+  reportLanguage?: "zh-CN" | "en-US";
 };
 
 export class NotebookGraphError extends Error {
@@ -78,9 +80,13 @@ function contextFor(selections: NotebookSourceSelection[], citations: NotebookCi
   for (const selection of selections) {
     const report = selection.job.result;
     const matches = selection.index ? searchRepository(selection, question, 4) : [];
+    const fileList = (selection.index?.manifest ?? [])
+      .slice(0, 60)
+      .map(entry => ({ path: entry.path, lines: entry.lines, language: entry.language }));
     sections.push([
       `SOURCE repository=${selection.job.repository} pr=${selection.job.pullRequestNumber} base=${selection.source.baseSha} head=${selection.source.headSha}`,
       `REPORT summary=${report?.summary ?? "not ready"} score=${report?.score ?? "unknown"} risk=${report?.riskLevel ?? "unknown"}`,
+      `FILES ${JSON.stringify(fileList)}`,
       `FINDINGS ${JSON.stringify(getReviewFindings(selection).slice(0, 8))}`,
       `EVIDENCE_PACK ${JSON.stringify(getEvidencePack(selection)).slice(0, 8_000)}`,
       `SEARCH_MATCHES ${JSON.stringify(matches.map(match => ({ file: match.file, content: match.content, citation: match.citation })))}`
@@ -176,13 +182,21 @@ export class NotebookGraph {
         "Keep the selected repository, PR number, and head SHA boundaries exact.",
         "If the evidence is insufficient, say that the current context cannot confirm the claim.",
         "Do not claim that tests ran, a patch was applied, or a GitHub comment was published.",
+        "CUSTOM DETERMINISTIC ANALYSIS BOUNDARY:",
+        "The only executable Python analysis modules are the built-in allowlist: style, structural, semantic, duplication, security.",
+        "When asked for a custom analysis, first clarify the goal, file/language scope, selected allowlisted modules, thresholds, required evidence, and acceptance examples.",
+        "Return a DRAFT AnalysisSpec in Markdown or YAML for human review. Never generate executable Python, never claim the draft ran, and never invent a module outside the allowlist.",
+        "Explain that execution remains deterministic while the LLM only plans and interprets evidence.",
         `USER QUESTION:\n${input.content.slice(0, 8_000)}`,
         `UNTRUSTED EVIDENCE BEGIN\n${contextFor(selections, initialCitations, input.content, this.maxContextChars)}\nUNTRUSTED EVIDENCE END`,
         "When making a code claim, mention a repository-relative file and line range; the UI will also show structured citations."
       ].join("\n\n");
 
       for await (const event of providerEvents(this.options.provider, {
-        systemPrompt: "Produce a concise, evidence-grounded developer answer in Markdown.",
+        systemPrompt: [
+          "Produce a concise, evidence-grounded developer answer in Markdown.",
+          reportLanguageInstruction(this.options.reportLanguage ?? "zh-CN")
+        ].join(" "),
         userPrompt: prompt
       })) {
         if (event.kind === "text_delta") {
@@ -292,7 +306,10 @@ export class NotebookGraph {
         "Return a compact Markdown card. For fix_plan, include a unified diff only when the supplied evidence supports it; label it as a suggestion and explicitly say it was not applied or tested. Include affected files, rationale, evidence citations, risk, and suggested tests."
       ].join("\n\n");
       for await (const event of providerEvents(this.options.provider, {
-        systemPrompt: "Generate a concise evidence-backed Markdown analysis card.",
+        systemPrompt: [
+          "Generate a concise evidence-backed Markdown analysis card.",
+          reportLanguageInstruction(this.options.reportLanguage ?? "zh-CN")
+        ].join(" "),
         userPrompt: prompt
       })) {
         if (event.kind === "text_delta") {

@@ -1,0 +1,49 @@
+.notebook-placeholder p {
+  margin: 0;
+}
+
+.notebook-placeholder > small {
+  display: block;
+  margin-top: 12px;
+  color: #76837e;
+  font-size: 11px;
+}
+
+.notebook-starters {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.notebook-starters button {
+  min-height: 46px;
+  padding: 9px 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  border: 1px solid #cad7d2;
+  border-radius: 8px;
+  background: #fff;
+  color: #34454c;
+  cursor: pointer;
+  font: 700 12px/1.35 var(--font-ui);
+  text-align: left;
+}
+
+.notebook-starters button:hover {
+  border-color: #91ad9f;
+  background: #f2f8f5;
+}
+
+.notebook-starters button:focus-visible {
+  outline: 3px solid rgba(47, 107, 255, .16);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .notebook-starters {
+    grid-template-columns: 1fr;
+  }
+}

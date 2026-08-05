@@ -28,6 +28,22 @@ export const errorResponseSchema = z.object({
 }).strict();
 
 export const publicPrRequestSchema = z.object({ url: z.string().trim().min(1).max(2_048) }).strict();
+
+export const localReviewRequestSchema = z.object({
+  repoPath: z.string().trim().min(1).max(4_096),
+  baseRef: z.string().trim().min(1).max(255).optional(),
+  headRef: z.string().trim().min(1).max(255).optional()
+}).strict();
+
+export const localReviewResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  repository: z.string().trim().min(1),
+  repoPath: z.string().trim().min(1),
+  baseSha: z.string().trim().min(1),
+  headSha: z.string().trim().min(1),
+  publicationPolicy: z.literal("disabled"),
+  status: z.literal("queued")
+}).strict();
 export const publicPrResponseSchema = z.object({
   jobId: z.string().trim().min(1),
   notebookId: z.string().trim().min(1),
@@ -58,5 +74,7 @@ export type StatsResponse = z.infer<typeof statsResponseSchema>;
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;
 export type PublicPrRequest = z.infer<typeof publicPrRequestSchema>;
 export type PublicPrResponse = z.infer<typeof publicPrResponseSchema>;
+export type LocalReviewRequest = z.infer<typeof localReviewRequestSchema>;
+export type LocalReviewResponse = z.infer<typeof localReviewResponseSchema>;
 export type NotebookMessageRequest = z.infer<typeof notebookMessageRequestSchema>;
 export type NotebookCardRequest = z.infer<typeof notebookCardRequestSchema>;

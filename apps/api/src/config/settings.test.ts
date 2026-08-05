@@ -21,7 +21,7 @@ describe("SettingsStore", () => {
     const settings = store();
     settings.update({
       llm: { provider: "deepseek", deepseekApiKey: "secret-deepseek-key" },
-      github: { appId: "123", webhookSecret: "secret-webhook-value" },
+      github: { appId: "123", webhookSecret: "secret-webhook-value", publicReadToken: "secret-public-token" },
       runtime: { workerConcurrency: 3 }
     });
 
@@ -31,10 +31,12 @@ describe("SettingsStore", () => {
     expect(publicText).not.toContain("secret-deepseek-key");
     expect(encryptedText).not.toContain("secret-deepseek-key");
     expect(encryptedText).not.toContain("secret-webhook-value");
+    expect(encryptedText).not.toContain("secret-public-token");
     expect(settings.savedEnvironment()).toMatchObject({
       LLM_PROVIDER: "deepseek",
       DEEPSEEK_API_KEY: "secret-deepseek-key",
       GITHUB_WEBHOOK_SECRET: "secret-webhook-value",
+      GITHUB_PUBLIC_READ_TOKEN: "secret-public-token",
       CONSISTENCY_WORKER_CONCURRENCY: "3"
     });
   });
@@ -53,8 +55,9 @@ describe("SettingsStore", () => {
 
   it("can clear a stored secret", () => {
     const settings = store();
-    settings.update({ github: { webhookSecret: "configured" } });
-    settings.update({ github: { webhookSecret: null } });
+    settings.update({ github: { webhookSecret: "configured", publicReadToken: "read-token" } });
+    settings.update({ github: { webhookSecret: null, publicReadToken: null } });
     expect(settings.savedEnvironment().GITHUB_WEBHOOK_SECRET).toBeUndefined();
+    expect(settings.savedEnvironment().GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
   });
 });

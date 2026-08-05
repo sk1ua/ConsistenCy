@@ -1,5 +1,6 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { z } from "zod";
+import { findProjectRoot } from "./settings";
 
 const optionalSecret = z.preprocess(
   value => typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -12,6 +13,12 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
   DATABASE_PATH: z.string().trim().min(1).default(".consistency/consistency.db"),
   CONSISTENCY_WORKSPACE_ROOT: z.string().trim().min(1).default(".consistency/workspaces"),
+  /**
+   * Comma-separated directories under which a local checkout may be reviewed.
+   * Defaults to the project's parent directory, which makes every sibling
+   * repository reviewable — narrow this before exposing the API off localhost.
+   */
+  CONSISTENCY_LOCAL_REVIEW_ROOTS: z.string().trim().optional(),
   CONSISTENCY_PYTHON_PATH: z.string().trim().min(1).default("python"),
   CONSISTENCY_ENGINE_MODULE: z.string().trim().min(1).default("engine"),
   CONSISTENCY_ENGINE_ROOT: z.string().trim().min(1).optional(),
@@ -27,10 +34,19 @@ export const envSchema = z.object({
   CONSISTENCY_PUBLISH_LEASE_DURATION_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   CONSISTENCY_PUBLISH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
   CONSISTENCY_PUBLISH_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  /** The daemon reads a live working tree, so it stays opt-in. */
+  CONSISTENCY_HEARTBEAT_ENABLED: z.enum(["true", "false"]).default("false"),
+  CONSISTENCY_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(30_000),
+  /**
+   * Workflow backing the deterministic review stage. Set to "legacy" to fall
+   * back to the single-shot `analyze` action.
+   */
+  CONSISTENCY_REVIEW_WORKFLOW: z.string().trim().min(1).default("pr-review"),
   CONSISTENCY_API_TOKEN: optionalSecret,
   CONSISTENCY_ALLOWED_ORIGINS: z.string().trim().default("http://127.0.0.1:5173,http://localhost:5173"),
   CONSISTENCY_WEB_URL: z.string().url().default("http://127.0.0.1:5173"),
   CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED: z.enum(["true", "false"]).default("true"),
+  CONSISTENCY_REPORT_LANGUAGE: z.enum(["zh-CN", "en-US"]).default("zh-CN"),
   CONSISTENCY_NOTEBOOK_ENABLED: z.enum(["true", "false"]).default("true"),
   CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(32).default(8),
   CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS: z.coerce.number().int().min(1_000).max(64_000).default(16_000),
@@ -48,14 +64,22 @@ export const envSchema = z.object({
 
 export type RawEnvironment = z.input<typeof envSchema>;
 
-export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_WORKSPACE_ROOT" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER" | "CONSISTENCY_ENGINE_ROOT"> & {
+export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_WORKSPACE_ROOT" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER" | "CONSISTENCY_ENGINE_ROOT" | "CONSISTENCY_LOCAL_REVIEW_ROOTS"> & {
   databasePath: string;
   workspaceRoot: string;
   engineRoot?: string;
+  localReviewRoots: string[];
+  localReviewRootsAreDefaulted: boolean;
   allowedOrigins: string[];
   LLM_PROVIDER: "mock" | "deepseek" | "openai";
   publicPrAnalysisEnabled: boolean;
+  reportLanguage: "zh-CN" | "en-US";
   notebookEnabled: boolean;
+  heartbeatEnabled: boolean;
+  /** Repository the heartbeat daemon observes. */
+  heartbeatRepoPath: string;
+  /** Workflow name, or null for the legacy single-shot analyze action. */
+  reviewWorkflow: string | null;
 };
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -85,6 +109,18 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   const allowedOrigins = parsed.CONSISTENCY_ALLOWED_ORIGINS.split(",")
     .map(origin => origin.trim())
     .filter(Boolean);
+  const configuredLocalRoots = (parsed.CONSISTENCY_LOCAL_REVIEW_ROOTS ?? "")
+    .split(",")
+    .map(root => root.trim())
+    .filter(Boolean)
+    .map(root => resolve(root));
+  // Defaulting to the project's parent makes every sibling checkout reviewable
+  // through POST /reviews/local. That suits local-first use but is broad for a
+  // shared deployment; `localReviewRootsAreDefaulted` lets startup say so.
+  const localReviewRootsAreDefaulted = configuredLocalRoots.length === 0;
+  const localReviewRoots = localReviewRootsAreDefaulted
+    ? [dirname(findProjectRoot())]
+    : configuredLocalRoots;
   if (parsed.NODE_ENV === "production" && (allowedOrigins.length === 0 || allowedOrigins.includes("*"))) {
     throw new Error("CONSISTENCY_ALLOWED_ORIGINS must contain explicit origins in production");
   }
@@ -100,8 +136,16 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     databasePath: resolve(parsed.DATABASE_PATH),
     workspaceRoot: resolve(parsed.CONSISTENCY_WORKSPACE_ROOT),
     engineRoot: parsed.CONSISTENCY_ENGINE_ROOT ? resolve(parsed.CONSISTENCY_ENGINE_ROOT) : undefined,
+    localReviewRoots,
+    localReviewRootsAreDefaulted,
     allowedOrigins,
     publicPrAnalysisEnabled,
-    notebookEnabled
+    reportLanguage: parsed.CONSISTENCY_REPORT_LANGUAGE,
+    notebookEnabled,
+    heartbeatEnabled: parsed.CONSISTENCY_HEARTBEAT_ENABLED === "true",
+    heartbeatRepoPath: findProjectRoot(),
+    reviewWorkflow: parsed.CONSISTENCY_REVIEW_WORKFLOW === "legacy"
+      ? null
+      : parsed.CONSISTENCY_REVIEW_WORKFLOW
   };
 }

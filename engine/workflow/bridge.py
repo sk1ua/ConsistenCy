@@ -1,0 +1,88 @@
+# -*- coding: utf-8 -*-
+"""Adapter between the stdio protocol and the DAG workflow engine."""
+from __future__ import annotations
+
+from ..protocol import RunWorkflowRequest, RunWorkflowResponse
+from .builtins import register_builtin_plugins
+from .plugins import AnalysisContext, BaseAnalyzerPlugin, PluginReport
+from .runner import run_workflow_sync
+from .spec import WorkflowSpecError, load_builtin_workflow
+
+
+class _SynthesizerPlaceholder(BaseAnalyzerPlugin):
+    """Terminal node for engine-only runs.
+
+    Synthesis is the LLM layer's job (apps/api), so the deterministic engine
+    stops at collected evidence rather than pretending to summarise it.
+    """
+
+    kind = "synthesize.review_report"
+
+    async def analyze(self, context: AnalysisContext) -> PluginReport:
+        # Deliberately emits no evidence of its own: every item is already
+        # attributed to the step that found it, and re-emitting here would
+        # double-count it in the run's collected evidence.
+        return PluginReport(
+            summary=f"Collected {len(context.upstream_evidence)} evidence item(s) for synthesis",
+        )
+
+
+def _resolver():
+    from .plugins import resolve_plugin
+
+    def resolve(step):
+        if step.role == "synthesizer":
+            return _SynthesizerPlaceholder()
+        return resolve_plugin(step)
+
+    return resolve
+
+
+def run_workflow_request(request: RunWorkflowRequest) -> RunWorkflowResponse:
+    """Execute the named builtin workflow over the request's files."""
+    register_builtin_plugins()
+
+    try:
+        spec = load_builtin_workflow(request.workflow)
+    except (WorkflowSpecError, FileNotFoundError) as error:
+        return RunWorkflowResponse(
+            id=request.id,
+            ok=False,
+            error=f"Unknown or invalid workflow '{request.workflow}': {error}",
+        )
+
+    files = {file_input.path: file_input.content for file_input in request.files}
+    baselines = {
+        file_input.path: file_input.baseline
+        for file_input in request.files
+        if file_input.baseline
+    }
+    diff_hunks = {
+        file_input.path: tuple(file_input.diff_hunks or ())
+        for file_input in request.files
+        if file_input.diff_hunks
+    }
+
+    context = AnalysisContext(
+        files=files,
+        baselines=baselines,
+        diff_hunks=diff_hunks,
+        workspace_path=request.workspace_path,
+        options=request.options,
+    )
+
+    max_parallelism = request.options.get("max_parallelism", 4)
+    if not isinstance(max_parallelism, int) or isinstance(max_parallelism, bool) or max_parallelism < 1:
+        return RunWorkflowResponse(
+            id=request.id,
+            ok=False,
+            error="options.max_parallelism must be a positive integer",
+        )
+
+    result = run_workflow_sync(
+        spec,
+        context,
+        resolver=_resolver(),
+        max_parallelism=min(max_parallelism, 8),
+    )
+    return RunWorkflowResponse(id=request.id, ok=True, run=result.to_dict())

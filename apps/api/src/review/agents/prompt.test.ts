@@ -4,6 +4,7 @@ import { buildAgentPrompt } from "./prompt";
 
 const baseContext: PRReviewContext = {
   jobId: "job-1",
+  source: "github_pr",
   repositoryFullName: "sk1ua/ConsistenCy",
   pullRequestNumber: 42,
   baseSha: "base123",
@@ -63,5 +64,66 @@ describe("buildAgentPrompt", () => {
     expect(parts.length).toBeGreaterThan(1);
     const evidenceSection = parts[1]!.split("=== END UNTRUSTED STATIC EVIDENCE ===")[0]!;
     expect(evidenceSection.length).toBeLessThanOrEqual(10_005);
+  });
+});
+
+describe("project history in prompts", () => {
+  const history = {
+    "apps/api/src/http.ts": {
+      historicalFixes: [{
+        reference: "1a30c2b",
+        file: "apps/api/src/http.ts",
+        summary: "Previously added a signature check here",
+        fixedAt: "2026-08-01T00:00:00.000Z",
+        severity: "high" as const
+      }],
+      relatedModules: [{ path: "apps/api/src/server.ts", relation: "imported_by" as const, weight: 0.9 }],
+      pastSecurityReports: [{
+        jobId: "job-9",
+        file: "apps/api/src/http.ts",
+        title: "Unsigned webhook accepted",
+        severity: "critical" as const,
+        reportedAt: "2026-07-01T00:00:00.000Z",
+        resolved: false
+      }],
+      callerGraph: [{
+        callerFile: "apps/api/src/server.ts",
+        callerSymbol: "start",
+        calleeFile: "apps/api/src/http.ts",
+        calleeSymbol: "createHttpServer",
+        depth: 1
+      }]
+    }
+  };
+
+  it("omits the section entirely when there is no history", () => {
+    const { userPrompt } = buildAgentPrompt("Security", baseContext, undefined, "en-US");
+    expect(userPrompt).not.toContain("PROJECT HISTORY");
+  });
+
+  it("renders past findings, fixes, callers, and related modules", () => {
+    const { userPrompt } = buildAgentPrompt("Security", baseContext, undefined, "en-US", history);
+
+    expect(userPrompt).toContain("Past critical finding: Unsigned webhook accepted (unresolved)");
+    expect(userPrompt).toContain("Previous fix 1a30c2b");
+    expect(userPrompt).toContain("apps/api/src/server.ts:start -> createHttpServer");
+    expect(userPrompt).toContain("apps/api/src/server.ts (imported_by)");
+  });
+
+  it("fences history as untrusted, like the static evidence", () => {
+    // Caller graphs carry paths and symbol names that originate in the code
+    // under review, so they are model input, not model instructions.
+    const { userPrompt } = buildAgentPrompt("Security", baseContext, undefined, "en-US", history);
+    expect(userPrompt).toContain("=== BEGIN UNTRUSTED PROJECT HISTORY ===");
+    expect(userPrompt).toContain("=== END UNTRUSTED PROJECT HISTORY ===");
+  });
+
+  it("skips files whose history is empty", () => {
+    const { userPrompt } = buildAgentPrompt("Security", baseContext, undefined, "en-US", {
+      "apps/api/src/http.ts": {
+        historicalFixes: [], relatedModules: [], pastSecurityReports: [], callerGraph: []
+      }
+    });
+    expect(userPrompt).not.toContain("PROJECT HISTORY");
   });
 });

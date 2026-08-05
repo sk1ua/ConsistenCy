@@ -1,0 +1,205 @@
+/* ===== Data Tables & Badges ===== */
+.table-section {
+  overflow: hidden;
+}
+.data-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.table-row {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 15px;
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+}
+.table-row:not(.table-head) {
+  cursor: pointer;
+}
+.table-row:not(.table-head):hover {
+  background: #f7f9f7;
+}
+.table-head {
+  min-height: 36px;
+  border-top: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.dashboard-table .table-row {
+  min-width: 960px;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.45fr) 98px 76px 62px 72px 120px 20px;
+}
+.repository-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.repository-cell strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.pr-cell {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+.pr-cell b {
+  color: #2457ce;
+  font-size: 12px;
+}
+.pr-cell small {
+  overflow: hidden;
+  color: #313b47;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.risk-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-transform: capitalize;
+  font-size: 12px;
+}
+.score-cell {
+  font-weight: 800;
+}
+.row-action {
+  color: #475463;
+}
+.badge {
+  width: fit-content;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #edf1ef;
+  color: #52605a;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.badge-succeeded, .badge-low, .badge-confirmed {
+  border-color: #bde5d2;
+  background: var(--success-soft);
+  color: #126e59;
+}
+.badge-running, .badge-info, .badge-likely {
+  border-color: #bfd2ff;
+  background: var(--primary-soft);
+  color: #2457ce;
+}
+.badge-failed, .badge-critical, .badge-high {
+  border-color: #f3c4bd;
+  background: var(--danger-soft);
+  color: #b83b2f;
+}
+.badge-medium, .badge-hypothesis, .badge-queued {
+  border-color: #efd7a6;
+  background: var(--warning-soft);
+  color: #9b5a10;
+}
+.badge-public-read {
+  border-color: #b9d4ee;
+  background: #edf7ff;
+  color: #17628f;
+}
+
+/* ===== Jobs Page ===== */
+.section-heading {
+  min-height: 46px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.section-heading h2 {
+  margin-bottom: 3px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.15;
+}
+.section-heading p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.jobs-page {
+  padding: 18px;
+}
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid var(--border);
+}
+.search-field {
+  height: 38px;
+  min-width: 280px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+.search-field svg {
+  color: var(--muted);
+}
+.search-field input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+}
+.filter-bar select {
+  height: 38px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+}
+.result-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.jobs-table .table-row {
+  min-width: 880px;
+  grid-template-columns: minmax(230px, 1.5fr) 95px 86px 66px 140px 100px;
+}
+.jobs-table .table-row strong, .jobs-table .table-row small {
+  display: block;
+}
+.jobs-table .table-row strong {
+  font-size: 13px;
+}
+.jobs-table .table-row small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.commit-range {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.empty-inline {
+  padding: 36px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}

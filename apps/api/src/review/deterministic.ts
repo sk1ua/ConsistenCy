@@ -6,10 +6,19 @@ import {
   parseWireComposeReviewResponse,
   wireAnalyzeRequestSchema,
   wireComposeReviewRequestSchema,
+  wireRelevantContextRequestSchema,
+  wireRelevantContextResponseSchema,
+  wireRecordReviewRequestSchema,
+  wireRecordReviewResponseSchema,
+  wireRunWorkflowRequestSchema,
+  wireRunWorkflowResponseSchema,
   type DomainAnalyzeResponse,
   type DomainComposeReviewResponse,
+  type RelevantContext,
   type WireAnalyzeRequest,
-  type WireComposeReviewRequest
+  type WireComposeReviewRequest,
+  type WireRelevantContextResponse,
+  type WireRunWorkflowResponse
 } from "@consistency/schema";
 
 export type DeterministicFileInput = {
@@ -36,7 +45,7 @@ export type ManagedProcess = {
 };
 
 type PendingRequest = {
-  action: "analyze" | "compose_review";
+  action: "analyze" | "compose_review" | "relevant_context" | "run_workflow" | "record_review";
   managedProc: ManagedProcess;
   resolve: (v: any) => void;
   reject: (e: Error) => void;
@@ -250,6 +259,11 @@ export class DeterministicAnalyzer {
     delete inheritedEnv.GITHUB_PUBLIC_READ_TOKEN;
     const env = {
       ...inheritedEnv,
+      // Force UTF-8 mode for the engine subprocess. On non-UTF-8 locales
+      // (e.g. Chinese Windows GBK/cp936) Python's default stdin/stdout
+      // encoding would mangle multi-byte file names and contents, breaking
+      // the JSON-over-stdio protocol.
+      PYTHONUTF8: "1",
       PYTHONPATH: process.env.PYTHONPATH
         ? `${projectRoot}${delimiter}${process.env.PYTHONPATH}`
         : projectRoot
@@ -386,6 +400,12 @@ export class DeterministicAnalyzer {
     try {
       if (handler.action === "compose_review") {
         domainResponse = parseWireComposeReviewResponse(raw);
+      } else if (handler.action === "relevant_context") {
+        domainResponse = wireRelevantContextResponseSchema.parse(raw);
+      } else if (handler.action === "run_workflow") {
+        domainResponse = wireRunWorkflowResponseSchema.parse(raw);
+      } else if (handler.action === "record_review") {
+        domainResponse = wireRecordReviewResponseSchema.parse(raw);
       } else {
         domainResponse = parseWireAnalyzeResponse(raw);
       }
@@ -496,6 +516,173 @@ export class DeterministicAnalyzer {
         // It will collect this pending request and reject it after real close.
       });
     });
+  }
+
+  /**
+   * Fold a completed review's findings into the repository's project memory.
+   *
+   * Findings previously open against a covered file that this review no longer
+   * reports are marked resolved and become historical fixes, so the next review
+   * of that file can see both what is outstanding and what was already fixed.
+   */
+  async recordReview(input: {
+    indexPath: string;
+    jobId: string;
+    reference: string;
+    reportedAt: string;
+    coveredFiles: string[];
+    findings: Array<{ file: string; title: string; severity: string }>;
+    timeoutMs?: number;
+  }): Promise<{ recorded: number; resolved: number }> {
+    const timeoutMs = parseTimeoutMs(input.timeoutMs);
+    const managedProc = await this.ensureProcess();
+    const id = `req_rec_${++this.counter}_${Date.now()}`;
+
+    const validatedRequest = wireRecordReviewRequestSchema.parse({
+      id,
+      action: "record_review",
+      index_path: input.indexPath,
+      job_id: input.jobId,
+      reference: input.reference,
+      reported_at: input.reportedAt,
+      covered_files: input.coveredFiles,
+      findings: input.findings
+    });
+
+    const response = await new Promise<{ ok: boolean; recorded?: number; resolved?: number; error?: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this.pending.has(id)) {
+          void this.fatalProtocolViolation(
+            managedProc,
+            new Error(`Record review timed out after ${timeoutMs}ms for request ${id}`)
+          );
+        }
+      }, timeoutMs);
+
+      this.pending.set(id, {
+        action: "record_review",
+        managedProc,
+        resolve: (value) => { clearTimeout(timeout); resolve(value); },
+        reject: (error) => { clearTimeout(timeout); reject(error); }
+      });
+
+      this.writeStdin(managedProc, JSON.stringify(validatedRequest)).catch(() => {
+        // fatalProtocolViolation already collected and rejected this request.
+      });
+    });
+
+    if (!response.ok) throw new Error(response.error ?? "Failed to record review");
+    return { recorded: response.recorded ?? 0, resolved: response.resolved ?? 0 };
+  }
+
+  /**
+   * Run a named workflow through the DAG engine.
+   *
+   * `workspacePath` is intentionally optional and omitted by the review path:
+   * supplying it lets subprocess steps run external tools inside the checkout,
+   * which is unsafe when the checkout is a clone of an untrusted repository.
+   */
+  async runWorkflow(
+    workflow: string,
+    files: DeterministicFileInput[],
+    options?: { workspacePath?: string; maxParallelism?: number; timeoutMs?: number }
+  ): Promise<WireRunWorkflowResponse> {
+    const timeoutMs = parseTimeoutMs(options?.timeoutMs);
+    const managedProc = await this.ensureProcess();
+    const id = `req_wf_${++this.counter}_${Date.now()}`;
+
+    const validatedRequest = wireRunWorkflowRequestSchema.parse({
+      id,
+      action: "run_workflow",
+      workflow,
+      files: files.map(file => ({
+        path: file.path,
+        content: file.content,
+        baseline: file.baseline ?? "",
+        language: file.language ?? "",
+        diff_hunks: file.diffHunks ?? []
+      })),
+      workspace_path: options?.workspacePath ?? null,
+      options: { max_parallelism: options?.maxParallelism ?? 4 }
+    });
+
+    return new Promise<WireRunWorkflowResponse>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this.pending.has(id)) {
+          void this.fatalProtocolViolation(
+            managedProc,
+            new Error(`Workflow run timed out after ${timeoutMs}ms for request ${id}`)
+          );
+        }
+      }, timeoutMs);
+
+      this.pending.set(id, {
+        action: "run_workflow",
+        managedProc,
+        resolve: (value) => { clearTimeout(timeout); resolve(value); },
+        reject: (error) => { clearTimeout(timeout); reject(error); }
+      });
+
+      this.writeStdin(managedProc, JSON.stringify(validatedRequest)).catch(() => {
+        // fatalProtocolViolation already collected and rejected this request.
+      });
+    });
+  }
+
+  /**
+   * Ask the engine for historical and structural context around the changed
+   * files: who calls them, what relates to them, and what past reviews found.
+   *
+   * Failures here are not fatal to a review — context is an enrichment, so the
+   * caller is expected to proceed without it rather than abort.
+   */
+  async relevantContext(
+    files: DeterministicFileInput[],
+    targets: string[],
+    options?: { limit?: number; indexPath?: string; timeoutMs?: number }
+  ): Promise<Record<string, RelevantContext>> {
+    const timeoutMs = parseTimeoutMs(options?.timeoutMs);
+    const managedProc = await this.ensureProcess();
+    const id = `req_ctx_${++this.counter}_${Date.now()}`;
+
+    const validatedRequest = wireRelevantContextRequestSchema.parse({
+      id,
+      action: "relevant_context",
+      files: files.map(file => ({
+        path: file.path,
+        content: file.content,
+        baseline: file.baseline ?? "",
+        language: file.language ?? ""
+      })),
+      targets,
+      index_path: options?.indexPath ?? null,
+      options: { limit: options?.limit ?? 10 }
+    });
+
+    const response = await new Promise<WireRelevantContextResponse>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        if (this.pending.has(id)) {
+          void this.fatalProtocolViolation(
+            managedProc,
+            new Error(`Relevant context timed out after ${timeoutMs}ms for request ${id}`)
+          );
+        }
+      }, timeoutMs);
+
+      this.pending.set(id, {
+        action: "relevant_context",
+        managedProc,
+        resolve: (value) => { clearTimeout(timeout); resolve(value); },
+        reject: (error) => { clearTimeout(timeout); reject(error); }
+      });
+
+      this.writeStdin(managedProc, JSON.stringify(validatedRequest)).catch(() => {
+        // fatalProtocolViolation already collected and rejected this request.
+      });
+    });
+
+    if (!response.ok) throw new Error(response.error);
+    return response.contexts;
   }
 
   /**

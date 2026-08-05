@@ -107,8 +107,10 @@ export class InMemoryJobQueue implements ReviewJobStore {
     const accessMode = input.accessMode ?? "github_app";
     const job: ReviewJob = {
       ...input,
-      installationId: accessMode === "public_read" ? undefined : input.installationId,
-      publicationPolicy: accessMode === "public_read" ? "disabled" : input.publicationPolicy ?? "github_comment",
+      installationId: accessMode === "github_app" ? input.installationId : undefined,
+      publicationPolicy: accessMode === "public_read" || accessMode === "local_git"
+        ? "disabled"
+        : input.publicationPolicy ?? "github_comment",
       accessMode,
       id: `job_${randomUUID()}`,
       status: "queued",

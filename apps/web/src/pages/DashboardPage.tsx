@@ -50,7 +50,7 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onA
 
   return <div className="page-stack dashboard-page">
     <section className="dashboard-intro">
-      <div className="intro-copy"><span className="eyebrow"><Radar size={15} />{t("Review pulse")}</span><h2>{t("Put reviewer attention where the evidence is strongest.")}</h2><p>{t("One operational view for review throughput, risk concentration and the context behind every finding.")}</p></div>
+      <div className="intro-copy"><span className="eyebrow"><Radar size={15} />{t("Review pulse")}</span><h2>{t("Focus attention where the evidence is strongest.")}</h2><p>{t("One view for review progress, risk concentration, and the context behind every finding.")}</p></div>
       <div className="attention-signal"><span>{t("Needs attention")}</span><strong>{elevatedReviews}</strong><small>{t(elevatedReviews === 1 ? "elevated review" : "elevated reviews")}</small></div>
       <div className="review-track" aria-label={t("Review workflow")}><span className="done">{t("Intake")}</span><span className="done">{t("Analysis")}</span><span className="active">{t("Evidence")}</span><span>{t("Decision")}</span></div>
     </section>

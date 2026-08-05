@@ -11,6 +11,7 @@ const publicSettingsSchema = z.object({
   GITHUB_APP_ID: z.string().trim().min(1).optional(),
   DATABASE_PATH: z.string().trim().min(1).optional(),
   CONSISTENCY_WORKSPACE_ROOT: z.string().trim().min(1).optional(),
+  CONSISTENCY_LOCAL_REVIEW_ROOTS: z.string().trim().min(1).optional(),
   CONSISTENCY_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).transform(String).optional(),
   CONSISTENCY_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).transform(String).optional(),
   CONSISTENCY_WEB_URL: z.string().url().optional()
@@ -19,6 +20,7 @@ const publicSettingsSchema = z.object({
 const secretSettingsSchema = z.object({
   GITHUB_PRIVATE_KEY: z.string().trim().min(1).optional(),
   GITHUB_WEBHOOK_SECRET: z.string().trim().min(1).optional(),
+  GITHUB_PUBLIC_READ_TOKEN: z.string().trim().min(1).optional(),
   DEEPSEEK_API_KEY: z.string().trim().min(1).optional(),
   OPENAI_API_KEY: z.string().trim().min(1).optional(),
   CONSISTENCY_API_TOKEN: z.string().trim().min(1).optional()
@@ -36,11 +38,13 @@ export const settingsPatchSchema = z.object({
   github: z.object({
     appId: z.string().trim().min(1).nullable().optional(),
     privateKey: z.string().trim().min(1).nullable().optional(),
-    webhookSecret: z.string().trim().min(1).nullable().optional()
+    webhookSecret: z.string().trim().min(1).nullable().optional(),
+    publicReadToken: z.string().trim().min(1).nullable().optional()
   }).strict().optional(),
   runtime: z.object({
     databasePath: z.string().trim().min(1).optional(),
     workspaceRoot: z.string().trim().min(1).optional(),
+    localReviewRoots: z.string().trim().min(1).optional(),
     workerConcurrency: z.coerce.number().int().min(1).max(16).optional(),
     workerPollIntervalMs: z.coerce.number().int().min(50).max(60_000).optional(),
     webUrl: z.string().url().optional(),
@@ -63,10 +67,13 @@ export type SettingsSnapshot = {
     appId: string;
     privateKeyConfigured: boolean;
     webhookSecretConfigured: boolean;
+    publicReadTokenConfigured: boolean;
   };
   runtime: {
     databasePath: string;
     workspaceRoot: string;
+    /** Comma-separated roots under which a local checkout may be reviewed. */
+    localReviewRoots: string;
     workerConcurrency: number;
     workerPollIntervalMs: number;
     webUrl: string;
@@ -83,6 +90,7 @@ type EncryptedPayload = { version: 1; iv: string; tag: string; data: string };
 const SECRET_KEYS = new Set<keyof SecretSettings>([
   "GITHUB_PRIVATE_KEY",
   "GITHUB_WEBHOOK_SECRET",
+  "GITHUB_PUBLIC_READ_TOKEN",
   "DEEPSEEK_API_KEY",
   "OPENAI_API_KEY",
   "CONSISTENCY_API_TOKEN"
@@ -210,8 +218,10 @@ export class SettingsStore {
     setPublic("GITHUB_APP_ID", patch.github?.appId);
     setSecret("GITHUB_PRIVATE_KEY", patch.github?.privateKey);
     setSecret("GITHUB_WEBHOOK_SECRET", patch.github?.webhookSecret);
+    setSecret("GITHUB_PUBLIC_READ_TOKEN", patch.github?.publicReadToken);
     setPublic("DATABASE_PATH", patch.runtime?.databasePath);
     setPublic("CONSISTENCY_WORKSPACE_ROOT", patch.runtime?.workspaceRoot);
+    setPublic("CONSISTENCY_LOCAL_REVIEW_ROOTS", patch.runtime?.localReviewRoots);
     setPublic("CONSISTENCY_WORKER_CONCURRENCY", patch.runtime?.workerConcurrency);
     setPublic("CONSISTENCY_WORKER_POLL_INTERVAL_MS", patch.runtime?.workerPollIntervalMs);
     setPublic("CONSISTENCY_WEB_URL", patch.runtime?.webUrl);
@@ -243,11 +253,13 @@ export class SettingsStore {
       github: {
         appId: effective.GITHUB_APP_ID ?? "",
         privateKeyConfigured: Boolean(effective.GITHUB_PRIVATE_KEY),
-        webhookSecretConfigured: Boolean(effective.GITHUB_WEBHOOK_SECRET)
+        webhookSecretConfigured: Boolean(effective.GITHUB_WEBHOOK_SECRET),
+        publicReadTokenConfigured: Boolean(effective.GITHUB_PUBLIC_READ_TOKEN)
       },
       runtime: {
         databasePath: effective.DATABASE_PATH ?? ".consistency/consistency.db",
         workspaceRoot: effective.CONSISTENCY_WORKSPACE_ROOT ?? ".consistency/workspaces",
+        localReviewRoots: effective.CONSISTENCY_LOCAL_REVIEW_ROOTS ?? dirname(findProjectRoot()),
         workerConcurrency: Number(effective.CONSISTENCY_WORKER_CONCURRENCY ?? 1),
         workerPollIntervalMs: Number(effective.CONSISTENCY_WORKER_POLL_INTERVAL_MS ?? 1_000),
         webUrl: effective.CONSISTENCY_WEB_URL ?? "http://127.0.0.1:5173",

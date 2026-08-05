@@ -34,18 +34,21 @@ export class SQLiteJobStore implements ReviewJobStore {
     const id = `job_${randomUUID()}`;
     const now = new Date().toISOString();
     const accessMode = input.accessMode ?? "github_app";
-    const publicationPolicy = accessMode === "public_read" ? "disabled" : input.publicationPolicy ?? "github_comment";
+    const publicationPolicy = accessMode === "public_read" || accessMode === "local_git"
+      ? "disabled"
+      : input.publicationPolicy ?? "github_comment";
     this.database.prepare(`
       INSERT INTO jobs (
-        id, type, status, repository_full_name, pull_request_number,
+        id, type, status, repository_full_name, pull_request_number, repo_path,
         installation_id, access_mode, base_sha, head_sha, delivery_id, sender_login,
         action, publication_policy, created_at, updated_at
-      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.repository,
-      input.pullRequestNumber,
-      accessMode === "public_read" ? null : input.installationId ?? null,
+      input.pullRequestNumber ?? null,
+      accessMode === "local_git" ? input.repoPath ?? null : null,
+      accessMode === "github_app" ? input.installationId ?? null : null,
       accessMode,
       input.baseSha,
       input.headSha,
@@ -583,11 +586,14 @@ export class SQLiteJobStore implements ReviewJobStore {
       status: row.status,
       deliveryId: row.delivery_id ?? undefined,
       repository: row.repository_full_name,
+      repoPath: row.repo_path ?? undefined,
       installationId: row.installation_id ?? undefined,
-      accessMode: row.access_mode === "public_read" ? "public_read" : "github_app",
+      accessMode: row.access_mode === "public_read" || row.access_mode === "local_git"
+        ? row.access_mode
+        : "github_app",
       senderLogin: row.sender_login ?? undefined,
       action: row.action ?? undefined,
-      pullRequestNumber: row.pull_request_number,
+      pullRequestNumber: row.pull_request_number ?? undefined,
       baseSha: row.base_sha,
       headSha: row.head_sha,
       publicationPolicy: row.publication_policy === "disabled" ? "disabled" : "github_comment",

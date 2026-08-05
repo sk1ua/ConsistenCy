@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { I18nProvider } from "./i18n";
 import "./styles.css";
+import "./workspace-enhancements.css";
+import "./settings-guidance.css";
+import "./notebook-dialog.css";
 
 const root = document.getElementById("root");
 

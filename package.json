@@ -26,11 +26,12 @@
     "setup": "tsx apps/api/src/config/cli.ts setup",
     "config": "tsx apps/api/src/config/cli.ts config",
     "data:import": "tsx apps/api/src/data/importRealData.ts",
+    "dev:webhook": "node scripts/dev-webhook.mjs",
     "dev:api": "npm run dev -w @consistency/api",
     "dev:web": "npm run dev -w @consistency/web"
   },
   "overrides": {
-    "postcss": "8.5.18"
+    "postcss": "8.5.25"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { retrievalTraceSchema, riskLevelSchema, type RetrievalTrace, type RiskLevel } from "./report";
+import { workflowRunSchema } from "./workflow";
+import { relevantContextSchema } from "./heartbeat";
 
 const nonBlankStringSchema = z.string().refine(
   (value) => value.trim().length > 0,
@@ -35,9 +37,45 @@ export const wireComposeReviewRequestSchema = z.object({
   options: z.record(z.unknown()).optional()
 }).strict();
 
+export const wireRunWorkflowRequestSchema = z.object({
+  id: nonBlankStringSchema,
+  action: z.literal("run_workflow"),
+  workflow: nonBlankStringSchema,
+  files: z.array(wireFileInputSchema),
+  workspace_path: z.string().optional().nullable(),
+  options: z.record(z.unknown()).optional()
+}).strict();
+
+export const wireRelevantContextRequestSchema = z.object({
+  id: nonBlankStringSchema,
+  action: z.literal("relevant_context"),
+  files: z.array(wireFileInputSchema),
+  targets: z.array(nonBlankStringSchema),
+  index_path: z.string().optional().nullable(),
+  options: z.record(z.unknown()).optional()
+}).strict();
+
+export const wireRecordReviewRequestSchema = z.object({
+  id: nonBlankStringSchema,
+  action: z.literal("record_review"),
+  index_path: nonBlankStringSchema,
+  job_id: nonBlankStringSchema,
+  reference: nonBlankStringSchema,
+  reported_at: nonBlankStringSchema,
+  covered_files: z.array(nonBlankStringSchema),
+  findings: z.array(z.object({
+    file: nonBlankStringSchema,
+    title: nonBlankStringSchema,
+    severity: z.string()
+  }).strict())
+}).strict();
+
 export const wireProtocolRequestSchema = z.discriminatedUnion("action", [
   wireAnalyzeRequestSchema,
-  wireComposeReviewRequestSchema
+  wireComposeReviewRequestSchema,
+  wireRunWorkflowRequestSchema,
+  wireRelevantContextRequestSchema,
+  wireRecordReviewRequestSchema
 ]);
 
 export const wireFileResultSchema = z.object({
@@ -89,6 +127,54 @@ export const wireComposeReviewFailureSchema = z.object({
 export const wireComposeReviewResponseSchema = z.discriminatedUnion("ok", [
   wireComposeReviewSuccessSchema,
   wireComposeReviewFailureSchema
+]);
+
+export const wireRunWorkflowSuccessSchema = z.object({
+  id: nonBlankStringSchema,
+  ok: z.literal(true),
+  run: workflowRunSchema
+}).strict();
+
+export const wireRunWorkflowFailureSchema = z.object({
+  id: nonBlankStringSchema,
+  ok: z.literal(false),
+  error: nonBlankStringSchema
+}).strict();
+
+export const wireRunWorkflowResponseSchema = z.discriminatedUnion("ok", [
+  wireRunWorkflowSuccessSchema,
+  wireRunWorkflowFailureSchema
+]);
+
+export const wireRelevantContextSuccessSchema = z.object({
+  id: nonBlankStringSchema,
+  ok: z.literal(true),
+  contexts: z.record(relevantContextSchema)
+}).strict();
+
+export const wireRelevantContextFailureSchema = z.object({
+  id: nonBlankStringSchema,
+  ok: z.literal(false),
+  error: nonBlankStringSchema
+}).strict();
+
+export const wireRelevantContextResponseSchema = z.discriminatedUnion("ok", [
+  wireRelevantContextSuccessSchema,
+  wireRelevantContextFailureSchema
+]);
+
+export const wireRecordReviewResponseSchema = z.discriminatedUnion("ok", [
+  z.object({
+    id: nonBlankStringSchema,
+    ok: z.literal(true),
+    recorded: z.number().int().nonnegative(),
+    resolved: z.number().int().nonnegative()
+  }).strict(),
+  z.object({
+    id: nonBlankStringSchema,
+    ok: z.literal(false),
+    error: nonBlankStringSchema
+  }).strict()
 ]);
 
 export const wireGenericResponseSchema = z.object({
@@ -149,6 +235,10 @@ export type WireFileInput = z.infer<typeof wireFileInputSchema>;
 export type WireAnalyzeRequest = z.infer<typeof wireAnalyzeRequestSchema>;
 export type WireComposeReviewFile = z.infer<typeof wireComposeReviewFileSchema>;
 export type WireComposeReviewRequest = z.infer<typeof wireComposeReviewRequestSchema>;
+export type WireRunWorkflowRequest = z.infer<typeof wireRunWorkflowRequestSchema>;
+export type WireRunWorkflowResponse = z.infer<typeof wireRunWorkflowResponseSchema>;
+export type WireRelevantContextRequest = z.infer<typeof wireRelevantContextRequestSchema>;
+export type WireRelevantContextResponse = z.infer<typeof wireRelevantContextResponseSchema>;
 
 // Transformation functions (snake_case -> camelCase)
 export function transformAnalyzeResponse(wire: WireAnalyzeResponse): DomainAnalyzeResponse {

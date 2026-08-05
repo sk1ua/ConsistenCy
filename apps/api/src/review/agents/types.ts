@@ -7,7 +7,8 @@ export const REVIEW_AGENT_NAMES = [
   "Correctness",
   "Maintainability",
   "Test",
-  "Style"
+  "Style",
+  "ArchitectureAuditor"
 ] as const satisfies readonly ReviewAgentName[];
 
 export type ExecutableReviewAgent = typeof REVIEW_AGENT_NAMES[number];
@@ -15,12 +16,16 @@ export type ExecutableReviewAgent = typeof REVIEW_AGENT_NAMES[number];
 export type AgentDependencies = {
   provider: LLMProvider;
   jobStore: ReviewJobStore;
+  reportLanguage: "zh-CN" | "en-US";
 };
 
 export type ContextBuilder = (input: {
   jobId: string;
   repositoryFullName: string;
-  pullRequestNumber: number;
+  /** Absent for local reviews, which have no pull request. */
+  pullRequestNumber?: number;
+  /** Absolute checkout path; set only when accessMode is local_git. */
+  repoPath?: string;
   installationId?: number;
   accessMode?: ReviewAccessMode;
   baseSha: string;

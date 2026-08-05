@@ -1,11 +1,13 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ZodError } from "zod";
-import { notebookCardRequestSchema, notebookMessageRequestSchema, publicPrRequestSchema } from "@consistency/schema";
+import { localReviewRequestSchema, notebookCardRequestSchema, notebookMessageRequestSchema, publicPrRequestSchema } from "@consistency/schema";
+import type { HeartbeatPulse, HeartbeatStreamEvent } from "@consistency/schema";
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
 import { seedDemoData } from "./api/demoSeed";
 import { buildHealthPayload } from "./health";
 import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
+import { LocalTriggerError } from "./trigger/local";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
 import { sanitizePublicError } from "./security/redact";
 import { settingsPatchSchema, type SettingsSnapshot } from "./config/settings";
@@ -142,6 +144,11 @@ export type CreateApiServerOptions = {
   realData?: () => RealDataSnapshot | undefined;
   publicPr?: (url: string) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
   publicPrAnalysisEnabled?: boolean;
+  localReview?: (input: { repoPath: string; baseRef?: string; headRef?: string }) => Promise<{ jobId: string }>;
+  heartbeat?: {
+    latest: () => HeartbeatPulse | undefined;
+    subscribe: (subscriber: (event: HeartbeatStreamEvent) => void) => () => void;
+  };
   notebookEnabled?: boolean;
   notebookStore?: NotebookStore;
   notebookGraph?: NotebookGraph;
@@ -196,6 +203,93 @@ const routes: Route[] = [
         pullRequestNumber: result.coordinates.pullRequestNumber,
         baseSha: result.job.baseSha,
         headSha: result.job.headSha,
+        publicationPolicy: "disabled",
+        status: "queued"
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/heartbeat",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.heartbeat) throw new ApiError("Heartbeat is disabled", "HEARTBEAT_DISABLED", 404);
+      const pulse = options.heartbeat.latest();
+      sendJson(request, response, 200, { pulse: pulse ?? null }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/heartbeat/stream",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.heartbeat) throw new ApiError("Heartbeat is disabled", "HEARTBEAT_DISABLED", 404);
+
+      startSse(request, response, allowedOrigins);
+      // writeHead alone does not put bytes on the wire, so a client would hang
+      // without response headers until the first pulse — up to a full interval.
+      response.flushHeaders?.();
+      response.write(": connected\n\n");
+
+      const unsubscribe = options.heartbeat.subscribe(event => {
+        writeSse(response, event.event, event);
+      });
+
+      // The stream stays open until the client disconnects; without this the
+      // daemon would accumulate a subscriber per dropped connection. A single
+      // disconnect fires several of these events, so unsubscribing is latched
+      // — callers must not see a second release for one subscription.
+      let closed = false;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        unsubscribe();
+        if (!response.writableEnded) response.end();
+      };
+      request.on("close", close);
+      request.on("error", close);
+      response.on("error", close);
+    }
+  },
+  {
+    method: "POST",
+    path: "/reviews/local",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, jobs }) => {
+      if (!options.localReview) {
+        throw new ApiError("Local review is not configured", "LOCAL_REVIEW_UNAVAILABLE", 503);
+      }
+      let body;
+      try {
+        body = localReviewRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) {
+          throw new ApiError("A repository path is required", "INVALID_LOCAL_REVIEW_REQUEST", 400);
+        }
+        throw error;
+      }
+
+      let result: { jobId: string };
+      try {
+        result = await options.localReview(body);
+      } catch (error) {
+        if (error instanceof LocalTriggerError) {
+          const status = error.code === "PATH_NOT_ALLOWED"
+            ? 403
+            : error.code === "NOTHING_TO_REVIEW" ? 409 : 400;
+          throw new ApiError(error.message, error.code, status);
+        }
+        throw error;
+      }
+
+      const job = jobs.get(result.jobId);
+      if (!job) throw new ApiError("Local review job was not persisted", "LOCAL_REVIEW_UNAVAILABLE", 500);
+      sendJson(request, response, 202, {
+        jobId: job.id,
+        repository: job.repository,
+        repoPath: job.repoPath,
+        baseSha: job.baseSha,
+        headSha: job.headSha,
         publicationPolicy: "disabled",
         status: "queued"
       }, allowedOrigins);
@@ -391,6 +485,22 @@ const routes: Route[] = [
       if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
       if (!job.result) throw new ApiError("Job report is not ready", "JOB_NOT_READY", 409);
       sendJson(request, response, 200, { report: job.result }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/notebook$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs, options }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      if (options.notebookEnabled === false || !options.notebookStore) {
+        sendJson(request, response, 200, { notebookId: null }, allowedOrigins);
+        return;
+      }
+      const notebook = options.notebookStore.findByJobId(id);
+      sendJson(request, response, 200, { notebookId: notebook?.id ?? null }, allowedOrigins);
     }
   },
   {

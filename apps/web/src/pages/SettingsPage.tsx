@@ -1,14 +1,27 @@
 import { Check, CheckCircle2, Database, Globe2, Github, KeyRound, LoaderCircle, LockKeyhole, RotateCcw, Save, ServerCog, Sparkles, XCircle } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api, type HealthResponse, type SettingsPatch, type SettingsSnapshot } from "../api/client";
+import { SETTING_HELP_LINKS, SettingHelp } from "../components/SettingHelp";
 import { useI18n } from "../i18n";
 
-type SecretName = "deepseekApiKey" | "openaiApiKey" | "privateKey" | "webhookSecret";
+type SecretName = "deepseekApiKey" | "openaiApiKey" | "privateKey" | "webhookSecret" | "publicReadToken";
 type SecretDrafts = Record<SecretName, string>;
 type ClearSecrets = Record<SecretName, boolean>;
 
-const emptySecrets: SecretDrafts = { deepseekApiKey: "", openaiApiKey: "", privateKey: "", webhookSecret: "" };
-const keepSecrets: ClearSecrets = { deepseekApiKey: false, openaiApiKey: false, privateKey: false, webhookSecret: false };
+const emptySecrets: SecretDrafts = {
+  deepseekApiKey: "",
+  openaiApiKey: "",
+  privateKey: "",
+  webhookSecret: "",
+  publicReadToken: ""
+};
+const keepSecrets: ClearSecrets = {
+  deepseekApiKey: false,
+  openaiApiKey: false,
+  privateKey: false,
+  webhookSecret: false,
+  publicReadToken: false
+};
 
 function safeEditablePath(value: string, fallback: string): string {
   const normalized = value.replaceAll("\\", "/");
@@ -20,23 +33,27 @@ function ConfigRow({ icon: Icon, label, value, ok, redact }: { icon: typeof Gith
   return <div className="config-row"><Icon size={18} /><span><strong>{label}</strong><small>{redact ? t("Local database configured") : value}</small></span>{ok === undefined ? null : ok ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}</div>;
 }
 
-function SecretField({ name, label, configured, value, clear, multiline = false, onValue, onClear }: {
+function SecretField({ name, label, configured, value, clear, help, helpHref, multiline = false, onValue, onClear }: {
   name: SecretName;
   label: string;
   configured: boolean;
   value: string;
   clear: boolean;
+  help: string;
+  helpHref?: string;
   multiline?: boolean;
   onValue: (name: SecretName, value: string) => void;
   onClear: (name: SecretName, value: boolean) => void;
 }) {
   const { t } = useI18n();
   const id = `setting-${name}`;
+  const helpId = `${id}-help`;
   return <div className="setting-field secret-field">
     <label htmlFor={id}>{t(label)}<span className={configured ? "configured" : "missing"}>{t(configured ? "Configured" : "Not configured")}</span></label>
     {multiline
-      ? <textarea id={id} rows={3} value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Paste a PEM key or enter a readable file path")} />
-      : <input id={id} type="password" autoComplete="new-password" value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Enter a new secret")} />}
+      ? <textarea id={id} aria-describedby={helpId} rows={3} value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Paste a PEM key or enter a readable file path")} />
+      : <input id={id} aria-describedby={helpId} type="password" autoComplete="new-password" value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Enter a new secret")} />}
+    <SettingHelp id={helpId} text={help} href={helpHref} />
     {configured && <label className="clear-secret"><input type="checkbox" checked={clear} onChange={event => onClear(name, event.target.checked)} />{t("Remove the stored value")}</label>}
   </div>;
 }
@@ -68,16 +85,6 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     return () => { active = false; };
   }, []);
 
-  const readiness = useMemo(() => {
-    if (!draft) return { complete: 0, total: 3 };
-    return {
-      complete: Number(draft.llm.provider === "mock" || (draft.llm.provider === "deepseek" ? draft.llm.deepseekApiKeyConfigured : draft.llm.openaiApiKeyConfigured))
-        + Number(Boolean(draft.github.appId && draft.github.privateKeyConfigured && draft.github.webhookSecretConfigured))
-        + Number(Boolean(draft.runtime.databasePath && draft.runtime.workspaceRoot)),
-      total: 3
-    };
-  }, [draft]);
-
   function updateSecret(name: SecretName, value: string) {
     setSecrets(current => ({ ...current, [name]: value }));
   }
@@ -85,6 +92,20 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
   function updateClear(name: SecretName, value: boolean) {
     setClearSecrets(current => ({ ...current, [name]: value }));
   }
+
+  function secretReady(name: SecretName, configured: boolean): boolean {
+    return Boolean(secrets[name].trim()) || (configured && !clearSecrets[name]);
+  }
+
+  const llmReady = Boolean(draft && settings && (draft.llm.provider === "mock"
+    || (draft.llm.provider === "deepseek" ? secretReady("deepseekApiKey", settings.llm.deepseekApiKeyConfigured) : secretReady("openaiApiKey", settings.llm.openaiApiKeyConfigured))));
+  const githubAppReady = Boolean(draft && settings && draft.github.appId
+    && secretReady("privateKey", settings.github.privateKeyConfigured)
+    && secretReady("webhookSecret", settings.github.webhookSecretConfigured));
+  const publicTokenReady = Boolean(settings && secretReady("publicReadToken", settings.github.publicReadTokenConfigured));
+  const sourceReady = Boolean(health && (health.publicPrAccessMode !== "disabled" || githubAppReady || publicTokenReady));
+  const runtimeReady = Boolean(draft?.runtime.databasePath && draft.runtime.workspaceRoot);
+  const readiness = { complete: Number(llmReady) + Number(sourceReady) + Number(runtimeReady), total: 3 };
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -103,7 +124,8 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       github: {
         appId: draft.github.appId || null,
         privateKey: secretValue(secrets.privateKey, clearSecrets.privateKey),
-        webhookSecret: secretValue(secrets.webhookSecret, clearSecrets.webhookSecret)
+        webhookSecret: secretValue(secrets.webhookSecret, clearSecrets.webhookSecret),
+        publicReadToken: secretValue(secrets.publicReadToken, clearSecrets.publicReadToken)
       },
       runtime: {
         databasePath: draft.runtime.databasePath,
@@ -131,16 +153,14 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
   if (loading) return <div className="loading-state"><LoaderCircle size={22} /><span>{t("Loading configuration")}</span></div>;
   if (!draft || !settings) return <div className="empty-state">{t("Configuration editor is unavailable. Run {command} for details.", { command: "npm run config -- doctor" })}</div>;
 
-  const llmReady = draft.llm.provider === "mock" || (draft.llm.provider === "deepseek" ? draft.llm.deepseekApiKeyConfigured : draft.llm.openaiApiKeyConfigured);
-  const githubReady = Boolean(draft.github.appId && draft.github.privateKeyConfigured && draft.github.webhookSecretConfigured);
   return <form className="settings-editor" onSubmit={event => void save(event)}>
     <section className="settings-intro">
       <div><span className="eyebrow"><Sparkles size={15} />{t("Workspace setup")}</span><h2>{t("Configure the review pipeline without editing environment files.")}</h2><p>{t("Secrets can be replaced but are never returned to this page. Environment variables remain the final override.")}</p></div>
       <div className="readiness-score"><strong>{readiness.complete}/{readiness.total}</strong><span>{t("configuration groups ready")}</span></div>
       <div className="setup-rail" aria-label={t("Configuration readiness")}>
         <span className={llmReady ? "ready" : ""}><i>{llmReady ? <Check size={12} /> : "1"}</i>{t("Model")}</span>
-        <span className={githubReady ? "ready" : ""}><i>{githubReady ? <Check size={12} /> : "2"}</i>{t("GitHub")}</span>
-        <span className="ready"><i><Check size={12} /></i>{t("Runtime")}</span>
+        <span className={sourceReady ? "ready" : ""}><i>{sourceReady ? <Check size={12} /> : "2"}</i>{t("Repository source")}</span>
+        <span className={runtimeReady ? "ready" : ""}><i>{runtimeReady ? <Check size={12} /> : "3"}</i>{t("Runtime")}</span>
       </div>
     </section>
 
@@ -150,37 +170,43 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     <section className="settings-group section-block">
       <div className="settings-group-title"><Sparkles size={18} /><div><span>{t("01 · Model")}</span><h3>{t("Evidence synthesis model")}</h3><p>{t("Choose the model used for evidence synthesis and reviewer handoff.")}</p></div></div>
       <div className="settings-fields">
-        <div className="setting-field"><label htmlFor="setting-provider">{t("Provider")}</label><select id="setting-provider" value={draft.llm.provider} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, provider: event.target.value as SettingsSnapshot["llm"]["provider"] } }) : current)}><option value="mock">{t("Mock · no external model")}</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select></div>
+        <div className="setting-field"><label htmlFor="setting-provider">{t("Provider")}</label><select id="setting-provider" aria-describedby="setting-provider-help" value={draft.llm.provider} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, provider: event.target.value as SettingsSnapshot["llm"]["provider"] } }) : current)}><option value="mock">{t("Mock · no external model")}</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select><SettingHelp id="setting-provider-help" text="Mock mode needs no API key. Select a provider only when you want LLM synthesis and dialogue." /></div>
         {draft.llm.provider === "deepseek" && <>
-          <div className="setting-field"><label htmlFor="setting-deepseek-model">{t("Model")}</label><input id="setting-deepseek-model" value={draft.llm.deepseekModel} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekModel: event.target.value } }) : current)} /></div>
-          <div className="setting-field setting-field-wide"><label htmlFor="setting-deepseek-url">{t("Base URL")}</label><input id="setting-deepseek-url" type="url" value={draft.llm.deepseekBaseUrl} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekBaseUrl: event.target.value } }) : current)} /></div>
-          <SecretField name="deepseekApiKey" label="DeepSeek API key" configured={settings.llm.deepseekApiKeyConfigured} value={secrets.deepseekApiKey} clear={clearSecrets.deepseekApiKey} onValue={updateSecret} onClear={updateClear} />
+          <div className="setting-field"><label htmlFor="setting-deepseek-model">{t("Model")}</label><input id="setting-deepseek-model" aria-describedby="setting-deepseek-model-help" value={draft.llm.deepseekModel} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekModel: event.target.value } }) : current)} /><SettingHelp id="setting-deepseek-model-help" text="Use a model name supported by your DeepSeek account." /></div>
+          <div className="setting-field setting-field-wide"><label htmlFor="setting-deepseek-url">{t("Base URL")}</label><input id="setting-deepseek-url" aria-describedby="setting-deepseek-url-help" type="url" value={draft.llm.deepseekBaseUrl} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekBaseUrl: event.target.value } }) : current)} /><SettingHelp id="setting-deepseek-url-help" text="Keep the official endpoint unless your organization provides a compatible gateway." /></div>
+          <SecretField name="deepseekApiKey" label="DeepSeek API key" configured={settings.llm.deepseekApiKeyConfigured} value={secrets.deepseekApiKey} clear={clearSecrets.deepseekApiKey} help="Create a key in DeepSeek. Do not paste an account password or browser session token." helpHref={SETTING_HELP_LINKS.deepseekApi} onValue={updateSecret} onClear={updateClear} />
         </>}
         {draft.llm.provider === "openai" && <>
-          <div className="setting-field"><label htmlFor="setting-openai-model">{t("Model")}</label><input id="setting-openai-model" value={draft.llm.openaiModel} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, openaiModel: event.target.value } }) : current)} /></div>
-          <SecretField name="openaiApiKey" label="OpenAI API key" configured={settings.llm.openaiApiKeyConfigured} value={secrets.openaiApiKey} clear={clearSecrets.openaiApiKey} onValue={updateSecret} onClear={updateClear} />
+          <div className="setting-field"><label htmlFor="setting-openai-model">{t("Model")}</label><input id="setting-openai-model" aria-describedby="setting-openai-model-help" value={draft.llm.openaiModel} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, openaiModel: event.target.value } }) : current)} /><SettingHelp id="setting-openai-model-help" text="Use an API model available to your OpenAI project." /></div>
+          <SecretField name="openaiApiKey" label="OpenAI API key" configured={settings.llm.openaiApiKeyConfigured} value={secrets.openaiApiKey} clear={clearSecrets.openaiApiKey} help="Create a project API key. This is not your ChatGPT password or session token." helpHref={SETTING_HELP_LINKS.openaiApiKeys} onValue={updateSecret} onClear={updateClear} />
         </>}
       </div>
     </section>
 
     <section className="settings-group section-block">
-      <div className="settings-group-title"><Github size={18} /><div><span>{t("02 · GitHub")}</span><h3>{t("Pull request connection")}</h3><p>{t("Connect signed webhook events to authenticated repository analysis.")}</p></div></div>
+      <div className="settings-group-title"><Github size={18} /><div><span>{t("02 · GitHub")}</span><h3>{t("Pull request connection")}</h3><p>{t("Start with anonymous public PR analysis, then add credentials only for the mode you need.")}</p></div></div>
       <div className="settings-fields">
-        <div className="setting-field"><label htmlFor="setting-app-id">{t("GitHub App ID")}</label><input id="setting-app-id" value={draft.github.appId} onChange={event => setDraft(current => current ? ({ ...current, github: { ...current.github, appId: event.target.value } }) : current)} placeholder={t("Only for GitHub App mode")} /></div>
-        <SecretField name="webhookSecret" label="Webhook secret" configured={settings.github.webhookSecretConfigured} value={secrets.webhookSecret} clear={clearSecrets.webhookSecret} onValue={updateSecret} onClear={updateClear} />
-        <div className="setting-field-wide"><SecretField name="privateKey" label="Private key" configured={settings.github.privateKeyConfigured} value={secrets.privateKey} clear={clearSecrets.privateKey} multiline onValue={updateSecret} onClear={updateClear} /></div>
+        <div className="source-mode-guide setting-field-wide" aria-label={t("GitHub connection modes")}>
+          <span><strong>{t("Anonymous public PR")}</strong><small>{t("Recommended for trying ConsistenCy. No GitHub App or token is required.")}</small></span>
+          <span><strong>{t("Public read token")}</strong><small>{t("Optional. Adds authenticated read capacity for selected public repositories.")}</small></span>
+          <span><strong>{t("GitHub App automation")}</strong><small>{t("Only needed for signed webhooks and installation-based repository access.")}</small></span>
+        </div>
+        <div className="setting-field"><label htmlFor="setting-app-id">{t("GitHub App ID")}</label><input id="setting-app-id" aria-describedby="setting-app-id-help" value={draft.github.appId} onChange={event => setDraft(current => current ? ({ ...current, github: { ...current.github, appId: event.target.value } }) : current)} placeholder={t("Only for GitHub App mode")} /><SettingHelp id="setting-app-id-help" text="Find the numeric App ID on the GitHub App settings page. Skip this for anonymous or PAT read-only mode." href={SETTING_HELP_LINKS.githubApp} /></div>
+        <SecretField name="publicReadToken" label="Public read token" configured={settings.github.publicReadTokenConfigured} value={secrets.publicReadToken} clear={clearSecrets.publicReadToken} help="Optional: use a fine-grained PAT limited to selected repositories and read-only contents/metadata permissions." helpHref={SETTING_HELP_LINKS.githubPat} onValue={updateSecret} onClear={updateClear} />
+        <SecretField name="webhookSecret" label="Webhook secret" configured={settings.github.webhookSecretConfigured} value={secrets.webhookSecret} clear={clearSecrets.webhookSecret} help="Create a random webhook secret in your GitHub App and enter the same value here." helpHref={SETTING_HELP_LINKS.githubWebhook} onValue={updateSecret} onClear={updateClear} />
+        <div className="setting-field-wide"><SecretField name="privateKey" label="Private key" configured={settings.github.privateKeyConfigured} value={secrets.privateKey} clear={clearSecrets.privateKey} help="Paste the GitHub App PEM private key or a readable local file path. Never commit the PEM file." helpHref={SETTING_HELP_LINKS.githubPrivateKey} multiline onValue={updateSecret} onClear={updateClear} /></div>
       </div>
     </section>
 
     <section className="settings-group section-block">
       <div className="settings-group-title"><ServerCog size={18} /><div><span>{t("03 · Runtime")}</span><h3>{t("Local service")}</h3><p>{t("Control storage, workspace isolation and worker throughput.")}</p></div></div>
       <div className="settings-fields">
-        <div className="setting-field"><label htmlFor="setting-database">{t("Database path")}</label><input id="setting-database" value={safeEditablePath(draft.runtime.databasePath, "./.consistency/consistency.db")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, databasePath: event.target.value } }) : current)} /></div>
-        <div className="setting-field"><label htmlFor="setting-workspace">{t("Workspace root")}</label><input id="setting-workspace" value={safeEditablePath(draft.runtime.workspaceRoot, "./.consistency/workspaces")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workspaceRoot: event.target.value } }) : current)} /></div>
-        <div className="setting-field"><label htmlFor="setting-concurrency">{t("Worker concurrency")}</label><input id="setting-concurrency" type="number" min="1" max="16" value={draft.runtime.workerConcurrency} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerConcurrency: Number(event.target.value) } }) : current)} /></div>
-        <div className="setting-field"><label htmlFor="setting-poll">{t("Poll interval (ms)")}</label><input id="setting-poll" type="number" min="50" max="60000" value={draft.runtime.workerPollIntervalMs} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerPollIntervalMs: Number(event.target.value) } }) : current)} /></div>
-        <div className="setting-field setting-field-wide"><label htmlFor="setting-web-url">{t("Web URL")}</label><input id="setting-web-url" type="url" value={draft.runtime.webUrl} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, webUrl: event.target.value } }) : current)} /></div>
-        <div className="setting-field setting-field-wide setting-note"><LockKeyhole size={17} /><div><strong>{t("API bearer token")}</strong><p>{t(settings.runtime.apiTokenConfigured ? "Configured for the API. Keep VITE_API_TOKEN synchronized before restarting the web app." : "Optional. Configure it from the CLI so the API and Vite client can be updated together.")}</p><code>npm run config -- set runtime.api-token</code></div></div>
+        <div className="setting-field"><label htmlFor="setting-database">{t("Database path")}</label><input id="setting-database" aria-describedby="setting-database-help" value={safeEditablePath(draft.runtime.databasePath, "./.consistency/consistency.db")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, databasePath: event.target.value } }) : current)} /><SettingHelp id="setting-database-help" text="Stored locally. Relative paths stay inside this project and are safest for a first setup." /></div>
+        <div className="setting-field"><label htmlFor="setting-workspace">{t("Workspace root")}</label><input id="setting-workspace" aria-describedby="setting-workspace-help" value={safeEditablePath(draft.runtime.workspaceRoot, "./.consistency/workspaces")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workspaceRoot: event.target.value } }) : current)} /><SettingHelp id="setting-workspace-help" text="Temporary review workspaces are created here. Keep the default unless you manage storage separately." /></div>
+        <div className="setting-field"><label htmlFor="setting-concurrency">{t("Worker concurrency")}</label><input id="setting-concurrency" aria-describedby="setting-concurrency-help" type="number" min="1" max="16" value={draft.runtime.workerConcurrency} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerConcurrency: Number(event.target.value) } }) : current)} /><SettingHelp id="setting-concurrency-help" text="Start with 1. Increase only after checking CPU, memory and provider rate limits." /></div>
+        <div className="setting-field"><label htmlFor="setting-poll">{t("Poll interval (ms)")}</label><input id="setting-poll" aria-describedby="setting-poll-help" type="number" min="50" max="60000" value={draft.runtime.workerPollIntervalMs} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerPollIntervalMs: Number(event.target.value) } }) : current)} /><SettingHelp id="setting-poll-help" text="How often the worker checks for queued jobs. The default is appropriate for local use." /></div>
+        <div className="setting-field setting-field-wide"><label htmlFor="setting-web-url">{t("Web URL")}</label><input id="setting-web-url" aria-describedby="setting-web-url-help" type="url" value={draft.runtime.webUrl} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, webUrl: event.target.value } }) : current)} /><SettingHelp id="setting-web-url-help" text="The browser URL used in links and callbacks, usually http://127.0.0.1:5173 for local development." /></div>
+        <div className="setting-field setting-field-wide setting-note"><LockKeyhole size={17} /><div><strong>{t("API bearer token")}</strong><p>{t(settings.runtime.apiTokenConfigured ? "Configured for the API. Keep VITE_API_TOKEN synchronized before restarting the web app." : "Optional for local use. Generate a high-entropy value yourself; this is not a vendor API key.")}</p><code>npm run config -- set runtime.api-token</code><SettingHelp id="setting-api-token-help" text="This token is generated by ConsistenCy, not an external API provider. A production browser deployment should use a protected server session or reverse proxy instead of treating a Vite build variable as a user secret." /></div></div>
       </div>
     </section>
 

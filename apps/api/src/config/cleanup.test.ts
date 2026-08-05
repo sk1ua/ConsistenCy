@@ -45,7 +45,7 @@ function getAllSourceFiles(dir: string): string[] {
   if (!existsSync(dir) || isInsideGeneratedContent(dir)) return results;
   const list = readdirSync(dir);
   for (const file of list) {
-    if (file === "node_modules" || file === ".git" || file === "dist" || file === "__pycache__") continue;
+    if (file === "node_modules" || file === ".git" || file === "dist" || file === "__pycache__" || file === ".consistency") continue;
     const filePath = join(dir, file);
     if (isInsideGeneratedContent(filePath)) continue;
     const stat = statSync(filePath);

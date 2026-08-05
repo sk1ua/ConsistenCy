@@ -1,0 +1,72 @@
+/* Beginner-facing setup guidance and fixed official resource links. */
+.setting-help {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  color: #68757c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.setting-help a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #2457ce;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.setting-help a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.setting-help a:focus-visible {
+  border-radius: 3px;
+  outline: 3px solid rgba(47, 107, 255, .2);
+  outline-offset: 2px;
+}
+
+.source-mode-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.source-mode-guide > span {
+  min-width: 0;
+  padding: 12px 13px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid #d5dedb;
+  border-radius: 8px;
+  background: #f7faf9;
+}
+
+.source-mode-guide > span:first-child {
+  border-color: #bcd9cd;
+  background: #f0f8f4;
+}
+
+.source-mode-guide strong {
+  color: #26353c;
+  font-size: 12px;
+}
+
+.source-mode-guide small {
+  color: #68757c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.setting-note .setting-help {
+  margin-top: 8px;
+}
+
+@media (max-width: 880px) {
+  .source-mode-guide {
+    grid-template-columns: 1fr;
+  }
+}

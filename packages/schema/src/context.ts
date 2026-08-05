@@ -11,10 +11,15 @@ export const changedFileSchema = z.object({
   patch: z.string().optional()
 }).strict();
 
+export const reviewSourceSchema = z.enum(["github_pr", "local_git"]);
+
 export const prReviewContextSchema = z.object({
   jobId: nonEmpty,
+  /** Defaults to github_pr so existing GitHub callers are unaffected. */
+  source: reviewSourceSchema.default("github_pr"),
+  /** `owner/repo` for GitHub; a display name for a local checkout. */
   repositoryFullName: nonEmpty,
-  pullRequestNumber: z.number().int().positive(),
+  pullRequestNumber: z.number().int().positive().optional(),
   baseSha: nonEmpty,
   headSha: nonEmpty,
   changedFiles: z.array(changedFileSchema),
@@ -23,7 +28,16 @@ export const prReviewContextSchema = z.object({
   baseFileContents: z.record(z.string()),
   projectMetadata: z.record(z.string()),
   workspacePath: nonEmpty
-}).strict();
+}).strict().superRefine((context, issues) => {
+  if (context.source === "github_pr" && context.pullRequestNumber === undefined) {
+    issues.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A github_pr context requires pullRequestNumber",
+      path: ["pullRequestNumber"]
+    });
+  }
+});
 
 export type ChangedFile = z.infer<typeof changedFileSchema>;
+export type ReviewSource = z.infer<typeof reviewSourceSchema>;
 export type PRReviewContext = z.infer<typeof prReviewContextSchema>;

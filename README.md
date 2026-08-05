@@ -68,12 +68,23 @@ https://github.com/espnet/espnet/pull/6327
 
 公开 URL 会锁定 repository、PR number、base SHA 和 head SHA，创建 `accessMode=public_read`、`publicationPolicy=disabled` 的 Job。它只读取公开 PR、生成报告和 Notebook，不调用 GitHub App installation API，不写文件，不执行命令，不应用补丁，也不发布评论。
 
-Notebook 是报告右侧的来源驱动研究空间：
+Notebook 默认以全页来源驱动研究空间打开：
 
 - Change Map、Architecture Impact、Risk Brief、Fix Plan 四类分析卡片；
 - 按 `repository + PR + head SHA` 隔离的索引和引用；
-- SSE 流式回答、工具事件、provider/model 和 token usage；
+- 支持 Markdown/GFM 的 SSE 流式回答、工具事件、provider/model 和 token usage；
+- 可通过对话整理客制化确定性 `AnalysisSpec` 草案，但只允许选择内置 Python 模块；
 - `generate_patch` 只返回 unified diff 文本，明确未应用、未执行测试。
+
+## 在 Codex 中直接使用
+
+打开仓库后，Codex 会读取根目录 `AGENTS.md`，并发现 `.agents/skills/consistency-review/`。可以直接要求：
+
+```text
+Use $consistency-review to analyze engine/config.py and return an evidence-backed report.
+```
+
+技能使用与 WebUI 相同的 Python 确定性引擎，只读仓库内源码，不执行被分析代码或 LLM 临时生成的 Python。三部分边界、当前实现状态及后续服务端 Codex SDK/MCP 方案见 [LLM、确定性分析与 Codex 集成](docs/llm-codex-integration.md)。
 
 ## 30 秒启动
 
@@ -99,7 +110,7 @@ npm run dev:web    # Web: http://127.0.0.1:5173
 Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed
 ```
 
-配置 `CONSISTENCY_API_TOKEN` 后，浏览器和 API 请求需要 `Authorization: Bearer <CONSISTENCY_API_TOKEN>`。公开 PR 分析默认在开发环境启用；如果配置 `GITHUB_PUBLIC_READ_TOKEN`，它只留在 API 进程中，不会传给 WebUI 或写入数据库。全栈 E2E 使用隔离数据和临时 API 端口 `3001`。
+配置 `CONSISTENCY_API_TOKEN` 后，浏览器和 API 请求需要 `Authorization: Bearer <CONSISTENCY_API_TOKEN>`。公开 PR 分析默认在开发环境启用；`GITHUB_PUBLIC_READ_TOKEN` 可在 Settings 中录入并加密保存，保存后只向 WebUI 返回“已配置”状态，不返回明文。全栈 E2E 使用隔离数据和临时 API 端口 `3001`。
 
 ## HTTP 入口
 
@@ -120,9 +131,10 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed
 | --- | --- |
 | GitHub 入口 | HMAC Webhook、PR Context、GitHub App 鉴权 |
 | 公开 PR | 严格 URL 校验、匿名/PAT 读取、SHA 锁定、analysis-only Job |
-| 确定性分析 | Python 多信号风险分析、Evidence Pack、边界预算 |
-| LLM 层 | Mock、DeepSeek、OpenAI；结构化输出和 Notebook SSE |
-| Repository Notebook | SHA 隔离索引、只读工具、强制引用、四类卡片 |
+| 确定性分析 | Python allowlist 模块、多信号风险分析、Evidence Pack、错误显式失败 |
+| LLM 层 | Mock、DeepSeek、OpenAI；结构化输出、Notebook SSE 和 AnalysisSpec 草案 |
+| Repository Notebook | 全页工作区、Markdown/GFM、SHA 隔离索引、只读工具、强制引用、四类卡片 |
+| Codex | 根 `AGENTS.md`、仓库技能和只读确定性分析 CLI |
 | 可靠发布 | SQLite Outbox、租约、fencing token、重试和幂等评论 |
 | 跨语言协议 | JSON-over-stdio、Correlation ID、双端 Schema 校验 |
 | 可复现性 | Demo seed、固定 MockLLM、隔离全栈 E2E 和公开数据快照 |
@@ -133,6 +145,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed
 - PAT 仅作为服务端环境变量使用；日志、错误、SSE 和 WebUI 不显示 token、私钥或 Authorization header。
 - 仓库内容、diff、评论和静态分析输出都按不可信输入处理；LLM 不是安全策略的唯一执行点。
 - Notebook 没有 shell、写文件、测试执行、补丁应用或 GitHub 评论权限。
+- LLM 只能起草分析计划；Python registry 拒绝未知模块，解析或模块异常不会降级成零风险结果。
 - 风险分数和公开 Review 只能作为审查排序信号，不能替代人工判断或缺陷金标准。
 
 详见 [安全边界](docs/security.md)、[公开 PR API](docs/api.md) 和 [Repository Notebook](docs/notebook.md)。
@@ -140,7 +153,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed
 ## 文档导航
 
 - **开始使用**：[Demo](docs/demo.md) · [HTTP API](docs/api.md) · [GitHub App 设置](docs/GITHUB_APP_SETUP.md)
-- **理解架构**：[项目概览](docs/PROJECT_OVERVIEW.md) · [架构](docs/architecture.md) · [Repository Notebook](docs/notebook.md)
+- **理解架构**：[项目概览](docs/PROJECT_OVERVIEW.md) · [架构](docs/architecture.md) · [Repository Notebook](docs/notebook.md) · [LLM / Codex 集成边界](docs/llm-codex-integration.md)
 - **数据与评估**：[输出 Schema](docs/output_schema.md) · [评估边界](docs/EVALUATION.md) · [评估数据集 Schema](evaluation/dataset_schema.md)
 - **贡献与安全**：[CONTRIBUTING](CONTRIBUTING.md) · [安全边界](docs/security.md)
 

@@ -1,0 +1,35 @@
+/* ===== Tokens & Custom Properties ===== */
+:root {
+  --font-ui: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-display: var(--font-ui);
+  --font-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --background: #f6f8f5;
+  --surface: #ffffff;
+  --surface-subtle: #f0f3f0;
+  --foreground: #17202a;
+  --muted: #687483;
+  --border: #dbe1dd;
+  --border-strong: #c8d0cb;
+  --primary: #2f6bff;
+  --primary-soft: #edf2ff;
+  --success: #16856b;
+  --success-soft: #e9f7f2;
+  --warning: #b66a12;
+  --warning-soft: #fff5e5;
+  --danger: #d14d3e;
+  --danger-soft: #fff0ed;
+  --sidebar: #17202a;
+  --sidebar-muted: #9eabb5;
+  color: #17202a;
+  background: #f6f8f5;
+  font-synthesis: none;
+}

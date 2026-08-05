@@ -1,0 +1,198 @@
+/* ===== App Shell — Sidebar ===== */
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  height: 100vh;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar);
+  color: #fff;
+}
+.brand {
+  height: 72px;
+  padding: 0 22px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, .1);
+}
+.brand img {
+  width: 38px;
+  height: 38px;
+  padding: 3px;
+  object-fit: contain;
+  border-radius: 9px;
+  background: #fff;
+}
+.brand > span {
+  min-width: 0;
+}
+.brand strong, .brand small {
+  display: block;
+}
+.brand strong {
+  font-family: var(--font-display);
+  font-size: 21px;
+  letter-spacing: .01em;
+}
+.brand strong span {
+  color: #72d1b1;
+}
+.brand small {
+  margin-top: 3px;
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.app-sidebar nav {
+  padding: 22px 14px;
+  display: grid;
+  gap: 6px;
+}
+.app-sidebar nav button {
+  position: relative;
+  width: 100%;
+  height: 45px;
+  padding: 0 13px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #d7dde1;
+  cursor: pointer;
+  text-align: left;
+  transition: background .16s ease, color .16s ease;
+}
+.app-sidebar nav button::before {
+  position: absolute;
+  left: -14px;
+  width: 3px;
+  height: 22px;
+  border-radius: 0 3px 3px 0;
+  background: transparent;
+  content: "";
+}
+.app-sidebar nav button:hover {
+  background: rgba(255, 255, 255, .07);
+  color: #fff;
+}
+.app-sidebar nav button.active {
+  background: rgba(47, 107, 255, .2);
+  color: #fff;
+  font-weight: 650;
+}
+.app-sidebar nav button.active::before {
+  background: #6f97ff;
+}
+.app-sidebar nav button.active svg {
+  color: #8facff;
+}
+.sidebar-signal {
+  margin: auto 18px 0;
+  padding: 14px 0 17px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}
+.sidebar-signal span, .sidebar-signal strong, .sidebar-signal small {
+  display: block;
+}
+.sidebar-signal span {
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.sidebar-signal strong {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.sidebar-signal strong i {
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  display: inline-block;
+  border-radius: 50%;
+  background: #72d1b1;
+  box-shadow: 0 0 0 4px rgba(114, 209, 177, .12);
+}
+.sidebar-signal small {
+  margin-top: 5px;
+  color: var(--sidebar-muted);
+  font-size: 11px;
+}
+.sidebar-backdrop {
+  display: none;
+}
+
+/* ===== App Shell — Header ===== */
+.app-main {
+  min-width: 0;
+}
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  min-height: 72px;
+  padding: 0 clamp(18px, 3vw, 40px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, .94);
+  backdrop-filter: blur(14px);
+}
+.header-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.header-title > div {
+  min-width: 0;
+}
+.header-title h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 25px;
+  line-height: 1.15;
+  letter-spacing: .01em;
+}
+.header-title p {
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.menu-button {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: none;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.header-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: #3b4653;
+  font-size: 12px;
+}

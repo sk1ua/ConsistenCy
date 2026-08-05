@@ -3,6 +3,7 @@ import type { AgentRun } from "@consistency/schema";
 import type { ReviewGraphStateValue } from "../graph/state";
 import type { AgentDependencies } from "./types";
 import { buildReviewReport, deduplicateAndSortFindings } from "../report/reportBuilder";
+import { reportLanguageInstruction } from "./prompt";
 
 export function createSynthesizerNode(dependencies: AgentDependencies) {
   return async (state: ReviewGraphStateValue) => {
@@ -36,7 +37,10 @@ export function createSynthesizerNode(dependencies: AgentDependencies) {
 
     try {
       const result = await dependencies.provider.generateSummary({
-        systemPrompt: "Summarize a multi-agent pull request review in two concise sentences. Incorporate the canonical summary and recommendations into the overview without omitting critical recommendations. Do not add findings or claims that are absent from the supplied data.",
+        systemPrompt: [
+          "Summarize a multi-agent pull request review in two concise sentences. Incorporate the canonical summary and recommendations into the overview without omitting critical recommendations. Do not add findings or claims that are absent from the supplied data.",
+          reportLanguageInstruction(dependencies.reportLanguage)
+        ].join(" "),
         userPrompt: JSON.stringify({
           canonicalScore: score,
           canonicalRiskLevel: riskLevel,

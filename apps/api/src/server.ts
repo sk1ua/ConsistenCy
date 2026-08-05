@@ -9,7 +9,10 @@ import { PublishWorker } from "./publish/worker";
 import { publishToGitHub } from "./publish/githubPublisher";
 import { PermanentPublishError } from "./publish/error";
 import { GitHubAppAuthenticator } from "./github/auth";
-import { buildPRContext } from "./review/context/buildPRContext";
+import { createContextBuilder } from "./review/context/contextRouter";
+import { triggerLocalReview } from "./trigger/local";
+import { HeartbeatDaemon } from "./heartbeat/daemon";
+import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createLLMProvider } from "./review/llm/factory";
 import { redactSensitiveText, sanitizePublishFailure } from "./security/redact";
 import { loadRealData } from "./data/realData";
@@ -56,7 +59,8 @@ const notebookGraph = new NotebookGraph({
   notebookStore,
   indexer: snapshotIndexer,
   maxToolCalls: config.CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS,
-  maxContextChars: config.CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS * 4
+  maxContextChars: config.CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS * 4,
+  reportLanguage: config.reportLanguage
 });
 
 export const worker = new ReviewWorker({
@@ -66,19 +70,36 @@ export const worker = new ReviewWorker({
   workflow: {
     provider,
     deterministicAnalyzer,
-    contextBuilder: input => {
-      return buildPRContext(input, {
+    reportLanguage: config.reportLanguage,
+    reviewWorkflow: config.reviewWorkflow,
+    workspaceRoot: config.workspaceRoot,
+    contextBuilder: createContextBuilder({
+      github: {
         authenticator,
         publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
         workspaceRoot: config.workspaceRoot
-      });
-    }
+      }
+    })
   },
   onError: (error, job) => {
     logger.error({
       jobId: job?.id,
       error: error instanceof Error ? redactSensitiveText(error.message) : "Unknown worker error"
     }, "Review worker failed a job");
+  },
+  onSucceeded: (job) => {
+    if (config.notebookEnabled === false) return;
+    try {
+      const { source } = notebookStore.ensureForJob(job);
+      void snapshotIndexer.ensure(job, source).catch(err => {
+        logger.warn({
+          jobId: job.id,
+          error: err instanceof Error ? redactSensitiveText(err.message) : "Unknown index error"
+        }, "Notebook index warm-up failed");
+      });
+    } catch (err) {
+      logger.warn({ jobId: job.id, error: String(err) }, "Notebook warm-up setup failed");
+    }
   }
 });
 
@@ -110,6 +131,26 @@ export const publishWorker = new PublishWorker({
   }
 });
 
+export const heartbeat = new HeartbeatDaemon({
+  repository: new LocalGitAdapter({ root: config.heartbeatRepoPath }),
+  config: {
+    enabled: config.heartbeatEnabled,
+    pulseIntervalMs: config.CONSISTENCY_HEARTBEAT_INTERVAL_MS,
+    watchFilesystem: false,
+    indexPath: ".consistency/knowledge_graph.sqlite",
+    maxIndexedFileBytes: 1_048_576
+  },
+  // Newest-first reports drive the risk index and outstanding security debt.
+  recentReports: () => jobs.list()
+    .map(job => job.result)
+    .filter((report): report is NonNullable<typeof report> => report !== undefined),
+  onError: error => {
+    logger.warn({
+      error: error instanceof Error ? redactSensitiveText(error.message) : "Unknown heartbeat error"
+    }, "Heartbeat pulse failed");
+  }
+});
+
 export const server = createApiServer({
   jobs,
   githubWebhookSecret: config.GITHUB_WEBHOOK_SECRET,
@@ -131,6 +172,13 @@ export const server = createApiServer({
     jobs,
     publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN
   }),
+  localReview: input => triggerLocalReview(jobs, input, {
+    allowedRoots: config.localReviewRoots
+  }),
+  heartbeat: {
+    latest: () => heartbeat.latest(),
+    subscribe: subscriber => heartbeat.subscribe(subscriber)
+  },
   healthDetails: () => ({
     database: { ok: database.open },
     worker: worker.status(),
@@ -165,7 +213,13 @@ export async function shutdownApplication(): Promise<void> {
     if (server.listening) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    // 2. Stop ReviewWorker (stops producing new Outbox items)
+    // 2. Stop the heartbeat first: it only observes, so nothing depends on it.
+    try {
+      heartbeat.stop();
+    } catch (err) {
+      logger.error({ error: err }, "Error stopping heartbeat during shutdown");
+    }
+    // 3. Stop ReviewWorker (stops producing new Outbox items)
     try {
       await worker.stop();
     } catch (err) {
@@ -216,13 +270,23 @@ if (process.env.NODE_ENV !== "test") {
     worker.start();
     publishWorker.start();
   }
+  heartbeat.start();
   server.listen(config.PORT, config.HOST, () => {
     logger.info({
       host: config.HOST,
       port: config.PORT,
       llmProvider: provider.name,
       workerConcurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
-      publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY
+      publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY,
+      // Surfaced at startup because any checkout under these roots is readable
+      // through POST /reviews/local.
+      localReviewRoots: config.localReviewRoots
     }, "ConsistenCy API listening");
+
+    if (config.localReviewRootsAreDefaulted) {
+      logger.warn({
+        localReviewRoots: config.localReviewRoots
+      }, "CONSISTENCY_LOCAL_REVIEW_ROOTS is unset; every repository under the project's parent directory can be read via POST /reviews/local");
+    }
   });
 }

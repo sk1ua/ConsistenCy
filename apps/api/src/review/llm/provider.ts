@@ -90,7 +90,11 @@ export abstract class BaseLLMProvider implements LLMProvider {
         lastError = error;
       }
     }
-    throw new StructuredOutputError(`Provider ${this.name} failed schema ${request.schemaName} after one repair attempt`, lastError);
+    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new StructuredOutputError(
+      `Provider ${this.name} failed schema ${request.schemaName} after one repair attempt: ${detail.slice(0, 800)}`,
+      lastError
+    );
   }
 
   async generateStructuredFinding(request: FindingGenerationRequest): Promise<StructuredResult<ReviewFinding[]>> {

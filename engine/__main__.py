@@ -3,7 +3,19 @@ import json
 import sys
 import traceback
 from typing import Optional
-from engine.protocol import AnalyzeRequest, ComposeReviewRequest, AnalyzeResponse, ComposeReviewResponse, normalise_protocol_strings
+from engine.protocol import (
+    AnalyzeRequest,
+    ComposeReviewRequest,
+    AnalyzeResponse,
+    ComposeReviewResponse,
+    RecordReviewRequest,
+    RecordReviewResponse,
+    RelevantContextRequest,
+    RelevantContextResponse,
+    RunWorkflowRequest,
+    RunWorkflowResponse,
+    normalise_protocol_strings,
+)
 from engine.runner import run_analysis, compose_review
 
 def write_stdout(data: dict) -> None:
@@ -18,6 +30,27 @@ def log_stderr(msg: str) -> None:
 def make_error_response(action: Optional[str], req_id: Optional[str], message: str) -> dict:
     if action == "compose_review":
         return ComposeReviewResponse(
+            id=req_id if req_id is not None else "req_error",
+            ok=False,
+            error=message
+        ).to_dict()
+
+    if action == "run_workflow":
+        return RunWorkflowResponse(
+            id=req_id if req_id is not None else "req_error",
+            ok=False,
+            error=message
+        ).to_dict()
+
+    if action == "record_review":
+        return RecordReviewResponse(
+            id=req_id if req_id is not None else "req_error",
+            ok=False,
+            error=message
+        ).to_dict()
+
+    if action == "relevant_context":
+        return RelevantContextResponse(
             id=req_id if req_id is not None else "req_error",
             ok=False,
             error=message
@@ -94,6 +127,32 @@ def main():
                 request = ComposeReviewRequest.from_dict(raw_data)
                 with redirect_stdout(sys.stderr):
                     response = compose_review(request)
+                response.id = req_id
+                write_stdout(response.to_dict())
+            elif action == "record_review":
+                from engine.knowledge.bridge import run_record_review_request
+
+                record_request = RecordReviewRequest.from_dict(raw_data)
+                with redirect_stdout(sys.stderr):
+                    response = run_record_review_request(record_request)
+                response.id = req_id
+                write_stdout(response.to_dict())
+            elif action == "relevant_context":
+                from engine.knowledge.bridge import run_relevant_context_request
+
+                context_request = RelevantContextRequest.from_dict(raw_data)
+                with redirect_stdout(sys.stderr):
+                    response = run_relevant_context_request(context_request)
+                response.id = req_id
+                write_stdout(response.to_dict())
+            elif action == "run_workflow":
+                # Imported lazily so the existing actions do not pay for the
+                # workflow engine's imports on every engine start.
+                from engine.workflow.bridge import run_workflow_request
+
+                workflow_request = RunWorkflowRequest.from_dict(raw_data)
+                with redirect_stdout(sys.stderr):
+                    response = run_workflow_request(workflow_request)
                 response.id = req_id
                 write_stdout(response.to_dict())
             else:

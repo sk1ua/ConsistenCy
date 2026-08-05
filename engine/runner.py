@@ -3,12 +3,10 @@ from typing import Dict, Any, List
 
 from engine.agents import (
     ParserAgent,
-    StyleAgent,
-    StructuralAgent,
-    SemanticAgent,
-    DuplicationAgent,
-    SecurityAgent,
     RiskScoringAgent,
+    DEFAULT_AGENT_IDS,
+    instantiate_agents,
+    resolve_agent_manifests,
 )
 from engine.agents.base_agent import AgentResult
 from engine.scoring import (
@@ -50,10 +48,8 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
 
     try:
         # Configuration options
-        requested_agents = request.options.get(
-            "agents",
-            ["style", "structural", "semantic", "duplication", "security"]
-        )
+        requested_agents = request.options.get("agents", list(DEFAULT_AGENT_IDS))
+        agent_manifests = resolve_agent_manifests(requested_agents)
         include_evidence_pack = request.options.get("include_evidence_pack", False)
         token_budget = request.options.get("token_budget", DEFAULT_TOKEN_BUDGET)
 
@@ -63,27 +59,34 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
 
             # 1b. Instantiate agents (No global singletons)
             parser = ParserAgent()
-            agents = {}
-            if "style" in requested_agents:
-                agents["style"] = StyleAgent()
-            if "structural" in requested_agents:
-                agents["structural"] = StructuralAgent()
-            if "semantic" in requested_agents:
-                agents["semantic"] = SemanticAgent()
-            if "duplication" in requested_agents:
-                agents["duplication"] = DuplicationAgent()
-            if "security" in requested_agents:
-                agents["security"] = SecurityAgent()
+            agents = instantiate_agents(agent_manifests)
 
             risk_scorer = RiskScoringAgent(weights=RISK_WEIGHTS)
 
             # 1c. Parse source_now and source_base using ParserAgent
-            if file_input.path:
+            # Non-code files (unknown language: .md, .json, .lock, ...) have no
+            # AST and must not be forced through the Python parser — parsing
+            # failure for such files is not evidence of a defect. Code files
+            # still fail closed below.
+            if lang == "unknown":
+                snapshot_now = {}
+                snapshot_base = {}
+            elif file_input.path:
                 snapshot_now = parser.parse_file(file_input.content, filepath=file_input.path)
                 snapshot_base = parser.parse_file(file_input.baseline, filepath=file_input.path) if file_input.baseline else {}
             else:
                 snapshot_now = parser.parse(file_input.content)
                 snapshot_base = parser.parse(file_input.baseline) if file_input.baseline else {}
+
+            if lang != "unknown":
+                if snapshot_now.get("error"):
+                    raise RuntimeError(
+                        f"Parser failed for current file '{file_input.path}': {snapshot_now['error']}"
+                    )
+                if snapshot_base.get("error"):
+                    raise RuntimeError(
+                        f"Parser failed for baseline file '{file_input.path}': {snapshot_base['error']}"
+                    )
 
             snapshot_now["language"] = lang
             if snapshot_base:
@@ -96,11 +99,10 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
                     res = agent.run(snapshot_now, snapshot_base)
                     agent_results[agent_name] = res
                 except Exception as e:
-                    agent_results[agent_name] = AgentResult(
-                        agent_name=agent_name,
-                        score=0.0,
-                        evidence=[f"Error running {agent_name}: {str(e)}"]
-                    )
+                    raise RuntimeError(
+                        f"Deterministic agent '{agent_name}' failed for file "
+                        f"'{file_input.path}': {e}"
+                    ) from e
 
             # 1e. Aggregate with RiskScoringAgent
             aggregated = risk_scorer.aggregate(agent_results)
@@ -180,7 +182,7 @@ def compose_review(request: ComposeReviewRequest) -> ComposeReviewResponse:
                 ok=True,
                 overall_score=100,
                 risk_level="low",
-                summary="No files analyzed.",
+                summary="未分析任何文件。",
                 recommendations=[]
             )
 
@@ -202,14 +204,14 @@ def compose_review(request: ComposeReviewRequest) -> ComposeReviewResponse:
             for finding in f.findings:
                 findings.append(f"{f.path}: {finding}")
 
-        recommendations = [f"Address findings in {len(files)} file(s)."] if findings else ["No major issues identified."]
+        recommendations = [f"建议处理 {len(files)} 个文件中的发现。"] if findings else ["未发现重大问题。"]
 
         return ComposeReviewResponse(
             id=request.id,
             ok=True,
             overall_score=overall_score,
             risk_level=risk_level,
-            summary=f"Analysis completed across {len(files)} file(s). Risk level: {risk_level}.",
+            summary=f"已完成 {len(files)} 个文件的确定性分析。风险等级: {risk_level}。",
             recommendations=recommendations
         )
     except Exception as e:

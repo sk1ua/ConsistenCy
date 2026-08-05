@@ -29,6 +29,13 @@ Thumbs.db
 # Environment and local config
 .env
 config.local.py
+/apps/api/secrets/
+
+# Local scratch and probe files
+probe-*.tmp.mjs
+verify-*.tmp.mjs
+/ui-*.png
+/.codex-screenshot-doc.diff
 
 # Logs and local databases
 *.log

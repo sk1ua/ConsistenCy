@@ -52,6 +52,7 @@ export type SettingsSnapshot = {
     appId: string;
     privateKeyConfigured: boolean;
     webhookSecretConfigured: boolean;
+    publicReadTokenConfigured: boolean;
   };
   runtime: {
     databasePath: string;
@@ -78,6 +79,7 @@ export type SettingsPatch = {
     appId?: string | null;
     privateKey?: string | null;
     webhookSecret?: string | null;
+    publicReadToken?: string | null;
   };
   runtime?: {
     databasePath?: string;
@@ -86,26 +88,6 @@ export type SettingsPatch = {
     workerPollIntervalMs?: number;
     webUrl?: string;
     apiToken?: string | null;
-  };
-};
-
-export type RealDataSnapshot = {
-  version: 1;
-  importedAt: string;
-  source: {
-    provider: "github"; repository: string; pullRequestNumber: number; url: string; fetchedAt: string; title: string; author: string;
-    state: string; createdAt: string; updatedAt: string; mergedAt: string | null; baseSha: string; headSha: string;
-    commits: number; changedFiles: number; additions: number; deletions: number; reviewCount: number;
-  };
-  analysis: {
-    reportPath: string; generatedAt: string; method: string; commitCount: number; averageRisk: number; maxRisk: number; riskScale: "0-1";
-    commits: Array<{ sha: string; date: string; author: string; message: string; risk_score: number; risk_level: string; files_analyzed: number }>;
-    topRiskyFiles: Array<{ file: string; avg_risk: number; max_risk: number; hits: number; churn_lines?: number; complexity?: number; owner?: string }>;
-    components: Record<string, number>;
-  };
-  validation: {
-    sourceDataset: string; labelSource: string; needsManualAudit: boolean; sampleCount: number; evaluatedCount: number; k: number;
-    precisionAtK: number; recallAtK: number; goldOverallRisk: string; predictedTopFiles: string[]; goldTopFiles: string[];
   };
 };
 
@@ -189,6 +171,9 @@ export const api = {
   async report(id: string): Promise<ReviewReport> {
     return reportResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/report`)).report;
   },
+  async jobNotebook(jobId: string): Promise<string | null> {
+    return (await request(`/jobs/${encodeURIComponent(jobId)}/notebook`) as { notebookId: string | null }).notebookId;
+  },
   async recentReports(limit = 10): Promise<ReviewReport[]> {
     return recentReportsResponseSchema.parse(await request(`/reports/recent?limit=${limit}`)).reports;
   },
@@ -203,9 +188,6 @@ export const api = {
   },
   async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
     return (await request("/settings", { method: "PUT", body: JSON.stringify(patch) }) as { settings: SettingsSnapshot }).settings;
-  },
-  async realData(): Promise<RealDataSnapshot | undefined> {
-    return (await request("/real-data") as { realData: RealDataSnapshot | null }).realData ?? undefined;
   },
   async seedDemo(): Promise<{ created: number; notebooks?: Array<{ jobId: string; notebookId: string }> }> {
     return await request("/demo/seed", { method: "POST", body: "{}" }) as { created: number; notebooks?: Array<{ jobId: string; notebookId: string }> };

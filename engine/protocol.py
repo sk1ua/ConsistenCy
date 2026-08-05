@@ -126,6 +126,271 @@ class AnalyzeRequest:
 
 
 @dataclass
+class RunWorkflowRequest:
+    """Runs a named workflow over the supplied files.
+
+    Additive alongside `analyze`: the existing action keeps its response shape,
+    so a caller opts into the DAG engine by choosing this action.
+    """
+
+    id: str = "req_default"
+    action: str = "run_workflow"
+    workflow: str = ""
+    files: List[FileInput] = field(default_factory=list)
+    workspace_path: Optional[str] = None
+    options: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RunWorkflowRequest":
+        if not isinstance(data, dict):
+            raise ValueError("RunWorkflowRequest data must be a dictionary")
+        _check_keys(
+            data,
+            {"id", "action", "workflow", "files", "workspace_path", "options"},
+            "RunWorkflowRequest",
+        )
+
+        if "id" not in data or not isinstance(data["id"], str) or not data["id"].strip():
+            raise ValueError("RunWorkflowRequest requires a non-empty string 'id'")
+
+        if data.get("action") != "run_workflow":
+            raise ValueError(
+                f"RunWorkflowRequest requires action='run_workflow', got '{data.get('action')}'"
+            )
+
+        workflow = data.get("workflow")
+        if not isinstance(workflow, str) or not workflow.strip():
+            raise ValueError("RunWorkflowRequest requires a non-empty string 'workflow'")
+
+        if "files" not in data or not isinstance(data["files"], list):
+            raise ValueError("RunWorkflowRequest requires a list for 'files'")
+
+        workspace_path = data.get("workspace_path")
+        if workspace_path is not None and not isinstance(workspace_path, str):
+            raise ValueError("RunWorkflowRequest 'workspace_path' must be string or null")
+
+        options = data.get("options", {})
+        if not isinstance(options, dict):
+            raise ValueError("RunWorkflowRequest 'options' must be a dictionary")
+
+        return cls(
+            id=data["id"],
+            action="run_workflow",
+            workflow=workflow.strip(),
+            files=[FileInput.from_dict(f) for f in data["files"]],
+            workspace_path=workspace_path,
+            options=options,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "action": self.action,
+            "workflow": self.workflow,
+            "files": [f.to_dict() for f in self.files],
+            "workspace_path": self.workspace_path,
+            "options": self.options,
+        }
+
+
+@dataclass
+class RunWorkflowResponse:
+    id: str = "req_default"
+    ok: bool = True
+    run: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        if not self.ok:
+            return {
+                "id": self.id,
+                "ok": False,
+                "error": self.error or "Unknown workflow error",
+            }
+        return {
+            "id": self.id,
+            "ok": True,
+            "run": self.run or {},
+        }
+
+
+@dataclass
+class RelevantContextRequest:
+    """Indexes the supplied files and returns augmentation context per target."""
+
+    id: str = "req_default"
+    action: str = "relevant_context"
+    files: List[FileInput] = field(default_factory=list)
+    targets: List[str] = field(default_factory=list)
+    index_path: Optional[str] = None
+    options: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RelevantContextRequest":
+        if not isinstance(data, dict):
+            raise ValueError("RelevantContextRequest data must be a dictionary")
+        _check_keys(
+            data,
+            {"id", "action", "files", "targets", "index_path", "options"},
+            "RelevantContextRequest",
+        )
+
+        if "id" not in data or not isinstance(data["id"], str) or not data["id"].strip():
+            raise ValueError("RelevantContextRequest requires a non-empty string 'id'")
+
+        if data.get("action") != "relevant_context":
+            raise ValueError(
+                f"RelevantContextRequest requires action='relevant_context', got '{data.get('action')}'"
+            )
+
+        if "files" not in data or not isinstance(data["files"], list):
+            raise ValueError("RelevantContextRequest requires a list for 'files'")
+
+        targets = data.get("targets", [])
+        if not isinstance(targets, list) or any(not isinstance(t, str) or not t.strip() for t in targets):
+            raise ValueError("RelevantContextRequest 'targets' must be a list of non-blank strings")
+
+        index_path = data.get("index_path")
+        if index_path is not None and not isinstance(index_path, str):
+            raise ValueError("RelevantContextRequest 'index_path' must be string or null")
+
+        options = data.get("options", {})
+        if not isinstance(options, dict):
+            raise ValueError("RelevantContextRequest 'options' must be a dictionary")
+
+        return cls(
+            id=data["id"],
+            action="relevant_context",
+            files=[FileInput.from_dict(f) for f in data["files"]],
+            targets=list(targets),
+            index_path=index_path,
+            options=options,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "action": self.action,
+            "files": [f.to_dict() for f in self.files],
+            "targets": self.targets,
+            "index_path": self.index_path,
+            "options": self.options,
+        }
+
+
+@dataclass
+class RelevantContextResponse:
+    id: str = "req_default"
+    ok: bool = True
+    contexts: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        if not self.ok:
+            return {
+                "id": self.id,
+                "ok": False,
+                "error": self.error or "Unknown context error",
+            }
+        return {
+            "id": self.id,
+            "ok": True,
+            "contexts": self.contexts or {},
+        }
+
+
+@dataclass
+class RecordReviewRequest:
+    """Folds a completed review's findings into persistent project memory."""
+
+    id: str = "req_default"
+    action: str = "record_review"
+    index_path: str = ""
+    job_id: str = ""
+    reference: str = ""
+    reported_at: str = ""
+    covered_files: List[str] = field(default_factory=list)
+    findings: List[Dict[str, Any]] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RecordReviewRequest":
+        if not isinstance(data, dict):
+            raise ValueError("RecordReviewRequest data must be a dictionary")
+        _check_keys(
+            data,
+            {"id", "action", "index_path", "job_id", "reference", "reported_at",
+             "covered_files", "findings"},
+            "RecordReviewRequest",
+        )
+
+        if "id" not in data or not isinstance(data["id"], str) or not data["id"].strip():
+            raise ValueError("RecordReviewRequest requires a non-empty string 'id'")
+        if data.get("action") != "record_review":
+            raise ValueError(
+                f"RecordReviewRequest requires action='record_review', got '{data.get('action')}'"
+            )
+
+        for key in ("index_path", "job_id", "reference", "reported_at"):
+            value = data.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"RecordReviewRequest requires a non-empty string '{key}'")
+
+        covered = data.get("covered_files", [])
+        if not isinstance(covered, list) or any(not isinstance(p, str) or not p.strip() for p in covered):
+            raise ValueError("RecordReviewRequest 'covered_files' must be non-blank strings")
+
+        findings = data.get("findings", [])
+        if not isinstance(findings, list) or any(not isinstance(f, dict) for f in findings):
+            raise ValueError("RecordReviewRequest 'findings' must be a list of objects")
+
+        return cls(
+            id=data["id"],
+            action="record_review",
+            index_path=data["index_path"],
+            job_id=data["job_id"],
+            reference=data["reference"],
+            reported_at=data["reported_at"],
+            covered_files=list(covered),
+            findings=list(findings),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "action": self.action,
+            "index_path": self.index_path,
+            "job_id": self.job_id,
+            "reference": self.reference,
+            "reported_at": self.reported_at,
+            "covered_files": self.covered_files,
+            "findings": self.findings,
+        }
+
+
+@dataclass
+class RecordReviewResponse:
+    id: str = "req_default"
+    ok: bool = True
+    recorded: int = 0
+    resolved: int = 0
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        if not self.ok:
+            return {
+                "id": self.id,
+                "ok": False,
+                "error": self.error or "Unknown record error",
+            }
+        return {
+            "id": self.id,
+            "ok": True,
+            "recorded": self.recorded,
+            "resolved": self.resolved,
+        }
+
+
+@dataclass
 class ComposeReviewFile:
     path: str
     risk_score: float

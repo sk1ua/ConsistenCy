@@ -47,8 +47,8 @@ class TestEngineProtocol(unittest.TestCase):
         self.assertEqual(resp.id, "req-200")
         self.assertEqual(resp.overall_score, 20)  # (1.0 - 0.8) * 100
         self.assertEqual(resp.risk_level, "critical")
-        self.assertIn("1 file(s)", resp.summary)
-        self.assertIn("1 file(s)", resp.recommendations[0])
+        self.assertIn("1 个文件", resp.summary)
+        self.assertIn("1 个文件", resp.recommendations[0])
 
     def test_main_stdio_valid_analyze_with_stdout_print_redirection(self):
         input_json = json.dumps({

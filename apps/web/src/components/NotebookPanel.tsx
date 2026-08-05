@@ -1,8 +1,9 @@
 import type { Notebook, NotebookCardKind, NotebookMessage } from "@consistency/schema";
 import { Bot, Braces, Download, FileCode2, LoaderCircle, Send, Sparkles, Wrench } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { api, type NotebookStreamEvent } from "../api/client";
 import { useI18n } from "../i18n";
+import { MarkdownContent } from "./MarkdownContent";
 
 const cardKinds: Array<{ kind: NotebookCardKind; label: string }> = [
   { kind: "change_map", label: "Change Map" },
@@ -69,18 +70,25 @@ function formatStatus(status: string, t: (key: string) => string): string {
 
 function MessageBubble({ message }: { message: NotebookMessage }) {
   const { t } = useI18n();
+  const deferredContent = useDeferredValue(message.content);
   return <div className={`notebook-message ${message.role}`}>
     <div className="notebook-message-head">
       <span>{message.role === "assistant" ? <Bot size={13} /> : <Braces size={13} />}{formatRole(message.role, t)}</span>
       <small>{formatStatus(message.status, t)}</small>
     </div>
-    <div className="notebook-message-content">{message.content || <span className="stream-placeholder">{t("Generating grounded response…")}</span>}</div>
+    {message.content
+      ? message.role === "assistant"
+        ? <MarkdownContent content={deferredContent} className="notebook-message-content notebook-markdown" />
+        : <div className="notebook-message-content">{message.content}</div>
+      : <div className="notebook-message-content"><span className="stream-placeholder">{t("Generating grounded response…")}</span></div>}
     {message.citations.length > 0 && <div className="notebook-citations">{message.citations.map(citation => <span key={citationKey(citation)}><FileCode2 size={11} />{citation.file}:{citation.startLine}-{citation.endLine}</span>)}</div>}
   </div>;
 }
 
 export function NotebookPanel({ notebookId }: { notebookId?: string }) {
   const { t } = useI18n();
+  const railRef = useRef<HTMLElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const [notebook, setNotebook] = useState<Notebook>();
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
@@ -140,6 +148,23 @@ export function NotebookPanel({ notebookId }: { notebookId?: string }) {
     }
   }
 
+  function handleMessagesWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    const messagesEl = messagesRef.current;
+    const railEl = railRef.current;
+    if (!messagesEl || !railEl) return;
+    const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 4;
+    const atTop = messagesEl.scrollTop <= 0;
+    if (atBottom && event.deltaY > 0 && railEl.scrollHeight > railEl.clientHeight) {
+      // 右侧对话触底：继续下滑时滚动左侧卡片，避免右侧空白
+      railEl.scrollTop = Math.min(railEl.scrollTop + event.deltaY, railEl.scrollHeight - railEl.clientHeight);
+      event.preventDefault();
+    } else if (atTop && event.deltaY < 0 && railEl.scrollTop > 0) {
+      // 反向：右侧回到顶部后继续上滑时回滚左侧卡片
+      railEl.scrollTop = Math.max(railEl.scrollTop + event.deltaY, 0);
+      event.preventDefault();
+    }
+  }
+
   async function generateCard(kind: NotebookCardKind) {
     if (!notebookId || selectedSources.length === 0 || cardLoading) return;
     setCardLoading(kind);
@@ -162,16 +187,30 @@ export function NotebookPanel({ notebookId }: { notebookId?: string }) {
     <p>{t("Analyze a public GitHub PR to open a SHA-bound Notebook beside its report. The Notebook can read, explain and suggest patches without changing the workspace.")}</p>
   </section>;
 
-  return <section className="notebook-panel">
+  return <section className="notebook-panel notebook-canvas">
     <div className="notebook-panel-title"><div><span className="panel-kicker">{t("Repository notebook")}</span><h2>{t("Research space")}</h2></div><div className="notebook-panel-status"><span className="notebook-state"><i />{notebook?.sources.some(source => source.indexStatus === "ready") ? t("Indexed") : t("Preparing")}</span>{latestRun && <small>{latestRun.provider} / {latestRun.model ?? t("model unavailable")} · {usageLabel}</small>}</div></div>
     {notebook && <>
-      <div className="notebook-source-bar"><div><span>{t("Repository")}</span><strong>{notebook.repository}</strong></div><label><span>{t("Sources")}</span><select aria-label={t("Notebook sources")} multiple value={selectedSources} onChange={event => setSelectedSources(Array.from(event.target.selectedOptions, option => option.value))}>{notebook.sources.map(source => <option key={source.jobId} value={source.jobId}>PR #{source.pullRequestNumber} · {source.headSha.slice(0, 10)}</option>)}</select></label></div>
-      <div className="notebook-cards">{cardKinds.map(({ kind, label }) => <button type="button" className="notebook-card-trigger" key={kind} disabled={Boolean(cardLoading) || selectedSources.length === 0} onClick={() => void generateCard(kind)}><span>{t(label)}</span>{cardLoading === kind ? <LoaderCircle className="spinning" size={14} /> : <Sparkles size={14} />}</button>)}</div>
-      {notebook.cards.length > 0 && <div className="notebook-card-list">{notebook.cards.slice(0, 4).map(card => <article className="notebook-card" key={card.id}><div><strong>{card.title}</strong><span className={`badge badge-${card.status}`}>{t(card.status === "generated" ? "Generated" : card.status === "degraded" ? "Degraded" : card.status)}</span></div><p>{card.content}</p><div className="notebook-card-footer">{card.citations.length > 0 && <small>{t("{count} source citations", { count: card.citations.length })}</small>}{card.kind === "fix_plan" && <button type="button" className="notebook-download" onClick={() => downloadCard(card)}><Download size={12} /> {t("Download suggestion")}</button>}</div></article>)}</div>}
-      <div className="notebook-stream-head"><span><Wrench size={13} /> {t("Agent trace")}</span><small>{events.length ? events.slice(-5).map((ev, i) => <span key={i} className="trace-event">{ev}{i < Math.min(events.length, 5) - 1 ? " · " : ""}</span>) : t("Tools stay read-only and source-bound.")}</small></div>
-      <div className="notebook-messages">{messages.length === 0 ? <div className="notebook-placeholder">{t("Ask why this PR changed these modules, which files carry the most risk, or what a safe fix plan would look like.")}</div> : messages.slice(-8).map(message => <MessageBubble message={message} key={message.id} />)}</div>
-      <form className="notebook-composer" onSubmit={event => void ask(event)}><textarea aria-label={t("Ask Repository Notebook")} value={question} onChange={event => setQuestion(event.target.value)} placeholder={t("Ask about the selected PR and SHA…")} disabled={streaming} /><button type="submit" aria-label={t("Send question")} disabled={streaming || !question.trim() || selectedSources.length === 0}>{streaming ? <LoaderCircle className="spinning" size={16} /> : <Send size={16} />}</button></form>
-      {error && <div className="notebook-error">{error}</div>}
+      <div className="notebook-trust-strip"><strong>{t("LLM interprets the task")}</strong><span aria-hidden="true">→</span><strong>{t("read-only tools gather evidence")}</strong><span aria-hidden="true">→</span><strong>{t("citations keep claims reviewable")}</strong></div>
+      <div className="notebook-layout">
+        <aside className="notebook-rail" ref={railRef}>
+          <div className="notebook-source-bar"><div><span>{t("Repository")}</span><strong>{notebook.repository}</strong></div><label><span>{t("Sources")}</span><select aria-label={t("Notebook sources")} multiple value={selectedSources} onChange={event => setSelectedSources(Array.from(event.target.selectedOptions, option => option.value))}>{notebook.sources.map(source => <option key={source.jobId} value={source.jobId}>PR #{source.pullRequestNumber} · {source.headSha.slice(0, 10)}</option>)}</select></label></div>
+          <div className="notebook-cards">{cardKinds.map(({ kind, label }) => <button type="button" className="notebook-card-trigger" key={kind} disabled={Boolean(cardLoading) || selectedSources.length === 0} onClick={() => void generateCard(kind)}><span>{t(label)}</span>{cardLoading === kind ? <LoaderCircle className="spinning" size={14} /> : <Sparkles size={14} />}</button>)}</div>
+          {notebook.cards.length > 0 && <div className="notebook-card-list">{notebook.cards.slice(0, 4).map(card => <article className="notebook-card" key={card.id}><div className="notebook-card-head"><strong>{card.title}</strong><span className={`badge badge-${card.status}`}>{t(card.status === "generated" ? "Generated" : card.status === "degraded" ? "Degraded" : card.status)}</span></div><MarkdownContent content={card.content} className="notebook-card-content notebook-markdown" /><div className="notebook-card-footer">{card.citations.length > 0 && <small>{t("{count} source citations", { count: card.citations.length })}</small>}{card.kind === "fix_plan" && <button type="button" className="notebook-download" onClick={() => downloadCard(card)}><Download size={12} /> {t("Download suggestion")}</button>}</div></article>)}</div>}
+        </aside>
+        <div className="notebook-conversation">
+          <div className="notebook-stream-head"><span><Wrench size={13} /> {t("Agent trace")}</span><small>{events.length ? events.slice(-5).map((ev, i) => <span key={i} className="trace-event">{ev}{i < Math.min(events.length, 5) - 1 ? " · " : ""}</span>) : t("Tools stay read-only and source-bound.")}</small></div>
+          <div className="notebook-messages" ref={messagesRef} onWheel={handleMessagesWheel}>{messages.length === 0 ? <div className="notebook-placeholder">
+            <p>{t("Ask why this PR changed these modules, which files carry the most risk, or what a safe fix plan would look like.")}</p>
+            <div className="notebook-starters">
+              <button type="button" onClick={() => setQuestion(t("Help me turn my review goal into a draft deterministic AnalysisSpec using only the built-in modules."))}><Braces size={14} />{t("Plan custom analysis")}</button>
+              <button type="button" onClick={() => setQuestion(t("Explain the highest-risk evidence and which deterministic module produced it."))}><FileCode2 size={14} />{t("Explain deterministic evidence")}</button>
+            </div>
+            <small>{t("The LLM drafts the plan; only allowlisted Python modules may execute after review.")}</small>
+          </div> : messages.slice(-12).map(message => <MessageBubble message={message} key={message.id} />)}</div>
+          <form className="notebook-composer" onSubmit={event => void ask(event)}><textarea aria-label={t("Ask Repository Notebook")} value={question} onChange={event => setQuestion(event.target.value)} placeholder={t("Ask about the selected PR and SHA…")} disabled={streaming} /><button type="submit" aria-label={t("Send question")} disabled={streaming || !question.trim() || selectedSources.length === 0}>{streaming ? <LoaderCircle className="spinning" size={18} /> : <Send size={18} />}</button></form>
+          {error && <div className="notebook-error">{error}</div>}
+        </div>
+      </div>
     </>}
   </section>;
 }

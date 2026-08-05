@@ -1,0 +1,4 @@
+interface:
+  display_name: "ConsistenCy Review"
+  short_description: "Run safe deterministic repository analysis"
+  default_prompt: "Use $consistency-review to analyze selected repository files and explain the deterministic evidence."

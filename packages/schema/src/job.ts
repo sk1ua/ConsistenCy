@@ -23,14 +23,17 @@ export const publishOutboxStatusSchema = z.enum([
 
 export const jobTypeSchema = z.literal("PR_REVIEW");
 export const publicationPolicySchema = z.enum(["github_comment", "disabled"]);
-export const reviewAccessModeSchema = z.enum(["github_app", "public_read"]);
+export const reviewAccessModeSchema = z.enum(["github_app", "public_read", "local_git"]);
 
 export const reviewJobSchema = z.object({
   id: z.string().trim().min(1),
   type: jobTypeSchema,
   status: jobStatusSchema,
   repositoryFullName: z.string().trim().min(1),
-  pullRequestNumber: z.number().int().positive(),
+  /** Absent for local reviews, which have no pull request. */
+  pullRequestNumber: z.number().int().positive().optional(),
+  /** Absolute path to the checkout; set only for local reviews. */
+  repoPath: z.string().trim().min(1).optional(),
   installationId: z.number().int().positive().optional(),
   accessMode: reviewAccessModeSchema.default("github_app"),
   baseSha: z.string().trim().min(1),
@@ -41,7 +44,32 @@ export const reviewJobSchema = z.object({
   finishedAt: z.string().datetime().optional(),
   error: z.string().trim().min(1).optional(),
   report: reviewReportSchema.optional()
-}).strict();
+}).strict().superRefine((job, issues) => {
+  if (job.accessMode === "local_git") {
+    if (job.repoPath === undefined) {
+      issues.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A local_git job requires repoPath",
+        path: ["repoPath"]
+      });
+    }
+    if (job.publicationPolicy !== "disabled") {
+      issues.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A local_git job must not publish to GitHub",
+        path: ["publicationPolicy"]
+      });
+    }
+    return;
+  }
+  if (job.pullRequestNumber === undefined) {
+    issues.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `A ${job.accessMode} job requires pullRequestNumber`,
+      path: ["pullRequestNumber"]
+    });
+  }
+});
 
 export const publishOutboxItemSchema = z.object({
   id: z.string().trim().min(1),

@@ -1,0 +1,51 @@
+# The workflow that backs the live review path.
+#
+# Deliberately contains no `tool.*` or `verify.unit_tests` steps. A review runs
+# against a clone of a repository the author does not control, so executing that
+# repository's test suite or linters would be arbitrary code execution on
+# untrusted input. Every step here analyses in-process instead.
+#
+# The subprocess-based workflows (security-hardening, pr-sanity-verification)
+# remain available for repositories you trust, run explicitly with a workspace.
+version: 2
+name: pr-review
+description: In-process deterministic analysis for a pull request or local change.
+
+nodes:
+  - id: security
+    uses: engine.security
+    timeoutMs: 120000
+
+  - id: structure
+    uses: engine.structural
+    timeoutMs: 120000
+
+  - id: semantics
+    uses: engine.semantic
+    timeoutMs: 120000
+
+  - id: style
+    uses: engine.style
+    continueOnError: true
+    timeoutMs: 120000
+
+  - id: duplication
+    uses: engine.duplication
+    continueOnError: true
+    timeoutMs: 120000
+
+  - id: circular-imports
+    uses: graph.dependency
+    needs: [structure]
+    continueOnError: true
+    timeoutMs: 120000
+
+verifiers:
+  - id: syntax-gate
+    uses: verify.syntax
+    needs: [security, structure, semantics]
+    timeoutMs: 60000
+
+synthesizer:
+  needs: [style, duplication, circular-imports, syntax-gate]
+  timeoutMs: 120000

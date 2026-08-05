@@ -1,0 +1,46 @@
+# Secrets, OWASP-style AST checks, and dependency risk.
+#
+# `uses` values are drawn from the allowlist in engine/workflow/spec.py — a
+# workflow selects capabilities, it cannot introduce them.
+version: 2
+name: security-hardening
+description: Secret exposure, injection-prone patterns, and dependency risk on changed files.
+
+nodes:
+  - id: secrets-and-injection
+    uses: engine.security
+    timeoutMs: 60000
+
+  # Semgrep is optional: if the binary is absent the step reports skipped
+  # rather than failing, so the workflow still produces a report.
+  - id: owasp-top-ten
+    uses: tool.semgrep
+    needs: [secrets-and-injection]
+    continueOnError: true
+    timeoutMs: 300000
+    with:
+      config: p/owasp-top-ten
+
+  - id: python-lint
+    uses: tool.ruff
+    continueOnError: true
+    timeoutMs: 120000
+    with:
+      select: S
+
+  - id: dependency-risk
+    uses: graph.dependency
+    continueOnError: true
+    timeoutMs: 60000
+
+verifiers:
+  # Cheap gate: evidence anchored to a file that no longer parses is not
+  # trustworthy, so syntax is confirmed before synthesis.
+  - id: syntax-gate
+    uses: verify.syntax
+    needs: [secrets-and-injection]
+    timeoutMs: 30000
+
+synthesizer:
+  needs: [owasp-top-ten, python-lint, dependency-risk, syntax-gate]
+  timeoutMs: 120000

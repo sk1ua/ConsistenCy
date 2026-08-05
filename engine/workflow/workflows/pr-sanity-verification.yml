@@ -1,0 +1,37 @@
+# Diff impact, executed tests, and a sanity pass over the change.
+version: 2
+name: pr-sanity-verification
+description: Impact scoring plus executed verification, for gating a pull request.
+
+nodes:
+  - id: impact
+    uses: engine.semantic
+    timeoutMs: 60000
+
+  - id: style-drift
+    uses: engine.style
+    continueOnError: true
+    timeoutMs: 60000
+
+  - id: duplication
+    uses: engine.duplication
+    needs: [impact]
+    continueOnError: true
+    timeoutMs: 60000
+
+verifiers:
+  - id: syntax-gate
+    uses: verify.syntax
+    needs: [impact]
+    timeoutMs: 30000
+
+  # The test suite is the expensive step and the most decisive, so it runs only
+  # once syntax is confirmed. Not continueOnError: a failing suite must block.
+  - id: unit-tests
+    uses: verify.unit_tests
+    needs: [syntax-gate]
+    timeoutMs: 600000
+
+synthesizer:
+  needs: [style-drift, duplication, unit-tests]
+  timeoutMs: 120000

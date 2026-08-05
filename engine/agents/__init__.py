@@ -24,6 +24,13 @@ from .evolution_agent import EvolutionAgent
 from .duplication_agent import DuplicationAgent
 from .security_agent import SecurityAgent
 from .risk_scoring_agent import RiskScoringAgent
+from .registry import (
+    AGENT_REGISTRY,
+    DEFAULT_AGENT_IDS,
+    AgentManifest,
+    instantiate_agents,
+    resolve_agent_manifests,
+)
 
 __all__ = [
     "ParserAgent",
@@ -34,4 +41,9 @@ __all__ = [
     "DuplicationAgent",
     "SecurityAgent",
     "RiskScoringAgent",
+    "AgentManifest",
+    "AGENT_REGISTRY",
+    "DEFAULT_AGENT_IDS",
+    "resolve_agent_manifests",
+    "instantiate_agents",
 ]

@@ -4,6 +4,7 @@ import type {
   DomainAnalyzeSuccess,
   DomainComposeReviewSuccess,
   PRReviewContext,
+  RelevantContext,
   ReviewFinding,
   ReviewPlan,
   ReviewReport,
@@ -13,7 +14,8 @@ import type {
 export const ReviewGraphState = Annotation.Root({
   jobId: Annotation<string>,
   repositoryFullName: Annotation<string>,
-  pullRequestNumber: Annotation<number>,
+  pullRequestNumber: Annotation<number | undefined>,
+  repoPath: Annotation<string | undefined>,
   installationId: Annotation<number | undefined>,
   accessMode: Annotation<ReviewAccessMode>({
     reducer: (left, right) => right,
@@ -23,6 +25,8 @@ export const ReviewGraphState = Annotation.Root({
   headSha: Annotation<string>,
   context: Annotation<PRReviewContext | undefined>,
   deterministicResult: Annotation<DomainAnalyzeSuccess | undefined>,
+  /** Historical and structural context per changed file, keyed by path. */
+  relevantContext: Annotation<Record<string, RelevantContext> | undefined>,
   composedReview: Annotation<DomainComposeReviewSuccess | undefined>,
   plan: Annotation<ReviewPlan | undefined>,
   agentRuns: Annotation<AgentRun[]>({

@@ -1,6 +1,6 @@
 # Repository Review Notebook
 
-Repository Review Notebook 是报告右侧的来源驱动研究空间，帮助开发者理解一个或多个 PR 的影响范围，而不是替代代码执行环境。
+Repository Review Notebook 是默认打开的全页来源驱动研究空间，帮助开发者理解一个或多个 PR 的影响范围，而不是替代代码执行环境。
 
 ## 运行模式
 
@@ -35,6 +35,8 @@ repository + pull request number + jobId + baseSha + headSha
 
 `POST /notebooks/:id/messages` 使用 SSE。UI 会显示 source selection、tool started/result、citation、text delta、usage 和 completed/degraded 状态，但不会显示原始 prompt 或密钥。
 
+助手消息和卡片使用安全的 Markdown/GFM 渲染，原始 HTML 不会执行。用户也可以让对话把审查目标整理成待审核的 `AnalysisSpec` 草案；草案只能选择 `style`、`structural`、`semantic`、`duplication`、`security`，不会生成或执行临时 Python。
+
 四类卡片：
 
 1. **Change Map**：文件和目录变更范围；
@@ -55,4 +57,4 @@ CONSISTENCY_NOTEBOOK_INDEX_MAX_BYTES=67108864
 GITHUB_PUBLIC_READ_TOKEN=
 ```
 
-`GITHUB_PUBLIC_READ_TOKEN` 留空表示匿名公开读取；配置后只在 API 进程使用。健康接口显示 `anonymous`、`pat` 或 `disabled`，不会显示 token 内容。LLM provider 切换到 DeepSeek/OpenAI 后，Settings 会显示 provider/model，重新启动后生效。
+`GITHUB_PUBLIC_READ_TOKEN` 留空表示匿名公开读取；可通过 Settings 录入并存入本地加密配置，保存后 API 只返回布尔配置状态，不回显 token。健康接口显示 `anonymous`、`pat` 或 `disabled`。LLM provider 切换到 DeepSeek/OpenAI 后，Settings 会显示 provider/model，重新启动后生效。

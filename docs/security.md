@@ -9,8 +9,8 @@
 - JSON-over-stdio 的 stdout 只允许协议消息；未知 ID、错误 Schema、非 JSON 或超长输出会触发协议熔断。
 - LLM 输出使用共享 Zod Schema 解析；LLM 不是安全策略的唯一执行点。
 - 公开 PR URL 只接受 canonical `https://github.com/{owner}/{repo}/pull/{number}`。
-- 公开读取模式不需要 GitHub App installation；可使用匿名 GitHub API，或使用仅保存在 API 进程中的 `GITHUB_PUBLIC_READ_TOKEN`。
-- PAT 认证失败不会静默降级为匿名；PAT 不进入 WebUI、数据库、日志、SSE 或错误响应。
+- 公开读取模式不需要 GitHub App installation；可使用匿名 GitHub API，或使用 API 进程从环境变量/本地加密配置读取的 `GITHUB_PUBLIC_READ_TOKEN`。
+- PAT 认证失败不会静默降级为匿名；保存后不会向 WebUI 回显，也不进入数据库、日志、SSE 或错误响应。
 - 公开 Job 固定 `accessMode=public_read` 和 `publicationPolicy=disabled`；内存 Store 与 SQLite Store 都会再次强制这一边界。
 - Notebook 来源绑定 repository、PR、base/head SHA；文件读取拒绝绝对路径、路径穿越、Secret 路径、二进制和超出预算的内容。
 - Notebook Agent 只读、无 shell、无工作区写入、无测试执行、无补丁应用和无 GitHub 发布权限；补丁建议只是文本。

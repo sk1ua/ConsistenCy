@@ -15,7 +15,8 @@ describe("SQLite foundation", () => {
         "0005_repository_notebook",
         "0006_agent_run_provider_metadata",
         "0007_notebook_citations",
-        "0008_public_read_access_mode"
+        "0008_public_read_access_mode",
+        "0009_local_git_jobs"
       ]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
@@ -71,7 +72,8 @@ describe("SQLite foundation", () => {
         "0005_repository_notebook",
         "0006_agent_run_provider_metadata",
         "0007_notebook_citations",
-        "0008_public_read_access_mode"
+        "0008_public_read_access_mode",
+        "0009_local_git_jobs"
       ]);
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
@@ -114,7 +116,8 @@ describe("SQLite foundation", () => {
         "0005_repository_notebook",
         "0006_agent_run_provider_metadata",
         "0007_notebook_citations",
-        "0008_public_read_access_mode"
+        "0008_public_read_access_mode",
+        "0009_local_git_jobs"
       ]);
 
       // Assert data preserved
@@ -176,6 +179,114 @@ describe("SQLite foundation", () => {
       const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_bad'").get() as any;
       expect(job).toBeTruthy();
       expect(job.status).toBe("running");
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("0009_local_git_jobs", () => {
+  const upTo0008 = migrations.filter(migration => migration.id < "0009");
+  const migration0009 = migrations.find(migration => migration.id === "0009_local_git_jobs")!;
+
+  function seedGitHubJob(database: ReturnType<typeof openDatabase>): void {
+    database.exec(`
+      INSERT INTO webhook_deliveries (delivery_id, event, action, received_at, status)
+      VALUES ('delivery_1', 'pull_request', 'opened', '2026-08-05T00:00:00.000Z', 'enqueued');
+
+      INSERT INTO jobs (
+        id, type, status, repository_full_name, pull_request_number, installation_id,
+        base_sha, head_sha, delivery_id, sender_login, action, created_at, updated_at
+      ) VALUES (
+        'job_kept', 'PR_REVIEW', 'succeeded', 'sk1ua/ConsistenCy', 34, 99,
+        'base123', 'head456', 'delivery_1', 'sk1ua', 'opened',
+        '2026-08-05T00:00:00.000Z', '2026-08-05T00:01:00.000Z'
+      );
+
+      INSERT INTO agent_runs (id, job_id, agent_name, status, started_at, input_summary, findings_json)
+      VALUES ('run_1', 'job_kept', 'Security', 'succeeded', '2026-08-05T00:00:30.000Z', 'Analyzed 2 files', '[]');
+
+      INSERT INTO reports (id, job_id, report_json, created_at)
+      VALUES ('report_1', 'job_kept', '{"jobId":"job_kept"}', '2026-08-05T00:01:00.000Z');
+    `);
+  }
+
+  it("preserves existing jobs and their foreign-key children through the table rebuild", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database, upTo0008);
+      seedGitHubJob(database);
+
+      expect(runMigrations(database, migrations)).toEqual(["0009_local_git_jobs"]);
+
+      const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_kept'").get() as any;
+      expect(job).toMatchObject({
+        repository_full_name: "sk1ua/ConsistenCy",
+        pull_request_number: 34,
+        installation_id: 99,
+        base_sha: "base123",
+        head_sha: "head456",
+        delivery_id: "delivery_1",
+        access_mode: "github_app",
+        publication_policy: "github_comment",
+        repo_path: null
+      });
+
+      expect(database.prepare("SELECT COUNT(*) c FROM agent_runs WHERE job_id = 'job_kept'").get()).toMatchObject({ c: 1 });
+      expect(database.prepare("SELECT COUNT(*) c FROM reports WHERE job_id = 'job_kept'").get()).toMatchObject({ c: 1 });
+      expect(database.pragma("foreign_key_check")).toEqual([]);
+
+      const index = database
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'jobs_status_created_at_idx'")
+        .get();
+      expect(index).toBeTruthy();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("accepts a local job without a pull request and rejects one without a repo path", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database);
+
+      const insertLocal = (repoPath: string | null, policy = "disabled") => database.prepare(`
+        INSERT INTO jobs (
+          id, type, status, repository_full_name, pull_request_number, repo_path,
+          base_sha, head_sha, publication_policy, access_mode, created_at, updated_at
+        ) VALUES (?, 'PR_REVIEW', 'queued', 'ConsistenCy', NULL, ?, 'base123', 'WORKING_TREE', ?, 'local_git', ?, ?)
+      `).run(`job_${repoPath ?? "null"}_${policy}`, repoPath, policy, "2026-08-05T00:00:00.000Z", "2026-08-05T00:00:00.000Z");
+
+      expect(() => insertLocal("D:/sk1ua/python/ConsistenCy")).not.toThrow();
+      expect(() => insertLocal(null)).toThrow(/CHECK constraint failed/);
+      // A local review must never be routed to a GitHub comment.
+      expect(() => insertLocal("D:/repo", "github_comment")).toThrow(/CHECK constraint failed/);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("still requires a pull request number for GitHub jobs", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database);
+      expect(() => database.prepare(`
+        INSERT INTO jobs (
+          id, type, status, repository_full_name, pull_request_number,
+          base_sha, head_sha, access_mode, created_at, updated_at
+        ) VALUES ('job_bad', 'PR_REVIEW', 'queued', 'sk1ua/ConsistenCy', NULL,
+          'base123', 'head456', 'github_app', '2026-08-05T00:00:00.000Z', '2026-08-05T00:00:00.000Z')
+      `).run()).toThrow(/CHECK constraint failed/);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("is a no-op to re-run", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database);
+      expect(runMigrations(database, [migration0009])).toEqual([]);
     } finally {
       database.close();
     }

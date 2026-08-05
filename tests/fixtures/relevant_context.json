@@ -1,0 +1,54 @@
+{
+  "historicalFixes": [
+    {
+      "reference": "1a30c2b",
+      "file": "pkg/beta.py",
+      "summary": "Fixed off-by-one in helper",
+      "fixedAt": "2026-08-01T00:00:00.000Z",
+      "severity": "high"
+    }
+  ],
+  "relatedModules": [
+    {
+      "path": "pkg/alpha.py",
+      "relation": "imported_by",
+      "weight": 0.9
+    },
+    {
+      "path": "tests/test_beta.py",
+      "relation": "test",
+      "weight": 0.7
+    },
+    {
+      "path": "pkg/__init__.py",
+      "relation": "sibling",
+      "weight": 0.3
+    }
+  ],
+  "pastSecurityReports": [
+    {
+      "jobId": "job-1",
+      "file": "pkg/beta.py",
+      "title": "Unvalidated input",
+      "severity": "critical",
+      "reportedAt": "2026-08-02T00:00:00.000Z",
+      "resolved": false
+    }
+  ],
+  "callerGraph": [
+    {
+      "callerFile": "pkg/alpha.py",
+      "callerSymbol": "build",
+      "calleeFile": "pkg/beta.py",
+      "calleeSymbol": "helper",
+      "depth": 1
+    },
+    {
+      "callerFile": "tests/test_beta.py",
+      "callerSymbol": "test_helper",
+      "calleeFile": "pkg/beta.py",
+      "calleeSymbol": "helper",
+      "depth": 1
+    }
+  ]
+}

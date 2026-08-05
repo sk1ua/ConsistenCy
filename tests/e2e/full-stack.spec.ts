@@ -67,6 +67,11 @@ test.describe("ConsistenCy Full-Stack Integration E2E Suite", () => {
     await expect(page.locator(".report-page")).toBeVisible();
     await expect(page.locator("h1")).toContainText(/Review report|审查报告/i);
     await expect(page.locator(".report-header p")).not.toHaveText("");
+    const reviewReportTab = page.getByRole("button", { name: "Review report", exact: true });
+    if (await reviewReportTab.count()) {
+      await expect(page.getByRole("button", { name: "Notebook workspace", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await reviewReportTab.click();
+    }
     await expect(page.locator(".report-score")).toBeVisible();
     await expect(page.locator(".report-score")).toContainText(/Significant Drift|Slight Drift|Minimal Drift|Critical|High|Medium|Low|None|分|层级/i);
     await expect(page.locator(".finding-item").first()).toBeVisible();

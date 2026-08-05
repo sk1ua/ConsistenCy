@@ -94,7 +94,8 @@ export const retrievalTraceSchema = z.object({
 export const reviewReportSchema = z.object({
   jobId: z.string().trim().min(1),
   repositoryFullName: z.string().trim().min(1),
-  pullRequestNumber: z.number().int().positive(),
+  /** Absent for local reviews, which have no pull request. */
+  pullRequestNumber: z.number().int().positive().optional(),
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   summary: z.string().trim().min(1),

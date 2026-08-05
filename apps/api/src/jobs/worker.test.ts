@@ -21,9 +21,10 @@ function enqueue(store: InMemoryJobQueue, suffix: string) {
   }).job!;
 }
 
-function context(jobId: string, pullRequestNumber: number): PRReviewContext {
+function context(jobId: string, pullRequestNumber: number | undefined): PRReviewContext {
   return {
     jobId,
+    source: "github_pr",
     repositoryFullName: "sk1ua/ConsistenCy",
     pullRequestNumber,
     baseSha: "base123",

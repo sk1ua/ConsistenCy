@@ -23,16 +23,26 @@ function errorMessage(error: unknown): string {
 }
 
 function workflowInput(job: ReviewJob) {
-  if (!job.pullRequestNumber || !job.baseSha || !job.headSha) {
-    throw new Error("PR review job is missing pull request metadata");
+  if (!job.baseSha || !job.headSha) {
+    throw new Error("Review job is missing revision metadata");
   }
-  if (job.accessMode === "github_app" && !job.installationId) {
-    throw new Error("GitHub App review job is missing installation id");
+  if (job.accessMode === "local_git") {
+    if (!job.repoPath) {
+      throw new Error("Local review job is missing repoPath");
+    }
+  } else {
+    if (!job.pullRequestNumber) {
+      throw new Error("PR review job is missing pull request metadata");
+    }
+    if (job.accessMode === "github_app" && !job.installationId) {
+      throw new Error("GitHub App review job is missing installation id");
+    }
   }
   return {
     jobId: job.id,
     repositoryFullName: job.repository,
     pullRequestNumber: job.pullRequestNumber,
+    repoPath: job.repoPath,
     installationId: job.installationId,
     accessMode: job.accessMode,
     baseSha: job.baseSha,
@@ -52,6 +62,7 @@ export class ReviewWorker {
     concurrency?: number;
     pollIntervalMs?: number;
     onError?: (error: unknown, job?: ReviewJob) => void;
+    onSucceeded?: (job: ReviewJob) => void;
   }) {}
 
   status(): WorkerStatus {
@@ -70,6 +81,7 @@ export class ReviewWorker {
         ...this.options.workflow,
         jobStore: this.options.jobStore
       });
+      this.options.onSucceeded?.(job);
     } catch (error) {
       const current = this.options.jobStore.get(job.id);
       if (current?.status !== "succeeded" && current?.status !== "awaiting_publish" && current?.status !== "publishing") {

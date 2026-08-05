@@ -1,0 +1,555 @@
+/* Full-canvas review workspace and safe Markdown presentation. */
+.report-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 18px;
+}
+
+.report-back {
+  justify-self: start;
+}
+
+.report-details {
+  min-width: 0;
+}
+
+.workspace-mode-bar {
+  min-height: 56px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.workspace-mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.workspace-mode-tabs button {
+  min-height: 38px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.workspace-mode-tabs button:hover {
+  color: var(--foreground);
+  background: var(--surface-subtle);
+}
+
+.workspace-mode-tabs button.active {
+  border-color: #bed0f8;
+  background: var(--primary-soft);
+  color: #244fae;
+}
+
+.workspace-mode-note {
+  padding-right: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.workspace-mode-note svg {
+  color: var(--primary);
+}
+
+.notebook-panel.notebook-canvas {
+  position: relative;
+  top: auto;
+  max-height: none;
+  overflow: visible;
+  padding: clamp(22px, 2.8vw, 32px);
+  border-color: #c7d5cf;
+  border-radius: 14px;
+  background: #f4f8f6;
+  box-shadow: 0 16px 42px rgba(23, 32, 42, .08);
+}
+
+.notebook-canvas .notebook-panel-title {
+  min-height: 48px;
+  align-items: center;
+}
+
+.notebook-canvas .notebook-panel-title h2 {
+  margin-top: 5px;
+  font-size: clamp(25px, 3vw, 32px);
+  letter-spacing: -.025em;
+}
+
+.notebook-trust-strip {
+  margin-top: 18px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  border: 1px solid #cbd9d3;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .72);
+  color: #3f4e52;
+  font-size: 11px;
+  letter-spacing: .02em;
+}
+
+.notebook-trust-strip strong {
+  font-weight: 750;
+}
+
+.notebook-trust-strip span {
+  color: #7a8b86;
+}
+
+.notebook-layout {
+  min-width: 0;
+  min-height: 660px;
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(270px, 330px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: clamp(18px, 2.4vw, 30px);
+}
+
+.notebook-rail {
+  min-width: 0;
+  padding-right: clamp(18px, 2.4vw, 28px);
+  border-right: 1px solid #ccd8d3;
+  /* 左侧卡片区独立滚动：sticky 保持在视口内，触底联动见 NotebookPanel */
+  position: sticky;
+  top: 12px;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.notebook-canvas .notebook-source-bar {
+  margin-top: 0;
+  padding: 14px;
+  gap: 13px;
+  border-radius: 9px;
+}
+
+.notebook-canvas .notebook-source-bar select {
+  min-height: 48px;
+}
+
+.notebook-canvas .notebook-cards {
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.notebook-canvas .notebook-card-trigger {
+  min-height: 42px;
+  padding: 0 11px;
+  border-radius: 7px;
+}
+
+.notebook-canvas .notebook-card-list {
+  margin-top: 12px;
+  gap: 9px;
+}
+
+.notebook-canvas .notebook-card {
+  min-width: 0;
+  overflow: hidden;
+  padding: 14px;
+  border-radius: 9px;
+}
+
+.notebook-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.notebook-card-content {
+  margin-top: 10px;
+  color: #34434a;
+  font-size: 13px;
+  line-height: 1.62;
+}
+
+/* 长行（URL、代码、表格单元格）必须换行而不是穿出卡片 */
+.notebook-card-content code {
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.notebook-card-content pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.notebook-card-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.notebook-card-content th,
+.notebook-card-content td {
+  word-break: break-word;
+}
+
+.notebook-conversation {
+  min-width: 0;
+  min-height: 660px;
+  padding: clamp(17px, 2.2vw, 24px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #cbd8d3;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.notebook-conversation .notebook-stream-head {
+  margin-top: 0;
+  padding: 0 0 13px;
+}
+
+.notebook-conversation .notebook-messages {
+  min-height: 440px;
+  max-height: 65dvh;
+  flex: 1;
+  margin-top: 0;
+  padding: 8px 7px 12px 1px;
+  gap: 12px;
+}
+
+.notebook-conversation .notebook-message {
+  padding: 14px 16px;
+  border-radius: 10px;
+}
+
+.notebook-conversation .notebook-message.assistant {
+  border-color: transparent;
+  background: #f6f8f7;
+}
+
+.notebook-conversation .notebook-message.user {
+  margin-left: clamp(28px, 8vw, 96px);
+}
+
+.notebook-message.user .notebook-message-content {
+  white-space: normal;
+}
+
+.notebook-conversation .notebook-composer {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.notebook-conversation .notebook-composer textarea {
+  min-height: 96px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.notebook-conversation .notebook-composer button {
+  width: 42px;
+  height: 42px;
+  border-radius: 9px;
+}
+
+.notebook-markdown {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: #2d3b42;
+  font-size: 15px;
+  line-height: 1.68;
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin: 1.35em 0 .55em;
+  color: #1c2930;
+  font-family: var(--font-display);
+  line-height: 1.25;
+}
+
+.markdown-content h1 {
+  padding-bottom: .35em;
+  border-bottom: 1px solid #d7dfdc;
+  font-size: 1.55em;
+}
+
+.markdown-content h2 {
+  font-size: 1.32em;
+}
+
+.markdown-content h3 {
+  font-size: 1.12em;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content blockquote,
+.markdown-content pre,
+.markdown-content table {
+  margin: .75em 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.55em;
+}
+
+.markdown-content li + li {
+  margin-top: .3em;
+}
+
+.markdown-content blockquote {
+  padding: .2em 0 .2em 1em;
+  border-left: 3px solid #8aa7ea;
+  color: #59676f;
+}
+
+.markdown-content code {
+  padding: .12em .38em;
+  border-radius: 4px;
+  background: #e9efed;
+  color: #173f5f;
+  font: .88em/1.5 var(--font-mono);
+}
+
+.markdown-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 15px 16px;
+  border: 1px solid #ced8d4;
+  border-radius: 8px;
+  background: #17232a;
+  color: #e8efec;
+}
+
+.markdown-content pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
+
+.markdown-content table {
+  width: max-content;
+  min-width: min(100%, 520px);
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: .9em;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 8px 10px;
+  border: 1px solid #d3ddda;
+  text-align: left;
+}
+
+.markdown-content th {
+  background: #eef3f1;
+  font-weight: 750;
+}
+
+.markdown-content a {
+  color: #2457ce;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.markdown-content input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--primary);
+}
+
+@media (max-width: 1100px) {
+  .notebook-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .notebook-rail {
+    padding-right: 0;
+    padding-bottom: 20px;
+    border-right: 0;
+    border-bottom: 1px solid #ccd8d3;
+  }
+
+  .notebook-canvas .notebook-cards {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace-mode-bar,
+  .workspace-mode-tabs {
+    align-items: stretch;
+  }
+
+  .workspace-mode-bar {
+    flex-direction: column;
+  }
+
+  .workspace-mode-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .workspace-mode-tabs button {
+    justify-content: center;
+  }
+
+  .workspace-mode-note {
+    justify-content: center;
+    padding: 0 0 4px;
+  }
+
+  .notebook-panel.notebook-canvas {
+    padding: 18px;
+  }
+
+  .notebook-canvas .notebook-panel-title {
+    align-items: flex-start;
+  }
+
+  .notebook-panel-status small,
+  .notebook-trust-strip span {
+    display: none;
+  }
+
+  .notebook-trust-strip {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .notebook-canvas .notebook-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .notebook-conversation {
+    min-height: 560px;
+    padding: 14px;
+  }
+
+  .notebook-conversation .notebook-messages {
+    min-height: 340px;
+    max-height: none;
+  }
+
+  .notebook-conversation .notebook-message.user {
+    margin-left: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-mode-tabs button {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Markdown 布局加固：确保内容区是块级布局，防止任何 flex/grid 上下文
+   把长行内容撑出卡片（内容宽度不得超过容器）。
+--------------------------------------------------------------------------- */
+.notebook-markdown,
+.notebook-card-content {
+  display: block !important;
+  max-width: 100%;
+}
+
+.notebook-markdown > *,
+.notebook-card-content > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   桌面端可折叠侧边栏：折叠为仅图标窄栏（76px）
+--------------------------------------------------------------------------- */
+.menu-button {
+  display: grid;
+}
+
+.app-shell {
+  transition: grid-template-columns .22s ease;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed .brand {
+  padding: 0;
+  justify-content: center;
+}
+
+.app-shell.sidebar-collapsed .brand span,
+.app-shell.sidebar-collapsed .app-sidebar nav button span,
+.app-shell.sidebar-collapsed .sidebar-signal {
+  display: none;
+}
+
+.app-shell.sidebar-collapsed .app-sidebar nav {
+  padding: 22px 10px;
+}
+
+.app-shell.sidebar-collapsed .app-sidebar nav button {
+  justify-content: center;
+  padding: 0;
+}
+
+@media (max-width: 859.98px) {
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 248px minmax(0, 1fr);
+  }
+  .app-shell.sidebar-collapsed .brand {
+    padding: 0 22px;
+    justify-content: flex-start;
+  }
+  .app-shell.sidebar-collapsed .brand span,
+  .app-shell.sidebar-collapsed .app-sidebar nav button span,
+  .app-shell.sidebar-collapsed .sidebar-signal {
+    display: block;
+  }
+  .app-shell.sidebar-collapsed .app-sidebar nav {
+    padding: 22px 14px;
+  }
+  .app-shell.sidebar-collapsed .app-sidebar nav button {
+    justify-content: flex-start;
+    padding: 0 13px;
+  }
+}

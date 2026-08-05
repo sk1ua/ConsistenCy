@@ -65,6 +65,7 @@ export type CreateNotebookCardInput = {
 export interface NotebookStore {
   ensureForJob(job: ReviewJob): { notebook: Notebook; source: NotebookSource };
   get(id: string): Notebook | undefined;
+  findByJobId(jobId: string): Notebook | undefined;
   getSource(id: string): NotebookSource | undefined;
   getSourceForJob(notebookId: string, jobId: string): NotebookSource | undefined;
   createMessage(input: CreateNotebookMessageInput): NotebookMessage;
@@ -121,6 +122,11 @@ export class InMemoryNotebookStore implements NotebookStore {
 
   get(id: string): Notebook | undefined {
     const notebook = this.notebooks.get(id);
+    return notebook ? notebookSchema.parse(notebook) : undefined;
+  }
+
+  findByJobId(jobId: string): Notebook | undefined {
+    const notebook = [...this.notebooks.values()].find(item => item.sources.some(source => source.jobId === jobId));
     return notebook ? notebookSchema.parse(notebook) : undefined;
   }
 
@@ -246,6 +252,11 @@ export class SQLiteNotebookStore implements NotebookStore {
   getSourceForJob(notebookId: string, jobId: string): NotebookSource | undefined {
     const row = this.database.prepare("SELECT * FROM notebook_sources WHERE notebook_id = ? AND job_id = ?").get(notebookId, jobId) as any;
     return row ? this.sourceFromRow(row) : undefined;
+  }
+
+  findByJobId(jobId: string): Notebook | undefined {
+    const row = this.database.prepare("SELECT notebook_id FROM notebook_sources WHERE job_id = ? LIMIT 1").get(jobId) as any;
+    return row ? this.get(row.notebook_id) : undefined;
   }
 
   createMessage(input: CreateNotebookMessageInput): NotebookMessage {
@@ -411,7 +422,8 @@ export class SQLiteNotebookStore implements NotebookStore {
         file: row.file,
         startLine: row.start_line,
         endLine: row.end_line,
-        excerpt: row.excerpt,
+        // 防御性兜底：旧数据可能存过空 excerpt
+        excerpt: (row.excerpt ?? "").trim().length > 0 ? row.excerpt : row.file,
         kind: row.kind
       }));
     }

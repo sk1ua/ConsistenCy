@@ -24,7 +24,7 @@ function walkMarkdown(dir) {
   if (!existsSync(dir)) return [];
   const files = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if ([".git", ".workbuddy", "node_modules", "repos", "results", "data", "__pycache__"].includes(entry.name)) continue;
+    if ([".git", ".workbuddy", ".claude", ".consistency", "node_modules", "repos", "results", "data", "__pycache__"].includes(entry.name)) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) files.push(...walkMarkdown(path));
     else if (extname(entry.name).toLowerCase() === ".md") files.push(path);
