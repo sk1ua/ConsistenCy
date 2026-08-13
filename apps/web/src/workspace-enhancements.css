@@ -104,8 +104,8 @@
   gap: 11px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: var(--sidebar-text);
-  color: var(--sidebar-hover);
+  background: var(--surface-muted);
+  color: var(--muted-strong);
   font-size: 11px;
   letter-spacing: .02em;
 }
@@ -264,9 +264,9 @@
 .notebook-conversation .notebook-composer textarea {
   min-height: 96px;
   padding: 12px 14px;
-  border-radius: 9px;
-  font-family: var(--font-ui);
-  font-size: 14px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
 }
 
 .notebook-conversation .notebook-composer button {

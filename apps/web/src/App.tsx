@@ -157,6 +157,7 @@ export function App() {
   }
 
   const page = pageMeta[view];
+  const activeNav = navItems.find(item => item.id === view);
 
   function navigate(nextView: View) {
     setView(nextView);
@@ -180,9 +181,14 @@ export function App() {
               setSidebarCollapsed(value => !value);
             }
           }}><Menu size={20} /></button>
-          <div><h1>{t(page.title)}</h1><p>{t(page.description)}</p></div>
+          <div>
+            <span className="header-breadcrumb">ConsistenCy<span className="sep">/</span>{t(activeNav?.label ?? page.title)}</span>
+            <h1>{t(page.title)}</h1><p>{t(page.description)}</p>
+          </div>
         </div>
         <div className="header-actions">
+          <span className="status-chip"><i className={"status-dot" + (heartbeatUnavailable ? "" : heartbeatPulse ? " live" : " idle")} />{heartbeatUnavailable ? t("Heartbeat disabled") : heartbeatPulse ? t(heartbeatStateLabel(heartbeatPulse.state)) : t("Operational")}</span>
+          {health && <span className="status-chip">{health.llmProvider}{health.llmModel ? " / " + health.llmModel : ""}</span>}
           <button className="icon-button" type="button" onClick={() => cycleTheme()} aria-label={t("Theme")} title={`${t("Theme")}: ${themeLabel}`}>{themeIcon}</button>
           <label className="language-select"><Globe2 size={15} /><span className="sr-only">{t("Language")}</span><select aria-label={t("Language")} value={locale} onChange={event => setLocale(event.target.value as "en-US" | "zh-CN")}><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
           {demoMode && <span className="demo-indicator"><FlaskConical size={15} />{t("Demo Mode")}</span>}

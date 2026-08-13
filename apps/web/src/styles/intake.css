@@ -44,10 +44,16 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid var(--primary-faint);
-  border-radius: 7px;
-  background: var(--scrim);
-  color: var(--primary-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+}
+.public-pr-intake .command-prompt {
+  flex: 0 0 auto;
+  color: var(--primary);
+  font: 700 15px/1 var(--font-mono);
+  user-select: none;
 }
 .public-pr-intake input {
   width: 100%;
@@ -57,6 +63,10 @@
   background: transparent;
   color: var(--foreground);
   font: 13px/1.4 var(--font-mono);
+}
+.public-pr-intake input::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 .public-pr-intake button {
   height: 39px;

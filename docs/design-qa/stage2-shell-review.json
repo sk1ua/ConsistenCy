@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "what": "Stage 2 (shell rework) visual review",
+    "provider": "google-vertex",
+    "model": "gemini-2.5-flash",
+    "note": "provider/model chip intentionally hidden below 1100px (responsive); mobile screenshot reflects that behavior."
+  },
+  "results": [
+    {
+      "page": "dashboard dark (en)",
+      "verdict": "ok",
+      "issues": [
+        "low: sidebar active strip contrast (fixed: 3px width)",
+        "low: PR input placeholder contrast (fixed: muted placeholder)"
+      ]
+    },
+    {
+      "page": "settings dark (en)",
+      "verdict": "ok",
+      "issues": []
+    },
+    {
+      "page": "dashboard dark (mobile)",
+      "verdict": "ok",
+      "issues": [
+        "low: provider/model chip hidden on narrow widths (accepted responsive behavior)"
+      ]
+    },
+    {
+      "page": "dashboard light (en)",
+      "verdict": "ok",
+      "issues": []
+    }
+  ]
+}

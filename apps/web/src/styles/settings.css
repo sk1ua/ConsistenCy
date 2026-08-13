@@ -98,7 +98,7 @@
   flex: 0 0 auto;
   border: 1px solid var(--primary-faint);
   border-radius: 50%;
-  background: var(--sidebar-text);
+  background: var(--primary-soft);
   font-size: 11px;
   font-style: normal;
 }

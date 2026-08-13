@@ -47,6 +47,7 @@
   --sidebar-text: rgba(255, 255, 255, 0.65);
   --sidebar-text-bright: rgba(255, 255, 255, 0.94);
   --overlay: rgba(23, 32, 42, 0.5);
+  --header-bg: rgba(255, 255, 255, 0.94);
 
   /* Blue / primary */
   --primary: #2f6bff;
@@ -106,6 +107,7 @@
   --sidebar-muted: #8b949e;
   --sidebar-hover: #161b22;
   --overlay: rgba(1, 4, 9, 0.6);
+  --header-bg: rgba(13, 17, 23, 0.85);
 
   --primary: #58a6ff;
   --primary-strong: #4493f8;
