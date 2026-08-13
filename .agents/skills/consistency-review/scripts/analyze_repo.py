@@ -8,6 +8,7 @@ from contextlib import redirect_stdout
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Iterable
 
@@ -167,9 +168,10 @@ def collect_sources(root: Path, raw_paths: list[str]) -> list[Path]:
     return [selected[key] for key in sorted(selected)]
 
 
-def load_files(root: Path, paths: list[Path]):
+def load_files(root: Path, paths: list[Path], baselines: dict[str, str] | None = None):
     from engine.protocol import FileInput
 
+    baselines = baselines or {}
     inputs = []
     for path in paths:
         relative = path.relative_to(root).as_posix()
@@ -179,8 +181,35 @@ def load_files(root: Path, paths: list[Path]):
             raise InputError(f"Source file is not valid UTF-8: {relative}") from error
         except OSError as error:
             raise InputError(f"Source file could not be read: {relative}") from error
-        inputs.append(FileInput(path=relative, content=content))
+        inputs.append(FileInput(path=relative, content=content, baseline=baselines.get(relative)))
     return inputs
+
+
+def load_baselines(root: Path, ref: str, paths: list[Path]) -> dict[str, str]:
+    """Read each file's content at 'ref' via read-only 'git show'.
+
+    Files absent at the ref (new in the current tree) get no baseline, which
+    the engine reports as low confidence instead of fabricating drift.
+    """
+    baselines: dict[str, str] = {}
+    for path in paths:
+        relative = path.relative_to(root).as_posix()
+        spec = f"{ref}:{relative}"
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(root), "show", spec],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise InputError(f"Could not read baseline for {relative} at {ref!r}: {error}") from error
+        if completed.returncode == 0:
+            baselines[relative] = completed.stdout
+    return baselines
 
 
 def parse_args() -> argparse.Namespace:
@@ -188,6 +217,13 @@ def parse_args() -> argparse.Namespace:
         description="Analyze bounded repository-local source files without executing them."
     )
     parser.add_argument("paths", nargs="+", help="Repository-local source files or directories")
+    parser.add_argument(
+        "--baseline-ref",
+        default=None,
+        metavar="REF",
+        help="Git ref whose tree supplies per-file baseline snapshots "
+        "(read-only git show); files absent at REF keep confidence 0",
+    )
     return parser.parse_args()
 
 
@@ -201,10 +237,11 @@ def main() -> int:
         from engine.protocol import AnalyzeRequest
         from engine.runner import run_analysis
 
+        baselines = load_baselines(root, args.baseline_ref, paths) if args.baseline_ref else {}
         request = AnalyzeRequest(
             id="codex-direct-analysis",
             action="analyze",
-            files=load_files(root, paths),
+            files=load_files(root, paths, baselines),
             options={
                 "agents": ["style", "structural", "semantic", "duplication", "security"],
                 "include_evidence_pack": False,
@@ -217,6 +254,7 @@ def main() -> int:
             "files": [path.relative_to(root).as_posix() for path in paths],
             "file_count": len(paths),
             "total_bytes": sum(path.stat().st_size for path in paths),
+            "baseline_ref": args.baseline_ref,
         }
         json.dump(payload, sys.stdout, ensure_ascii=False, indent=2, sort_keys=True)
         sys.stdout.write("\n")

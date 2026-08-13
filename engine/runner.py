@@ -34,6 +34,22 @@ except ImportError:
 
 from engine.config import RISK_WEIGHTS, DEFAULT_TOKEN_BUDGET
 
+
+def _signal_agreement(scores: dict[str, float]) -> float:
+    """Fractional agreement among non-zero signal scores.
+
+    Signals that all point the same direction agree fully; conflicting signals
+    lower the agreement term. Files with fewer than two non-zero signals have
+    nothing to disagree about and count as fully agreeing.
+    """
+    nonzero = [float(value) for value in scores.values() if float(value) > 0.0]
+    if len(nonzero) < 2:
+        return 1.0
+    mean = sum(nonzero) / len(nonzero)
+    spread = sum(abs(value - mean) for value in nonzero) / len(nonzero)
+    return max(0.0, min(1.0, 1.0 - spread / (mean + 1e-9)))
+
+
 def get_language(path: str) -> str:
     ext = path.split('.')[-1].lower() if '.' in path else ''
     if ext == 'py': return 'python'
@@ -118,7 +134,10 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
 
             signal_evidence = {k: v.evidence for k, v in agent_results.items() if v.evidence}
 
-            confidence = build_confidence() # Can be enhanced with history depth etc.
+            confidence = build_confidence(
+                baseline_versions=1 if file_input.baseline else 0,
+                signal_agreement=_signal_agreement(breakdown),
+            )
             explainability = build_explainability_block(breakdown, signal_evidence, confidence=confidence)
 
             signal_details = {

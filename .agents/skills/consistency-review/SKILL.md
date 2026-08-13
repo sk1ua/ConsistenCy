@@ -38,6 +38,16 @@ Pass more than one repository-local path when comparison is useful. For example,
 .\.venv\Scripts\python.exe .agents\skills\consistency-review\scripts\analyze_repo.py engine\agents apps\api\src\review\deterministic.ts
 ```
 
+To compare modified files against a baseline branch, pass `--baseline-ref`; the
+script reads each file's content at that ref via read-only `git show`. Files
+that exist at the ref get meaningful drift scores and confidence in the
+[0.45, 0.80] band; files that are new at the ref (absent from it) stay below
+0.45 and must be read as manual-review leads only.
+
+```powershell
+.\.venv\Scripts\python.exe .agents\skills\consistency-review\scripts\analyze_repo.py --baseline-ref main engine\workflow apps\api\src\review
+```
+
 The script returns one JSON document. Treat a nonzero exit or `"ok": false` as a failed analysis, not as a clean result.
 
 ## Interpret the evidence

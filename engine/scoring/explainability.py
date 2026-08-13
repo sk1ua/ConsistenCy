@@ -48,9 +48,15 @@ def build_confidence(
     signal_agreement: float = 0.0,
     history_depth: int = 0,
 ) -> float:
-    """Confidence q(baseline sufficiency, signal agreement, history depth)."""
+    """Confidence q(baseline sufficiency, signal agreement, history depth).
 
-    baseline_term = min(max(baseline_versions, 0) / 8.0, 1.0)
+    A single baseline snapshot is sufficient for the drift agents to compare
+    against, so baseline_versions >= 1 saturates the baseline term: files with
+    a baseline land in [0.45, 0.80], files without one stay below 0.45 and
+    should be treated as manual-review leads only.
+    """
+
+    baseline_term = 1.0 if baseline_versions >= 1 else 0.0
     agreement_term = max(0.0, min(signal_agreement, 1.0))
     history_term = min(max(history_depth, 0) / 50.0, 1.0)
     return round(0.45 * baseline_term + 0.35 * agreement_term + 0.20 * history_term, 4)
