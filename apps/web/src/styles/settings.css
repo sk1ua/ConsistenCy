@@ -71,6 +71,10 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-muted);
 }
 .setup-rail span {
   min-width: 0;
@@ -195,7 +199,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 12px;
   font-weight: 750;
 }

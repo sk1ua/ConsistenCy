@@ -690,11 +690,19 @@
 .finding-summary:hover {
   background: var(--surface-muted);
 }
+.finding-title {
+  min-width: 0;
+}
 .finding-title strong, .finding-title small {
   display: block;
 }
 .finding-title strong {
+  display: -webkit-box;
+  overflow: hidden;
   font-size: 13px;
+  line-height: 1.4;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .finding-title small {
   margin-top: 3px;

@@ -50,6 +50,8 @@ test.describe("public project screenshot capture", () => {
 
     await page.getByRole("button", { name: /Jobs|任务/ }).click();
     await expect(page.locator("h1")).toContainText(/Review queue|审查队列/i);
+    await stabilize(page, ".jobs-page", [".jobs-table .table-row"]);
+    await capture(page, "jobs-dark-desktop.png");
 
     const succeededJob = page.locator(".jobs-table button.table-row").filter({ hasText: /succeeded|已完成|已成功/i }).first();
     await expect(succeededJob).toBeVisible();
@@ -73,6 +75,11 @@ test.describe("public project screenshot capture", () => {
     await page.getByRole("button", { name: "Change Map" }).click();
     await expect(page.locator(".notebook-card").first()).toBeVisible();
     await capture(page, "report-notebook-demo-desktop.png");
+
+    await page.getByRole("button", { name: /Workflows|工作流/ }).click();
+    await expect(page.locator("h1")).toContainText(/Workflow builder|工作流构建器/i);
+    await stabilize(page, ".workflows-page", [".workflow-list", ".react-flow"]);
+    await capture(page, "workflows-dark-desktop.png");
 
     await page.getByRole("button", { name: /Settings|设置/ }).click();
     await expect(page.locator("h1")).toContainText(/System status|系统状态/i);
@@ -105,7 +112,11 @@ test.describe("public project screenshot capture", () => {
     await expect(page.locator("h1")).toContainText(/Review overview|审查概览/i);
     await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro", ".metric-grid .metric-card"]);
     await capture(page, "dashboard-light-desktop.png");
-    await page.getByRole("button", { name: /Settings|设置/ }).click();
+    await page.getByRole("button", { name: "任务", exact: true }).click();
+    await expect(page.locator("h1")).toContainText(/Review queue|审查队列/i);
+    await stabilize(page, ".jobs-page", [".jobs-table .table-row"]);
+    await capture(page, "jobs-light-desktop.png");
+    await page.getByRole("button", { name: "设置", exact: true }).click();
     await expect(page.locator("h1")).toContainText(/System status|系统状态/i);
     await stabilize(page, ".settings-editor", [".settings-group"]);
     await capture(page, "settings-light-desktop.png");

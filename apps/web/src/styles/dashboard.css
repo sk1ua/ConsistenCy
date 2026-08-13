@@ -309,6 +309,7 @@
   white-space: nowrap;
   font-size: 13px;
   font-weight: 650;
+  line-height: 1.4;
 }
 .priority-row > span:not(.badge), .priority-row code {
   overflow: hidden;
