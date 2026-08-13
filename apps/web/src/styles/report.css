@@ -14,9 +14,54 @@
 .report-workspace {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(360px, .78fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 15px;
+}
+
+/* ===== Report IDE split (report mode) ===== */
+.report-ide {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 340px;
+  align-items: start;
+  gap: 15px;
+}
+.report-findings-pane, .report-center, .report-detail-pane {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.report-findings-pane, .report-detail-pane {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.pane-heading {
+  padding: 13px 15px;
+  display: grid;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.pane-heading .section-heading {
+  justify-content: flex-start;
+}
+.pane-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 15px 15px;
+}
+.report-center {
+  padding: 18px;
+}
+.report-center > .empty-state {
+  min-height: 320px;
+}
+.report-detail-pane .agent-run {
+  grid-template-columns: 24px minmax(0, 1fr);
 }
 .report-workspace > .report-page {
   min-width: 0;
@@ -129,7 +174,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   background: var(--surface);
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -166,7 +211,7 @@
 .notebook-card p {
   margin: 7px 0 0;
   white-space: normal;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 12px;
   line-height: 1.55;
 }
@@ -226,7 +271,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 12px;
   font-weight: 800;
 }
@@ -280,7 +325,7 @@
 .notebook-message-content {
   margin-top: 7px;
   white-space: normal;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 14px;
   line-height: 1.55;
 }
@@ -474,7 +519,7 @@
   margin: 6px 0;
   max-height: 84px;
   overflow: auto;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
@@ -628,11 +673,11 @@
   font-weight: 500;
 }
 .finding-item {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-subtle);
 }
 .finding-summary {
   width: 100%;
-  min-height: 58px;
+  min-height: 46px;
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto 20px;
   align-items: center;
@@ -731,6 +776,11 @@
 }
 .agent-meta {
   text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.agent-meta strong {
+  font-size: 12px;
 }
 .agent-error {
   grid-column: 2 / -1;

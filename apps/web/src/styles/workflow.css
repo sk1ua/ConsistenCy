@@ -1,4 +1,12 @@
 /* ===== Workflow builder ===== */
+.react-flow {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.react-flow__node {
+  font-family: var(--font-mono);
+}
 .workflows-page {
   display: flex;
   flex-direction: column;

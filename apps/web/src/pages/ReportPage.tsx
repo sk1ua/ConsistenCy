@@ -78,19 +78,29 @@ export function ReportPage({ job, report, notebookId, llmProvider, llmModel, onB
       ? <DiffViewer files={diffFiles ?? []} findings={report?.findings ?? []} focus={diffFocus} />
       : workspaceView === "notebook" && notebookId
       ? <Suspense fallback={<div className="loading-state"><LoaderCircle className="spinning" size={22} /><span>{t("Loading review workspace")}</span></div>}><NotebookPanel notebookId={notebookId} /></Suspense>
-      : <div className="page-stack report-details">
-        {!report ? <div className="empty-state">{t("The report will appear when the review worker finishes.")}</div> : <>
-          <section className="section-block">
-            <div className="section-heading"><div><h2>{t("Findings")}</h2><p>{t("Evidence, reasoning and concrete remediation")}</p></div>
-              <div className="segmented"><button className={groupBy === "severity" ? "active" : ""} onClick={() => setGroupBy("severity")}>{t("Severity")}</button><button className={groupBy === "agent" ? "active" : ""} onClick={() => setGroupBy("agent")}>{t("Agent")}</button></div>
-            </div>
-            {groups.length === 0 ? <div className="empty-inline">{t("No findings were reported.")}</div> : groups.map(([group, findings]) => <div className="finding-group" key={group}>
-              <h3>{t(group)}<span>{findings.length}</span></h3>{findings.map(finding => <FindingItem finding={finding} key={finding.id} onLocate={(file, line) => { setDiffFocus({ file, line }); setWorkspaceView("diff"); }} />)}
-            </div>)}
-          </section>
-          <EvidencePanel retrieval={report.retrieval} />
-          <section className="section-block"><div className="section-heading"><div><h2>{t("Agent runs")}</h2><p>{t("Execution timeline and per-agent output")}</p></div></div><AgentRuns runs={report.agentRuns} /></section>
-        </>}
+      : <div className="report-ide">
+        <aside className="report-findings-pane" aria-label={t("Findings")}>
+          <div className="pane-heading">
+            <div className="section-heading"><div><h2>{t("Findings")}</h2><p>{t("Evidence, reasoning and concrete remediation")}</p></div></div>
+            <div className="segmented"><button className={groupBy === "severity" ? "active" : ""} onClick={() => setGroupBy("severity")}>{t("Severity")}</button><button className={groupBy === "agent" ? "active" : ""} onClick={() => setGroupBy("agent")}>{t("Agent")}</button></div>
+          </div>
+          <div className="pane-scroll">
+            {!report ? <div className="empty-state">{t("The report will appear when the review worker finishes.")}</div>
+              : groups.length === 0 ? <div className="empty-inline">{t("No findings were reported.")}</div>
+              : groups.map(([group, findings]) => <div className="finding-group" key={group}>
+                <h3>{t(group)}<span>{findings.length}</span></h3>{findings.map(finding => <FindingItem finding={finding} key={finding.id} onLocate={(file, line) => { setDiffFocus({ file, line }); setWorkspaceView("diff"); }} />)}
+              </div>)}
+          </div>
+        </aside>
+        <div className="report-center">
+          {!report ? <div className="empty-state">{t("The report will appear when the review worker finishes.")}</div> : <EvidencePanel retrieval={report.retrieval} />}
+        </div>
+        <aside className="report-detail-pane" aria-label={t("Agent runs")}>
+          <div className="pane-heading">
+            <div className="section-heading"><div><h2>{t("Agent runs")}</h2><p>{t("Execution timeline and per-agent output")}</p></div></div>
+          </div>
+          <div className="pane-scroll">{report && <AgentRuns runs={report.agentRuns} />}</div>
+        </aside>
       </div>}
   </div>;
 }

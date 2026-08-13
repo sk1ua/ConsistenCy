@@ -174,14 +174,15 @@
 }
 .metric-copy strong {
   margin-top: 4px;
-  font-family: var(--font-display);
-  font-size: 25px;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  letter-spacing: -.01em;
   line-height: 1.15;
 }
 .metric-card small {
   grid-column: 1 / -1;
   align-self: end;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 12px;
 }
 .dashboard-split {
@@ -268,7 +269,11 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
+}
+.risk-list > div strong {
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 .risk-list .risk-total {
   min-height: 38px;

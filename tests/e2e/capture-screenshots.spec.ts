@@ -58,6 +58,13 @@ test.describe("public project screenshot capture", () => {
     await expect(page.locator(".notebook-source-bar")).toBeVisible();
     await capture(page, "report-demo-desktop.png");
 
+    // IDE split in report mode: findings | evidence | agent timeline
+    await page.getByRole("button", { name: "Review report", exact: true }).click();
+    await stabilize(page, ".report-workspace", [".report-header", ".report-ide .finding-item", ".report-ide .agent-timeline"]);
+    await capture(page, "report-mode-desktop.png");
+    await page.getByRole("button", { name: "Notebook workspace", exact: true }).click();
+    await expect(page.locator(".notebook-source-bar")).toBeVisible();
+
     const notebookQuestion = page.locator("textarea[aria-label='Ask Repository Notebook']");
     await notebookQuestion.fill("Why should a reviewer inspect the selected evidence first?");
     await page.locator(".notebook-composer button[type='submit']").click();

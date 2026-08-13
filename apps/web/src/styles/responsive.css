@@ -166,6 +166,13 @@
     display: grid;
     padding: 20px;
   }
+  .report-ide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .report-findings-pane, .report-detail-pane {
+    position: static;
+    max-height: none;
+  }
   .report-score {
     justify-items: start;
   }

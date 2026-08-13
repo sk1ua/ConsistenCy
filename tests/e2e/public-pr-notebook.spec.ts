@@ -72,7 +72,7 @@ test.describe("public PR Notebook UI", () => {
     const reviewMode = page.getByRole("button", { name: "Review report", exact: true });
     await expect(notebookMode).toHaveAttribute("aria-pressed", "true");
     await expect(reviewMode).toHaveAttribute("aria-pressed", "false");
-    await expect(page.locator(".report-details")).toHaveCount(0);
+    await expect(page.locator(".report-ide")).toHaveCount(0);
 
     const notebookBox = await page.locator(".notebook-panel").boundingBox();
     const conversationBox = await page.locator(".notebook-conversation").boundingBox();
@@ -87,14 +87,14 @@ test.describe("public PR Notebook UI", () => {
     await reviewMode.click();
     await expect(reviewMode).toHaveAttribute("aria-pressed", "true");
     await expect(notebookMode).toHaveAttribute("aria-pressed", "false");
-    await expect(page.locator(".report-details")).toBeVisible();
+    await expect(page.locator(".report-ide")).toBeVisible();
     await expect(page.locator(".notebook-panel")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Findings", exact: true })).toBeVisible();
 
     await notebookMode.click();
     await expect(notebookMode).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(".notebook-panel")).toBeVisible();
-    await expect(page.locator(".report-details")).toHaveCount(0);
+    await expect(page.locator(".report-ide")).toHaveCount(0);
 
     const question = page.locator("textarea[aria-label='Ask Repository Notebook']");
     await question.fill("Which evidence should the reviewer inspect first?");
@@ -116,6 +116,6 @@ test.describe("public PR Notebook UI", () => {
     await expect(page.locator(".notebook-panel")).toBeVisible();
     await expect(page.locator(".notebook-source-bar")).toBeVisible();
     await expect(page.getByRole("button", { name: "Notebook workspace", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator(".report-details")).toHaveCount(0);
+    await expect(page.locator(".report-ide")).toHaveCount(0);
   });
 });
