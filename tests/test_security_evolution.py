@@ -44,6 +44,45 @@ def q(username):
     assert any("SQL Injection Risk" in ev for ev in result.evidence)
 
 
+def test_security_sql_fstring_ignores_interpolated_variable_names():
+    """{where} / {select!r} are variable names, not SQL keywords.
+
+    Regression: the raw f-string source used to be matched wholesale, so
+    interpolated identifiers such as {where} matched the WHERE keyword and
+    {select!r} matched SELECT.
+    """
+    agent = SecurityAgent()
+    src = """
+def validate(where, select):
+    raise ValueError(f"{where} must be a mapping")
+    raise ValueError(f"Unsafe ruff option value: {select!r}")
+"""
+    result = agent.run({"source": src}, {"source": ""})
+    assert result.details["medium_count"] == 0
+    assert not any("SQL Injection Risk" in ev for ev in result.evidence)
+
+
+def test_security_sql_fstring_without_interpolation_is_not_flagged():
+    """A constant f-string is not injectable, whatever keywords it holds."""
+    agent = SecurityAgent()
+    result = agent.run({"source": 'LABEL = f"SELECT count(*) FROM t"\n'}, {"source": ""})
+    assert result.details["medium_count"] == 0
+    assert not any("SQL Injection Risk" in ev for ev in result.evidence)
+
+
+def test_security_sql_fstring_placeholder_list_stays_flagged():
+    """Literal SQL plus generated placeholders must remain a review lead."""
+    agent = SecurityAgent()
+    src = '''
+def q(paths):
+    placeholders = ",".join("?" for _ in paths)
+    return cursor.execute(f"SELECT * FROM t WHERE id IN ({placeholders})", paths)
+'''
+    result = agent.run({"source": src}, {"source": ""})
+    assert result.details["medium_count"] >= 1
+    assert any("SQL Injection Risk" in ev for ev in result.evidence)
+
+
 def test_evolution_entropy_uses_file_churn_distribution():
     focused_commit = {
         "author": "alice",

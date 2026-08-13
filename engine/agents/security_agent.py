@@ -287,10 +287,12 @@ class SecurityAgent(AgentBase):
         except SyntaxError:
             return findings
 
-        sql_keywords = ("SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "WHERE", "EXECUTE")
+        # Word-boundary match so keywords inside identifiers ("updates",
+        # "selector") are not mistaken for SQL.
+        _SQL_KEYWORD = re.compile(r"\b(?:SELECT|INSERT|UPDATE|DELETE|DROP|WHERE|EXECUTE)\b")
 
         def _looks_like_sql(text: str) -> bool:
-            return any(kw in text.upper() for kw in sql_keywords)
+            return _SQL_KEYWORD.search(text.upper()) is not None
 
         for node in ast.walk(tree):
             lineno = getattr(node, "lineno", 0)
@@ -357,12 +359,20 @@ class SecurityAgent(AgentBase):
                     ))
 
             # ── F-string SQL injection ──────────────────────────────────
+            # Match keywords against the literal text only: interpolated
+            # expressions such as {where} or {select!r} are variable names,
+            # not SQL. Interpolation must be present, otherwise the string is
+            # a constant nothing can be injected into.
             if isinstance(node, ast.JoinedStr):
-                try:
-                    src_fragment = ast.unparse(node)
-                except AttributeError:
-                    src_fragment = ""
-                if _looks_like_sql(src_fragment):
+                literal_text = "".join(
+                    part.value
+                    for part in node.values
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
+                )
+                has_interpolation = any(
+                    isinstance(part, ast.FormattedValue) for part in node.values
+                )
+                if has_interpolation and _looks_like_sql(literal_text):
                     findings.append(SecurityFinding(
                         "MEDIUM", "SQL Injection Risk",
                         "F-string used to construct SQL query — vulnerable to injection",
