@@ -57,6 +57,11 @@ htmlcov/
 pytest-cache-files-*/
 test-results/
 playwright-report/
+
+# Desktop packaging artifacts
+apps/desktop/release/
+apps/desktop/staged/
+
 /output/
 
 # Node / TypeScript workspace
