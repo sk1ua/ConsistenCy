@@ -23,11 +23,20 @@ node_modules/better-sqlite3). Switch back with step 1 before desktop runs.
 
 ## Packaging (Windows)
 
-`npm run desktop:pack` stages web/api/engine/packages/node_modules into
-apps/desktop/staged (copied with dereferenced symlinks - see
-scripts/desktop-pack.mjs) and runs electron-builder for the NSIS installer and
-a portable build. Size optimization (bundling a real Node runtime instead of
-the repo node_modules, embedding Python) is a follow-up.
+`npm run desktop:pack` builds the web UI (relative base), installs the API's
+production dependencies into apps/desktop/staged/runtime (renamed to modules/
+so electron-builder's node_modules matcher keeps it), rebuilds better-sqlite3
+for the Electron ABI, and runs electron-builder. The default target is the
+runnable win-unpacked folder; NSIS/portable installers need the winCodeSign
+tool cache, whose extraction creates symlinks and therefore requires Windows
+Developer Mode (or an admin shell). Workaround without Developer Mode:
+pre-extract the cache with 7za -snl- into
+%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0 (and
+materialize the two darwin .dylib symlink names as file copies), then run
+`DESKTOP_TARGETS=--win\ nsis\ portable npm run desktop:pack`.
+
+Size optimization (embedding a dedicated Node runtime and Python) is a
+follow-up.
 
 ## Smoke test
 

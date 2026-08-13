@@ -22,8 +22,8 @@ function log(message) {
 
 function stagedRoot() {
   // Development: the repository root (src -> desktop -> apps -> root).
-  // Packaged (asar disabled): resources/app.
-  if (app.isPackaged) return app.getAppPath();
+  // Packaged (asar disabled): resources/app/staged.
+  if (app.isPackaged) return path.join(app.getAppPath(), "staged");
   return path.resolve(__dirname, "..", "..", "..");
 }
 
@@ -51,7 +51,10 @@ function findPython312() {
 function startApi(python) {
   log("main: startApi begin");
   const root = stagedRoot();
-  const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
+  // Packaged runtime lives in staged/runtime/modules (electron-builder
+  // excludes any directory literally named node_modules from its matcher).
+  const modulesRoot = app.isPackaged ? path.join(root, "runtime", "modules") : path.join(root, "node_modules");
+  const tsxCli = path.join(modulesRoot, "tsx", "dist", "cli.mjs");
   const serverEntry = path.join(root, "apps", "api", "src", "server.ts");
   log("main: root=" + root + " tsx=" + fs.existsSync(tsxCli) + " server=" + fs.existsSync(serverEntry));
   if (!fs.existsSync(tsxCli) || !fs.existsSync(serverEntry)) {
@@ -66,6 +69,9 @@ function startApi(python) {
   const env = {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
+    // The packaged runtime tree is renamed modules/ (electron-builder drops
+    // node_modules dirs), so bare specifiers resolve through NODE_PATH.
+    ...(app.isPackaged ? { NODE_PATH: path.join(root, "runtime", "modules") } : {}),
     NODE_ENV: "development",
     HOST: "127.0.0.1",
     PORT: String(PORT),
