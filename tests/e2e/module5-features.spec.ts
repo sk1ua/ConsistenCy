@@ -1,4 +1,27 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+
+// The diff workspace needs tracked changes, so the test builds a scratch
+// repository with one committed file plus a working-tree modification. Using
+// the live checkout (process.cwd()) is not hermetic: a clean tree yields an
+// empty diff and the file list never renders.
+function makeDiffFixture(): string {
+  const root = process.env.CONSISTENCY_E2E_ROOT;
+  if (!root) throw new Error("CONSISTENCY_E2E_ROOT is unset; run via the project playwright config");
+  const repo = join(root, "diff-fixture");
+  mkdirSync(repo, { recursive: true });
+  const git = (args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: "pipe" });
+  git(["init", "-q"]);
+  git(["config", "user.email", "e2e@consistency.local"]);
+  git(["config", "user.name", "ConsistenCy E2E"]);
+  writeFileSync(join(repo, "note.txt"), "first line\n");
+  git(["add", "note.txt"]);
+  git(["commit", "-q", "-m", "baseline"]);
+  writeFileSync(join(repo, "note.txt"), "first line\nsecond line\n");
+  return repo;
+}
 
 test.describe("Module 5 feature suite", () => {
   test("workflow builder lists builtins, opens a draft, and deletes it", async ({ page, request }) => {
@@ -29,7 +52,7 @@ test.describe("Module 5 feature suite", () => {
 
   test("report page shows an annotated diff for a local review job", async ({ page, request }) => {
     const created = await request.post("http://127.0.0.1:3001/reviews/local", {
-      data: { repoPath: process.cwd() }
+      data: { repoPath: makeDiffFixture() }
     });
     expect(created.ok()).toBe(true);
     const body = await created.json();
