@@ -183,7 +183,7 @@
 
 .notebook-card-content {
   margin-top: 10px;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 13px;
   line-height: 1.62;
 }
@@ -278,7 +278,7 @@
 .notebook-markdown {
   white-space: normal;
   overflow-wrap: anywhere;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 15px;
   line-height: 1.68;
 }
@@ -296,7 +296,7 @@
 .markdown-content h3,
 .markdown-content h4 {
   margin: 1.35em 0 .55em;
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-family: var(--font-display);
   line-height: 1.25;
 }

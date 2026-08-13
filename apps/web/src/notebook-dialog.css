@@ -26,7 +26,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--surface);
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   cursor: pointer;
   font: 700 12px/1.35 var(--font-ui);
   text-align: left;

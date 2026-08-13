@@ -51,7 +51,7 @@
 }
 
 .source-mode-guide strong {
-  color: var(--sidebar-hover);
+  color: var(--foreground);
   font-size: 12px;
 }
 

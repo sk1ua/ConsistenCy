@@ -1,0 +1,39 @@
+{
+  "name": "@consistency/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ConsistenCy desktop shell (Electron, Windows-first)",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild -f -w better-sqlite3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.consistency.desktop",
+    "productName": "ConsistenCy",
+    "asar": false,
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "staged/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "artifactName": "ConsistenCy-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "ConsistenCy"
+    }
+  }
+}
