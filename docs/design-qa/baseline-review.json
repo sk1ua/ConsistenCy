@@ -1,0 +1,337 @@
+{
+  "meta": {
+    "what": "Baseline visual review of the pre-redesign UI against docs/design-qa/style-checklist.md",
+    "provider": "google-vertex",
+    "model": "gemini-2.5-flash",
+    "reviewed": "2026-08-13",
+    "source_screenshots": "docs/screenshots/pre-redesign/"
+  },
+  "reviews": [
+    {
+      "page": "dashboard (en)",
+      "vision_ok": true,
+      "summary": "整体布局尚可，但存在多处视觉与风格问题。主要问题集中在色彩对比度、字体选择和布局细节上。缺乏一致性主题，且部分交互元素的视觉反馈不明显。",
+      "issues": [
+        {
+          "severity": "high",
+          "location": "General",
+          "description": "页面整体为浅色主题，与标准中默认暗色主题不符，且未见切换浅色模式的选项。",
+          "suggestion": "应将暗色设为默认主题，并提供浅色主题切换功能。"
+        },
+        {
+          "severity": "medium",
+          "location": "Navigation Bar",
+          "description": "左侧导航栏激活态（Dashboard）与背景对比度不足，不满足 WCAG AA。",
+          "suggestion": "提高激活态导航项的背景或文字对比度。"
+        },
+        {
+          "severity": "medium",
+          "location": "Top Bar",
+          "description": "SHA、时间等元素未使用 monospace 字体。",
+          "suggestion": "SHA、行号、状态、命令、路径统一使用 monospace 字体栈。"
+        },
+        {
+          "severity": "medium",
+          "location": "Body Content",
+          "description": "大面积白色背景导致死白区域过多。",
+          "suggestion": "通过分层背景或增加内容填充避免大块空白。"
+        },
+        {
+          "severity": "low",
+          "location": "Interactive Elements",
+          "description": "部分可交互元素缺乏清晰聚焦环。",
+          "suggestion": "聚焦时显示 2px accent 色聚焦环。"
+        },
+        {
+          "severity": "low",
+          "location": "Borders",
+          "description": "部分卡片/表格边框对比度较高。",
+          "suggestion": "边框改 1px 低饱和度。"
+        }
+      ]
+    },
+    {
+      "page": "report (en)",
+      "vision_ok": true,
+      "summary": "评审报告界面布局清晰，信息密度适中，但存在颜色对比度不足和部分元素对齐问题。",
+      "issues": [
+        {
+          "severity": "medium",
+          "location": "Sidebar",
+          "description": "侧边栏激活态缺少左侧边条。",
+          "suggestion": "在激活菜单项左侧添加 accent 色边条。"
+        },
+        {
+          "severity": "medium",
+          "location": "Sidebar bottom",
+          "description": "Operational 描述文字与背景对比度不足。",
+          "suggestion": "调整颜色以满足 WCAG AA。"
+        },
+        {
+          "severity": "low",
+          "location": "Top status bar",
+          "description": "状态栏图标风格不一致。",
+          "suggestion": "统一为线性图标。"
+        },
+        {
+          "severity": "low",
+          "location": "Top status bar",
+          "description": "DEMO MODE 与 API connected 文本未对齐。",
+          "suggestion": "统一垂直对齐。"
+        },
+        {
+          "severity": "low",
+          "location": "Agent trace",
+          "description": "长文本存在溢出风险。",
+          "suggestion": "为路径/SHA 制定换行策略。"
+        }
+      ]
+    },
+    {
+      "page": "report notebook (en)",
+      "vision_ok": true,
+      "note": "Agent self-reported vision_ok=false but produced image-grounded detail; issues retained.",
+      "summary": "报告笔记本界面整体布局清晰、信息分层合理，但颜色对比度、字体使用和图标一致性存在问题。",
+      "issues": [
+        {
+          "severity": "high",
+          "location": "Sidebar",
+          "description": "激活态与非激活态导航项文字颜色对比度不足。",
+          "suggestion": "提高对比度满足 WCAG AA。"
+        },
+        {
+          "severity": "medium",
+          "location": "Sidebar",
+          "description": "未激活图标颜色过浅，难以辨识。",
+          "suggestion": "调整未激活图标颜色。"
+        },
+        {
+          "severity": "medium",
+          "location": "Titles",
+          "description": "REPOSITORY NOTEBOOK 与页面顶部标题字体风格不一致。",
+          "suggestion": "统一标题字体家族/字重/字号。"
+        },
+        {
+          "severity": "low",
+          "location": "Buttons/badges",
+          "description": "同类组件圆角大小不统一。",
+          "suggestion": "面板 8px / 控件 6px 统一。"
+        },
+        {
+          "severity": "low",
+          "location": "Repository rows",
+          "description": "内容行高偏大，信息密度低。",
+          "suggestion": "列表行高 ≤ 40px。"
+        }
+      ]
+    },
+    {
+      "page": "settings (en)",
+      "vision_ok": true,
+      "summary": "页面整体布局清晰，颜色和排版基本符合要求。主要的不足是命令式输入缺少指定前缀。",
+      "issues": [
+        {
+          "severity": "low",
+          "location": "API bearer token section",
+          "description": "命令式输入缺少 '>' 前缀。",
+          "suggestion": "添加 '>' 前缀以符合终端质感。"
+        }
+      ]
+    },
+    {
+      "page": "dashboard (mobile)",
+      "vision_ok": true,
+      "summary": "移动端仪表盘在视觉一致性与设计原则上有多处待改进：颜色 token 不一致、信息密度欠佳、组件样式与圆角不统一，顶栏缺少关键元素。",
+      "issues": [
+        {
+          "severity": "critical",
+          "location": "Top navigation bar",
+          "description": "顶栏缺少面包屑、心跳状态、provider/model、主题切换、doctor 徽标。",
+          "suggestion": "实现完整状态行。"
+        },
+        {
+          "severity": "high",
+          "location": "Status indicators",
+          "description": "Failed/Running/Queued 徽标文字对比度可能不满足 WCAG AA。",
+          "suggestion": "调整语义色对比度。"
+        },
+        {
+          "severity": "high",
+          "location": "PUBLIC PR ANALYSIS",
+          "description": "输入框无 '>' 前缀与 mono 字体，无终端质感。",
+          "suggestion": "命令式输入 + mono。"
+        },
+        {
+          "severity": "high",
+          "location": "Icons/rounded corners",
+          "description": "圆角不一致（面板/控件）。",
+          "suggestion": "面板 8px / 控件 6px 严格统一。"
+        },
+        {
+          "severity": "medium",
+          "location": "Throughout",
+          "description": "多处颜色疑似硬编码，未走 token。",
+          "suggestion": "全部颜色走设计 token。"
+        },
+        {
+          "severity": "medium",
+          "location": "Numeric displays",
+          "description": "数字未用 tabular-nums 对齐。",
+          "suggestion": "数字指标 tabular-nums。"
+        },
+        {
+          "severity": "medium",
+          "location": "Lists/cards",
+          "description": "行高与卡片留白大，信息密度低。",
+          "suggestion": "提高密度至 IDE 标准。"
+        },
+        {
+          "severity": "medium",
+          "location": "Badges/buttons",
+          "description": "同类组件外观不一致。",
+          "suggestion": "统一设计系统。"
+        },
+        {
+          "severity": "low",
+          "location": "Backgrounds",
+          "description": "背景分层不够清晰。",
+          "suggestion": "至少三级可辨识背景。"
+        },
+        {
+          "severity": "low",
+          "location": "Code snippets",
+          "description": "CHANGED_HUNK/AGENT_FINDING 未用 mono。",
+          "suggestion": "代码相关元素用 mono。"
+        },
+        {
+          "severity": "low",
+          "location": "Input border",
+          "description": "输入框边框对比偏高。",
+          "suggestion": "降低边框饱和度。"
+        },
+        {
+          "severity": "low",
+          "location": "Sub-headings",
+          "description": "子标题层级过多。",
+          "suggestion": "控制视觉标题 ≤ 3 级。"
+        },
+        {
+          "severity": "low",
+          "location": "REVIEW TRAIL",
+          "description": "流式输出无 step 编号。",
+          "suggestion": "加 step 编号与 mono。"
+        },
+        {
+          "severity": "low",
+          "location": "REVIEW TRAIL",
+          "description": "失败状态缺 cross 图标。",
+          "suggestion": "补充失败图标。"
+        }
+      ]
+    },
+    {
+      "page": "dashboard (zh-CN)",
+      "vision_ok": true,
+      "summary": "仪表盘背景分层不够清晰，部分文字对比度可能不足，代码信息未统一使用等宽字体，信息密度较低，布局未利用 IDE 分栏，命令式输入缺乏终端质感。",
+      "issues": [
+        {
+          "severity": "medium",
+          "location": "整体",
+          "description": "背景分层不清晰，未见明显内嵌区。",
+          "suggestion": "至少三层背景。"
+        },
+        {
+          "severity": "medium",
+          "location": "右上角需要关注区域",
+          "description": "高风险红色文字对比度可能不足。",
+          "suggestion": "满足 WCAG AA。"
+        },
+        {
+          "severity": "medium",
+          "location": "列表和卡片",
+          "description": "行高偏高、留白多，信息密度低于 IDE 标准。",
+          "suggestion": "提高密度。"
+        },
+        {
+          "severity": "high",
+          "location": "工作区布局",
+          "description": "未采用 IDE 三分栏布局。",
+          "suggestion": "重排为列表/主内容/详情分栏。"
+        },
+        {
+          "severity": "medium",
+          "location": "PR 分析输入框",
+          "description": "缺少 '>' 前缀与等宽字体。",
+          "suggestion": "命令式输入。"
+        },
+        {
+          "severity": "low",
+          "location": "文件路径、SHA",
+          "description": "未使用等宽字体。",
+          "suggestion": "统一 mono。"
+        },
+        {
+          "severity": "low",
+          "location": "数字指标",
+          "description": "未使用等宽数字对齐。",
+          "suggestion": "tabular-nums。"
+        }
+      ]
+    },
+    {
+      "page": "real data espnet (en)",
+      "vision_ok": true,
+      "summary": "页面存在多处视觉问题，整体观感不符合设计清单要求。",
+      "issues": [
+        {
+          "severity": "critical",
+          "location": "General",
+          "description": "浅色主题，不符合暗色默认要求。",
+          "suggestion": "暗色默认 + 浅色可选。"
+        },
+        {
+          "severity": "high",
+          "location": "顶部导航栏",
+          "description": "导航栏与内容区背景分层不清晰。",
+          "suggestion": "至少三级背景分层。"
+        },
+        {
+          "severity": "high",
+          "location": "左侧边栏",
+          "description": "激活菜单项缺左侧指示边条。",
+          "suggestion": "加 2px accent 边条。"
+        },
+        {
+          "severity": "medium",
+          "location": "文件列表",
+          "description": "文件路径和 SHA 未用等宽字体。",
+          "suggestion": "mono。"
+        },
+        {
+          "severity": "medium",
+          "location": "所有可交互元素",
+          "description": "聚焦环缺失。",
+          "suggestion": "2px accent 聚焦环。"
+        },
+        {
+          "severity": "medium",
+          "location": "卡片和面板边框",
+          "description": "边框饱和度高，挤占信息。",
+          "suggestion": "1px 低饱和边框。"
+        },
+        {
+          "severity": "low",
+          "location": "页面标题",
+          "description": "标题层级不足。",
+          "suggestion": "视觉标题 ≤ 3 级。"
+        },
+        {
+          "severity": "low",
+          "location": "列表/右侧面板",
+          "description": "行高与留白偏大，密度低。",
+          "suggestion": "行高 ≤ 40px。"
+        }
+      ]
+    }
+  ]
+}

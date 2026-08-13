@@ -73,26 +73,17 @@ test.describe("public project screenshot capture", () => {
     await capture(page, "settings-demo-desktop.png");
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("button", { name: /Open navigation|打开导航/ }).click();
+    await page.getByRole("button", { name: /Toggle navigation|切换导航/ }).click();
     await page.getByRole("button", { name: /Dashboard|仪表盘/ }).click();
     await expect(page.locator("h1")).toContainText(/Review overview|审查概览/i);
     await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro"]);
     await capture(page, "dashboard-demo-mobile.png");
 
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.getByRole("button", { name: /Real data|真实数据/ }).click();
-    await expect(page.locator("h1")).toContainText(/Verified data|可信数据/i);
-    await expect(page.locator(".demo-indicator")).toContainText(/Public snapshot|公开数据快照/i);
-    if (await page.locator(".real-data-page").count() > 0) {
-      await expect(page.locator(".real-data-header")).toContainText(/espnet\/espnet/i);
-      await stabilize(page, ".real-data-page", [".real-risk-chart", ".real-file-row"]);
-      await capture(page, "real-data-espnet-pr6327-desktop.png");
-    } else {
-      console.warn(
-        "Skipped public-data screenshot: no local snapshot at .consistency/real-data.json " +
-        "(run npm run data:import). Existing screenshot left untouched."
-      );
-    }
+    // The real-data view was removed from the web UI during the local-first
+    // refactor (data:import remains a CLI concern), so no real-data page is
+    // captured here anymore; the archived pre-redesign screenshot stays as
+    // historical reference.
 
     // Capture Chinese mode screenshot for CJK verification
     await page.locator("select[aria-label='Language'], select[aria-label='语言']").selectOption("zh-CN");

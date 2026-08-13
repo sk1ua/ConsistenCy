@@ -25,7 +25,7 @@ const zh: Record<string, string> = {
   "Operational": "运行正常",
   "{count} reviews observed": "已观察 {count} 次审查",
   "Close navigation": "关闭导航",
-  "Open navigation": "打开导航",
+  "Toggle navigation": "切换导航",
   "Demo Mode": "演示模式",
   "API connected": "API 已连接",
   "Demo data": "演示数据",
