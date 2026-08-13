@@ -5,6 +5,10 @@ from pathlib import Path
 
 from engine.workflow.spec import (
     ANALYZER_KINDS,
+    DEFAULT_NODE_TIMEOUT_MS,
+    DEFAULT_SYNTHESIZER_TIMEOUT_MS,
+    MAX_TIMEOUT_MS,
+    STEP_ID_PATTERN,
     VERIFIER_KINDS,
     WorkflowSpecError,
     builtin_workflow_directory,
@@ -47,6 +51,55 @@ class ContractDriftTest(unittest.TestCase):
     def test_verifier_kinds_match_typescript(self):
         self.assertEqual(_ts_enum_members(self.source, "verifierKindSchema"), set(VERIFIER_KINDS))
 
+    # ─── Field-level contract ──────────────────────────────────────────────
+
+    def _ts_object_fields(self, pattern: str, block_name: str) -> set[str]:
+        match = re.search(pattern, self.source, re.DOTALL)
+        if match is None:
+            raise AssertionError(f"{block_name} block not found in workflow.ts")
+        return set(re.findall(r"\b(\w+)\s*:", match.group(1)))
+
+    def test_step_field_names_match_typescript(self):
+        ts_fields = self._ts_object_fields(r"const stepBase = \{(.*?)\n\};", "stepBase")
+        py_fields = {"id", "uses", "needs", "timeoutMs", "continueOnError", "with"}
+        # 'uses' is selected per role in TypeScript, so it lives outside stepBase.
+        self.assertEqual(ts_fields | {"uses"}, py_fields)
+
+    def test_spec_level_fields_match_typescript(self):
+        ts_fields = self._ts_object_fields(
+            r"workflowSpecObjectSchema\s*=\s*z\.object\(\{(.*?)\n\}\)",
+            "workflowSpecObjectSchema",
+        )
+        py_fields = {"version", "name", "description", "nodes", "verifiers", "synthesizer"}
+        self.assertEqual(ts_fields, py_fields)
+
+    def test_synthesizer_fields_match_typescript(self):
+        ts_fields = self._ts_object_fields(
+            r"workflowSynthesizerSchema\s*=\s*z\.object\(\{(.*?)\n\}\)",
+            "workflowSynthesizerSchema",
+        )
+        py_fields = {"id", "uses", "needs", "timeoutMs", "with"}
+        self.assertEqual(ts_fields, py_fields)
+
+    def test_timeout_defaults_and_bounds_match_typescript(self):
+        node_bounds = re.search(r"max\(([\d_]+)\)\.default\(([\d_]+)\)", self.source)
+        self.assertIsNotNone(node_bounds, "node timeoutMs bounds not found in workflow.ts")
+        self.assertEqual(int(node_bounds.group(1).replace("_", "")), MAX_TIMEOUT_MS)
+        self.assertEqual(int(node_bounds.group(2).replace("_", "")), DEFAULT_NODE_TIMEOUT_MS)
+
+        synth_match = re.search(
+            r"workflowSynthesizerSchema\s*=\s*z\.object\(\{.*?\n\}\)", self.source, re.DOTALL
+        )
+        self.assertIsNotNone(synth_match, "workflowSynthesizerSchema block not found")
+        synth_default = re.search(r"\.default\(([\d_]+)\)", synth_match.group(0))
+        self.assertIsNotNone(synth_default, "synthesizer timeoutMs default not found")
+        self.assertEqual(int(synth_default.group(1).replace("_", "")), DEFAULT_SYNTHESIZER_TIMEOUT_MS)
+
+    def test_step_id_pattern_matches_typescript(self):
+        ts_pattern = re.search(r"\.regex\(/\^([^/]+)\$/", self.source)
+        self.assertIsNotNone(ts_pattern, "step id regex not found in workflow.ts")
+        self.assertEqual(f"^{ts_pattern.group(1)}$", STEP_ID_PATTERN.pattern)
+
 
 class LoadWorkflowSpecTest(unittest.TestCase):
     def test_parses_a_minimal_spec_and_applies_defaults(self):
@@ -77,6 +130,10 @@ class LoadWorkflowSpecTest(unittest.TestCase):
             with self.subTest(step_id=bad):
                 with self.assertRaises(WorkflowSpecError):
                     load_workflow_spec({**MINIMAL, "nodes": [{"id": bad, "uses": "engine.security"}]})
+
+    def test_rejects_continue_on_error_on_the_synthesizer(self):
+        with self.assertRaisesRegex(WorkflowSpecError, "unknown field"):
+            load_workflow_spec({**MINIMAL, "synthesizer": {"continueOnError": True}})
 
     def test_rejects_unknown_fields(self):
         with self.assertRaisesRegex(WorkflowSpecError, "unknown field"):

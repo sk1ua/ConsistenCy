@@ -150,13 +150,21 @@ def _parse_uses(value: Any, allowed: frozenset[str], where: str) -> str:
 def _parse_step(raw: Any, role: str, allowed: frozenset[str], index: int, default_timeout: int) -> WorkflowStep:
     where = f"{role}s[{index}]" if role != "synthesizer" else "synthesizer"
     mapping = _require_mapping(raw, where)
-    unknown = set(mapping) - {"id", "uses", "needs", "timeoutMs", "continueOnError", "with"}
+    allowed_keys = {"id", "uses", "needs", "timeoutMs", "continueOnError", "with"}
+    if role == "synthesizer":
+        # The TypeScript schema is strict here: the synthesizer has no
+        # continueOnError because its failure must always fail the workflow.
+        allowed_keys = allowed_keys - {"continueOnError"}
+    unknown = set(mapping) - allowed_keys
     if unknown:
         raise WorkflowSpecError(f"{where} has unknown field(s): {', '.join(sorted(unknown))}")
 
-    continue_on_error = mapping.get("continueOnError", False)
-    if not isinstance(continue_on_error, bool):
-        raise WorkflowSpecError(f"{where}.continueOnError must be a boolean")
+    if role == "synthesizer":
+        continue_on_error = False
+    else:
+        continue_on_error = mapping.get("continueOnError", False)
+        if not isinstance(continue_on_error, bool):
+            raise WorkflowSpecError(f"{where}.continueOnError must be a boolean")
 
     return WorkflowStep(
         step_id=_parse_step_id(mapping.get("id"), where),
