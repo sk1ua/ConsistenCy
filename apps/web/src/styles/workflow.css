@@ -60,7 +60,7 @@
   border: 1px solid var(--primary);
   border-radius: var(--radius-md);
   background: var(--primary);
-  color: #fff;
+  color: var(--surface);
   font-weight: 600;
   cursor: pointer;
 }
@@ -172,7 +172,7 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--surface);
-  box-shadow: 0 2px 8px rgba(23, 32, 42, 0.08);
+  box-shadow: 0 2px 8px var(--shadow-card);
   display: grid;
   gap: 3px;
   font-size: 12px;

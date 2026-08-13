@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
-import { Activity, BarChart3, BriefcaseBusiness, Clock3, FlaskConical, Globe2, Menu, RefreshCw, Settings, Workflow, X } from "lucide-react";
+import { Activity, BarChart3, BriefcaseBusiness, Clock3, FlaskConical, Globe2, Menu, Monitor, Moon, RefreshCw, Settings, Sun, Workflow, X } from "lucide-react";
 import { api, type HealthResponse } from "./api/client";
 import { mockJobs, mockReports, mockStats } from "./demo/mockReports";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -11,6 +11,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { HeartbeatWidget, heartbeatStateLabel } from "./components/HeartbeatWidget";
 import { useHeartbeat } from "./hooks/useHeartbeat";
 import { useI18n } from "./i18n";
+import { useTheme } from "./theme";
 
 const WorkflowPage = lazy(() => import("./pages/WorkflowPage").then(module => ({ default: module.WorkflowPage })));
 
@@ -40,6 +41,9 @@ function initialView(): View {
 
 export function App() {
   const { locale, setLocale, t } = useI18n();
+  const { preference, cycle: cycleTheme } = useTheme();
+  const themeIcon = preference === "dark" ? <Moon size={16} /> : preference === "light" ? <Sun size={16} /> : <Monitor size={16} />;
+  const themeLabel = t(preference === "dark" ? "Dark" : preference === "light" ? "Light" : "System");
   const { pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable } = useHeartbeat();
   const [view, setView] = useState<View>(initialView);
   const [jobs, setJobs] = useState<ReviewJob[]>([]);
@@ -179,6 +183,7 @@ export function App() {
           <div><h1>{t(page.title)}</h1><p>{t(page.description)}</p></div>
         </div>
         <div className="header-actions">
+          <button className="icon-button" type="button" onClick={() => cycleTheme()} aria-label={t("Theme")} title={`${t("Theme")}: ${themeLabel}`}>{themeIcon}</button>
           <label className="language-select"><Globe2 size={15} /><span className="sr-only">{t("Language")}</span><select aria-label={t("Language")} value={locale} onChange={event => setLocale(event.target.value as "en-US" | "zh-CN")}><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
           {demoMode && <span className="demo-indicator"><FlaskConical size={15} />{t("Demo Mode")}</span>}
           <span className="api-status"><i className={health?.database.ok ? "online" : "offline"} /> {t(health?.database.ok ? "API connected" : "Demo data")}</span>

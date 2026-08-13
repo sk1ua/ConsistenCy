@@ -5,7 +5,7 @@
 .notebook-placeholder > small {
   display: block;
   margin-top: 12px;
-  color: #76837e;
+  color: var(--muted-strong);
   font-size: 11px;
 }
 
@@ -23,22 +23,22 @@
   align-items: center;
   justify-content: flex-start;
   gap: 7px;
-  border: 1px solid #cad7d2;
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: #fff;
-  color: #34454c;
+  background: var(--surface);
+  color: var(--sidebar-hover);
   cursor: pointer;
   font: 700 12px/1.35 var(--font-ui);
   text-align: left;
 }
 
 .notebook-starters button:hover {
-  border-color: #91ad9f;
-  background: #f2f8f5;
+  border-color: var(--muted-strong);
+  background: var(--surface-muted);
 }
 
 .notebook-starters button:focus-visible {
-  outline: 3px solid rgba(47, 107, 255, .16);
+  outline: 3px solid var(--primary-wash);
   outline-offset: 2px;
 }
 

@@ -1,4 +1,14 @@
-/* ===== Tokens & Custom Properties ===== */
+/* ===== Design Tokens =====
+ *
+ * Dual-theme token system. :root holds the light values (the historical
+ * palette, preserved); :root[data-theme="dark"] overrides them with the
+ * Codex-style dark palette. ThemeProvider (src/theme.tsx) sets data-theme on
+ * <html> and index.html applies it before first paint.
+ *
+ * Rule: components never hardcode colors - always reference a token here.
+ * Known chart-only colors exempted from the sweep are listed in
+ * styles/tokens.test.ts.
+ */
 :root {
   --font-ui: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
   --font-display: var(--font-ui);
@@ -17,26 +27,125 @@
   --duration-slow: 360ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Neutrals */
   --background: #f6f8f5;
   --surface: #ffffff;
   --surface-subtle: #f0f3f0;
+  --surface-muted: #f7faf9;
   --foreground: #17202a;
   --muted: #687483;
+  --muted-strong: #59677a;
   --border: #dbe1dd;
   --border-strong: #c8d0cb;
-  --primary: #2f6bff;
-  --primary-soft: #edf2ff;
-  --success: #16856b;
-  --success-soft: #e9f7f2;
-  --warning: #b66a12;
-  --warning-soft: #fff5e5;
-  --danger: #d14d3e;
-  --danger-soft: #fff0ed;
+  --border-subtle: #d5dfdb;
   --sidebar: #17202a;
   --sidebar-muted: #9eabb5;
+  --sidebar-hover: #26353c;
+  --sidebar-faint: rgba(255, 255, 255, 0.07);
+  --sidebar-highlight: rgba(255, 255, 255, 0.1);
+  --sidebar-text: rgba(255, 255, 255, 0.65);
+  --sidebar-text-bright: rgba(255, 255, 255, 0.94);
+  --overlay: rgba(23, 32, 42, 0.5);
+
+  /* Blue / primary */
+  --primary: #2f6bff;
+  --primary-strong: #2457ce;
+  --primary-soft: #edf2ff;
+  --primary-faint: #cbd7f5;
+  --primary-line: #bfd2ff;
+  --primary-muted-text: #7397f1;
+  --primary-wash: rgba(47, 107, 255, 0.1);
+
+  /* Green / success */
+  --success: #16856b;
+  --success-strong: #126e59;
+  --success-soft: #e9f7f2;
+  --success-faint: #bde5d2;
+  --success-muted: #72d1b1;
+  --success-wash: rgba(22, 133, 107, 0.1);
+
+  /* Amber / warning */
+  --warning: #b66a12;
+  --warning-strong: #9b5a10;
+  --warning-soft: #fff5e5;
+  --warning-faint: #efd7a6;
+  --warning-muted: #f3c975;
+
+  /* Red / danger */
+  --danger: #d14d3e;
+  --danger-strong: #b83b2f;
+  --danger-soft: #fff0ed;
+  --danger-faint: #f3c4bd;
+  --danger-wash: rgba(209, 77, 62, 0.1);
+
+  /* Focus, shadows, scrims */
+  --focus-ring: rgba(47, 107, 255, 0.3);
+  --shadow-soft: rgba(23, 32, 42, 0.02);
+  --shadow-card: rgba(23, 32, 42, 0.06);
+  --scrim: rgba(255, 255, 255, 0.9);
+
   color: #17202a;
   background: #f6f8f5;
   font-synthesis: none;
+}
+
+/* ===== Dark theme (Codex-style terminal palette) ===== */
+:root[data-theme="dark"] {
+  --background: #0d1117;
+  --surface: #161b22;
+  --surface-subtle: #1c2128;
+  --surface-muted: #21262d;
+  --foreground: #e6edf3;
+  --muted: #8b949e;
+  --muted-strong: #a8b3bd;
+  --border: #30363d;
+  --border-strong: #484f58;
+  --border-subtle: #21262d;
+  --sidebar: #010409;
+  --sidebar-muted: #8b949e;
+  --sidebar-hover: #161b22;
+  --overlay: rgba(1, 4, 9, 0.6);
+
+  --primary: #58a6ff;
+  --primary-strong: #4493f8;
+  --primary-soft: #172c4d;
+  --primary-faint: #2b3a52;
+  --primary-line: #24406b;
+  --primary-muted-text: #79a8ff;
+  --primary-wash: rgba(88, 166, 255, 0.12);
+
+  --success: #3fb950;
+  --success-strong: #2ea043;
+  --success-soft: #12261e;
+  --success-faint: #1f4032;
+  --success-muted: #3fb950;
+  --success-wash: rgba(63, 185, 80, 0.15);
+
+  --warning: #d29922;
+  --warning-strong: #bb8009;
+  --warning-soft: #2b2110;
+  --warning-faint: #3b2f12;
+  --warning-muted: #d29922;
+
+  --danger: #f85149;
+  --danger-strong: #da3633;
+  --danger-soft: #2d1514;
+  --danger-faint: #3f1d1b;
+  --danger-wash: rgba(248, 81, 73, 0.15);
+
+  --focus-ring: rgba(88, 166, 255, 0.45);
+  --shadow-soft: rgba(0, 0, 0, 0.35);
+  --shadow-card: rgba(0, 0, 0, 0.4);
+  --scrim: rgba(13, 17, 23, 0.92);
+
+  color: #e6edf3;
+  background: #0d1117;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 @media (prefers-reduced-motion: reduce) {

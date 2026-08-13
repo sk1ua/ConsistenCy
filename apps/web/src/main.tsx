@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { I18nProvider } from "./i18n";
+import { ThemeProvider } from "./theme";
 import "./styles.css";
 import "./workspace-enhancements.css";
 import "./settings-guidance.css";
@@ -19,6 +20,6 @@ if (!root) {
 
 createRoot(root).render(
   <React.StrictMode>
-    <I18nProvider><App /></I18nProvider>
+    <ThemeProvider><I18nProvider><App /></I18nProvider></ThemeProvider>
   </React.StrictMode>
 );

@@ -11,9 +11,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 170px;
   gap: 20px 34px;
-  border: 1px solid #c7d3ef;
+  border: 1px solid var(--primary-faint);
   border-radius: 10px;
-  background: linear-gradient(122deg, #f8faff 0%, #edf2ff 67%, #e4ebff 100%);
+  background: linear-gradient(122deg, var(--primary-soft) 0%, var(--primary-soft) 67%, var(--primary-soft) 100%);
 }
 .settings-intro::after {
   display: none;
@@ -26,7 +26,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  color: #2457ce;
+  color: var(--primary-strong);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .08em;
@@ -42,14 +42,14 @@
 .settings-intro p {
   max-width: 690px;
   margin-bottom: 0;
-  color: #58667b;
+  color: var(--muted-strong);
   font-size: 13px;
   line-height: 1.55;
 }
 .readiness-score {
   align-self: center;
   padding-left: 24px;
-  border-left: 1px solid #c3cee7;
+  border-left: 1px solid var(--primary-faint);
 }
 .readiness-score strong, .readiness-score span {
   display: block;
@@ -62,7 +62,7 @@
 .readiness-score span {
   max-width: 100px;
   margin-top: 7px;
-  color: #5a6780;
+  color: var(--muted-strong);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -77,14 +77,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #69758a;
+  color: var(--muted-strong);
   font-size: 12px;
   font-weight: 700;
 }
 .setup-rail span::after {
   height: 2px;
   flex: 1;
-  background: #cdd6e8;
+  background: var(--primary-faint);
   content: "";
 }
 .setup-rail span:last-child::after {
@@ -96,21 +96,21 @@
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  border: 1px solid #b8c5df;
+  border: 1px solid var(--primary-faint);
   border-radius: 50%;
-  background: rgba(255, 255, 255, .65);
+  background: var(--sidebar-text);
   font-size: 11px;
   font-style: normal;
 }
 .setup-rail span.ready {
-  color: #126e59;
+  color: var(--success-strong);
 }
 .setup-rail span.ready i {
-  border-color: #91cdb9;
+  border-color: var(--success-faint);
   background: var(--success-soft);
 }
 .setup-rail span.ready::after {
-  background: #9fcfbe;
+  background: var(--success-faint);
 }
 .settings-message {
   padding: 11px 14px;
@@ -120,19 +120,19 @@
   line-height: 1.45;
 }
 .settings-message.success {
-  border-color: #bde5d2;
+  border-color: var(--success-faint);
   background: var(--success-soft);
-  color: #126e59;
+  color: var(--success-strong);
 }
 .settings-message.error {
-  border-color: #f3c4bd;
+  border-color: var(--danger-faint);
   background: var(--danger-soft);
-  color: #a9382d;
+  color: var(--danger-strong);
 }
 .settings-message.warning {
-  border-color: #efd7a6;
+  border-color: var(--warning-faint);
   background: var(--warning-soft);
-  color: #8d530e;
+  color: var(--warning-strong);
 }
 .settings-message code {
   overflow-wrap: anywhere;
@@ -148,7 +148,7 @@
   align-items: flex-start;
   gap: 10px;
   border-right: 1px solid var(--border);
-  background: #fafbfa;
+  background: var(--surface-muted);
   border-radius: 10px 0 0 10px;
 }
 .settings-group-title > svg {
@@ -195,7 +195,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #33404b;
+  color: var(--sidebar-hover);
   font-size: 12px;
   font-weight: 750;
 }
@@ -205,7 +205,7 @@
   padding: 9px 11px;
   border: 1px solid var(--border-strong);
   border-radius: 7px;
-  background: #fff;
+  background: var(--surface);
   color: var(--foreground);
   font: 13px/1.5 var(--font-mono);
   transition: border-color .15s ease, box-shadow .15s ease;
@@ -216,12 +216,12 @@
   line-height: 1.45;
 }
 .setting-field input:not([type="checkbox"]):focus, .setting-field select:focus, .setting-field textarea:focus {
-  border-color: #7397f1;
+  border-color: var(--primary-muted-text);
   outline: 0;
-  box-shadow: 0 0 0 3px rgba(47, 107, 255, .1);
+  box-shadow: 0 0 0 3px var(--primary-wash);
 }
 .setting-field input:disabled, .setting-field textarea:disabled {
-  background: #f2f4f2;
+  background: var(--surface-muted);
   color: var(--muted);
 }
 .secret-field .configured, .secret-field .missing {
@@ -271,7 +271,7 @@
   line-height: 1.45;
 }
 .setting-note code {
-  color: #2457ce;
+  color: var(--primary-strong);
   font-size: 12px;
 }
 .settings-status {
@@ -288,8 +288,8 @@
   gap: 9px;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 4px 16px rgba(23, 32, 42, .07);
+  background: var(--surface);
+  box-shadow: 0 4px 16px var(--shadow-card);
 }
 .settings-actions > span {
   margin-right: auto;
@@ -313,16 +313,16 @@
 }
 .secondary-button {
   border: 1px solid var(--border-strong);
-  background: #fff;
+  background: var(--surface);
 }
 .secondary-button:hover {
   background: var(--surface-subtle);
 }
 .save-settings {
-  border: 1px solid #2457ce;
+  border: 1px solid var(--primary-strong);
   background: var(--primary);
-  color: #fff;
+  color: var(--surface);
 }
 .save-settings:hover {
-  background: #2457ce;
+  background: var(--primary-strong);
 }

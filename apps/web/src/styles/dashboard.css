@@ -8,7 +8,7 @@
   grid-template-columns: minmax(0, 1fr) 160px;
   align-items: start;
   gap: 28px;
-  border: 1px solid #cfd8ef;
+  border: 1px solid var(--primary-faint);
   border-radius: 14px;
   background-color: var(--surface-subtle);
 }
@@ -21,7 +21,7 @@
   max-width: 760px;
 }
 .eyebrow, .panel-kicker {
-  color: #315fc6;
+  color: var(--primary-strong);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .08em;
@@ -44,7 +44,7 @@
 .intro-copy p {
   max-width: 650px;
   margin-bottom: 0;
-  color: #59677a;
+  color: var(--muted-strong);
   font-size: 14px;
   line-height: 1.55;
 }
@@ -53,13 +53,13 @@
   z-index: 1;
   align-self: center;
   padding-left: 22px;
-  border-left: 1px solid #bfcbea;
+  border-left: 1px solid var(--primary-faint);
 }
 .attention-signal span, .attention-signal strong, .attention-signal small {
   display: block;
 }
 .attention-signal span {
-  color: #59677a;
+  color: var(--muted-strong);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -73,7 +73,7 @@
 }
 .attention-signal small {
   margin-top: 4px;
-  color: #59677a;
+  color: var(--muted-strong);
   font-size: 12px;
 }
 .review-track {
@@ -89,13 +89,13 @@
   left: 3px;
   right: 3px;
   height: 1px;
-  background: #bcc8e5;
+  background: var(--primary-faint);
   content: "";
 }
 .review-track span {
   position: relative;
   padding-top: 18px;
-  color: #7d899b;
+  color: var(--muted-strong);
   font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
@@ -106,9 +106,9 @@
   left: 0;
   width: 9px;
   height: 9px;
-  border: 2px solid #aab7d5;
+  border: 2px solid var(--primary-faint);
   border-radius: 50%;
-  background: #f8faff;
+  background: var(--primary-soft);
   content: "";
 }
 .review-track span.done::before {
@@ -116,13 +116,13 @@
   background: var(--success);
 }
 .review-track span.active {
-  color: #2457ce;
+  color: var(--primary-strong);
   font-weight: 800;
 }
 .review-track span.active::before {
   border-color: var(--primary);
-  background: #fff;
-  box-shadow: 0 0 0 4px rgba(47, 107, 255, .13);
+  background: var(--surface);
+  box-shadow: 0 0 0 4px var(--primary-wash);
 }
 
 /* ===== Metrics & Risk ===== */
@@ -142,7 +142,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 1px 0 rgba(23, 32, 42, .02);
+  box-shadow: 0 1px 0 var(--shadow-soft);
 }
 .metric-icon {
   width: 38px;
@@ -181,7 +181,7 @@
 .metric-card small {
   grid-column: 1 / -1;
   align-self: end;
-  color: #4e5c69;
+  color: var(--sidebar-hover);
   font-size: 12px;
 }
 .dashboard-split {
@@ -196,7 +196,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 1px 0 rgba(23, 32, 42, .02);
+  box-shadow: 0 1px 0 var(--shadow-soft);
 }
 .panel-title {
   min-height: 62px;
@@ -230,13 +230,13 @@
   display: flex;
   overflow: hidden;
   border-radius: 6px;
-  background: #edf0ee;
+  background: var(--surface-muted);
 }
 .risk-segment {
   min-width: 0;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--surface);
   font-size: 11px;
   font-weight: 800;
 }
@@ -244,10 +244,10 @@
   background: var(--success);
 }
 .risk-medium {
-  background: #d49a28;
+  background: var(--warning);
 }
 .risk-high {
-  background: #db7523;
+  background: var(--warning);
 }
 .risk-critical {
   background: var(--danger);
@@ -260,7 +260,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #edf0ee;
+  border-bottom: 1px solid var(--surface-muted);
   font-size: 13px;
   text-transform: capitalize;
 }
@@ -268,7 +268,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #4b5665;
+  color: var(--sidebar-hover);
 }
 .risk-list .risk-total {
   min-height: 38px;

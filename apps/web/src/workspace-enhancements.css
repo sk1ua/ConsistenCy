@@ -23,7 +23,7 @@
   gap: 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .workspace-mode-tabs {
@@ -53,9 +53,9 @@
 }
 
 .workspace-mode-tabs button.active {
-  border-color: #bed0f8;
+  border-color: var(--primary-line);
   background: var(--primary-soft);
-  color: #244fae;
+  color: var(--primary-strong);
 }
 
 .workspace-mode-note {
@@ -78,10 +78,10 @@
   max-height: none;
   overflow: visible;
   padding: clamp(22px, 2.8vw, 32px);
-  border-color: #c7d5cf;
+  border-color: var(--border-subtle);
   border-radius: 14px;
-  background: #f4f8f6;
-  box-shadow: 0 16px 42px rgba(23, 32, 42, .08);
+  background: var(--surface-muted);
+  box-shadow: 0 16px 42px var(--shadow-card);
 }
 
 .notebook-canvas .notebook-panel-title {
@@ -102,10 +102,10 @@
   align-items: center;
   justify-content: center;
   gap: 11px;
-  border: 1px solid #cbd9d3;
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: rgba(255, 255, 255, .72);
-  color: #3f4e52;
+  background: var(--sidebar-text);
+  color: var(--sidebar-hover);
   font-size: 11px;
   letter-spacing: .02em;
 }
@@ -115,7 +115,7 @@
 }
 
 .notebook-trust-strip span {
-  color: #7a8b86;
+  color: var(--muted-strong);
 }
 
 .notebook-layout {
@@ -131,7 +131,7 @@
 .notebook-rail {
   min-width: 0;
   padding-right: clamp(18px, 2.4vw, 28px);
-  border-right: 1px solid #ccd8d3;
+  border-right: 1px solid var(--border-subtle);
   /* 左侧卡片区独立滚动：sticky 保持在视口内，触底联动见 NotebookPanel */
   position: sticky;
   top: 12px;
@@ -183,7 +183,7 @@
 
 .notebook-card-content {
   margin-top: 10px;
-  color: #34434a;
+  color: var(--sidebar-hover);
   font-size: 13px;
   line-height: 1.62;
 }
@@ -218,9 +218,9 @@
   padding: clamp(17px, 2.2vw, 24px);
   display: flex;
   flex-direction: column;
-  border: 1px solid #cbd8d3;
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .notebook-conversation .notebook-stream-head {
@@ -244,7 +244,7 @@
 
 .notebook-conversation .notebook-message.assistant {
   border-color: transparent;
-  background: #f6f8f7;
+  background: var(--surface-muted);
 }
 
 .notebook-conversation .notebook-message.user {
@@ -278,7 +278,7 @@
 .notebook-markdown {
   white-space: normal;
   overflow-wrap: anywhere;
-  color: #2d3b42;
+  color: var(--sidebar-hover);
   font-size: 15px;
   line-height: 1.68;
 }
@@ -296,14 +296,14 @@
 .markdown-content h3,
 .markdown-content h4 {
   margin: 1.35em 0 .55em;
-  color: #1c2930;
+  color: var(--sidebar-hover);
   font-family: var(--font-display);
   line-height: 1.25;
 }
 
 .markdown-content h1 {
   padding-bottom: .35em;
-  border-bottom: 1px solid #d7dfdc;
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 1.55em;
 }
 
@@ -335,14 +335,14 @@
 
 .markdown-content blockquote {
   padding: .2em 0 .2em 1em;
-  border-left: 3px solid #8aa7ea;
-  color: #59676f;
+  border-left: 3px solid var(--primary-muted-text);
+  color: var(--muted-strong);
 }
 
 .markdown-content code {
   padding: .12em .38em;
   border-radius: 4px;
-  background: #e9efed;
+  background: var(--surface-muted);
   color: #173f5f;
   font: .88em/1.5 var(--font-mono);
 }
@@ -351,10 +351,10 @@
   max-width: 100%;
   overflow-x: auto;
   padding: 15px 16px;
-  border: 1px solid #ced8d4;
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background: #17232a;
-  color: #e8efec;
+  background: var(--foreground);
+  color: var(--surface-muted);
 }
 
 .markdown-content pre code {
@@ -377,17 +377,17 @@
 .markdown-content th,
 .markdown-content td {
   padding: 8px 10px;
-  border: 1px solid #d3ddda;
+  border: 1px solid var(--border-subtle);
   text-align: left;
 }
 
 .markdown-content th {
-  background: #eef3f1;
+  background: var(--surface-muted);
   font-weight: 750;
 }
 
 .markdown-content a {
-  color: #2457ce;
+  color: var(--primary-strong);
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
@@ -406,7 +406,7 @@
     padding-right: 0;
     padding-bottom: 20px;
     border-right: 0;
-    border-bottom: 1px solid #ccd8d3;
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .notebook-canvas .notebook-cards {

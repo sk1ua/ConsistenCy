@@ -13,7 +13,7 @@
   display: flex;
   flex-direction: column;
   background: var(--sidebar);
-  color: #fff;
+  color: var(--surface);
 }
 .brand {
   height: 72px;
@@ -21,7 +21,7 @@
   display: flex;
   align-items: center;
   gap: 11px;
-  border-bottom: 1px solid rgba(255, 255, 255, .1);
+  border-bottom: 1px solid var(--sidebar-highlight);
 }
 .brand img {
   width: 38px;
@@ -29,7 +29,7 @@
   padding: 3px;
   object-fit: contain;
   border-radius: 9px;
-  background: #fff;
+  background: var(--surface);
 }
 .brand > span {
   min-width: 0;
@@ -43,7 +43,7 @@
   letter-spacing: .01em;
 }
 .brand strong span {
-  color: #72d1b1;
+  color: var(--success-muted);
 }
 .brand small {
   margin-top: 3px;
@@ -68,7 +68,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #d7dde1;
+  color: var(--border);
   cursor: pointer;
   text-align: left;
   transition: background .16s ease, color .16s ease;
@@ -83,24 +83,24 @@
   content: "";
 }
 .app-sidebar nav button:hover {
-  background: rgba(255, 255, 255, .07);
-  color: #fff;
+  background: var(--sidebar-faint);
+  color: var(--surface);
 }
 .app-sidebar nav button.active {
-  background: rgba(47, 107, 255, .2);
-  color: #fff;
+  background: var(--primary-wash);
+  color: var(--surface);
   font-weight: 650;
 }
 .app-sidebar nav button.active::before {
-  background: #6f97ff;
+  background: var(--primary-muted-text);
 }
 .app-sidebar nav button.active svg {
-  color: #8facff;
+  color: var(--primary-muted-text);
 }
 .sidebar-signal {
   margin: auto 18px 0;
   padding: 14px 0 17px;
-  border-top: 1px solid rgba(255, 255, 255, .1);
+  border-top: 1px solid var(--sidebar-highlight);
 }
 .sidebar-signal span, .sidebar-signal strong, .sidebar-signal small {
   display: block;
@@ -122,8 +122,8 @@
   margin-right: 7px;
   display: inline-block;
   border-radius: 50%;
-  background: #72d1b1;
-  box-shadow: 0 0 0 4px rgba(114, 209, 177, .12);
+  background: var(--success-muted);
+  box-shadow: 0 0 0 4px var(--success-wash);
 }
 .sidebar-signal small {
   margin-top: 5px;
@@ -149,7 +149,7 @@
   justify-content: space-between;
   gap: 24px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, .94);
+  background: var(--sidebar-text-bright);
   backdrop-filter: blur(14px);
 }
 .header-title {
@@ -193,6 +193,6 @@
   display: flex;
   align-items: center;
   gap: 13px;
-  color: #3b4653;
+  color: var(--sidebar-hover);
   font-size: 12px;
 }

@@ -91,5 +91,19 @@ test.describe("public project screenshot capture", () => {
     await expect(page.locator("h1")).toContainText("审查概览");
     await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro"]);
     await capture(page, "dashboard-demo-zh-desktop.png");
+
+    // Light-theme pass for dual-theme verification (default is dark).
+    await page.evaluate(() => window.localStorage.setItem("consistency.theme.v1", "light"));
+    await page.reload();
+    await expect(page.locator("h1")).toContainText(/Review overview|审查概览/i);
+    await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro", ".metric-grid .metric-card"]);
+    await capture(page, "dashboard-light-desktop.png");
+    await page.getByRole("button", { name: /Settings|设置/ }).click();
+    await expect(page.locator("h1")).toContainText(/System status|系统状态/i);
+    await stabilize(page, ".settings-editor", [".settings-group"]);
+    await capture(page, "settings-light-desktop.png");
+
+    // Restore the dark default for the next capture run.
+    await page.evaluate(() => window.localStorage.setItem("consistency.theme.v1", "dark"));
   });
 });

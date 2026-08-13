@@ -28,7 +28,7 @@
     left: 0;
     transform: translateX(-102%);
     width: 248px;
-    box-shadow: 18px 0 50px rgba(23, 32, 42, .24);
+    box-shadow: 18px 0 50px var(--overlay);
     transition: transform .2s ease;
   }
   .app-sidebar.open {
@@ -40,7 +40,7 @@
     z-index: 5;
     display: block;
     border: 0;
-    background: rgba(23, 32, 42, .42);
+    background: var(--overlay);
   }
   .menu-button {
     display: grid;
@@ -91,7 +91,7 @@
   }
   .attention-signal {
     padding: 14px 0 0;
-    border-top: 1px solid #bfcbea;
+    border-top: 1px solid var(--primary-faint);
     border-left: 0;
   }
   .attention-signal strong {
@@ -209,7 +209,7 @@
   }
   .readiness-score {
     padding: 13px 0 0;
-    border-top: 1px solid #c3cee7;
+    border-top: 1px solid var(--primary-faint);
     border-left: 0;
   }
   .readiness-score span {

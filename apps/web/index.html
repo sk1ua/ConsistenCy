@@ -7,6 +7,17 @@
     <title>ConsistenCy</title>
   </head>
   <body>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash of the
+      // wrong theme. Mirrors resolveTheme() in src/theme.tsx.
+      try {
+        var theme = localStorage.getItem("consistency.theme.v1") || "dark";
+        var dark = theme === "dark" ||
+          (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

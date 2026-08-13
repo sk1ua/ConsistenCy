@@ -22,7 +22,7 @@
   cursor: pointer;
 }
 .table-row:not(.table-head):hover {
-  background: #f7f9f7;
+  background: var(--surface-muted);
 }
 .table-head {
   min-height: 36px;
@@ -55,12 +55,12 @@
   gap: 6px;
 }
 .pr-cell b {
-  color: #2457ce;
+  color: var(--primary-strong);
   font-size: 12px;
 }
 .pr-cell small {
   overflow: hidden;
-  color: #313b47;
+  color: var(--sidebar-hover);
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
@@ -76,43 +76,43 @@
   font-weight: 800;
 }
 .row-action {
-  color: #475463;
+  color: var(--sidebar-hover);
 }
 .badge {
   width: fit-content;
   padding: 3px 7px;
   border: 1px solid transparent;
   border-radius: 999px;
-  background: #edf1ef;
-  color: #52605a;
+  background: var(--surface-muted);
+  color: var(--muted-strong);
   font-size: 11px;
   font-weight: 800;
   text-transform: capitalize;
   white-space: nowrap;
 }
 .badge-succeeded, .badge-low, .badge-confirmed {
-  border-color: #bde5d2;
+  border-color: var(--success-faint);
   background: var(--success-soft);
-  color: #126e59;
+  color: var(--success-strong);
 }
 .badge-running, .badge-info, .badge-likely {
-  border-color: #bfd2ff;
+  border-color: var(--primary-line);
   background: var(--primary-soft);
-  color: #2457ce;
+  color: var(--primary-strong);
 }
 .badge-failed, .badge-critical, .badge-high {
-  border-color: #f3c4bd;
+  border-color: var(--danger-faint);
   background: var(--danger-soft);
-  color: #b83b2f;
+  color: var(--danger-strong);
 }
 .badge-medium, .badge-hypothesis, .badge-queued {
-  border-color: #efd7a6;
+  border-color: var(--warning-faint);
   background: var(--warning-soft);
-  color: #9b5a10;
+  color: var(--warning-strong);
 }
 .badge-public-read {
-  border-color: #b9d4ee;
-  background: #edf7ff;
+  border-color: var(--primary-faint);
+  background: var(--primary-soft);
   color: #17628f;
 }
 
@@ -156,7 +156,7 @@
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #fff;
+  background: var(--surface);
 }
 .search-field svg {
   color: var(--muted);
@@ -171,7 +171,7 @@
   padding: 0 28px 0 10px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #fff;
+  background: var(--surface);
 }
 .result-count {
   margin-left: auto;

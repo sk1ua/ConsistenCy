@@ -27,7 +27,7 @@
 .public-pr-copy p {
   max-width: 640px;
   margin: 0;
-  color: #617188;
+  color: var(--muted-strong);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -44,10 +44,10 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid #b9c9e8;
+  border: 1px solid var(--primary-faint);
   border-radius: 7px;
-  background: rgba(255, 255, 255, .9);
-  color: #4b6fb9;
+  background: var(--scrim);
+  color: var(--primary-strong);
 }
 .public-pr-intake input {
   width: 100%;
@@ -64,10 +64,10 @@
   align-items: center;
   gap: 7px;
   padding: 0 12px;
-  border: 1px solid #2457ce;
+  border: 1px solid var(--primary-strong);
   border-radius: 7px;
   background: var(--primary);
-  color: #fff;
+  color: var(--surface);
   cursor: pointer;
   font-size: 13px;
   font-weight: 750;
@@ -80,6 +80,6 @@
 .public-pr-error {
   grid-column: 2;
   margin-top: -7px;
-  color: #b83b2f;
+  color: var(--danger-strong);
   font-size: 12px;
 }

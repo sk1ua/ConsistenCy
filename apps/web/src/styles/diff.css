@@ -146,7 +146,7 @@
 
 .diff-row > span {
   padding: 0 6px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--shadow-soft);
 }
 
 .diff-ln {
@@ -212,7 +212,7 @@
   padding: 8px 12px !important;
   background: var(--surface) !important;
   border-top: 1px solid var(--border);
-  box-shadow: 0 4px 14px rgba(23, 32, 42, 0.12);
+  box-shadow: 0 4px 14px var(--shadow-card);
 }
 
 .diff-popover span {
