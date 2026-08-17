@@ -113,6 +113,46 @@ export { AgentRegistry } from "./agent/registry.js";
 export type { ContextImageId } from "./identity/context-image.js";
 export { asContextImageId } from "./identity/context-image.js";
 
+// Context VM (PR-3): virtual context memory primitives
+export type {
+  ContextPageId,
+  ContextPageKind,
+  ContextPage,
+  CreatePageSpec,
+  Residency,
+  ResolvedPage,
+  SourceRef,
+  PageProvenance,
+  ContextImageSnapshot,
+  WorkingSetSnapshot,
+  RenderedContextPage,
+  RenderedContext,
+  ContextCheckpoint,
+} from "./context/types.js";
+export {
+  asContextPageId,
+  CONTEXT_PAGE_KINDS,
+  CONTEXT_PAGE_KIND_PRECEDENCE,
+  RESIDENCIES,
+  isResidency,
+} from "./context/types.js";
+export {
+  ContextError,
+  PageNotFoundError,
+  ImageNotFoundError,
+  PageAlreadyExistsError,
+  PageAlreadyAttachedError,
+  PageNotAttachedError,
+  PinnedPageEvictionError,
+  InvalidResidencyTransitionError,
+  CheckpointFormatError,
+  CheckpointCorruptionError,
+  ImageIdConflictError,
+} from "./context/errors.js";
+export { hashText } from "./context/page-store.js";
+export { ContextManager } from "./context/manager.js";
+export type { RestoreOptions } from "./context/manager.js";
+
 // Scheduler (admission control + cooperative scheduling)
 export type {
   SchedulerConfig,
