@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("public PR Notebook UI", () => {
   test("opens a full-page Notebook, renders Markdown, and switches back to the review", async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.addInitScript(() => window.localStorage.setItem("consistency.locale.v1", "en-US"));
 
     const seedResponse = await request.post("http://127.0.0.1:3001/demo/seed", { data: {} });
     expect(seedResponse.ok()).toBe(true);
@@ -14,7 +15,7 @@ test.describe("public PR Notebook UI", () => {
     const notebook = seed.notebooks?.find(item => item.jobId === job!.id);
     expect(notebook).toBeDefined();
 
-    await page.route("http://127.0.0.1:3001/reviews/public-pr", async route => {
+    await page.route("**/api/reviews/public-pr", async route => {
       await route.fulfill({
         status: 202,
         contentType: "application/json",
@@ -30,13 +31,13 @@ test.describe("public PR Notebook UI", () => {
         })
       });
     });
-    await page.route("http://127.0.0.1:3001/jobs*", async route => {
+    await page.route("**/api/jobs", async route => {
       const response = await route.fetch();
       const payload = await response.json() as { jobs: Array<Record<string, unknown>> };
       payload.jobs = payload.jobs.map(item => item.id === job!.id ? { ...item, accessMode: "public_read", publicationPolicy: "disabled", installationId: undefined } : item);
       await route.fulfill({ response, json: payload });
     });
-    await page.route(`http://127.0.0.1:3001/notebooks/${encodeURIComponent(notebook!.notebookId)}`, async route => {
+    await page.route(`**/api/notebooks/${encodeURIComponent(notebook!.notebookId)}`, async route => {
       const response = await route.fetch();
       const payload = await response.json() as {
         notebook: {
@@ -55,44 +56,49 @@ test.describe("public PR Notebook UI", () => {
       await route.fulfill({ response, json: payload });
     });
 
-    await page.goto("http://127.0.0.1:5173");
-    await expect(page.locator("h1")).toContainText(/Review overview|审查概览/i);
+    await page.goto("/#/inbox");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review inbox");
     const input = page.locator("input[aria-label='GitHub pull request URL']");
     await input.fill("https://github.com/example/repo/pull/9");
     await page.getByRole("button", { name: /Analyze PR/i }).click();
 
-    await expect(page.locator(".report-workspace")).toBeVisible();
     await expect(page.locator(".notebook-panel")).toBeVisible();
     await expect(page.locator(".notebook-source-bar")).toBeVisible();
-    await expect(page.locator(".report-meta")).toContainText(/analysis only/i);
-    await expect(page.locator(".report-meta")).toContainText(/PUBLIC READ-ONLY/i);
-    await expect(page).toHaveURL(/notebook=/);
+    await expect(page).toHaveURL(/#\/runs\/[^/]+\/notebook\?notebook=/);
 
-    const notebookMode = page.getByRole("button", { name: "Notebook workspace", exact: true });
-    const reviewMode = page.getByRole("button", { name: "Review report", exact: true });
-    await expect(notebookMode).toHaveAttribute("aria-pressed", "true");
-    await expect(reviewMode).toHaveAttribute("aria-pressed", "false");
+    const notebookMode = page.getByRole("tab", { name: "Notebook", exact: true });
+    const overviewMode = page.getByRole("tab", { name: "Overview", exact: true });
+    await expect(notebookMode).toHaveAttribute("aria-selected", "true");
+    await expect(overviewMode).toHaveAttribute("aria-selected", "false");
     await expect(page.locator(".report-ide")).toHaveCount(0);
 
+    const workbenchBox = await page.locator(".audit-workbench").boundingBox();
     const notebookBox = await page.locator(".notebook-panel").boundingBox();
     const conversationBox = await page.locator(".notebook-conversation").boundingBox();
     const messagesBox = await page.locator(".notebook-messages").boundingBox();
+    expect(workbenchBox).not.toBeNull();
     expect(notebookBox).not.toBeNull();
     expect(conversationBox).not.toBeNull();
     expect(messagesBox).not.toBeNull();
-    expect(notebookBox!.width).toBeGreaterThanOrEqual(1_000);
-    expect(conversationBox!.width).toBeGreaterThanOrEqual(600);
-    expect(messagesBox!.height).toBeGreaterThanOrEqual(440);
+    expect(workbenchBox!.width).toBeGreaterThanOrEqual(640);
+    expect(notebookBox!.width).toBeGreaterThanOrEqual(600);
+    expect(conversationBox!.width).toBeGreaterThanOrEqual(260);
+    expect(messagesBox!.height).toBeGreaterThanOrEqual(320);
 
-    await reviewMode.click();
-    await expect(reviewMode).toHaveAttribute("aria-pressed", "true");
-    await expect(notebookMode).toHaveAttribute("aria-pressed", "false");
+    await overviewMode.click();
+    await expect(page).toHaveURL(/#\/runs\/[^/]+\/overview$/);
+    await expect(overviewMode).toHaveAttribute("aria-selected", "true");
+    await expect(notebookMode).toHaveAttribute("aria-selected", "false");
+    await expect(page.locator(".report-workspace")).toBeVisible();
+    await expect(page.locator(".report-meta")).toContainText(/analysis only/i);
+    await expect(page.locator(".report-meta")).toContainText(/PUBLIC READ-ONLY/i);
     await expect(page.locator(".report-ide")).toBeVisible();
     await expect(page.locator(".notebook-panel")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Findings", exact: true })).toBeVisible();
 
     await notebookMode.click();
-    await expect(notebookMode).toHaveAttribute("aria-pressed", "true");
+    await expect(page).toHaveURL(/#\/runs\/[^/]+\/notebook(?:\?notebook=[^#]+)?$/);
+    await expect(notebookMode).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".notebook-panel")).toBeVisible();
     await expect(page.locator(".report-ide")).toHaveCount(0);
 
@@ -115,7 +121,7 @@ test.describe("public PR Notebook UI", () => {
     await page.reload();
     await expect(page.locator(".notebook-panel")).toBeVisible();
     await expect(page.locator(".notebook-source-bar")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Notebook workspace", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("tab", { name: "Notebook", exact: true })).toHaveAttribute("aria-selected", "true");
     await expect(page.locator(".report-ide")).toHaveCount(0);
   });
 });

@@ -69,6 +69,31 @@ def resolver_for(plugins):
 
 
 class WorkflowRunnerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_step_options_cannot_grant_themselves_trusted_execution(self):
+        observed = []
+
+        class CaptureOptionsPlugin(BaseAnalyzerPlugin):
+            async def analyze(self, context):
+                observed.append(dict(context.options))
+                return PluginReport(summary="captured")
+
+        spec = spec_from(
+            [{
+                "id": "untrusted-step",
+                "uses": "engine.style",
+                "with": {"execution_profile": "trusted_sandbox"},
+            }],
+            ["untrusted-step"],
+        )
+        plugins = {
+            "untrusted-step": CaptureOptionsPlugin(),
+            "synthesizer": CaptureOptionsPlugin(),
+        }
+
+        await run_workflow(spec, CONTEXT, resolver=resolver_for(plugins))
+
+        self.assertEqual(observed[0]["execution_profile"], "static_readonly")
+
     async def test_runs_independent_steps_concurrently(self):
         log = []
         spec = spec_from(

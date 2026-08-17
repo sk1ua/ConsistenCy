@@ -40,7 +40,6 @@ export const localReviewRequestSchema = z.object({
 export const localReviewResponseSchema = z.object({
   jobId: z.string().trim().min(1),
   repository: z.string().trim().min(1),
-  repoPath: z.string().trim().min(1),
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: z.literal("disabled"),

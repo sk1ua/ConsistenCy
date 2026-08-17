@@ -40,8 +40,12 @@ describe("DiffViewer", () => {
     expect(html).toContain("src/a.ts");
     expect(html).toContain("old");
     expect(html).toContain("new");
-    expect(html).toContain("diff-row-del diff-finding diff-finding-high");
+    expect(html).toContain("diff-row diff-mode-unified diff-row-del diff-finding diff-finding-high");
     expect(html).toContain("diff-row-add");
+    expect(html).toContain('aria-label="Diff view mode"');
+    expect(html).toContain('aria-pressed="true">Unified');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain('tabindex="0"');
   });
 
   it("shows an empty state when there are no files", () => {

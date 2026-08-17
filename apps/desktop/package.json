@@ -5,19 +5,40 @@
   "description": "ConsistenCy desktop shell (Electron, Windows-first)",
   "author": "ConsistenCy",
   "main": "src/main.cjs",
+  "consistencyDesktopSignedRelease": false,
+  "consistencyDesktopUpdateChannel": "stable",
+  "consistencyDesktopDistribution": "manual",
   "scripts": {
-    "start": "electron .",
-    "rebuild": "electron-rebuild -f -w better-sqlite3"
+    "start": "electron ."
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.1",
-    "electron": "33.4.11",
-    "electron-builder": "^25.1.8"
+    "@electron/fuses": "^1.8.0",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.consistency.desktop",
     "productName": "ConsistenCy",
-    "asar": false,
+    "asar": true,
+    "forceCodeSigning": false,
+    "electronUpdaterCompatibility": ">= 2.16",
+    "generateUpdatesFilesForAllChannels": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "sk1ua",
+        "repo": "ConsistenCy",
+        "channel": "latest",
+        "releaseType": "release",
+        "publishAutoUpdate": true
+      }
+    ],
+    "asarUnpack": [
+      "staged/apps/api/dist/**/*",
+      "staged/engine/**/*",
+      "staged/runtime/**/*"
+    ],
+    "afterPack": "scripts/afterPack.cjs",
     "npmRebuild": false,
     "directories": {
       "output": "release"
@@ -28,13 +49,24 @@
       "package.json"
     ],
     "win": {
-      "target": ["nsis", "portable"],
-      "artifactName": "ConsistenCy-${version}-${arch}.${ext}"
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "ConsistenCy"
+      "shortcutName": "ConsistenCy",
+      "include": "scripts/installer.nsh",
+      "differentialPackage": true,
+      "artifactName": "ConsistenCy-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "ConsistenCy-Portable-${version}-${arch}.${ext}"
     }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
   }
 }

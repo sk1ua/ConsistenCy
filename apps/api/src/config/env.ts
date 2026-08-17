@@ -1,4 +1,4 @@
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { z } from "zod";
 import { findProjectRoot } from "./settings";
 
@@ -37,12 +37,14 @@ export const envSchema = z.object({
   /** The daemon reads a live working tree. Defaults to enabled in development; production stays opt-in. */
   CONSISTENCY_HEARTBEAT_ENABLED: z.enum(["true", "false"]).default("false"),
   CONSISTENCY_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(30_000),
+  CONSISTENCY_AUTOMATION_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
   /**
    * Workflow backing the deterministic review stage. Set to "legacy" to fall
    * back to the single-shot `analyze` action.
    */
   CONSISTENCY_REVIEW_WORKFLOW: z.string().trim().min(1).default("pr-review"),
   CONSISTENCY_API_TOKEN: optionalSecret,
+  CONSISTENCY_DESKTOP_CONTROL_TOKEN: optionalSecret,
   CONSISTENCY_ALLOWED_ORIGINS: z.string().trim().default("http://127.0.0.1:5173,http://localhost:5173"),
   CONSISTENCY_WEB_URL: z.string().url().default("http://127.0.0.1:5173"),
   CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED: z.enum(["true", "false"]).default("true"),
@@ -114,13 +116,11 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     .map(root => root.trim())
     .filter(Boolean)
     .map(root => resolve(root));
-  // Defaulting to the project's parent makes every sibling checkout reviewable
-  // through POST /reviews/local. That suits local-first use but is broad for a
-  // shared deployment; `localReviewRootsAreDefaulted` lets startup say so.
+  // Legacy path-based local reviews are fail-closed. Electron repository access
+  // is granted by the main-process folder picker and the server-side registry;
+  // deployments that still need POST /reviews/local must opt into exact roots.
   const localReviewRootsAreDefaulted = configuredLocalRoots.length === 0;
-  const localReviewRoots = localReviewRootsAreDefaulted
-    ? [dirname(findProjectRoot())]
-    : configuredLocalRoots;
+  const localReviewRoots = configuredLocalRoots;
   if (parsed.NODE_ENV === "production" && (allowedOrigins.length === 0 || allowedOrigins.includes("*"))) {
     throw new Error("CONSISTENCY_ALLOWED_ORIGINS must contain explicit origins in production");
   }

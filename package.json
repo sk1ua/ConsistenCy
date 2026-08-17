@@ -29,19 +29,22 @@
     "dev:webhook": "node scripts/dev-webhook.mjs",
     "dev:api": "npm run dev -w @consistency/api",
     "dev:web": "npm run dev -w @consistency/web",
-    "desktop:dev": "electron apps/desktop",
+    "desktop:dev": "npm run build -w @consistency/web && npm run build -w @consistency/api && electron apps/desktop",
     "desktop:pack": "node scripts/desktop-pack.mjs",
-    "test:desktop": "playwright test --config=playwright.electron.config.ts"
+    "test:api-bundle": "npm run build -w @consistency/api && node scripts/smoke-api-bundle.mjs",
+    "test:desktop": "npm run build -w @consistency/web && npm run build -w @consistency/api && playwright test --config=playwright.electron.config.ts"
   },
   "overrides": {
     "postcss": "8.5.25"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^22.10.7",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "esbuild": "^0.25.12",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",

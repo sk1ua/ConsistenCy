@@ -18,7 +18,7 @@ export function JobsPage({ jobs, onOpenJob }: { jobs: ReviewJob[]; onOpenJob: (j
 
   return <section className="section-block jobs-page">
     <div className="filter-bar">
-      <label className="search-field"><Search size={17} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder={t("Search repository or PR")} /></label>
+      <label className="search-field"><Search size={17} /><span className="sr-only">{t("Search repository or PR")}</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder={t("Search repository or PR")} /></label>
       <select value={status} onChange={event => setStatus(event.target.value as JobStatus | "")} aria-label={t("Filter by status")}>
         <option value="">{t("All statuses")}</option><option value="queued">{t("Queued")}</option><option value="running">{t("Running option")}</option><option value="awaiting_publish">{t("awaiting publish")}</option><option value="publishing">{t("publishing")}</option><option value="succeeded">{t("Succeeded option")}</option><option value="failed">{t("Failed")}</option><option value="publish_failed">{t("publish failed")}</option>
       </select>
@@ -28,16 +28,19 @@ export function JobsPage({ jobs, onOpenJob }: { jobs: ReviewJob[]; onOpenJob: (j
       <span className="result-count">{t("{count} jobs", { count: filtered.length })}</span>
     </div>
     <div className="data-table jobs-table">
-      <div className="table-row table-head"><span>{t("Repository / PR")}</span><span>{t("Status")}</span><span>{t("Risk")}</span><span>{t("Findings")}</span><span>{t("Commit range")}</span><span>{t("Created")}</span></div>
-      {filtered.map(job => <button className="table-row" key={job.id} type="button" onClick={() => onOpenJob(job)}>
-        <span><strong>{job.repositoryFullName}</strong><small>{job.pullRequestNumber === undefined ? t("Local repository") : `PR #${job.pullRequestNumber}`}</small></span>
-        <span><StatusBadge value={job.status} /></span>
-        <span>{job.report ? <StatusBadge value={job.report.riskLevel} /> : "-"}</span>
-        <span>{job.report?.findings.length ?? "-"}</span>
-        <span className="commit-range">{job.baseSha.slice(0, 7)}..{job.headSha.slice(0, 7)}</span>
-        <span>{new Date(job.createdAt).toLocaleDateString(locale)}</span>
-      </button>)}
-      {filtered.length === 0 && <div className="empty-state">{t("No review jobs match these filters.")}</div>}
+      <table className="semantic-table">
+        <caption className="sr-only">{t("Review queue")}</caption>
+        <thead><tr><th scope="col">{t("Repository / PR")}</th><th scope="col">{t("Status")}</th><th scope="col">{t("Risk")}</th><th scope="col">{t("Findings")}</th><th scope="col">{t("Commit range")}</th><th scope="col">{t("Created")}</th></tr></thead>
+        <tbody>{filtered.map(job => <tr key={job.id}>
+          <td><button className="semantic-row-open" type="button" onClick={() => onOpenJob(job)}><strong>{job.repositoryFullName}</strong><small>{job.pullRequestNumber === undefined ? t("Local repository") : `PR #${job.pullRequestNumber}`}</small></button></td>
+          <td><StatusBadge value={job.status} /></td>
+          <td>{job.report ? <StatusBadge value={job.report.riskLevel} /> : "-"}</td>
+          <td>{job.report?.findings.length ?? "-"}</td>
+          <td className="commit-range">{job.baseSha.slice(0, 7)}..{job.headSha.slice(0, 7)}</td>
+          <td>{new Date(job.createdAt).toLocaleDateString(locale)}</td>
+        </tr>)}</tbody>
+      </table>
+      {filtered.length === 0 && <div className="empty-state" role="status">{t("No review jobs match these filters.")}</div>}
     </div>
   </section>;
 }

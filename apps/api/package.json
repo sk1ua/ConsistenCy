@@ -6,6 +6,7 @@
   "main": "./src/server.ts",
   "scripts": {
     "dev": "tsx src/server.ts",
+    "build": "node ../../scripts/build-api.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

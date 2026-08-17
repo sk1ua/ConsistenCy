@@ -62,11 +62,20 @@ export async function clonePullRequestWorkspace(options: {
   const runGit = options.runGit ?? defaultRunGit;
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.GITHUB_PUBLIC_READ_TOKEN;
+  delete env.GIT_CONFIG_PARAMETERS;
+  for (const key of Object.keys(env)) {
+    if (/^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/.test(key)) delete env[key];
+  }
   env.GIT_TERMINAL_PROMPT = "0";
+  // Public analysis must not silently acquire credentials from the desktop
+  // user's global credential helper. Installation/public-read tokens, when
+  // explicitly supplied, remain in the child environment and never argv.
+  env.GIT_CONFIG_COUNT = options.token ? "2" : "1";
+  env.GIT_CONFIG_KEY_0 = "credential.helper";
+  env.GIT_CONFIG_VALUE_0 = "";
   if (options.token) {
-    env.GIT_CONFIG_COUNT = "1";
-    env.GIT_CONFIG_KEY_0 = "http.extraHeader";
-    env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`;
+    env.GIT_CONFIG_KEY_1 = "http.extraHeader";
+    env.GIT_CONFIG_VALUE_1 = `Authorization: Basic ${Buffer.from(`x-access-token:${options.token}`).toString("base64")}`;
   }
   const url = `https://github.com/${owner}/${repo}.git`;
   try {

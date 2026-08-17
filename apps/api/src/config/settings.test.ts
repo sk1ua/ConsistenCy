@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { SettingsStore } from "./settings";
+import { SettingsStore, toRendererSettings } from "./settings";
 
 describe("SettingsStore", () => {
   const directories: string[] = [];
@@ -59,5 +59,28 @@ describe("SettingsStore", () => {
     settings.update({ github: { webhookSecret: null, publicReadToken: null } });
     expect(settings.savedEnvironment().GITHUB_WEBHOOK_SECRET).toBeUndefined();
     expect(settings.savedEnvironment().GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
+  });
+
+  it("projects filesystem configuration to renderer-safe status only", () => {
+    const settings = store();
+    const snapshot = settings.update({
+      runtime: {
+        databasePath: "D:/private/state/consistency.db",
+        workspaceRoot: "D:/private/workspaces",
+        localReviewRoots: "D:/customers/one,D:/customers/two"
+      }
+    });
+
+    const renderer = toRendererSettings(snapshot);
+    expect(renderer.runtime).toMatchObject({
+      storage: { kind: "file", configured: true },
+      workspace: { configured: true },
+      localReview: { configured: true, rootCount: 2 }
+    });
+    expect(renderer.runtime).not.toHaveProperty("databasePath");
+    expect(renderer.runtime).not.toHaveProperty("workspaceRoot");
+    expect(renderer.runtime).not.toHaveProperty("localReviewRoots");
+    expect(JSON.stringify(renderer)).not.toContain("D:/private");
+    expect(JSON.stringify(renderer)).not.toContain("D:/customers");
   });
 });

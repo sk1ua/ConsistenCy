@@ -8,6 +8,8 @@ engine inherits their test coverage.
 from __future__ import annotations
 
 import json
+import posixpath
+import re
 from typing import Any, Mapping
 
 from ..agents.parser_agent import ParserAgent
@@ -20,6 +22,7 @@ from .plugins import (
     SubprocessPlugin,
     register_plugin,
 )
+from .static_safety import StaticSafetyPlugin
 
 #: Maps an allowlisted analyzer kind onto a deterministic agent id.
 _AGENT_BY_KIND = {
@@ -27,7 +30,6 @@ _AGENT_BY_KIND = {
     "engine.structural": "structural",
     "engine.semantic": "semantic",
     "engine.duplication": "duplication",
-    "engine.security": "security",
 }
 
 _SEVERITY_FLOOR = (
@@ -99,7 +101,7 @@ class EngineAgentPlugin(BaseAnalyzerPlugin):
 
 
 class DependencyGraphPlugin(BaseAnalyzerPlugin):
-    """Finds import cycles among the Python files under review.
+    """Finds import cycles among Python and JavaScript/TypeScript snapshots.
 
     Only edges between modules present in the context are considered — a cycle
     that runs through an unreviewed module cannot be confirmed from this data,
@@ -146,6 +148,36 @@ class DependencyGraphPlugin(BaseAnalyzerPlugin):
                 found.update(f"{base}.{alias.name}" for alias in node.names)
         return found
 
+    _SCRIPT_IMPORT = re.compile(
+        r"(?:\b(?:import|export)\b[^'\"]*?\bfrom\s*|"
+        r"\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s*)['\"]([^'\"]+)['\"]"
+    )
+
+    @staticmethod
+    def _script_module_name(path: str) -> str:
+        normalized = path.replace("\\", "/")
+        module, _ = posixpath.splitext(normalized)
+        if module.endswith("/index"):
+            module = module[:-len("/index")]
+        return module.strip("/")
+
+    @classmethod
+    def _script_imports(cls, source: str, importer_path: str) -> set[str]:
+        base = posixpath.dirname(importer_path.replace("\\", "/"))
+        found: set[str] = set()
+        for match in cls._SCRIPT_IMPORT.finditer(source):
+            specifier = match.group(1)
+            if not specifier.startswith("."):
+                continue
+            resolved = posixpath.normpath(posixpath.join(base, specifier))
+            module, extension = posixpath.splitext(resolved)
+            if extension.lower() in {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"}:
+                resolved = module
+            if resolved.endswith("/index"):
+                resolved = resolved[:-len("/index")]
+            found.add(resolved.strip("/"))
+        return found
+
     def _cycles(self, graph: Mapping[str, set[str]]) -> list[tuple[str, ...]]:
         cycles: list[tuple[str, ...]] = []
         seen_signatures: set[frozenset[str]] = set()
@@ -173,30 +205,196 @@ class DependencyGraphPlugin(BaseAnalyzerPlugin):
         return cycles
 
     async def analyze(self, context: AnalysisContext) -> PluginReport:
-        modules = {
+        python_modules = {
             self._module_name(path): path
             for path in context.files
             if path.endswith(".py")
         }
-        graph: dict[str, set[str]] = {}
-        for module, path in modules.items():
+        python_graph: dict[str, set[str]] = {}
+        for module, path in python_modules.items():
             imported = self._imports(context.files[path], module)
-            graph[module] = {target for target in imported if target in modules}
+            python_graph[module] = {target for target in imported if target in python_modules}
 
-        evidence = [
+        script_suffixes = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts")
+        script_modules = {
+            self._script_module_name(path): path
+            for path in context.files
+            if path.lower().endswith(script_suffixes)
+        }
+        script_graph: dict[str, set[str]] = {}
+        for module, path in script_modules.items():
+            imported = self._script_imports(context.files[path], path)
+            script_graph[module] = {target for target in imported if target in script_modules}
+
+        python_evidence = [
             EvidenceItem(
-                file=modules[cycle[0]],
+                file=python_modules[cycle[0]],
                 excerpt="Import cycle: " + " -> ".join([*cycle, cycle[0]]),
                 rule="graph.dependency.circular_import",
                 severity="high",
                 metadata={"modules": list(cycle)},
             )
-            for cycle in self._cycles(graph)
+            for cycle in self._cycles(python_graph)
         ]
+        script_evidence = [
+            EvidenceItem(
+                file=script_modules[cycle[0]],
+                excerpt="Import cycle: " + " -> ".join([*cycle, cycle[0]]),
+                rule="graph.dependency.circular_import",
+                severity="high",
+                metadata={"modules": list(cycle)},
+            )
+            for cycle in self._cycles(script_graph)
+        ]
+        evidence = [*python_evidence, *script_evidence]
 
         return PluginReport(
             evidence=tuple(evidence),
-            summary=f"Inspected {len(modules)} module(s), found {len(evidence)} import cycle(s)",
+            summary=(
+                f"Inspected {len(python_modules) + len(script_modules)} module(s), "
+                f"found {len(evidence)} import cycle(s)"
+            ),
+        )
+
+
+class SchemaDriftPlugin(BaseAnalyzerPlugin):
+    """Compare JSON, YAML, JSON Schema, and OpenAPI contracts as data.
+
+    Only files whose paths identify them as schemas/contracts are considered.
+    Removed fields, changed type constraints, narrowed enums, and newly-required
+    properties are evidence.  Ordinary additive properties are not findings.
+    """
+
+    kind = "graph.schema_drift"
+
+    @staticmethod
+    def _shape(value: Any, prefix: str = "$") -> set[str]:
+        if isinstance(value, dict):
+            shaped = {f"{prefix}:object"}
+            for key, child in value.items():
+                if key in {"required", "enum"}:
+                    continue
+                shaped.update(SchemaDriftPlugin._shape(child, f"{prefix}.{key}"))
+            return shaped
+        if isinstance(value, list):
+            shaped = {f"{prefix}:array"}
+            for child in value[:1]:
+                shaped.update(SchemaDriftPlugin._shape(child, f"{prefix}[]"))
+            return shaped
+        if value is None:
+            kind = "null"
+        elif isinstance(value, bool):
+            kind = "boolean"
+        elif isinstance(value, (int, float)):
+            kind = "number"
+        else:
+            kind = type(value).__name__
+        return {f"{prefix}:{kind}"}
+
+    @staticmethod
+    def _constraint_facts(value: Any, prefix: str = "$") -> tuple[set[str], set[str]]:
+        """Return value constraints and required-property constraints separately."""
+        values: set[str] = set()
+        required: set[str] = set()
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_prefix = f"{prefix}.{key}"
+                if key == "required" and isinstance(child, list):
+                    required.update(
+                        f"{prefix}:required:{item}"
+                        for item in child
+                        if isinstance(item, str)
+                    )
+                    continue
+                if key == "enum" and isinstance(child, list):
+                    values.update(
+                        f"{prefix}:enum:{json.dumps(item, sort_keys=True, ensure_ascii=True)}"
+                        for item in child
+                    )
+                    continue
+                if key in {"type", "format", "pattern", "additionalProperties"} and isinstance(
+                    child, (str, int, float, bool)
+                ):
+                    values.add(
+                        f"{child_prefix}={json.dumps(child, sort_keys=True, ensure_ascii=True)}"
+                    )
+                child_values, child_required = SchemaDriftPlugin._constraint_facts(
+                    child, child_prefix
+                )
+                values.update(child_values)
+                required.update(child_required)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                child_values, child_required = SchemaDriftPlugin._constraint_facts(
+                    child, f"{prefix}[{index}]"
+                )
+                values.update(child_values)
+                required.update(child_required)
+        return values, required
+
+    @staticmethod
+    def _load_document(source: str, suffix: str) -> Any:
+        if suffix == ".json":
+            return json.loads(source)
+        try:
+            import yaml
+        except ImportError as error:  # pragma: no cover - PyYAML is a locked dependency
+            raise ValueError("YAML parser unavailable") from error
+        return yaml.safe_load(source)
+
+    @staticmethod
+    def _is_contract_path(normalized: str) -> bool:
+        suffix = posixpath.splitext(normalized)[1]
+        if suffix not in {".json", ".yml", ".yaml"}:
+            return False
+        return any(marker in normalized for marker in ("schema", "contract", "openapi", "swagger"))
+
+    async def analyze(self, context: AnalysisContext) -> PluginReport:
+        evidence: list[EvidenceItem] = []
+        additions = 0
+        compared = 0
+        for file, current_source in sorted(context.files.items()):
+            normalized = file.lower().replace("\\", "/")
+            if not self._is_contract_path(normalized):
+                continue
+            baseline_source = context.baselines.get(file)
+            if baseline_source is None:
+                continue
+            try:
+                suffix = posixpath.splitext(normalized)[1]
+                current_document = self._load_document(current_source, suffix)
+                baseline_document = self._load_document(baseline_source, suffix)
+                current = self._shape(current_document)
+                baseline = self._shape(baseline_document)
+                current_constraints, current_required = self._constraint_facts(current_document)
+                baseline_constraints, baseline_required = self._constraint_facts(baseline_document)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                # Syntax validation belongs to a dedicated verifier; malformed
+                # JSON is not silently recast as schema drift.
+                continue
+            compared += 1
+            removed = sorted((baseline - current) | (baseline_constraints - current_constraints))
+            newly_required = sorted(current_required - baseline_required)
+            additions += len(current - baseline)
+            if removed or newly_required:
+                evidence.append(EvidenceItem(
+                    file=file,
+                    excerpt=(
+                        "Schema contract has "
+                        f"{len(removed)} removed/changed shape(s) and "
+                        f"{len(newly_required)} newly-required field(s)"
+                    ),
+                    rule="graph.schema_drift.removed_contract",
+                    severity="medium",
+                    metadata={
+                        "removedShapes": removed[:50],
+                        "newlyRequired": newly_required[:50],
+                        "truncated": len(removed) > 50 or len(newly_required) > 50,
+                    },
+                ))
+        return PluginReport(
+            evidence=tuple(evidence),
+            summary=f"Compared {compared} schema/contract file(s), {len(evidence)} breaking drift observation(s), {additions} additive shape(s)",
         )
 
 
@@ -312,6 +510,53 @@ class PytestVerifier(SubprocessPlugin):
         return frozenset({0})
 
 
+class BuildVerifier(SubprocessPlugin):
+    """Run the repository's declared npm build with fixed argv.
+
+    `SubprocessPlugin` refuses to run unless orchestration supplied an explicit
+    trusted workspace. Public/untrusted PR analysis therefore cannot execute
+    this verifier even if a workflow requests it.
+    """
+
+    kind = "verify.build"
+    executable = "npm"
+    base_args = ("run", "build", "--if-present")
+
+    def acceptable_exit_codes(self) -> frozenset[int]:
+        return frozenset({0})
+
+
+class GroundingSanityVerifier(BaseAnalyzerPlugin):
+    """Deterministically reject evidence that cannot be traced to run input.
+
+    The historical capability name is ``verify.llm_sanity`` but this verifier
+    deliberately does not invoke an LLM. It validates the evidence boundary
+    before optional synthesis.
+    """
+
+    kind = "verify.llm_sanity"
+
+    async def analyze(self, context: AnalysisContext) -> PluginReport:
+        known_files = set(context.files) | set(context.baselines)
+        failures = [
+            EvidenceItem(
+                file=item.file,
+                excerpt="Evidence is not anchored to a file in the immutable run input",
+                start_line=item.start_line,
+                end_line=item.end_line,
+                rule="verify.llm_sanity.untracked_evidence",
+                severity="high",
+                metadata={"sourceRule": item.rule},
+            )
+            for item in context.upstream_evidence
+            if item.file not in known_files or not item.excerpt.strip()
+        ]
+        return PluginReport(
+            evidence=tuple(failures),
+            summary=f"Validated {len(context.upstream_evidence)} upstream evidence item(s), {len(failures)} ungrounded item(s)",
+        )
+
+
 class SyntaxVerifier(BaseAnalyzerPlugin):
     """Compiles every Python file so a workflow can prove the tree still parses."""
 
@@ -348,9 +593,13 @@ def register_builtin_plugins() -> None:
             kind,
             lambda options, _kind=kind, _agent=agent_id: EngineAgentPlugin(_kind, _agent, options),
         )
+    register_plugin("engine.security", lambda options: StaticSafetyPlugin(options))
     register_plugin("graph.dependency", lambda options: DependencyGraphPlugin(options))
+    register_plugin("graph.schema_drift", lambda options: SchemaDriftPlugin(options))
     register_plugin("tool.semgrep", lambda options: SemgrepPlugin(options))
     register_plugin("tool.ruff", lambda options: RuffPlugin(options))
     register_plugin("tool.eslint", lambda options: EslintPlugin(options))
     register_plugin("verify.unit_tests", lambda options: PytestVerifier(options))
+    register_plugin("verify.build", lambda options: BuildVerifier(options))
     register_plugin("verify.syntax", lambda options: SyntaxVerifier(options))
+    register_plugin("verify.llm_sanity", lambda options: GroundingSanityVerifier(options))

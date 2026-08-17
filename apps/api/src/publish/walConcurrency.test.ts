@@ -1,7 +1,8 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { Worker } from "node:worker_threads";
-import { describe, expect, it } from "vitest";
+import { buildSync } from "esbuild";
+import { afterAll, describe, expect, it } from "vitest";
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
 import { SQLiteJobStore } from "../jobs/sqliteJobStore";
@@ -53,7 +54,26 @@ async function waitForWorkersReady(
   }
 }
 
-const workerFixture = resolve(__dirname, "./fixtures/walClaimWorkerBootstrap.mjs");
+// Bundle the TypeScript worker into a disposable CommonJS entrypoint. This keeps
+// the concurrency test independent from tsx's runtime bootstrap, which calls
+// os.userInfo() and can fail in restricted Windows worker environments.
+const workerBuildDirectory = mkdtempSync(resolve(__dirname, "../../.tmp-wal-worker-"));
+const workerFixture = resolve(workerBuildDirectory, "walClaimWorker.cjs");
+
+buildSync({
+  entryPoints: [resolve(__dirname, "./fixtures/walClaimWorker.ts")],
+  outfile: workerFixture,
+  bundle: true,
+  platform: "node",
+  format: "cjs",
+  target: "node22",
+  external: ["better-sqlite3"],
+  logLevel: "silent"
+});
+
+afterAll(() => {
+  rmSync(workerBuildDirectory, { recursive: true, force: true });
+});
 
 function spawnWalClaimWorker(
   workerId: string,

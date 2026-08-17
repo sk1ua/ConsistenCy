@@ -254,7 +254,14 @@ class WorkflowRunner:
                 asts=context.asts,
                 workspace_path=context.workspace_path,
                 upstream_evidence=upstream,
-                options=step.options,
+                # Run-level controls (notably the execution profile) are part
+                # of the immutable trust boundary.  A workflow step may add
+                # plugin-specific options but cannot grant itself execution.
+                options={
+                    **step.options,
+                    "execution_profile": "static_readonly",
+                    **context.options,
+                },
             )
 
             try:

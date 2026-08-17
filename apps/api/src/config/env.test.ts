@@ -9,6 +9,7 @@ describe("loadEnv", () => {
     expect(config.workspaceRoot).toMatch(/\.consistency[\\/]workspaces$/);
     expect(config.LLM_PROVIDER).toBe("mock");
     expect(config.CONSISTENCY_WORKER_CONCURRENCY).toBe(1);
+    expect(config.CONSISTENCY_AUTOMATION_SCHEDULER_INTERVAL_MS).toBe(15_000);
     expect(config.publicPrAnalysisEnabled).toBe(true);
     expect(config.notebookEnabled).toBe(true);
     expect(config.GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
@@ -107,5 +108,12 @@ describe("loadEnv", () => {
     const config = loadEnv({ GITHUB_PUBLIC_READ_TOKEN: "local-read-token" });
     expect(config.GITHUB_PUBLIC_READ_TOKEN).toBe("local-read-token");
     expect(() => loadEnv({ GITHUB_PUBLIC_READ_TOKEN: "" })).not.toThrow();
+  });
+
+  it("keeps the desktop control credential server-only and treats whitespace as unconfigured", () => {
+    expect(loadEnv({ CONSISTENCY_DESKTOP_CONTROL_TOKEN: "desktop-control" })
+      .CONSISTENCY_DESKTOP_CONTROL_TOKEN).toBe("desktop-control");
+    expect(loadEnv({ CONSISTENCY_DESKTOP_CONTROL_TOKEN: "   " })
+      .CONSISTENCY_DESKTOP_CONTROL_TOKEN).toBeUndefined();
   });
 });

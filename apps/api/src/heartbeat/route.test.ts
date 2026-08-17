@@ -6,10 +6,11 @@ import { createApiServer } from "../http";
 const PULSE: HeartbeatPulse = {
   pulseId: "pulse_1",
   state: "idle",
-  repository: { root: "D:/repo", provider: "local_git", branch: "v2" },
+  repository: { root: "D:/private/repo", provider: "local_git", branch: "v2" },
   observedAt: "2026-08-05T12:00:00.000Z",
   dirtyFileCount: 3,
-  pendingEvents: 0
+  pendingEvents: 0,
+  lastError: "Unable to inspect D:/private/repo/.git/index"
 };
 
 async function listen(server: ReturnType<typeof createApiServer>): Promise<number> {
@@ -60,7 +61,13 @@ describe("heartbeat endpoints", () => {
     const response = await getJson(port, "/heartbeat", { authorization: "Bearer api-secret" });
 
     expect(response.status).toBe(200);
-    expect(response.body.pulse).toMatchObject({ pulseId: "pulse_1", dirtyFileCount: 3 });
+    expect(response.body.pulse).toMatchObject({
+      pulseId: "pulse_1",
+      dirtyFileCount: 3,
+      repository: { root: "repo" }
+    });
+    expect(response.body.pulse.lastError).toContain("[PATH_REDACTED]");
+    expect(JSON.stringify(response.body)).not.toContain("D:/");
   });
 
   it("returns null before the first pulse rather than 404", async () => {
@@ -117,6 +124,9 @@ describe("heartbeat endpoints", () => {
 
     expect(frames).toContain("event: pulse");
     expect(frames).toContain("\"pulseId\":\"pulse_1\"");
+    expect(frames).toContain("\"root\":\"repo\"");
+    expect(frames).toContain("[PATH_REDACTED]");
+    expect(frames).not.toContain("D:/");
   });
 
   it("unsubscribes when the client disconnects", async () => {

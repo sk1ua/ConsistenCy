@@ -1,8 +1,26 @@
-// Minimal preload: exposes only version/userData info to the renderer.
-// The renderer never gets Node access (contextIsolation + sandbox).
+// Narrow, capability-oriented preload. No raw IPC object, local path, port,
+// token or decrypted credential crosses into the renderer.
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("consistencyDesktop", {
-  appVersion: () => ipcRenderer.invoke("app:version"),
-  userDataPath: () => ipcRenderer.invoke("app:userDataPath")
+const updates = Object.freeze({
+  getState: () => ipcRenderer.invoke("updates:get-state"),
+  setChannel: channel => ipcRenderer.invoke("updates:set-channel", channel),
+  check: () => ipcRenderer.invoke("updates:check"),
+  download: () => ipcRenderer.invoke("updates:download"),
+  install: () => ipcRenderer.invoke("updates:install"),
+  onStateChange: callback => {
+    if (typeof callback !== "function") throw new TypeError("Update state listener must be a function");
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("updates:state-changed", listener);
+    return () => ipcRenderer.removeListener("updates:state-changed", listener);
+  }
 });
+
+contextBridge.exposeInMainWorld("consistencyDesktop", Object.freeze({
+  appVersion: () => ipcRenderer.invoke("app:version"),
+  selectRepository: () => ipcRenderer.invoke("repositories:select"),
+  credentialStatus: () => ipcRenderer.invoke("credentials:status"),
+  setCredential: (key, value) => ipcRenderer.invoke("credentials:set", { key, value }),
+  showFromTray: () => ipcRenderer.invoke("tray:show"),
+  updates
+}));

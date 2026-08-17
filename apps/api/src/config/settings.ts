@@ -83,6 +83,44 @@ export type SettingsSnapshot = {
   restartRequired: boolean;
 };
 
+export type RendererSettingsSnapshot = Omit<SettingsSnapshot, "runtime"> & {
+  runtime: {
+    storage: { kind: "memory" | "file"; configured: boolean };
+    workspace: { configured: boolean };
+    localReview: { configured: boolean; rootCount: number };
+    workerConcurrency: number;
+    workerPollIntervalMs: number;
+    webUrl: string;
+    apiTokenConfigured: boolean;
+  };
+};
+
+/** Renderer-facing projection; local filesystem locations remain server-side. */
+export function toRendererSettings(snapshot: SettingsSnapshot): RendererSettingsSnapshot {
+  const localReviewRoots = snapshot.runtime.localReviewRoots
+    .split(",")
+    .map(root => root.trim())
+    .filter(Boolean);
+  return {
+    llm: snapshot.llm,
+    github: snapshot.github,
+    runtime: {
+      storage: {
+        kind: snapshot.runtime.databasePath === ":memory:" ? "memory" : "file",
+        configured: snapshot.runtime.databasePath.trim().length > 0
+      },
+      workspace: { configured: snapshot.runtime.workspaceRoot.trim().length > 0 },
+      localReview: { configured: localReviewRoots.length > 0, rootCount: localReviewRoots.length },
+      workerConcurrency: snapshot.runtime.workerConcurrency,
+      workerPollIntervalMs: snapshot.runtime.workerPollIntervalMs,
+      webUrl: snapshot.runtime.webUrl,
+      apiTokenConfigured: snapshot.runtime.apiTokenConfigured
+    },
+    overriddenByEnvironment: snapshot.overriddenByEnvironment,
+    restartRequired: snapshot.restartRequired
+  };
+}
+
 type PublicSettings = z.infer<typeof publicSettingsSchema>;
 type SecretSettings = z.infer<typeof secretSettingsSchema>;
 type EncryptedPayload = { version: 1; iv: string; tag: string; data: string };

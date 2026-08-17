@@ -1,5 +1,6 @@
 import type { ReviewJob as ApiReviewJob, ReviewReport, RiskLevel, StatsResponse } from "@consistency/schema";
 import type { ReviewJob } from "../jobQueue";
+import { sanitizePublicError } from "../security/redact";
 
 export function toApiJob(job: ReviewJob): ApiReviewJob {
   return {
@@ -8,7 +9,6 @@ export function toApiJob(job: ReviewJob): ApiReviewJob {
     status: job.status,
     repositoryFullName: job.repository,
     pullRequestNumber: job.pullRequestNumber!,
-    repoPath: job.repoPath,
     installationId: job.installationId,
     accessMode: job.accessMode,
     baseSha: job.baseSha!,
@@ -17,7 +17,7 @@ export function toApiJob(job: ReviewJob): ApiReviewJob {
     createdAt: job.createdAt,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
-    error: job.error,
+    error: job.error === undefined ? undefined : sanitizePublicError(job.error),
     report: job.result
   };
 }

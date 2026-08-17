@@ -1,0 +1,77 @@
+# Versioned evidence-first safety harness. Static analyzers always run against
+# source as data. External tools execute only when orchestration supplies an
+# explicitly trusted workspace; otherwise their artifacts are recorded as
+# skipped and policy evaluation must remain unknown/incomplete.
+version: 2
+name: vibe-safety
+description: Evidence-first security, dependency, architecture, schema, syntax, build, and test coverage.
+
+nodes:
+  - id: secrets-and-injection
+    uses: engine.security
+    timeoutMs: 60000
+
+  - id: architecture-dependencies
+    uses: graph.dependency
+    timeoutMs: 60000
+
+  - id: architecture-structure
+    uses: engine.structural
+    timeoutMs: 60000
+
+  - id: schema-drift
+    uses: graph.schema_drift
+    timeoutMs: 60000
+
+  - id: semgrep-security
+    uses: tool.semgrep
+    needs: [secrets-and-injection]
+    continueOnError: true
+    timeoutMs: 300000
+    with:
+      config: p/owasp-top-ten
+
+  - id: python-security-lint
+    uses: tool.ruff
+    continueOnError: true
+    timeoutMs: 120000
+    with:
+      select: S
+
+  - id: javascript-lint
+    uses: tool.eslint
+    continueOnError: true
+    timeoutMs: 120000
+
+verifiers:
+  - id: syntax-gate
+    uses: verify.syntax
+    needs: [secrets-and-injection]
+    timeoutMs: 30000
+
+  - id: build-gate
+    uses: verify.build
+    needs: [syntax-gate]
+    continueOnError: true
+    timeoutMs: 600000
+
+  - id: test-gate
+    uses: verify.unit_tests
+    needs: [syntax-gate]
+    continueOnError: true
+    timeoutMs: 600000
+
+  - id: evidence-grounding
+    uses: verify.llm_sanity
+    needs: [secrets-and-injection, architecture-dependencies, architecture-structure, schema-drift]
+    timeoutMs: 30000
+
+synthesizer:
+  needs:
+    - semgrep-security
+    - python-security-lint
+    - javascript-lint
+    - build-gate
+    - test-gate
+    - evidence-grounding
+  timeoutMs: 120000

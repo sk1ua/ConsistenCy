@@ -17,7 +17,8 @@ from engine.protocol import AnalyzeRequest, FileInput
 from engine.runner import run_analysis
 
 
-EXPECTED_AGENT_IDS = ("style", "structural", "semantic", "duplication", "security")
+EXPECTED_AGENT_IDS = ("style", "structural", "semantic", "duplication", "security", "evolution")
+EXPECTED_DEFAULT_AGENT_IDS = ("style", "structural", "semantic", "duplication", "security")
 
 
 def _request(agent_ids, *, content: str = "value = 1\n") -> AnalyzeRequest:
@@ -30,7 +31,7 @@ def _request(agent_ids, *, content: str = "value = 1\n") -> AnalyzeRequest:
 
 def test_agent_registry_is_an_explicit_read_only_allowlist():
     assert tuple(AGENT_REGISTRY) == EXPECTED_AGENT_IDS
-    assert DEFAULT_AGENT_IDS == EXPECTED_AGENT_IDS
+    assert DEFAULT_AGENT_IDS == EXPECTED_DEFAULT_AGENT_IDS
     assert all(item.agent_id == agent_id for agent_id, item in AGENT_REGISTRY.items())
     assert all(item.to_dict()["version"] for item in AGENT_REGISTRY.values())
 
@@ -48,6 +49,14 @@ def test_registry_creates_fresh_instances():
     assert first["security"].name == "SecurityAgent"
     assert first["style"] is not second["style"]
     assert first["security"] is not second["security"]
+
+
+def test_evolution_is_explicitly_available_but_not_a_per_file_default():
+    manifests = resolve_agent_manifests(["evolution"])
+    agent = instantiate_agents(manifests)["evolution"]
+
+    assert agent.name == "EvolutionAgent"
+    assert "evolution" not in DEFAULT_AGENT_IDS
 
 
 @pytest.mark.parametrize("requested", ["style", [], ["style", "style"], [" style"]])

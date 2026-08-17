@@ -2,6 +2,7 @@ import { Check, CheckCircle2, Database, Globe2, Github, KeyRound, LoaderCircle, 
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type HealthResponse, type SettingsPatch, type SettingsSnapshot } from "../api/client";
 import { SETTING_HELP_LINKS, SettingHelp } from "../components/SettingHelp";
+import { desktopBridge, type DesktopCredentialKey, type DesktopCredentialStatus } from "../desktop";
 import { useI18n } from "../i18n";
 
 type SecretName = "deepseekApiKey" | "openaiApiKey" | "privateKey" | "webhookSecret" | "publicReadToken";
@@ -23,14 +24,33 @@ const keepSecrets: ClearSecrets = {
   publicReadToken: false
 };
 
-function safeEditablePath(value: string, fallback: string): string {
-  const normalized = value.replaceAll("\\", "/");
-  return /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("/") ? fallback : value;
+const desktopCredentialBySecret: Record<SecretName, DesktopCredentialKey> = {
+  deepseekApiKey: "DEEPSEEK_API_KEY",
+  openaiApiKey: "OPENAI_API_KEY",
+  privateKey: "GITHUB_PRIVATE_KEY",
+  webhookSecret: "GITHUB_WEBHOOK_SECRET",
+  publicReadToken: "GITHUB_PUBLIC_READ_TOKEN"
+};
+
+function withDesktopCredentialStatus(settings: SettingsSnapshot, status: DesktopCredentialStatus): SettingsSnapshot {
+  return {
+    ...settings,
+    llm: {
+      ...settings.llm,
+      deepseekApiKeyConfigured: settings.llm.deepseekApiKeyConfigured || status.DEEPSEEK_API_KEY,
+      openaiApiKeyConfigured: settings.llm.openaiApiKeyConfigured || status.OPENAI_API_KEY
+    },
+    github: {
+      ...settings.github,
+      privateKeyConfigured: settings.github.privateKeyConfigured || status.GITHUB_PRIVATE_KEY,
+      webhookSecretConfigured: settings.github.webhookSecretConfigured || status.GITHUB_WEBHOOK_SECRET,
+      publicReadTokenConfigured: settings.github.publicReadTokenConfigured || status.GITHUB_PUBLIC_READ_TOKEN
+    }
+  };
 }
 
-function ConfigRow({ icon: Icon, label, value, ok, redact }: { icon: typeof Github; label: string; value: string; ok?: boolean; redact?: boolean }) {
-  const { t } = useI18n();
-  return <div className="config-row"><Icon size={18} /><span><strong>{label}</strong><small>{redact ? t("Local database configured") : value}</small></span>{ok === undefined ? null : ok ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}</div>;
+function ConfigRow({ icon: Icon, label, value, ok }: { icon: typeof Github; label: string; value: string; ok?: boolean }) {
+  return <div className="config-row"><Icon size={18} /><span><strong>{label}</strong><small>{value}</small></span>{ok === undefined ? null : ok ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}</div>;
 }
 
 function SecretField({ name, label, configured, value, clear, help, helpHref, multiline = false, onValue, onClear }: {
@@ -75,8 +95,13 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
 
   useEffect(() => {
     let active = true;
-    void api.settings().then(loaded => {
+    const bridge = desktopBridge();
+    void Promise.all([
+      api.settings(),
+      bridge?.credentialStatus().catch(() => undefined)
+    ]).then(([snapshot, credentialStatus]) => {
       if (!active) return;
+      const loaded = credentialStatus ? withDesktopCredentialStatus(snapshot, credentialStatus) : snapshot;
       setSettings(loaded);
       setDraft(loaded);
     }).catch(error => {
@@ -104,7 +129,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     && secretReady("webhookSecret", settings.github.webhookSecretConfigured));
   const publicTokenReady = Boolean(settings && secretReady("publicReadToken", settings.github.publicReadTokenConfigured));
   const sourceReady = Boolean(health && (health.publicPrAccessMode !== "disabled" || githubAppReady || publicTokenReady));
-  const runtimeReady = Boolean(draft?.runtime.databasePath && draft.runtime.workspaceRoot);
+  const runtimeReady = Boolean(draft?.runtime.storage.configured && draft.runtime.workspace.configured);
   const readiness = { complete: Number(llmReady) + Number(sourceReady) + Number(runtimeReady), total: 3 };
 
   async function save(event: FormEvent) {
@@ -112,31 +137,46 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     if (!draft) return;
     setSaving(true);
     setMessage(undefined);
+    const bridge = desktopBridge();
+    const secretUpdates = Object.fromEntries((Object.keys(desktopCredentialBySecret) as SecretName[])
+      .map(name => [name, secretValue(secrets[name], clearSecrets[name])])) as Record<SecretName, string | null | undefined>;
     const patch: SettingsPatch = {
       llm: {
         provider: draft.llm.provider,
         deepseekBaseUrl: draft.llm.deepseekBaseUrl,
         deepseekModel: draft.llm.deepseekModel,
         openaiModel: draft.llm.openaiModel,
-        deepseekApiKey: secretValue(secrets.deepseekApiKey, clearSecrets.deepseekApiKey),
-        openaiApiKey: secretValue(secrets.openaiApiKey, clearSecrets.openaiApiKey)
+        ...(bridge ? {} : {
+          deepseekApiKey: secretUpdates.deepseekApiKey,
+          openaiApiKey: secretUpdates.openaiApiKey
+        })
       },
       github: {
         appId: draft.github.appId || null,
-        privateKey: secretValue(secrets.privateKey, clearSecrets.privateKey),
-        webhookSecret: secretValue(secrets.webhookSecret, clearSecrets.webhookSecret),
-        publicReadToken: secretValue(secrets.publicReadToken, clearSecrets.publicReadToken)
+        ...(bridge ? {} : {
+          privateKey: secretUpdates.privateKey,
+          webhookSecret: secretUpdates.webhookSecret,
+          publicReadToken: secretUpdates.publicReadToken
+        })
       },
       runtime: {
-        databasePath: draft.runtime.databasePath,
-        workspaceRoot: draft.runtime.workspaceRoot,
         workerConcurrency: draft.runtime.workerConcurrency,
         workerPollIntervalMs: draft.runtime.workerPollIntervalMs,
         webUrl: draft.runtime.webUrl
       }
     };
     try {
-      const updated = await api.updateSettings(patch);
+      const updatedSnapshot = await api.updateSettings(patch);
+      let updated = updatedSnapshot;
+      if (bridge) {
+        let status = await bridge.credentialStatus();
+        for (const name of Object.keys(desktopCredentialBySecret) as SecretName[]) {
+          const value = secretUpdates[name];
+          if (value === undefined) continue;
+          status = await bridge.setCredential(desktopCredentialBySecret[name], value);
+        }
+        updated = withDesktopCredentialStatus(updatedSnapshot, status);
+      }
       setSettings(updated);
       setDraft(updated);
       setSecrets(emptySecrets);
@@ -201,12 +241,12 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     <section className="settings-group section-block">
       <div className="settings-group-title"><ServerCog size={18} /><div><span>{t("03 · Runtime")}</span><h3>{t("Local service")}</h3><p>{t("Control storage, workspace isolation and worker throughput.")}</p></div></div>
       <div className="settings-fields">
-        <div className="setting-field"><label htmlFor="setting-database">{t("Database path")}</label><input id="setting-database" aria-describedby="setting-database-help" value={safeEditablePath(draft.runtime.databasePath, "./.consistency/consistency.db")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, databasePath: event.target.value } }) : current)} /><SettingHelp id="setting-database-help" text="Stored locally. Relative paths stay inside this project and are safest for a first setup." /></div>
-        <div className="setting-field"><label htmlFor="setting-workspace">{t("Workspace root")}</label><input id="setting-workspace" aria-describedby="setting-workspace-help" value={safeEditablePath(draft.runtime.workspaceRoot, "./.consistency/workspaces")} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workspaceRoot: event.target.value } }) : current)} /><SettingHelp id="setting-workspace-help" text="Temporary review workspaces are created here. Keep the default unless you manage storage separately." /></div>
+        <div className="setting-field setting-note"><Database size={17} /><div><strong>{t("Database")}</strong><p>{t(draft.runtime.storage.kind === "memory" ? "In-memory storage configured" : "Local file storage configured")}</p><SettingHelp id="setting-database-help" text="The local filesystem location is owned by the API process and is never sent to the renderer." /></div></div>
+        <div className="setting-field setting-note"><ServerCog size={17} /><div><strong>{t("Workspace")}</strong><p>{t(draft.runtime.workspace.configured ? "Review workspace configured" : "Review workspace not configured")}</p><SettingHelp id="setting-workspace-help" text="Choose local folders through the privileged desktop folder picker; raw paths do not cross into Web UI state." /></div></div>
         <div className="setting-field"><label htmlFor="setting-concurrency">{t("Worker concurrency")}</label><input id="setting-concurrency" aria-describedby="setting-concurrency-help" type="number" min="1" max="16" value={draft.runtime.workerConcurrency} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerConcurrency: Number(event.target.value) } }) : current)} /><SettingHelp id="setting-concurrency-help" text="Start with 1. Increase only after checking CPU, memory and provider rate limits." /></div>
         <div className="setting-field"><label htmlFor="setting-poll">{t("Poll interval (ms)")}</label><input id="setting-poll" aria-describedby="setting-poll-help" type="number" min="50" max="60000" value={draft.runtime.workerPollIntervalMs} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, workerPollIntervalMs: Number(event.target.value) } }) : current)} /><SettingHelp id="setting-poll-help" text="How often the worker checks for queued jobs. The default is appropriate for local use." /></div>
         <div className="setting-field setting-field-wide"><label htmlFor="setting-web-url">{t("Web URL")}</label><input id="setting-web-url" aria-describedby="setting-web-url-help" type="url" value={draft.runtime.webUrl} onChange={event => setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, webUrl: event.target.value } }) : current)} /><SettingHelp id="setting-web-url-help" text="The browser URL used in links and callbacks, usually http://127.0.0.1:5173 for local development." /></div>
-        <div className="setting-field setting-field-wide setting-note"><LockKeyhole size={17} /><div><strong>{t("API bearer token")}</strong><p>{t(settings.runtime.apiTokenConfigured ? "Configured for the API. Keep VITE_API_TOKEN synchronized before restarting the web app." : "Optional for local use. Generate a high-entropy value yourself; this is not a vendor API key.")}</p><code>npm run config -- set runtime.api-token</code><SettingHelp id="setting-api-token-help" text="This token is generated by ConsistenCy, not an external API provider. A production browser deployment should use a protected server session or reverse proxy instead of treating a Vite build variable as a user secret." /></div></div>
+        <div className="setting-field setting-field-wide setting-note"><LockKeyhole size={17} /><div><strong>{t("API session")}</strong><p>{t(settings.runtime.apiTokenConfigured ? "Protected API session configured" : "Browser development session is not protected")}</p><code>npm run config -- set runtime.api-token</code><SettingHelp id="setting-api-token-help" text="Electron owns its one-time session token in the main process. The renderer never receives or stores that token." /></div></div>
       </div>
     </section>
 
@@ -219,7 +259,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
         <ConfigRow icon={KeyRound} label={t("Public read token")} value={t(health.configuration.publicReadTokenConfigured ? "Configured" : "Not configured")} ok={health.configuration.publicReadTokenConfigured} />
         <ConfigRow icon={ServerCog} label={t("LLM provider")} value={health.llmProvider} />
         <ConfigRow icon={ServerCog} label={t("Worker")} value={t(health.worker.running ? "Running · concurrency {count}" : "Stopped · concurrency {count}", { count: health.worker.concurrency })} ok={health.worker.running} />
-        <ConfigRow icon={Database} label={t("Database")} value={health.configuration.databasePath} ok={health.database.ok} redact />
+        <ConfigRow icon={Database} label={t("Database")} value={t(health.configuration.storage.kind === "memory" ? "In-memory storage" : "Local file storage")} ok={health.database.ok && health.configuration.storage.configured} />
       </div>
     </section>
 

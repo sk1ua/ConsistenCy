@@ -166,7 +166,7 @@ input[type="checkbox"] {
 }
 .notice small {
   margin-top: 2px;
-  color: #85683f;
+  color: var(--muted-strong);
   font-size: 11px;
 }
 .loading-state, .empty-state {

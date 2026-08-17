@@ -12,6 +12,14 @@ import {
   jobDiffResponseSchema,
   heartbeatPulseSchema,
   heartbeatStreamEventSchema,
+  auditCapabilitiesSchema,
+  auditIssueSchema,
+  auditRunSchema,
+  automationSchema,
+  evolutionSnapshotSchema,
+  repositoryEventSchema,
+  repositoryPulseSchema,
+  repositorySchema,
   type JobStatus,
   type Notebook,
   type NotebookCardKind,
@@ -24,17 +32,29 @@ import {
   type WorkflowResponse,
   type WorkflowSpec,
   type WorkflowSummary,
-  type JobDiffResponse
+  type JobDiffResponse,
+  type AuditCapabilities,
+  type Automation,
+  type Repository,
+  type AuditIssue,
+  type AuditRun,
+  type EvolutionSnapshot,
+  type RepositoryEvent,
+  type RepositoryPulse
 } from "@consistency/schema";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8787";
-const apiToken = import.meta.env.VITE_API_TOKEN as string | undefined;
+// The renderer always talks to a same-origin capability broker. In browser
+// development Vite proxies `/api`; Electron serves the same path from its
+// restricted `consistency://app` protocol and injects its one-time token in
+// the main process. Secrets must never be compiled into this bundle.
+const apiBaseUrl = "/api";
 
 export type HealthResponse = {
   ok: boolean;
   service: string;
   database: { ok: boolean };
   worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
+  deterministicAnalyzer?: { running: boolean; generation: number; pendingCount: number };
   llmProvider: string;
   llmModel?: string;
   publicPrAnalysis?: boolean;
@@ -44,8 +64,9 @@ export type HealthResponse = {
     githubAppConfigured: boolean;
     webhookSecretConfigured: boolean;
     publicReadTokenConfigured: boolean;
-    databasePath: string;
+    storage: { kind: "memory" | "file"; configured: boolean };
     workerConcurrency: number;
+    publishWorkerConcurrency?: number;
     demoMode: boolean;
   };
 };
@@ -66,8 +87,9 @@ export type SettingsSnapshot = {
     publicReadTokenConfigured: boolean;
   };
   runtime: {
-    databasePath: string;
-    workspaceRoot: string;
+    storage: { kind: "memory" | "file"; configured: boolean };
+    workspace: { configured: boolean };
+    localReview: { configured: boolean; rootCount: number };
     workerConcurrency: number;
     workerPollIntervalMs: number;
     webUrl: string;
@@ -93,8 +115,6 @@ export type SettingsPatch = {
     publicReadToken?: string | null;
   };
   runtime?: {
-    databasePath?: string;
-    workspaceRoot?: string;
     workerConcurrency?: number;
     workerPollIntervalMs?: number;
     webUrl?: string;
@@ -109,7 +129,6 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
     ...init,
     headers: {
       "content-type": "application/json",
-      ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {}),
       ...init?.headers
     }
   });
@@ -147,15 +166,15 @@ async function* readSse(response: Response): AsyncIterable<NotebookStreamEvent> 
   }
 }
 
-async function openSse(path: string, payload: unknown): Promise<Response> {
+async function openSse(path: string, payload: unknown, signal?: AbortSignal): Promise<Response> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      accept: "text/event-stream",
-      ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {})
+      accept: "text/event-stream"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -170,8 +189,7 @@ async function openSse(path: string, payload: unknown): Promise<Response> {
 async function openGetSse(path: string, signal?: AbortSignal): Promise<Response> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     headers: {
-      accept: "text/event-stream",
-      ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {})
+      accept: "text/event-stream"
     },
     signal
   });
@@ -186,34 +204,80 @@ async function openGetSse(path: string, signal?: AbortSignal): Promise<Response>
 }
 
 export const api = {
-  async jobs(filters: { status?: JobStatus; repository?: string; severity?: Severity } = {}): Promise<ReviewJob[]> {
+  async jobs(filters: { status?: JobStatus; repository?: string; severity?: Severity } = {}, signal?: AbortSignal): Promise<ReviewJob[]> {
     const query = new URLSearchParams();
     if (filters.status) query.set("status", filters.status);
     if (filters.repository) query.set("repository", filters.repository);
     if (filters.severity) query.set("severity", filters.severity);
     const suffix = query.size > 0 ? `?${query}` : "";
-    return jobListResponseSchema.parse(await request(`/jobs${suffix}`)).jobs;
+    return jobListResponseSchema.parse(await request(`/jobs${suffix}`, { signal })).jobs;
   },
-  async job(id: string): Promise<ReviewJob> {
-    return jobDetailResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}`)).job;
+  async job(id: string, signal?: AbortSignal): Promise<ReviewJob> {
+    return jobDetailResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}`, { signal })).job;
   },
-  async report(id: string): Promise<ReviewReport> {
-    return reportResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/report`)).report;
+  async report(id: string, signal?: AbortSignal): Promise<ReviewReport> {
+    return reportResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/report`, { signal })).report;
   },
-  async jobDiff(id: string): Promise<JobDiffResponse> {
-    return jobDiffResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/diff`));
+  async jobDiff(id: string, signal?: AbortSignal): Promise<JobDiffResponse> {
+    return jobDiffResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/diff`, { signal }));
   },
-  async jobNotebook(jobId: string): Promise<string | null> {
-    return (await request(`/jobs/${encodeURIComponent(jobId)}/notebook`) as { notebookId: string | null }).notebookId;
+  async jobNotebook(jobId: string, signal?: AbortSignal): Promise<string | null> {
+    return (await request(`/jobs/${encodeURIComponent(jobId)}/notebook`, { signal }) as { notebookId: string | null }).notebookId;
   },
-  async recentReports(limit = 10): Promise<ReviewReport[]> {
-    return recentReportsResponseSchema.parse(await request(`/reports/recent?limit=${limit}`)).reports;
+  async recentReports(limit = 10, signal?: AbortSignal): Promise<ReviewReport[]> {
+    return recentReportsResponseSchema.parse(await request(`/reports/recent?limit=${limit}`, { signal })).reports;
   },
-  async stats(): Promise<StatsResponse> {
-    return statsResponseSchema.parse(await request("/stats"));
+  async stats(signal?: AbortSignal): Promise<StatsResponse> {
+    return statsResponseSchema.parse(await request("/stats", { signal }));
   },
-  async health(): Promise<HealthResponse> {
-    return await request("/health") as HealthResponse;
+  async health(signal?: AbortSignal): Promise<HealthResponse> {
+    return await request("/health", { signal }) as HealthResponse;
+  },
+  async auditCapabilities(signal?: AbortSignal): Promise<AuditCapabilities> {
+    return auditCapabilitiesSchema.parse(await request("/audit/capabilities", { signal }));
+  },
+  async repositories(signal?: AbortSignal): Promise<Repository[]> {
+    const payload = await request("/repositories", { signal }) as { repositories?: unknown };
+    return repositorySchema.array().parse(payload.repositories);
+  },
+  async setRepositoryMonitoring(repositoryId: string, enabled: boolean): Promise<Repository> {
+    const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/actions/set-monitoring`, {
+      method: "POST",
+      body: JSON.stringify({ enabled })
+    }) as { repository?: unknown };
+    return repositorySchema.parse(payload.repository);
+  },
+  async repositoryTimeline(repositoryId: string, signal?: AbortSignal): Promise<{ repositoryEvents: RepositoryEvent[]; repositoryPulses: RepositoryPulse[]; auditRuns: AuditRun[] }> {
+    const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/timeline`, { signal }) as {
+      repositoryEvents?: unknown;
+      repositoryPulses?: unknown;
+      auditRuns?: unknown;
+    };
+    return {
+      repositoryEvents: repositoryEventSchema.array().parse(payload.repositoryEvents),
+      repositoryPulses: repositoryPulseSchema.array().parse(payload.repositoryPulses),
+      auditRuns: auditRunSchema.array().parse(payload.auditRuns)
+    };
+  },
+  async repositoryMetrics(repositoryId: string, signal?: AbortSignal): Promise<EvolutionSnapshot[]> {
+    const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/metrics`, { signal }) as { evolutionSnapshots?: unknown };
+    return evolutionSnapshotSchema.array().parse(payload.evolutionSnapshots);
+  },
+  async repositoryIssues(repositoryId: string, signal?: AbortSignal): Promise<AuditIssue[]> {
+    const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/issues`, { signal }) as { issues?: unknown };
+    return auditIssueSchema.array().parse(payload.issues);
+  },
+  async automations(signal?: AbortSignal): Promise<Automation[]> {
+    const payload = await request("/automations", { signal }) as { automations?: unknown };
+    return automationSchema.array().parse(payload.automations);
+  },
+  async setAutomationEnabled(automationId: string, enabled: boolean): Promise<Automation> {
+    const action = enabled ? "resume" : "pause";
+    const payload = await request(`/automations/${encodeURIComponent(automationId)}/${action}`, {
+      method: "POST",
+      body: "{}"
+    }) as { automation?: unknown };
+    return automationSchema.parse(payload.automation);
   },
   async heartbeat(): Promise<HeartbeatPulse | null> {
     const payload = await request("/heartbeat") as { pulse?: HeartbeatPulse | null };
@@ -237,18 +301,18 @@ export const api = {
   async analyzePublicPr(url: string) {
     return publicPrResponseSchema.parse(await request("/reviews/public-pr", { method: "POST", body: JSON.stringify({ url }) }));
   },
-  async notebook(id: string): Promise<Notebook> {
-    return notebookResponseSchema.parse(await request(`/notebooks/${encodeURIComponent(id)}`)).notebook;
+  async notebook(id: string, signal?: AbortSignal): Promise<Notebook> {
+    return notebookResponseSchema.parse(await request(`/notebooks/${encodeURIComponent(id)}`, { signal })).notebook;
   },
   async notebookSources(id: string) {
     return notebookSourcesResponseSchema.parse(await request(`/notebooks/${encodeURIComponent(id)}/sources`)).sources;
   },
-  async *streamNotebookMessage(id: string, content: string, sourceJobIds?: string[]): AsyncIterable<NotebookStreamEvent> {
-    const response = await openSse(`/notebooks/${encodeURIComponent(id)}/messages`, { content, sourceJobIds });
+  async *streamNotebookMessage(id: string, content: string, sourceJobIds?: string[], signal?: AbortSignal): AsyncIterable<NotebookStreamEvent> {
+    const response = await openSse(`/notebooks/${encodeURIComponent(id)}/messages`, { content, sourceJobIds }, signal);
     yield* readSse(response);
   },
-  async *streamNotebookCard(id: string, kind: NotebookCardKind, sourceJobIds: string[]): AsyncIterable<NotebookStreamEvent> {
-    const response = await openSse(`/notebooks/${encodeURIComponent(id)}/cards`, { kind, sourceJobIds });
+  async *streamNotebookCard(id: string, kind: NotebookCardKind, sourceJobIds: string[], signal?: AbortSignal): AsyncIterable<NotebookStreamEvent> {
+    const response = await openSse(`/notebooks/${encodeURIComponent(id)}/cards`, { kind, sourceJobIds }, signal);
     yield* readSse(response);
   },
   async workflows(): Promise<WorkflowSummary[]> {

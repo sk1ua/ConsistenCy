@@ -1,24 +1,91 @@
 import { createRequire } from "node:module";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import { _electron as electron, expect, test } from "@playwright/test";
 
 const require = createRequire(import.meta.url);
 
 test.describe("desktop shell", () => {
-  test("boots the web UI with a healthy API", async () => {
+  test("boots the hardened app protocol with a healthy same-origin API", async () => {
     test.setTimeout(120_000);
     const executablePath = require("electron") as unknown as string;
-    const app = await electron.launch({ args: ["apps/desktop"], executablePath });
+    const repositoryRoot = resolve(import.meta.dirname, "..", "..");
+    const userData = mkdtempSync(join(tmpdir(), "consistency-electron-smoke-"));
+    const python = join(repositoryRoot, ".venv", "Scripts", "python.exe");
+    const app = await electron.launch({
+      args: ["apps/desktop", `--user-data-dir=${userData}`],
+      executablePath,
+      env: {
+        ...process.env,
+        CONSISTENCY_NODE_HELPER: process.execPath,
+        CONSISTENCY_PYTHON_PATH: python,
+        CONSISTENCY_WORKERS_ENABLED: "false",
+        CONSISTENCY_HEARTBEAT_ENABLED: "false",
+        LLM_PROVIDER: "mock"
+      }
+    });
     try {
       const window = await app.firstWindow();
-      await expect(window.locator(".app-sidebar")).toBeVisible({ timeout: 60_000 });
-      await expect(window.getByRole("heading", { level: 1 })).toContainText(/Review overview|审查概览/i);
-      const healthy = await window.evaluate(async () => {
-        const response = await fetch("http://127.0.0.1:3001/health");
-        return response.ok;
+      await expect(window.locator(".audit-shell")).toBeVisible({ timeout: 60_000 });
+      await expect(window.getByText(/API connected|API 已连接/i)).toBeVisible();
+      expect(new URL(window.url()).protocol).toBe("consistency:");
+
+      const boundary = await window.evaluate(async () => {
+        const response = await fetch("/api/health");
+        const internalResponse = await fetch("/api/internal/repositories/local", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-consistency-desktop-control": "renderer-controlled"
+          },
+          body: JSON.stringify({ path: "renderer-must-not-register" })
+        });
+        const desktop = (window as typeof window & {
+          consistencyDesktop?: Record<string, unknown>;
+        }).consistencyDesktop;
+        const updates = desktop?.updates as undefined | {
+          getState: () => Promise<Record<string, unknown>>;
+        };
+        return {
+          healthy: response.ok,
+          internalStatus: internalResponse.status,
+          methods: desktop ? Object.keys(desktop).sort() : [],
+          updateMethods: updates ? Object.keys(updates).sort() : [],
+          updateState: updates ? await updates.getState() : null,
+          hasRawUserDataPath: Boolean(desktop && "userDataPath" in desktop),
+          hasRawIpc: Boolean(desktop && "ipcRenderer" in desktop)
+        };
       });
-      expect(healthy).toBe(true);
+      expect(boundary.healthy).toBe(true);
+      expect(boundary.internalStatus).toBe(404);
+      expect(boundary.hasRawUserDataPath).toBe(false);
+      expect(boundary.hasRawIpc).toBe(false);
+      expect(boundary.methods).toEqual([
+        "appVersion",
+        "credentialStatus",
+        "selectRepository",
+        "setCredential",
+        "showFromTray",
+        "updates"
+      ]);
+      expect(boundary.updateMethods).toEqual([
+        "check",
+        "download",
+        "getState",
+        "install",
+        "onStateChange",
+        "setChannel"
+      ]);
+      expect(boundary.updateState).toMatchObject({ mode: "manual", reason: "development", channel: "stable" });
     } finally {
       await app.close();
+      const target = resolve(userData);
+      const temporaryRoot = `${resolve(tmpdir())}${sep}`;
+      if (!target.startsWith(temporaryRoot)) {
+        throw new Error(`Refusing to remove unexpected smoke directory: ${target}`);
+      }
+      rmSync(target, { recursive: true, force: true });
     }
   });
 });

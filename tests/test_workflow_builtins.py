@@ -1,14 +1,22 @@
 """Tests for the shipped plugins and end-to-end execution of bundled workflows."""
 import asyncio
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from engine.workflow.artifacts import STATUS_SKIPPED, STATUS_SUCCEEDED
-from engine.workflow.builtins import DependencyGraphPlugin, SyntaxVerifier, register_builtin_plugins
+from engine.workflow.builtins import (
+    BuildVerifier,
+    DependencyGraphPlugin,
+    GroundingSanityVerifier,
+    SchemaDriftPlugin,
+    SyntaxVerifier,
+    register_builtin_plugins,
+)
 from engine.workflow.plugins import AnalysisContext, registered_kinds, resolve_plugin
 from engine.workflow.runner import run_workflow
 from engine.workflow.spec import load_builtin_workflow
 
-BUILTIN_WORKFLOWS = ("security-hardening", "architectural-drift", "pr-sanity-verification")
+BUILTIN_WORKFLOWS = ("security-hardening", "architectural-drift", "pr-sanity-verification", "vibe-safety")
 
 
 class ShippedWorkflowCoverageTest(unittest.TestCase):
@@ -75,6 +83,16 @@ class DependencyGraphPluginTest(unittest.IsolatedAsyncioTestCase):
         report = await DependencyGraphPlugin().analyze(context)
         self.assertEqual(report.evidence, ())
 
+    async def test_detects_a_typescript_import_cycle(self):
+        context = AnalysisContext(files={
+            "src/alpha.ts": 'import { beta } from "./beta";\nexport const alpha = beta;\n',
+            "src/beta.ts": 'import { alpha } from "./alpha";\nexport const beta = alpha;\n',
+        })
+        report = await DependencyGraphPlugin().analyze(context)
+
+        self.assertEqual(len(report.evidence), 1)
+        self.assertEqual(report.evidence[0].rule, "graph.dependency.circular_import")
+
 
 class SyntaxVerifierTest(unittest.IsolatedAsyncioTestCase):
     async def test_reports_syntax_errors_with_a_line_anchor(self):
@@ -90,15 +108,97 @@ class SyntaxVerifierTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.evidence, ())
 
 
+class SchemaDriftPluginTest(unittest.IsolatedAsyncioTestCase):
+    async def test_reports_removed_schema_contract_shapes(self):
+        report = await SchemaDriftPlugin().analyze(AnalysisContext(
+            files={"contracts/user.schema.json": '{"id": 1}'},
+            baselines={"contracts/user.schema.json": '{"id": 1, "role": "admin"}'},
+        ))
+        self.assertEqual(len(report.evidence), 1)
+        self.assertEqual(report.evidence[0].rule, "graph.schema_drift.removed_contract")
+
+    async def test_ignores_additive_schema_changes(self):
+        report = await SchemaDriftPlugin().analyze(AnalysisContext(
+            files={"contracts/user.schema.json": '{"id": 1, "role": "admin"}'},
+            baselines={"contracts/user.schema.json": '{"id": 1}'},
+        ))
+        self.assertEqual(report.evidence, ())
+
+    async def test_reports_json_schema_type_change_and_new_required_field(self):
+        baseline = {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+        }
+        current = {
+            "type": "object",
+            "required": ["id"],
+            "properties": {"id": {"type": "number"}},
+        }
+        import json
+
+        report = await SchemaDriftPlugin().analyze(AnalysisContext(
+            files={"contracts/user.schema.json": json.dumps(current)},
+            baselines={"contracts/user.schema.json": json.dumps(baseline)},
+        ))
+
+        self.assertEqual(len(report.evidence), 1)
+        self.assertTrue(report.evidence[0].metadata["removedShapes"])
+        self.assertTrue(report.evidence[0].metadata["newlyRequired"])
+
+    async def test_reports_openapi_yaml_contract_drift(self):
+        report = await SchemaDriftPlugin().analyze(AnalysisContext(
+            files={"api/openapi.yml": "components:\n  schemas:\n    User:\n      type: object\n"},
+            baselines={
+                "api/openapi.yml": (
+                    "components:\n  schemas:\n    User:\n      type: object\n"
+                    "      properties:\n        id:\n          type: string\n"
+                )
+            },
+        ))
+        self.assertEqual(len(report.evidence), 1)
+
+
+class GroundingSanityVerifierTest(unittest.IsolatedAsyncioTestCase):
+    async def test_flags_evidence_outside_the_run_input(self):
+        from engine.workflow.artifacts import EvidenceItem
+
+        report = await GroundingSanityVerifier().analyze(AnalysisContext(
+            files={"known.py": "value = 1\n"},
+            upstream_evidence=(EvidenceItem(file="invented.py", excerpt="claim"),),
+        ))
+        self.assertEqual(len(report.evidence), 1)
+        self.assertEqual(report.evidence[0].severity, "high")
+
+
 class SubprocessPluginGuardTest(unittest.IsolatedAsyncioTestCase):
     async def test_refuses_to_run_without_an_explicit_workspace(self):
         # Otherwise the tool inherits the process CWD and scans whatever is there.
         from engine.workflow.builtins import RuffPlugin
 
-        report = await RuffPlugin().analyze(AnalysisContext(files={"a.py": "x = 1\n"}))
+        report = await RuffPlugin().analyze(AnalysisContext(
+            files={"a.py": "x = 1\n"},
+            options={"execution_profile": "trusted_sandbox"},
+        ))
         self.assertIsNotNone(report.skipped_reason)
         self.assertIn("workspace_path", report.skipped_reason)
         self.assertIsNone(report.exit_code)
+
+    async def test_build_refuses_to_run_without_a_trusted_workspace(self):
+        report = await BuildVerifier().analyze(AnalysisContext(files={"package.json": "{}"}))
+        self.assertIsNotNone(report.skipped_reason)
+        self.assertEqual(report.command, ("npm", "run", "build", "--if-present"))
+
+    async def test_static_readonly_never_starts_a_subprocess_even_with_a_workspace(self):
+        with patch("engine.workflow.plugins.asyncio.create_subprocess_exec", new=AsyncMock()) as create:
+            report = await BuildVerifier().analyze(AnalysisContext(
+                files={"package.json": "{}"},
+                workspace_path="C:/untrusted/checkout",
+                options={"execution_profile": "static_readonly"},
+            ))
+
+        self.assertIsNotNone(report.skipped_reason)
+        self.assertIn("trusted_sandbox", report.skipped_reason)
+        create.assert_not_awaited()
 
     async def test_rejects_unsafe_tool_options(self):
         from engine.workflow.builtins import RuffPlugin, SemgrepPlugin
@@ -141,6 +241,34 @@ class BundledWorkflowExecutionTest(unittest.IsolatedAsyncioTestCase):
             artifact = result.artifact(step_id)
             self.assertIn(artifact.status, {STATUS_SUCCEEDED, STATUS_SKIPPED})
         self.assertEqual(result.artifact("secrets-and-injection").status, STATUS_SUCCEEDED)
+
+    async def test_vibe_safety_static_readonly_runs_in_process_and_skips_external_tools(self):
+        context = AnalysisContext(
+            files={
+                "src/run.ts": (
+                    'import { exec } from "node:child_process";\n'
+                    "exec(untrustedCommand);\n"
+                ),
+            },
+            workspace_path="C:/must-not-be-executed",
+            options={"execution_profile": "static_readonly"},
+        )
+        spec = load_builtin_workflow("vibe-safety")
+        result = await run_workflow(spec, context, resolver=_resolver_skipping_synthesizer())
+
+        self.assertEqual(result.artifact("secrets-and-injection").status, STATUS_SUCCEEDED)
+        for step_id in (
+            "semgrep-security",
+            "python-security-lint",
+            "javascript-lint",
+            "build-gate",
+            "test-gate",
+        ):
+            self.assertEqual(result.artifact(step_id).status, STATUS_SKIPPED)
+        self.assertTrue(any(
+            item.rule == "engine.security.child_process_exec"
+            for item in result.evidence
+        ))
 
 
 def _resolver_skipping_synthesizer():

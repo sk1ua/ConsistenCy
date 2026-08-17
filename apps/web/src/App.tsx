@@ -1,223 +1,244 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
-import { Activity, BarChart3, BriefcaseBusiness, Clock3, FlaskConical, Globe2, Menu, Monitor, Moon, RefreshCw, Settings, Sun, Workflow, X } from "lucide-react";
-import { api, type HealthResponse } from "./api/client";
-import { mockJobs, mockReports, mockStats } from "./demo/mockReports";
-import { DashboardPage } from "./pages/DashboardPage";
-import { JobsPage } from "./pages/JobsPage";
-import { ReportPage } from "./pages/ReportPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { HeartbeatWidget, heartbeatStateLabel } from "./components/HeartbeatWidget";
+import { lazy, Suspense, useMemo } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ReviewJob, StatsResponse } from "@consistency/schema";
+import { RefreshCw } from "lucide-react";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { api } from "./api/client";
+import { desktopBridge } from "./desktop";
 import { useHeartbeat } from "./hooks/useHeartbeat";
 import { useI18n } from "./i18n";
+import { workspaceQueryKeys } from "./query/client";
+import { safeRequestError } from "./query/safeRequestError";
+import { useWorkspaceQueries } from "./query/useWorkspaceQueries";
+import { routeMeta } from "./routes/meta";
+import { AppShell, type DataNotice } from "./shell/AppShell";
 import { useTheme } from "./theme";
 
+const DashboardPage = lazy(() => import("./pages/DashboardPage").then(module => ({ default: module.DashboardPage })));
+const JobsPage = lazy(() => import("./pages/JobsPage").then(module => ({ default: module.JobsPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then(module => ({ default: module.SettingsPage })));
 const WorkflowPage = lazy(() => import("./pages/WorkflowPage").then(module => ({ default: module.WorkflowPage })));
+const RepositoriesPage = lazy(() => import("./routes/RepositoriesPage").then(module => ({ default: module.RepositoriesPage })));
+const AutomationsPage = lazy(() => import("./routes/AutomationsPage").then(module => ({ default: module.AutomationsPage })));
+const ReportRoute = lazy(() => import("./routes/ReportRoute").then(module => ({ default: module.ReportRoute })));
+const FindingsPage = lazy(() => import("./routes/FindingsPage").then(module => ({ default: module.FindingsPage })));
+const RepositoryDetailPage = lazy(() => import("./routes/RepositoryDetailPage").then(module => ({ default: module.RepositoryDetailPage })));
 
-type View = "dashboard" | "jobs" | "report" | "workflows" | "settings";
-
-const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-  { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
-  { id: "report", label: "Reports", icon: Activity },
-  { id: "workflows", label: "Workflows", icon: Workflow },
-  { id: "settings", label: "Settings", icon: Settings }
-] as const satisfies ReadonlyArray<{ id: View; label: string; icon: typeof BarChart3 }>;
-
-const pageMeta: Record<View, { title: string; description: string }> = {
-  dashboard: { title: "Review overview", description: "Evidence-backed signals across active pull requests" },
-  jobs: { title: "Review queue", description: "Track every review from intake to decision" },
-  report: { title: "Review report", description: "Inspect findings, evidence and agent decisions" },
-  workflows: { title: "Workflow builder", description: "Visualize and edit deterministic analysis workflows" },
-  settings: { title: "System status", description: "Runtime readiness without exposing secret values" }
+const EMPTY_STATS: StatsResponse = {
+  totalJobs: 0,
+  runningJobs: 0,
+  succeededJobs: 0,
+  failedJobs: 0,
+  averageDuration: 0,
+  riskDistribution: { low: 0, medium: 0, high: 0, critical: 0 },
+  topRepositories: []
 };
 
-function initialView(): View {
-  if (typeof window === "undefined") return "dashboard";
-  const value = new URLSearchParams(window.location.search).get("view");
-  return value === "jobs" || value === "report" || value === "workflows" || value === "settings" ? value : "dashboard";
+function RouteLoading({ label }: { label: string }) {
+  return <div className="loading-state"><RefreshCw className="spinning" size={20} /><span>{label}</span></div>;
+}
+
+function RunIndexRedirect() {
+  const { runId = "" } = useParams();
+  const { search } = useLocation();
+  return <Navigate replace to={`/runs/${encodeURIComponent(runId)}/overview${search}`} />;
+}
+
+function LegacyReportRedirect() {
+  const { jobId = "" } = useParams();
+  const { search } = useLocation();
+  const mode = new URLSearchParams(search).has("notebook") ? "notebook" : "overview";
+  return <Navigate replace to={`/runs/${encodeURIComponent(jobId)}/${mode}${search}`} />;
 }
 
 export function App() {
   const { locale, setLocale, t } = useI18n();
   const { preference, cycle: cycleTheme } = useTheme();
-  const themeIcon = preference === "dark" ? <Moon size={16} /> : preference === "light" ? <Sun size={16} /> : <Monitor size={16} />;
-  const themeLabel = t(preference === "dark" ? "Dark" : preference === "light" ? "Light" : "System");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const queries = useWorkspaceQueries();
   const { pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable } = useHeartbeat();
-  const [view, setView] = useState<View>(initialView);
-  const [jobs, setJobs] = useState<ReviewJob[]>([]);
-  const [reports, setReports] = useState<ReviewReport[]>([]);
-  const [stats, setStats] = useState<StatsResponse>(mockStats);
-  const [health, setHealth] = useState<HealthResponse>();
-  const [selectedJobId, setSelectedJobId] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("job") ?? "");
-  const [selectedNotebookId, setSelectedNotebookId] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("notebook") ?? "");
-  const [notebooksByJob, setNotebooksByJob] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [demoMode, setDemoMode] = useState(false);
-  const [error, setError] = useState<string>();
-  const [now, setNow] = useState(() => new Date());
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [publicPrAnalyzing, setPublicPrAnalyzing] = useState(false);
-  const [publicPrError, setPublicPrError] = useState<string>();
 
-  async function loadData() {
-    setLoading(true);
-    setError(undefined);
+  const jobs = queries.jobs.data ?? [];
+  const reports = queries.reports.data ?? [];
+  const stats = queries.stats.data ?? EMPTY_STATS;
+  const health = queries.health.data;
+  const repositories = queries.repositories.data ?? [];
+  const automations = queries.automations.data ?? [];
+  const meta = routeMeta(location.pathname, locale);
+  const zh = locale === "zh-CN";
+  const themeLabel = t(preference === "dark" ? "Dark" : preference === "light" ? "Light" : "System");
+  const inspectorContext = useMemo(() => {
+    const match = location.pathname.match(/^\/runs\/([^/]+)/);
+    if (!match?.[1]) return undefined;
+    let runId: string;
+    try { runId = decodeURIComponent(match[1]); } catch { return undefined; }
+    const job = jobs.find(candidate => candidate.id === runId);
+    const embedded = job && job.report?.jobId === job.id ? job.report : undefined;
+    const report = embedded ?? reports.find(candidate => candidate.jobId === job?.id);
+    return { runId, ...(job ? { job } : {}), ...(report ? { report } : {}) };
+  }, [jobs, location.pathname, reports]);
+
+  const analyzePublicPr = useMutation({
+    mutationFn: (url: string) => api.analyzePublicPr(url),
+    onSuccess: result => {
+      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
+      navigate(`/runs/${encodeURIComponent(result.jobId)}/notebook?notebook=${encodeURIComponent(result.notebookId)}`);
+    }
+  });
+  const seedDemo = useMutation({
+    mutationFn: () => api.seedDemo(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
+    }
+  });
+  const selectRepository = useMutation({
+    mutationFn: async () => {
+      const bridge = desktopBridge();
+      if (!bridge) throw new Error(zh ? "目录选择器仅在 Electron 桌面应用中可用" : "The folder picker is available only in the Electron desktop app");
+      const result = await bridge.selectRepository();
+      if (result.canceled) return null;
+      if ("error" in result) throw new Error(result.error);
+      return result.repository;
+    },
+    onSuccess: async repository => {
+      if (!repository) return;
+      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.repositories });
+    }
+  });
+  const setRepositoryMonitoring = useMutation({
+    mutationFn: ({ repositoryId, enabled }: { repositoryId: string; enabled: boolean }) => api.setRepositoryMonitoring(repositoryId, enabled),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.repositories });
+    }
+  });
+  const setAutomationEnabled = useMutation({
+    mutationFn: ({ automationId, enabled }: { automationId: string; enabled: boolean }) => api.setAutomationEnabled(automationId, enabled),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.automations });
+    }
+  });
+
+  async function submitPublicPr(url: string): Promise<void> {
     try {
-      const [loadedJobs, loadedReports, loadedStats, loadedHealth] = await Promise.all([
-        api.jobs(), api.recentReports(20), api.stats(), api.health()
-      ]);
-      setJobs(loadedJobs);
-      setReports(loadedReports);
-      setStats(loadedStats);
-      setHealth(loadedHealth);
-      setDemoMode(loadedHealth.configuration.demoMode);
-    } catch (caught) {
-      setJobs(mockJobs);
-      setReports(mockReports);
-      setStats(mockStats);
-      setDemoMode(true);
-      setError(caught instanceof Error ? caught.message : t("API unavailable"));
-    } finally {
-      setLoading(false);
+      await analyzePublicPr.mutateAsync(url);
+    } catch {
+      // The mutation owns the route-local error state shown by DashboardPage.
     }
   }
 
-  useEffect(() => { void loadData(); }, []);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams();
-    if (view !== "dashboard") params.set("view", view);
-    if (selectedJobId && view === "report") params.set("job", selectedJobId);
-    if (selectedNotebookId && view === "report") params.set("notebook", selectedNotebookId);
-    window.history.replaceState(null, "", params.size ? `?${params}` : window.location.pathname);
-  }, [view, selectedJobId, selectedNotebookId]);
-
-  const selectedJob = useMemo(() => jobs.find(job => job.id === selectedJobId), [jobs, selectedJobId]);
-  const selectedReport = useMemo(() => selectedJob?.report ?? reports.find(report => report.jobId === selectedJobId), [reports, selectedJob, selectedJobId]);
-
-  async function openJob(job: ReviewJob) {
-    setSelectedJobId(job.id);
-    setSelectedNotebookId(notebooksByJob[job.id] ?? "");
-    setView("report");
-    if (job.status === "succeeded" && !job.report && !reports.some(report => report.jobId === job.id)) {
-      try {
-        const report = await api.report(job.id);
-        setReports(current => [report, ...current.filter(item => item.jobId !== report.jobId)]);
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : t("Could not load report"));
-      }
-    }
-    // 查找该 job 关联的 notebook（不在内存映射时向 API 查询）
-    if (!notebooksByJob[job.id]) {
-      try {
-        const notebookId = await api.jobNotebook(job.id);
-        if (notebookId) {
-          setNotebooksByJob(current => ({ ...current, [job.id]: notebookId }));
-          setSelectedNotebookId(notebookId);
-        }
-      } catch {
-        // Notebook 查询失败不影响报告查看
-      }
-    }
+  function openJob(job: ReviewJob) {
+    navigate(`/runs/${encodeURIComponent(job.id)}/overview`);
   }
 
-  async function analyzePublicPr(url: string) {
-    setPublicPrAnalyzing(true);
-    setPublicPrError(undefined);
-    try {
-      const result = await api.analyzePublicPr(url);
-      setNotebooksByJob(current => ({ ...current, [result.jobId]: result.notebookId }));
-      setSelectedJobId(result.jobId);
-      setSelectedNotebookId(result.notebookId);
-      setView("report");
-      await loadData();
-    } catch (caught) {
-      setPublicPrError(caught instanceof Error ? caught.message : t("Could not analyze public PR"));
-    } finally {
-      setPublicPrAnalyzing(false);
+  const notices = useMemo<DataNotice[]>(() => {
+    const visible: DataNotice[] = [];
+    const add = (id: string, label: string, error: unknown) => visible.push({ id, label, message: safeRequestError(error) });
+    const isOverview = location.pathname === "/" || location.pathname.startsWith("/inbox");
+    const isRepositories = location.pathname.startsWith("/repositories");
+    const isJobs = location.pathname === "/runs" || location.pathname.startsWith("/jobs");
+    const isReports = /^\/(?:runs\/[^/]+|reports)/.test(location.pathname);
+    const isSettings = location.pathname.startsWith("/settings");
+
+    if ((isOverview || isRepositories || isJobs) && queries.jobs.error) {
+      add("jobs", zh ? "审查队列暂不可用" : "Review queue unavailable", queries.jobs.error);
     }
-  }
-
-  async function seedDemo() {
-    try {
-      const result = await api.seedDemo();
-      if (result.notebooks) setNotebooksByJob(current => ({ ...current, ...Object.fromEntries(result.notebooks!.map(item => [item.jobId, item.notebookId])) }));
-      await loadData();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("Could not seed demo data"));
+    if (isOverview && queries.reports.error) {
+      add("reports", zh ? "最近报告暂不可用" : "Recent reports unavailable", queries.reports.error);
     }
-  }
+    if (isOverview && queries.stats.error) {
+      add("stats", zh ? "统计数据暂不可用" : "Review statistics unavailable", queries.stats.error);
+    }
+    if ((isOverview || isRepositories || isReports || isSettings) && queries.health.error) {
+      add("health", zh ? "运行状态暂不可用" : "Runtime status unavailable", queries.health.error);
+    }
+    if (seedDemo.error) {
+      add("seed", zh ? "无法加载演示数据" : "Could not load demo data", seedDemo.error);
+    }
+    return visible;
+  }, [location.pathname, queries.health.error, queries.jobs.error, queries.reports.error, queries.stats.error, seedDemo.error, zh]);
 
-  const page = pageMeta[view];
-  const activeNav = navItems.find(item => item.id === view);
+  const firstLoad = queries.jobs.isPending || queries.reports.isPending || queries.stats.isPending;
 
-  function navigate(nextView: View) {
-    setView(nextView);
-    setSidebarOpen(false);
-  }
-
-  return <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
-    <aside className={`app-sidebar${sidebarOpen ? " open" : ""}`}>
-      <div className="brand"><img src="/consistency-logo.png" alt="" /><span><strong>Consisten<span>Cy</span></strong><small>{t("Review intelligence")}</small></span></div>
-      <nav aria-label={t("Primary navigation")}>{navItems.map(({ id, label, icon: Icon }) => <button aria-current={view === id ? "page" : undefined} className={view === id ? "active" : ""} key={id} type="button" onClick={() => navigate(id)} title={t(label)}><Icon aria-hidden="true" size={18} /><span>{t(label)}</span></button>)}</nav>
-      <div className="sidebar-signal"><span>{t("Workspace signal")}</span><strong><i className={`sidebar-signal-dot signal-${heartbeatUnavailable ? "unavailable" : heartbeatPulse?.state ?? "idle"}`} /> {heartbeatUnavailable ? t("Heartbeat disabled") : heartbeatPulse ? t(heartbeatStateLabel(heartbeatPulse.state)) : t("Operational")}</strong><small>{t("{count} reviews observed", { count: jobs.length })}</small></div>
-    </aside>
-    {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label={t("Close navigation")} onClick={() => setSidebarOpen(false)} />}
-    <main className="app-main">
-      <header className="app-header">
-        <div className="header-title">
-          <button className="menu-button" type="button" aria-label={t("Toggle navigation")} onClick={() => {
-            if (typeof window !== "undefined" && window.innerWidth < 860) {
-              setSidebarOpen(value => !value);
-            } else {
-              setSidebarCollapsed(value => !value);
-            }
-          }}><Menu size={20} /></button>
-          <div>
-            <span className="header-breadcrumb">ConsistenCy<span className="sep">/</span>{t(activeNav?.label ?? page.title)}</span>
-            <h1>{t(page.title)}</h1><p>{t(page.description)}</p>
-          </div>
-        </div>
-        <div className="header-actions">
-          <span className="status-chip"><i className={"status-dot" + (heartbeatUnavailable ? "" : heartbeatPulse ? " live" : " idle")} />{heartbeatUnavailable ? t("Heartbeat disabled") : heartbeatPulse ? t(heartbeatStateLabel(heartbeatPulse.state)) : t("Operational")}</span>
-          {health && <span className="status-chip">{health.llmProvider}{health.llmModel ? " / " + health.llmModel : ""}</span>}
-          <button className="icon-button" type="button" onClick={() => cycleTheme()} aria-label={t("Theme")} title={`${t("Theme")}: ${themeLabel}`}>{themeIcon}</button>
-          <label className="language-select"><Globe2 size={15} /><span className="sr-only">{t("Language")}</span><select aria-label={t("Language")} value={locale} onChange={event => setLocale(event.target.value as "en-US" | "zh-CN")}><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
-          {demoMode && <span className="demo-indicator"><FlaskConical size={15} />{t("Demo Mode")}</span>}
-          <span className="api-status"><i className={health?.database.ok ? "online" : "offline"} /> {t(health?.database.ok ? "API connected" : "Demo data")}</span>
-          <span className="header-time"><Clock3 size={16} />{now.toLocaleString(locale, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</span>
-          {jobs.length === 0 && !loading && <button className="secondary-button" onClick={() => void seedDemo()}>{t("Load demo data")}</button>}
-          <button className="icon-button" type="button" onClick={() => void loadData()} aria-label={t("Refresh data")} disabled={loading}><RefreshCw className={loading ? "spinning" : ""} size={18} /></button>
-        </div>
-      </header>
-      <div className="app-content">
-        {error && <div className="notice" role="status"><span className="notice-mark">!</span><span><strong>{t("Showing a local review snapshot")}</strong><small>{t("The API is unavailable. Live data will return after the next successful refresh.")}</small></span></div>}
-        {loading ? <div className="loading-state"><RefreshCw size={22} /><span>{t("Loading review workspace")}</span></div> :
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={view}
-              className="app-view"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
-            >
-              {view === "dashboard" ? <DashboardPage stats={stats} jobs={jobs} reports={reports} onOpenJob={job => void openJob(job)} onOpenJobs={() => setView("jobs")} onAnalyzePublicPr={analyzePublicPr} publicPrAnalyzing={publicPrAnalyzing} publicPrError={publicPrError} publicPrAccessMode={health?.publicPrAccessMode} heartbeat={{ pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable }} /> :
-              view === "jobs" ? <JobsPage jobs={jobs} onOpenJob={job => void openJob(job)} /> :
-              view === "workflows" ? <Suspense fallback={<div className="loading-state"><RefreshCw size={22} /><span>{t("Loading workflow")}</span></div>}><WorkflowPage /></Suspense> :
-              view === "settings" ? <SettingsPage health={health} /> :
-              <ReportPage job={selectedJob ?? (selectedJobId ? undefined : jobs.find(job => job.status === "succeeded"))} report={selectedReport ?? (selectedJobId ? undefined : reports[0])} notebookId={selectedNotebookId || undefined} llmProvider={health?.llmProvider} llmModel={health?.llmModel} onBack={() => setView("jobs")} />}
-            </motion.div>
-          </AnimatePresence>}
-      </div>
-    </main>
-  </div>;
+  return <AppShell
+    path={location.pathname}
+    routeHref={`${location.pathname}${location.search}`}
+    meta={meta}
+    locale={locale}
+    setLocale={setLocale}
+    themePreference={preference}
+    themeLabel={themeLabel}
+    cycleTheme={cycleTheme}
+    jobs={jobs}
+    repositories={repositories}
+    pulse={heartbeatPulse}
+    health={health}
+    healthUnavailable={queries.health.isError}
+    inspectorContext={inspectorContext}
+    demoMode={health?.configuration.demoMode ?? false}
+    notices={notices}
+    refreshing={queries.isFetching}
+    canSeedDemo={queries.jobs.isSuccess && jobs.length === 0}
+    seedingDemo={seedDemo.isPending}
+    onRefresh={() => void queries.refresh()}
+    onSeedDemo={() => seedDemo.mutate()}
+  >
+    <Suspense fallback={<RouteLoading label={zh ? "正在加载工作台" : "Loading workspace"} />}>
+      <Routes>
+        <Route path="/" element={<Navigate replace to="/inbox" />} />
+        <Route path="/inbox" element={firstLoad ? <RouteLoading label={zh ? "正在加载审查工作区" : "Loading review workspace"} /> : <DashboardPage
+          stats={stats}
+          jobs={jobs}
+          reports={reports}
+          onOpenJob={openJob}
+          onOpenJobs={() => navigate("/runs")}
+          onAnalyzePublicPr={submitPublicPr}
+          publicPrAnalyzing={analyzePublicPr.isPending}
+          publicPrError={analyzePublicPr.error ? safeRequestError(analyzePublicPr.error, zh ? "无法分析公开 PR" : "Could not analyze public PR") : undefined}
+          publicPrAccessMode={health?.publicPrAccessMode}
+          heartbeat={{ pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable }}
+        />} />
+        <Route path="/repositories" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository sources"} /> : <RepositoriesPage
+          jobs={jobs}
+          pulse={heartbeatPulse}
+          heartbeatUnavailable={heartbeatUnavailable}
+          jobsUnavailable={queries.jobs.isError}
+          repositories={repositories}
+          registryUnavailable={queries.repositories.isError}
+          canSelectRepository={Boolean(desktopBridge())}
+          addingRepository={selectRepository.isPending}
+          addRepositoryError={selectRepository.error ? safeRequestError(selectRepository.error) : undefined}
+          monitoringError={setRepositoryMonitoring.error ? safeRequestError(setRepositoryMonitoring.error) : undefined}
+          onAddRepository={() => selectRepository.mutate()}
+          monitoringRepositoryId={setRepositoryMonitoring.variables?.repositoryId}
+          onSetMonitoring={(repository, enabled) => setRepositoryMonitoring.mutate({ repositoryId: repository.id, enabled })}
+        />} />
+        <Route path="/repositories/:repositoryId/*" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository source"} /> : <RepositoryDetailPage jobs={jobs} repositories={repositories} automations={automations} pulse={heartbeatPulse} />} />
+        <Route path="/runs" element={queries.jobs.isPending ? <RouteLoading label={zh ? "正在加载审查队列" : "Loading review queue"} /> : <JobsPage jobs={jobs} onOpenJob={openJob} />} />
+        <Route path="/runs/:runId" element={<RunIndexRedirect />} />
+        <Route path="/runs/:runId/overview" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/runs/:runId/diff" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/runs/:runId/evidence" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/runs/:runId/notebook" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/runs/:runId/*" element={<RunIndexRedirect />} />
+        <Route path="/findings" element={queries.reports.isPending ? <RouteLoading label={zh ? "正在加载发现" : "Loading findings"} /> : <FindingsPage reports={reports} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/jobs" element={<Navigate replace to="/runs" />} />
+        <Route path="/reports" element={queries.jobs.isPending || queries.reports.isPending ? <RouteLoading label={zh ? "正在加载审查报告" : "Loading review reports"} /> : <ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/reports/:jobId" element={<LegacyReportRedirect />} />
+        <Route path="/automations" element={<AutomationsPage
+          automations={automations}
+          repositories={repositories}
+          capabilities={queries.auditCapabilities.data}
+          unavailable={queries.automations.isError || queries.auditCapabilities.isError}
+          actionError={setAutomationEnabled.error ? safeRequestError(setAutomationEnabled.error) : undefined}
+          changingAutomationId={setAutomationEnabled.variables?.automationId}
+          onSetEnabled={(automation, enabled) => setAutomationEnabled.mutate({ automationId: automation.id, enabled })}
+        />} />
+        <Route path="/workflows" element={<WorkflowPage />} />
+        <Route path="/settings" element={<SettingsPage health={health} />} />
+        <Route path="*" element={<Navigate replace to="/inbox" />} />
+      </Routes>
+    </Suspense>
+  </AppShell>;
 }

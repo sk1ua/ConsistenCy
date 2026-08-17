@@ -137,3 +137,29 @@
 - F. 打包产物未签名 + asar:false：发布前安全评估（供应链、篡改检测）。
 - G. 视觉改版中若干"评审者像素级异议"被判定为低于可执行精度而放行（记录于
   stage4-acceptance-review.json）——若要求严格一致性可复查。
+
+## 8. GLM 审阅后修复记录
+
+基于审阅报告发现的 4 类问题已修复并通过验证（web vitest 24/24, typecheck, pytest 259/259）。
+
+### 8.1 暗色主题对比度回归（4 处，已修复）
+
+令牌清扫时硬编码色按色值映射而不检查令牌在两主题下的语义角色，导致暗色下 4 处文字不可读。
+
+| 位置 | 原值（暗色 1.35:1） | 修复后 | 暗色对比度 |
+|---|---|---|---|
+| report.css `.finding-detail pre` | bg:sidebar + fg:border-subtle | bg:surface-muted + fg:foreground + 边框 | 12.6:1 |
+| workspace-enhancements.css `.markdown-content code` | bg:surface-muted + fg:#173f5f | bg:primary-soft + fg:primary-strong | 6.8:1 |
+| tables.css `.badge-public-read` | fg:#17628f | fg:primary-strong | 5.9:1 |
+| controls.css `.notice small` | fg:#85683f | fg:muted-strong | 5.6:1 |
+
+`tokens.test.ts` 的 ALLOWED_HEX 已清空（豁免注释声称"chart-only"但实际为文字色，理由不成立）。
+
+### 8.2 report-ide 折叠断点（已修复）
+
+风格指南和总结文档写"≤1200px 折叠"，但代码在 680px 才折叠——680–1220px 区间中心栏被 300+340px 侧栏挤压至不足 155px，内部 minmax(240px) 必然溢出。在 responsive.css 1220px 断点块补充了 `.report-ide { grid-template-columns: 1fr }` 及侧栏 static 规则，使文档与代码一致。
+
+### 8.3 测试加固
+
+- `tokens.test.ts`：cssFiles() 改为递归扫描（未来新增嵌套目录 CSS 不会漏检）。
+- `theme.test.tsx`：新增 anti-flash 脚本 localStorage key 同步断言（key 改名不再静默闪屏）。

@@ -186,7 +186,7 @@ class LoadWorkflowSpecTest(unittest.TestCase):
 
 
 class BuiltinWorkflowTest(unittest.TestCase):
-    EXPECTED = ("security-hardening", "architectural-drift", "pr-sanity-verification", "pr-review")
+    EXPECTED = ("security-hardening", "architectural-drift", "pr-sanity-verification", "pr-review", "vibe-safety")
 
     def test_pr_review_never_executes_repository_code(self):
         """The live review path runs against an untrusted clone.

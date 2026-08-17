@@ -73,11 +73,12 @@ describe("POST /reviews/local", () => {
     expect(response.status).toBe(202);
     expect(response.body).toMatchObject({
       repository: "ConsistenCy",
-      repoPath: "D:/workspaces/ConsistenCy",
       headSha: WORKING_TREE_REV,
       publicationPolicy: "disabled",
       status: "queued"
     });
+    expect(response.body).not.toHaveProperty("repoPath");
+    expect(JSON.stringify(response.body)).not.toContain("D:/workspaces/ConsistenCy");
     expect(jobs.get(response.body.jobId)?.accessMode).toBe("local_git");
   });
 

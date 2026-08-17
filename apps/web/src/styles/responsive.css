@@ -16,6 +16,13 @@
     position: static;
     max-height: none;
   }
+  .report-ide {
+    grid-template-columns: 1fr;
+  }
+  .report-findings-pane, .report-detail-pane {
+    position: static;
+    max-height: none;
+  }
 }
 
 /* ===== Responsive — 860px ===== */
@@ -148,6 +155,21 @@
     min-width: 0;
     grid-template-columns: minmax(0, 1fr) 86px 70px;
   }
+  .dashboard-table .semantic-table,
+  .jobs-table .semantic-table {
+    min-width: 0;
+  }
+  .dashboard-table .semantic-table :is(th, td):nth-child(2),
+  .dashboard-table .semantic-table :is(th, td):nth-child(n+5),
+  .jobs-table .semantic-table :is(th, td):nth-child(n+4) {
+    display: none;
+  }
+  .dashboard-table .semantic-table :is(th, td):nth-child(1),
+  .jobs-table .semantic-table :is(th, td):nth-child(1) { width: auto; }
+  .dashboard-table .semantic-table :is(th, td):nth-child(3),
+  .jobs-table .semantic-table :is(th, td):nth-child(2) { width: 86px; }
+  .dashboard-table .semantic-table :is(th, td):nth-child(4),
+  .jobs-table .semantic-table :is(th, td):nth-child(3) { width: 70px; }
   .dashboard-table .table-row > :nth-child(2), .dashboard-table .table-row > :nth-child(n+5), .jobs-table .table-row > :nth-child(n+4) {
     display: none;
   }

@@ -10,18 +10,18 @@
  * styles/tokens.test.ts.
  */
 :root {
-  --font-ui: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   --font-display: var(--font-ui);
-  --font-mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --font-mono: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
   --space-lg: 24px;
   --space-xl: 32px;
   --space-2xl: 48px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --duration-fast: 140ms;
   --duration-normal: 220ms;
   --duration-slow: 360ms;
@@ -91,31 +91,31 @@
   font-synthesis: none;
 }
 
-/* ===== Dark theme (Codex-style terminal palette) ===== */
+/* ===== Dark theme (evidence workbench palette) ===== */
 :root[data-theme="dark"] {
-  --background: #0d1117;
-  --surface: #161b22;
-  --surface-subtle: #1c2128;
-  --surface-muted: #21262d;
-  --foreground: #e6edf3;
-  --muted: #8b949e;
-  --muted-strong: #a8b3bd;
-  --border: #30363d;
-  --border-strong: #484f58;
-  --border-subtle: #21262d;
-  --sidebar: #010409;
-  --sidebar-muted: #8b949e;
-  --sidebar-hover: #161b22;
-  --overlay: rgba(1, 4, 9, 0.6);
-  --header-bg: rgba(13, 17, 23, 0.85);
+  --background: #0b0d10;
+  --surface: #12161c;
+  --surface-subtle: #151a21;
+  --surface-muted: #1a2028;
+  --foreground: #e7eaee;
+  --muted: #8c96a3;
+  --muted-strong: #b0b8c2;
+  --border: #252b34;
+  --border-strong: #343c47;
+  --border-subtle: #1e242c;
+  --sidebar: #090b0e;
+  --sidebar-muted: #8c96a3;
+  --sidebar-hover: #171c23;
+  --overlay: rgba(5, 7, 10, 0.68);
+  --header-bg: rgba(11, 13, 16, 0.88);
 
-  --primary: #58a6ff;
-  --primary-strong: #4493f8;
-  --primary-soft: #172c4d;
-  --primary-faint: #2b3a52;
-  --primary-line: #24406b;
-  --primary-muted-text: #79a8ff;
-  --primary-wash: rgba(88, 166, 255, 0.12);
+  --primary: #6fa8ff;
+  --primary-strong: #8ab8ff;
+  --primary-soft: #16253b;
+  --primary-faint: #263954;
+  --primary-line: #2c4b78;
+  --primary-muted-text: #8bb8ff;
+  --primary-wash: rgba(111, 168, 255, 0.12);
 
   --success: #3fb950;
   --success-strong: #2ea043;
@@ -136,13 +136,13 @@
   --danger-faint: #3f1d1b;
   --danger-wash: rgba(248, 81, 73, 0.15);
 
-  --focus-ring: rgba(88, 166, 255, 0.45);
+  --focus-ring: rgba(111, 168, 255, 0.45);
   --shadow-soft: rgba(0, 0, 0, 0.35);
   --shadow-card: rgba(0, 0, 0, 0.4);
-  --scrim: rgba(13, 17, 23, 0.92);
+  --scrim: rgba(11, 13, 16, 0.92);
 
-  color: #e6edf3;
-  background: #0d1117;
+  color: #e7eaee;
+  background: #0b0d10;
   color-scheme: dark;
 }
 

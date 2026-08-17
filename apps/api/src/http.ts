@@ -1,7 +1,28 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { ZodError } from "zod";
-import { localReviewRequestSchema, notebookCardRequestSchema, notebookMessageRequestSchema, publicPrRequestSchema, saveWorkflowRequestSchema } from "@consistency/schema";
+import { z, ZodError } from "zod";
+import {
+  auditCapabilitiesSchema,
+  auditIssueActionRequestSchema,
+  auditIssueActionSchema,
+  auditIssueStateSchema,
+  createAuditIssueRequestSchema,
+  createAuditRunRequestSchema,
+  createAutomationRequestSchema,
+  createPolicyRevisionRequestSchema,
+  createRepositoryRequestSchema,
+  createWorkflowRevisionRequestSchema,
+  evaluateAuditPolicy,
+  internalLocalRepositoryRegistrationRequestSchema,
+  localReviewRequestSchema,
+  notebookCardRequestSchema,
+  notebookMessageRequestSchema,
+  publicPrRequestSchema,
+  riskScoreSchema,
+  saveWorkflowRequestSchema,
+  stepIdSchema,
+  workflowSpecSchema
+} from "@consistency/schema";
 import type { HeartbeatPulse, HeartbeatStreamEvent, VcsChangedFile } from "@consistency/schema";
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
 import { seedDemoData } from "./api/demoSeed";
@@ -10,7 +31,7 @@ import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
 import { LocalTriggerError } from "./trigger/local";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
 import { sanitizePublicError } from "./security/redact";
-import { settingsPatchSchema, type SettingsSnapshot } from "./config/settings";
+import { settingsPatchSchema, toRendererSettings, type SettingsSnapshot } from "./config/settings";
 import type { RealDataSnapshot } from "./data/realData";
 import { PublicPrError } from "./review/publicPr";
 import type { NotebookGraph } from "./notebook/graph";
@@ -18,6 +39,9 @@ import type { NotebookStore } from "./notebook/store";
 import type { ReviewJob } from "./jobQueue";
 import type { WorkflowStore } from "./workflows/store";
 import { JobDiffError, type JobDiffResult } from "./review/jobDiff";
+import { AuditDomainError, type AuditDomainStore } from "./audit/store";
+import { validateLocalRepositoryRegistration } from "./audit/localRegistration";
+import { AuditRunPlanner } from "./audit/planner";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -53,7 +77,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 function responseHeaders(request: IncomingMessage, allowedOrigins: string[]): Record<string, string> {
   const origin = request.headers.origin;
   return {
-    "access-control-allow-headers": "authorization,content-type,x-github-event,x-github-delivery,x-hub-signature-256",
+    "access-control-allow-headers": "authorization,content-type,x-consistency-desktop-control,x-github-event,x-github-delivery,x-hub-signature-256",
     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     ...(origin && allowedOrigins.includes(origin) ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
     "content-type": "application/json; charset=utf-8"
@@ -85,6 +109,41 @@ function errorPayload(code: string, message: string, details?: Record<string, un
   return { error: { code, message, ...(details ? { details } : {}) } };
 }
 
+function parseAuditInput<TSchema extends z.ZodTypeAny>(schema: TSchema, value: unknown): z.output<TSchema> {
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ApiError(
+        error.issues[0]?.message ?? "Audit request is invalid",
+        "INVALID_AUDIT_REQUEST",
+        400
+      );
+    }
+    throw error;
+  }
+}
+
+function auditInputWithPathId(value: unknown, field: "workflowId" | "policyId", id: string): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  return { ...(value as Record<string, unknown>), [field]: id };
+}
+
+function auditCapabilityUnavailable(capability: string): never {
+  throw new ApiError(
+    `Audit capability '${capability}' is not wired yet`,
+    "AUDIT_CAPABILITY_UNAVAILABLE",
+    501,
+    { capability }
+  );
+}
+
+function requireAuditPlanner(options: CreateApiServerOptions): AuditRunPlanner {
+  if (options.auditPlanner) return options.auditPlanner;
+  if (options.auditStore) return new AuditRunPlanner(options.auditStore);
+  throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+}
+
 function sendError(request: IncomingMessage, response: ServerResponse, error: unknown, allowedOrigins: string[]): void {
   if (error instanceof ZodError) {
     sendJson(request, response, 400, errorPayload("INVALID_SETTINGS", error.issues[0]?.message ?? "Settings are invalid"), allowedOrigins);
@@ -98,18 +157,72 @@ function sendError(request: IncomingMessage, response: ServerResponse, error: un
     sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error.details), allowedOrigins);
     return;
   }
+  if (error instanceof AuditDomainError) {
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
+    return;
+  }
   sendJson(request, response, 500, errorPayload("INTERNAL_ERROR", "Unexpected API error"), allowedOrigins);
 }
 
+function constantTimeTokenMatches(supplied: string | undefined, expected: string): boolean {
+  const suppliedDigest = createHash("sha256").update(supplied ?? "").digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return supplied !== undefined && timingSafeEqual(suppliedDigest, expectedDigest);
+}
+
 function isAuthorized(request: IncomingMessage, token: string): boolean {
-  const supplied = request.headers.authorization;
-  const expected = `Bearer ${token}`;
-  if (!supplied || Buffer.byteLength(supplied) !== Buffer.byteLength(expected)) return false;
-  return timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+  return constantTimeTokenMatches(request.headers.authorization, `Bearer ${token}`);
+}
+
+function isDesktopControlAuthorized(request: IncomingMessage, token: string): boolean {
+  const supplied = request.headers["x-consistency-desktop-control"];
+  return constantTimeTokenMatches(typeof supplied === "string" ? supplied : undefined, token);
 }
 
 function parseUrl(url: string | undefined): URL {
   return new URL(url ?? "/", "http://localhost");
+}
+
+function filesystemDisplayLabel(value: string): string {
+  const segments = value.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? "Local repository";
+}
+
+function toRendererHeartbeatPulse(pulse: HeartbeatPulse): HeartbeatPulse {
+  return {
+    ...pulse,
+    repository: {
+      ...pulse.repository,
+      root: pulse.repository.root === "unknown"
+        ? "Local repository"
+        : filesystemDisplayLabel(pulse.repository.root)
+    },
+    ...(pulse.lastError === undefined ? {} : { lastError: sanitizePublicError(pulse.lastError) })
+  };
+}
+
+function toRendererHeartbeatEvent(event: HeartbeatStreamEvent): HeartbeatStreamEvent {
+  if (event.event === "pulse") return { ...event, pulse: toRendererHeartbeatPulse(event.pulse) };
+  if (event.event === "change") {
+    return {
+      ...event,
+      change: {
+        ...event.change,
+        repository: {
+          ...event.change.repository,
+          root: filesystemDisplayLabel(event.change.repository.root)
+        }
+      }
+    };
+  }
+  if (event.event === "index_progress" && event.currentPath !== undefined) {
+    const currentPath = /^(?:[A-Za-z]:[\\/]|[\\/]{1,2}|file:)/i.test(event.currentPath)
+      ? filesystemDisplayLabel(event.currentPath)
+      : event.currentPath;
+    return { ...event, currentPath };
+  }
+  if (event.event === "error") return { ...event, message: sanitizePublicError(event.message) };
+  return event;
 }
 
 export type ApiHealthDetails = {
@@ -124,8 +237,9 @@ export type ApiHealthDetails = {
     githubAppConfigured: boolean;
     webhookSecretConfigured: boolean;
     publicReadTokenConfigured: boolean;
-    databasePath: string;
+    storage: { kind: "memory" | "file"; configured: boolean };
     workerConcurrency: number;
+    publishWorkerConcurrency?: number;
     demoMode: boolean;
   };
 };
@@ -135,6 +249,7 @@ export type CreateApiServerOptions = {
   jobs?: ReviewJobStore;
   githubWebhookSecret?: string;
   apiToken?: string;
+  desktopControlToken?: string;
   nodeEnv?: "development" | "test" | "production";
   allowedOrigins?: string[];
   healthDetails?: () => ApiHealthDetails;
@@ -147,6 +262,10 @@ export type CreateApiServerOptions = {
   publicPr?: (url: string) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
   publicPrAnalysisEnabled?: boolean;
   localReview?: (input: { repoPath: string; baseRef?: string; headRef?: string }) => Promise<{ jobId: string }>;
+  auditStore?: AuditDomainStore;
+  auditPlanner?: AuditRunPlanner;
+  automationScheduler?: { available: boolean };
+  onAuditRepositoriesChanged?: () => Promise<void> | void;
   heartbeat?: {
     latest: () => HeartbeatPulse | undefined;
     subscribe: (subscriber: (event: HeartbeatStreamEvent) => void) => () => void;
@@ -168,6 +287,7 @@ type RequestContext = {
   jobs: ReviewJobStore;
   githubWebhookSecret?: string;
   apiToken?: string;
+  desktopControlToken?: string;
   nodeEnv: "development" | "test" | "production";
   match?: RegExpExecArray | null;
 };
@@ -180,6 +300,627 @@ type Route = {
 };
 
 const routes: Route[] = [
+  {
+    method: "GET",
+    path: "/audit/capabilities",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      const persistence = options.auditStore !== undefined;
+      sendJson(request, response, 200, auditCapabilitiesSchema.parse({
+        domainVersion: 2,
+        persistence,
+        repositoryRegistration: persistence,
+        localPathRegistration: false,
+        repositoryTimeline: persistence,
+        repositoryMetrics: persistence,
+        workflowValidation: true,
+        automationDefinitions: persistence,
+        automationScheduling: persistence && options.automationScheduler?.available === true,
+        automationHistory: persistence,
+        auditRunDrafts: persistence,
+        auditExecution: false,
+        auditRunArtifacts: persistence,
+        auditRunEvents: false,
+        auditReports: persistence,
+        auditExport: false,
+        issueTriage: persistence,
+        evolutionPersistence: persistence,
+        policyEvaluation: true
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/internal/repositories/local",
+    auth: true,
+    handler: async ({
+      request,
+      response,
+      allowedOrigins,
+      options,
+      apiToken,
+      desktopControlToken
+    }) => {
+      if (!apiToken || !desktopControlToken) {
+        throw new ApiError(
+          "Desktop repository control is not configured",
+          "DESKTOP_CONTROL_UNAVAILABLE",
+          503
+        );
+      }
+      if (!isDesktopControlAuthorized(request, desktopControlToken)) {
+        throw new ApiError(
+          "Valid desktop control authorization is required",
+          "DESKTOP_CONTROL_UNAUTHORIZED",
+          401
+        );
+      }
+      if (!options.auditStore) {
+        throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      }
+
+      const input = parseAuditInput(
+        internalLocalRepositoryRegistrationRequestSchema,
+        await readJson(request)
+      );
+      const validated = await validateLocalRepositoryRegistration(input);
+      const repository = options.auditStore.createRepository({
+        displayName: validated.displayName,
+        source: "local_git",
+        monitoringEnabled: validated.monitoringEnabled
+      }, {
+        serverLocator: validated.serverLocator
+      });
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 201, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflows\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const workflowId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        workflowId,
+        workflowRevisions: options.auditStore.listWorkflowRevisions(workflowId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/workflows\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const workflowId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(
+        createWorkflowRevisionRequestSchema,
+        auditInputWithPathId(await readJson(request), "workflowId", workflowId)
+      );
+      const workflowRevision = options.auditStore.createWorkflowRevision(input);
+      sendJson(request, response, 201, { workflowRevision }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/workflows\/([^/]+)\/validate$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match }) => {
+      const workflowId = decodeURIComponent(match?.[1] ?? "");
+      const raw = await readJson(request);
+      const specCandidate = raw !== null && typeof raw === "object" && !Array.isArray(raw) && "spec" in raw
+        ? (raw as { spec: unknown }).spec
+        : raw;
+      const spec = parseAuditInput(workflowSpecSchema, specCandidate);
+      sendJson(request, response, 200, { valid: true, workflowId, spec }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/policies\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const policyId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        policyId,
+        policyRevisions: options.auditStore.listPolicyRevisions(policyId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/policies\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const policyId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(
+        createPolicyRevisionRequestSchema,
+        auditInputWithPathId(await readJson(request), "policyId", policyId)
+      );
+      const policyRevision = options.auditStore.createPolicyRevision(input);
+      sendJson(request, response, 201, { policyRevision }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/policies\/([^/]+)\/evaluate$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const policyId = decodeURIComponent(match?.[1] ?? "");
+      const policyRevision = options.auditStore.listPolicyRevisions(policyId)[0];
+      if (!policyRevision) throw new ApiError("Policy not found", "POLICY_NOT_FOUND", 404);
+      const input = parseAuditInput(z.object({
+        riskScore: riskScoreSchema,
+        coverage: z.number().min(0).max(1),
+        completedChecks: z.array(stepIdSchema).default([])
+      }).strict(), await readJson(request));
+      const evaluation = evaluateAuditPolicy(policyRevision, input);
+      sendJson(request, response, 200, {
+        policyId,
+        policyRevisionId: policyRevision.id,
+        evaluation
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/repositories",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, { repositories: options.auditStore.listRepositories() }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/repositories",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const input = parseAuditInput(createRepositoryRequestSchema, await readJson(request));
+      // Local checkout paths are intentionally not accepted by this public DTO.
+      // Desktop main uses the separately authenticated internal registration route.
+      if (input.source === "local_git") {
+        throw new ApiError(
+          "Local repository registration requires the privileged desktop adapter",
+          "LOCAL_PATH_REGISTRATION_UNAVAILABLE",
+          501
+        );
+      }
+      const repository = options.auditStore.createRepository(input);
+      sendJson(request, response, 201, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repository = options.auditStore.getRepository(decodeURIComponent(match?.[1] ?? ""));
+      if (!repository) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      sendJson(request, response, 200, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/events$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getRepository(repositoryId)) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      sendJson(request, response, 200, { events: options.auditStore.listRepositoryEvents(repositoryId) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/timeline$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getRepository(repositoryId)) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      sendJson(request, response, 200, {
+        repositoryId,
+        repositoryEvents: options.auditStore.listRepositoryEvents(repositoryId),
+        repositoryPulses: options.auditStore.listRepositoryPulses(repositoryId),
+        auditRuns: options.auditStore.listAuditRuns(repositoryId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/metrics$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        repositoryId,
+        evolutionSnapshots: options.auditStore.listEvolutionSnapshots(repositoryId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/issues$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getRepository(repositoryId)) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      const stateRaw = url.searchParams.get("state") ?? undefined;
+      const state = stateRaw === undefined ? undefined : parseAuditInput(auditIssueStateSchema, stateRaw);
+      sendJson(request, response, 200, {
+        repositoryId,
+        issues: options.auditStore.listIssues(repositoryId, state)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/repositories\/([^/]+)\/actions\/set-monitoring$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const body = parseAuditInput(z.object({ enabled: z.boolean() }).strict(), await readJson(request));
+      const repository = options.auditStore.setRepositoryMonitoring(decodeURIComponent(match?.[1] ?? ""), body.enabled);
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 200, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-revisions",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        workflowRevisions: options.auditStore.listWorkflowRevisions(url.searchParams.get("workflowId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-revisions",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const revision = options.auditStore.createWorkflowRevision(
+        parseAuditInput(createWorkflowRevisionRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, { workflowRevision: revision }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/policy-revisions",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        policyRevisions: options.auditStore.listPolicyRevisions(url.searchParams.get("policyId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/policy-revisions",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const revision = options.auditStore.createPolicyRevision(
+        parseAuditInput(createPolicyRevisionRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, { policyRevision: revision }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/automations",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        automations: options.auditStore.listAutomations(url.searchParams.get("repositoryId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/automations",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.createAutomation(
+        parseAuditInput(createAutomationRequestSchema, await readJson(request))
+      );
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 201, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/automations\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.getAutomation(decodeURIComponent(match?.[1] ?? ""));
+      if (!automation) throw new ApiError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
+      sendJson(request, response, 200, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/automations\/([^/]+)\/(pause|resume)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.setAutomationEnabled(
+        decodeURIComponent(match?.[1] ?? ""),
+        match?.[2] === "resume"
+      );
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 200, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/automations\/([^/]+)\/history$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automationId = decodeURIComponent(match?.[1] ?? "");
+      const automation = options.auditStore.getAutomation(automationId);
+      if (!automation) throw new ApiError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
+      const auditRuns = options.auditStore.listAuditRuns(automation.repositoryId)
+        .filter(run => run.automationId === automationId);
+      const planningReceipts = options.auditStore.listAuditRunPlanningReceipts(automationId);
+      const scheduleState = options.auditStore.getAutomationScheduleState(automationId) ?? null;
+      const scheduleWindows = automation.trigger.type === "schedule"
+        ? options.auditStore.listAutomationScheduleWindows(automationId)
+        : [];
+      sendJson(request, response, 200, {
+        automationId,
+        auditRuns,
+        planningReceipts,
+        scheduleState,
+        scheduleWindows
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/automations\/([^/]+)\/schedule$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automationId = decodeURIComponent(match?.[1] ?? "");
+      const automation = options.auditStore.getAutomation(automationId);
+      if (!automation) throw new ApiError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
+      if (automation.trigger.type !== "schedule") {
+        throw new ApiError("Automation is not schedule-triggered", "AUTOMATION_TRIGGER_NOT_MATCHED", 409);
+      }
+      sendJson(request, response, 200, {
+        automationId,
+        scheduleState: options.auditStore.getAutomationScheduleState(automationId) ?? null,
+        scheduleWindows: options.auditStore.listAutomationScheduleWindows(automationId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/automations\/([^/]+)\/run$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automationId = decodeURIComponent(match?.[1] ?? "");
+      const planning = requireAuditPlanner(options).planManualRun(automationId);
+      sendJson(request, response, 202, { planning }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/automations\/([^/]+)\/actions\/(pause|resume)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.setAutomationEnabled(
+        decodeURIComponent(match?.[1] ?? ""),
+        match?.[2] === "resume"
+      );
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 200, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/audit-runs",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        auditRuns: options.auditStore.listAuditRuns(url.searchParams.get("repositoryId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/audit-runs",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.createAuditRunDraft(
+        parseAuditInput(createAuditRunRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, {
+        auditRun,
+        execution: { available: false, reason: "Audit execution is not wired to the v2 domain yet" }
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/steps$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        auditRunId,
+        steps: options.auditStore.listRunStepArtifacts(auditRunId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/report$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      const report = options.auditStore.getAuditReport(auditRunId);
+      if (!report) throw new ApiError("Audit report not found", "AUDIT_REPORT_NOT_FOUND", 404);
+      sendJson(request, response, 200, { report }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/events$/,
+    auth: true,
+    handler: ({ options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      auditCapabilityUnavailable("auditRunEvents");
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/audit-runs\/([^/]+)\/cancel$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.cancelAuditRun(decodeURIComponent(match?.[1] ?? ""));
+      sendJson(request, response, 200, { auditRun }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/export$/,
+    auth: true,
+    handler: ({ options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      auditCapabilityUnavailable("auditExport");
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/audit-runs\/([^/]+)\/export$/,
+    auth: true,
+    handler: ({ options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      auditCapabilityUnavailable("auditExport");
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.getAuditRun(decodeURIComponent(match?.[1] ?? ""));
+      if (!auditRun) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      sendJson(request, response, 200, { auditRun }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/audit-runs\/([^/]+)\/actions\/cancel$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.cancelAuditRun(decodeURIComponent(match?.[1] ?? ""));
+      sendJson(request, response, 200, { auditRun }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/issues",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const stateRaw = url.searchParams.get("state") ?? undefined;
+      const state = stateRaw === undefined ? undefined : parseAuditInput(auditIssueStateSchema, stateRaw);
+      sendJson(request, response, 200, {
+        issues: options.auditStore.listIssues(url.searchParams.get("repositoryId") ?? undefined, state)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/issues",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const issue = options.auditStore.createIssue(
+        parseAuditInput(createAuditIssueRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, { issue }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/issues\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const issue = options.auditStore.getIssue(decodeURIComponent(match?.[1] ?? ""));
+      if (!issue) throw new ApiError("Issue not found", "ISSUE_NOT_FOUND", 404);
+      sendJson(request, response, 200, { issue }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/issues\/([^/]+)\/triage$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const body = parseAuditInput(z.object({
+        action: auditIssueActionSchema,
+        reason: z.string().trim().min(1).max(2_000).optional()
+      }).strict(), await readJson(request));
+      const issue = options.auditStore.applyIssueAction(
+        decodeURIComponent(match?.[1] ?? ""),
+        body.action,
+        body.reason
+      );
+      sendJson(request, response, 200, { issue }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/issues\/([^/]+)\/actions\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const action = parseAuditInput(auditIssueActionSchema, decodeURIComponent(match?.[2] ?? ""));
+      const body = parseAuditInput(auditIssueActionRequestSchema, await readJson(request));
+      const issue = options.auditStore.applyIssueAction(decodeURIComponent(match?.[1] ?? ""), action, body.reason);
+      sendJson(request, response, 200, { issue }, allowedOrigins);
+    }
+  },
   {
     method: "POST",
     path: "/reviews/public-pr",
@@ -219,7 +960,7 @@ const routes: Route[] = [
     handler: ({ request, response, allowedOrigins, options }) => {
       if (!options.heartbeat) throw new ApiError("Heartbeat is disabled", "HEARTBEAT_DISABLED", 404);
       const pulse = options.heartbeat.latest();
-      sendJson(request, response, 200, { pulse: pulse ?? null }, allowedOrigins);
+      sendJson(request, response, 200, { pulse: pulse === undefined ? null : toRendererHeartbeatPulse(pulse) }, allowedOrigins);
     }
   },
   {
@@ -236,7 +977,7 @@ const routes: Route[] = [
       response.write(": connected\n\n");
 
       const unsubscribe = options.heartbeat.subscribe(event => {
-        writeSse(response, event.event, event);
+        writeSse(response, event.event, toRendererHeartbeatEvent(event));
       });
 
       // The stream stays open until the client disconnects; without this the
@@ -291,7 +1032,6 @@ const routes: Route[] = [
       sendJson(request, response, 202, {
         jobId: job.id,
         repository: job.repository,
-        repoPath: job.repoPath,
         baseSha: job.baseSha,
         headSha: job.headSha,
         publicationPolicy: "disabled",
@@ -477,22 +1217,34 @@ const routes: Route[] = [
     path: "/health",
     auth: true,
     handler: ({ request, response, allowedOrigins, options, githubWebhookSecret }) => {
+      const details = options.healthDetails?.() ?? {
+        database: { ok: true },
+        worker: { running: false, activeJobs: 0, concurrency: 1 },
+        llmProvider: "mock",
+        publicPrAccessMode: "disabled" as const,
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: Boolean(githubWebhookSecret),
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory" as const, configured: true },
+          workerConcurrency: 1,
+          demoMode: true
+        }
+      };
       sendJson(request, response, 200, {
         ...buildHealthPayload(),
-        ...(options.healthDetails?.() ?? {
-          database: { ok: true },
-          worker: { running: false, activeJobs: 0, concurrency: 1 },
-          llmProvider: "mock",
-          publicPrAccessMode: "disabled",
-          configuration: {
-            githubAppConfigured: false,
-            webhookSecretConfigured: Boolean(githubWebhookSecret),
-            publicReadTokenConfigured: false,
-            databasePath: ":memory:",
-            workerConcurrency: 1,
-            demoMode: true
-          }
-        })
+        ...details,
+        configuration: {
+          githubAppConfigured: details.configuration.githubAppConfigured,
+          webhookSecretConfigured: details.configuration.webhookSecretConfigured,
+          publicReadTokenConfigured: details.configuration.publicReadTokenConfigured,
+          storage: details.configuration.storage,
+          workerConcurrency: details.configuration.workerConcurrency,
+          ...(details.configuration.publishWorkerConcurrency === undefined
+            ? {}
+            : { publishWorkerConcurrency: details.configuration.publishWorkerConcurrency }),
+          demoMode: details.configuration.demoMode
+        }
       }, allowedOrigins);
     }
   },
@@ -502,7 +1254,7 @@ const routes: Route[] = [
     auth: true,
     handler: ({ request, response, allowedOrigins, options }) => {
       if (!options.settings) throw new ApiError("Settings service is unavailable", "SETTINGS_UNAVAILABLE", 404);
-      sendJson(request, response, 200, { settings: options.settings.get() }, allowedOrigins);
+      sendJson(request, response, 200, { settings: toRendererSettings(options.settings.get()) }, allowedOrigins);
     }
   },
   {
@@ -522,7 +1274,9 @@ const routes: Route[] = [
         throw new ApiError("Settings updates are disabled", "SETTINGS_READ_ONLY", 404);
       }
       const patch = settingsPatchSchema.parse(await readJson(request));
-      sendJson(request, response, 200, { settings: options.settings.update(patch) }, allowedOrigins);
+      sendJson(request, response, 200, {
+        settings: toRendererSettings(options.settings.update(patch))
+      }, allowedOrigins);
     }
   },
   {
@@ -604,6 +1358,7 @@ export function createApiServer(options: CreateApiServerOptions = {}) {
   const jobs = options.jobs ?? new InMemoryJobQueue();
   const githubWebhookSecret = options.githubWebhookSecret ?? process.env.GITHUB_WEBHOOK_SECRET;
   const apiToken = options.apiToken ?? process.env.CONSISTENCY_API_TOKEN;
+  const desktopControlToken = options.desktopControlToken ?? process.env.CONSISTENCY_DESKTOP_CONTROL_TOKEN;
   const nodeEnv = options.nodeEnv ?? (process.env.NODE_ENV as "development" | "test" | "production" | undefined) ?? "development";
   const allowedOrigins = options.allowedOrigins ?? ["http://127.0.0.1:5173", "http://localhost:5173"];
 
@@ -661,6 +1416,7 @@ export function createApiServer(options: CreateApiServerOptions = {}) {
         jobs,
         githubWebhookSecret,
         apiToken,
+        desktopControlToken,
         nodeEnv,
         match: routeMatch
       });

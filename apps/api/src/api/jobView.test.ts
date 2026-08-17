@@ -4,7 +4,7 @@ import { toApiJob } from "./jobView";
 import type { ReviewJob } from "../jobQueue";
 
 describe("toApiJob", () => {
-  it("keeps repoPath for local jobs so the wire schema accepts them", () => {
+  it("keeps the server-side repoPath out of local-job renderer DTOs", () => {
     const job: ReviewJob = {
       id: "job_local",
       kind: "pull_request",
@@ -15,12 +15,16 @@ describe("toApiJob", () => {
       publicationPolicy: "disabled",
       baseSha: "a".repeat(40),
       headSha: WORKING_TREE_REV,
+      error: "Unable to read D:/workspaces/ConsistenCy/private.ts",
       createdAt: "2026-08-05T00:00:00.000Z",
       updatedAt: "2026-08-05T00:00:00.000Z"
     };
     const apiJob = toApiJob(job);
-    expect(apiJob.repoPath).toBe("D:/workspaces/ConsistenCy");
+    expect(apiJob).not.toHaveProperty("repoPath");
+    expect(JSON.stringify(apiJob)).not.toContain("D:/workspaces/ConsistenCy");
+    expect(apiJob.error).toContain("[PATH_REDACTED]");
     expect(() => reviewJobSchema.parse(apiJob)).not.toThrow();
+    expect(() => reviewJobSchema.parse({ ...apiJob, repoPath: job.repoPath })).toThrow();
   });
 
   it("carries pull request metadata for GitHub jobs", () => {

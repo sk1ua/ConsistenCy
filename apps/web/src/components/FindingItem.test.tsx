@@ -13,4 +13,15 @@ describe("FindingItem", () => {
     expect(html).toContain(finding!.confidence);
     expect(html).toContain(finding!.file);
   });
+
+  it("keeps the diff locator outside the expandable summary control", () => {
+    const finding = demoReviewReport.findings[0]!;
+    const html = renderToString(<FindingItem finding={finding} onLocate={() => undefined} />);
+    const summaryEnd = html.indexOf("</button>");
+    const locatorStart = html.indexOf('class="finding-locate"');
+
+    expect(summaryEnd).toBeGreaterThan(0);
+    expect(locatorStart).toBeGreaterThan(summaryEnd);
+    expect(html.slice(0, summaryEnd)).not.toContain("finding-locate");
+  });
 });

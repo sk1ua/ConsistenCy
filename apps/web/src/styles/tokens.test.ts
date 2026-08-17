@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -19,18 +19,21 @@ const REQUIRED_TOKENS = [
   "focus-ring", "shadow-soft", "shadow-card", "scrim"
 ];
 
-// Colors that intentionally remain hardcoded: chart-only hues and the
-// heartbeat sparkline gradient stops. They are per-page backlog, not tokens.
-const ALLOWED_HEX = new Set(["#173f5f", "#17628f", "#85683f"]);
+// Colors intentionally left hardcoded: heartbeat sparkline box-shadow gradient
+// stops (animated alpha, not rendered as text). All text colors must use tokens.
+const ALLOWED_HEX = new Set<string>();
 const ALLOWED_RGBA = new Set(["rgba(22,133,107,0)", "rgba(22,133,107,0.45)"]);
 
-function cssFiles(): string[] {
+function cssFiles(dir: string): string[] {
   const files: string[] = [];
-  for (const name of readdirSync(here)) {
-    if (name.endsWith(".css") && name !== "tokens.css") files.push(join(here, name));
-  }
-  for (const name of readdirSync(dirname(here))) {
-    if (name.endsWith(".css")) files.push(join(dirname(here), name));
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      files.push(...cssFiles(full));
+    } else if (name.endsWith(".css") && name !== "tokens.css") {
+      files.push(full);
+    }
   }
   return files;
 }
@@ -51,12 +54,16 @@ describe("design tokens", () => {
   });
 
   it("uses the dark theme as the documented default", () => {
-    expect(tokens).toContain('--background: #0d1117');
+    expect(tokens).toContain('--background: #0b0d10');
+    expect(tokens).toContain('--surface: #12161c');
+    expect(tokens).toContain('--surface-muted: #1a2028');
+    expect(tokens).toContain('--foreground: #e7eaee');
+    expect(tokens).toContain('--primary: #6fa8ff');
   });
 
   it("leaves no unmapped hardcoded colors in component styles", () => {
     const leftovers: string[] = [];
-    for (const file of cssFiles()) {
+    for (const file of cssFiles(here)) {
       const text = readFileSync(file, "utf8");
       for (const match of text.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
         if (!ALLOWED_HEX.has(match[0].toLowerCase())) {

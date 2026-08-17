@@ -8,6 +8,7 @@ from types import MappingProxyType
 
 from .base_agent import AgentBase
 from .duplication_agent import DuplicationAgent
+from .evolution_agent import EvolutionAgent
 from .security_agent import SecurityAgent
 from .semantic_agent import SemanticAgent
 from .structural_agent import StructuralAgent
@@ -54,11 +55,17 @@ _MANIFESTS = {
     "semantic": _manifest("semantic", SemanticAgent, "Semantic change proxies."),
     "duplication": _manifest("duplication", DuplicationAgent, "Code-clone detection."),
     "security": _manifest("security", SecurityAgent, "Static security checks."),
+    # Evolution consumes commit-history snapshots rather than one source file.
+    # It is allowlisted for the repository supervisor, but intentionally not a
+    # default per-file analyzer until versioned history is supplied.
+    "evolution": _manifest("evolution", EvolutionAgent, "Commit-history churn, hotspot, ownership, and bus-factor signals."),
 }
 
 # Public read-only registry. Adding an agent requires an explicit code change here.
 AGENT_REGISTRY: Mapping[str, AgentManifest] = MappingProxyType(_MANIFESTS)
-DEFAULT_AGENT_IDS: tuple[str, ...] = tuple(AGENT_REGISTRY)
+DEFAULT_AGENT_IDS: tuple[str, ...] = tuple(
+    agent_id for agent_id in AGENT_REGISTRY if agent_id != "evolution"
+)
 
 
 def resolve_agent_manifests(requested_agents: object) -> tuple[AgentManifest, ...]:

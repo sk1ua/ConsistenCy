@@ -42,7 +42,8 @@
 
 ## 5. 动效与可访问性
 
-- 动效时长 ≤ 180ms、无弹簧；prefers-reduced-motion 下全部归零（motion.css）。
+- 动效时长由 tokens.css 的 --duration-fast/normal/slow 令牌控制（140/220/360ms）；
+  组件应引用令牌而非硬编码时长；prefers-reduced-motion 下全部归零（motion.css）。
 - 全局 :focus-visible 焦点环（base.css）使用 --focus-ring；复选框 accent-color。
 - 语义色对比度按 WCAG AA 校准（暗色采用 GitHub-dark 系明色）。
 - 中英双语文案一律走 i18n.tsx 的 t()，不得硬编码界面文本。

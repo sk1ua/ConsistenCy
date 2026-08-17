@@ -158,6 +158,71 @@ describe("createApiServer", () => {
     expect(oversized.body).toMatchObject({ error: { code: "BODY_TOO_LARGE" } });
   });
 
+  it("projects health and settings without renderer-visible filesystem paths", async () => {
+    const internalSettings = {
+      llm: {
+        provider: "mock" as const,
+        deepseekBaseUrl: "https://api.deepseek.com",
+        deepseekModel: "deepseek-chat",
+        openaiModel: "gpt-4o-mini",
+        deepseekApiKeyConfigured: false,
+        openaiApiKeyConfigured: false
+      },
+      github: {
+        appId: "",
+        privateKeyConfigured: false,
+        webhookSecretConfigured: false,
+        publicReadTokenConfigured: false
+      },
+      runtime: {
+        databasePath: "D:/private/state/consistency.db",
+        workspaceRoot: "D:/private/workspaces",
+        localReviewRoots: "D:/private/repositories",
+        workerConcurrency: 1,
+        workerPollIntervalMs: 1_000,
+        webUrl: "http://127.0.0.1:5173",
+        apiTokenConfigured: false
+      },
+      overriddenByEnvironment: [],
+      restartRequired: false
+    };
+    const server = createApiServer({
+      settings: { get: () => internalSettings, update: () => internalSettings },
+      healthDetails: () => ({
+        database: { ok: true },
+        worker: { running: false, activeJobs: 0, concurrency: 1 },
+        llmProvider: "mock",
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "file", configured: true },
+          databasePath: "D:/private/state/consistency.db",
+          workspaceRoot: "D:/private/workspaces",
+          workerConcurrency: 1,
+          demoMode: true
+        }
+      } as any)
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const health = await getJson(port, "/health");
+    const healthBody = health.body as any;
+    expect(healthBody.configuration).toMatchObject({ storage: { kind: "file", configured: true } });
+    expect(healthBody.configuration).not.toHaveProperty("databasePath");
+    expect(healthBody.configuration).not.toHaveProperty("workspaceRoot");
+
+    const settings = await getJson(port, "/settings");
+    const settingsBody = settings.body as any;
+    expect(settingsBody.settings.runtime).toMatchObject({
+      storage: { kind: "file", configured: true },
+      workspace: { configured: true },
+      localReview: { configured: true, rootCount: 1 }
+    });
+    expect(JSON.stringify({ health: healthBody, settings: settingsBody })).not.toContain("D:/private");
+  });
+
   it("verifies GitHub pull_request webhooks and enqueues review jobs", async () => {
     const jobs = new InMemoryJobQueue();
     const server = createApiServer({ jobs, githubWebhookSecret: "secret" });

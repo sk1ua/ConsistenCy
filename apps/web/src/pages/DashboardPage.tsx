@@ -1,11 +1,133 @@
-import type { ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
-import { Activity, ArrowRight, CheckCircle2, FileText, Github, GitPullRequest, Radar, Timer } from "lucide-react";
-import { useState } from "react";
-import { EvidencePanel } from "../components/EvidencePanel";
-import { HeartbeatWidget } from "../components/HeartbeatWidget";
+import type { HeartbeatPulse, ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
+import { Activity, AlertTriangle, ArrowRight, Github, Radio, ScanSearch, Timer } from "lucide-react";
+import { useMemo, useState } from "react";
 import { StatusBadge } from "../components/StatusBadge";
 import { useI18n } from "../i18n";
-import type { HeartbeatPulse } from "@consistency/schema";
+
+const ACTIVE_STATUSES = new Set<ReviewJob["status"]>(["queued", "running", "awaiting_publish", "publishing"]);
+const DEGRADED_STATUSES = new Set<ReviewJob["status"]>(["failed", "publish_failed"]);
+const DECISION_READY_STATUSES = new Set<ReviewJob["status"]>(["succeeded", "awaiting_publish", "publishing", "publish_failed"]);
+const RISK_WEIGHT = { critical: 4, high: 3, medium: 2, low: 1 } as const;
+
+type DashboardHeartbeat = { pulse: HeartbeatPulse | null; history: HeartbeatPulse[]; unavailable: boolean };
+
+const COPY = {
+  "en-US": {
+    title: "Operations inbox",
+    subtitle: "Audit operations",
+    needsDecision: "Needs decision",
+    activeRuns: "Active runs",
+    degradedRuns: "Degraded runs",
+    repositories: "Repositories",
+    recorded: "recorded",
+    reports: "reports",
+    average: "average",
+    analyzePublicPr: "Analyze public PR",
+    publicPrUnavailable: "Public PR intake unavailable",
+    patRead: "PAT read",
+    anonymousRead: "Anonymous read",
+    disabled: "Disabled",
+    accessPending: "Access mode pending",
+    monitor: "Repository monitor",
+    monitorUnavailable: "Repository monitor unavailable",
+    noHeartbeat: "No heartbeat recorded",
+    dirtyFiles: "dirty files",
+    pendingEvents: "pending events",
+    pulses: "pulses recorded",
+    decisionQueue: "Decision queue",
+    decisionContext: "Completed analyses without a recorded human disposition",
+    allRuns: "All runs",
+    noDecisions: "No completed analyses are waiting for a recorded decision.",
+    findings: "findings",
+    runWatch: "Run watch",
+    runWatchContext: "Active work and failures that need operator attention",
+    noRunWatch: "No active or degraded runs are recorded.",
+    repoFleet: "Repository fleet",
+    repoFleetContext: "Latest review state per observed repository",
+    reviews: "reviews",
+    monitored: "live monitor",
+    noFleet: "No repository has produced a review or heartbeat yet.",
+    signalWatch: "Signal watch",
+    signalWatchContext: "Only signals present in current API payloads",
+    regression: "Regression signal",
+    automationFailure: "Automation failures",
+    riskWorsened: "Repository risk index worsened",
+    noWorsening: "No worsening repository-risk trend in the latest window.",
+    noRegressionSource: "Not recorded · repository health history is unavailable.",
+    automationUnavailable: "Not connected · Inbox does not receive automation execution history.",
+    securityDebt: "unsettled security items",
+    recentRuns: "Recent reviews",
+    recentRunsContext: "Newest recorded runs across the fleet",
+    noRuns: "No review runs have been recorded.",
+    repository: "Repository",
+    state: "State",
+    risk: "Risk",
+    duration: "Duration",
+    updated: "Updated",
+    noReport: "not reported",
+    runPending: "Analysis has not produced a report yet."
+  },
+  "zh-CN": {
+    title: "运营收件箱",
+    subtitle: "人工审查队列与实时 Harness 状态",
+    needsDecision: "待决策",
+    activeRuns: "活跃运行",
+    degradedRuns: "异常运行",
+    repositories: "仓库",
+    recorded: "条记录",
+    reports: "份报告",
+    average: "平均",
+    analyzePublicPr: "分析公开 PR",
+    publicPrUnavailable: "公开 PR 接入不可用",
+    patRead: "PAT 读取",
+    anonymousRead: "匿名读取",
+    disabled: "已禁用",
+    accessPending: "访问模式待确认",
+    monitor: "仓库监控",
+    monitorUnavailable: "仓库监控不可用",
+    noHeartbeat: "尚未记录心跳",
+    dirtyFiles: "个脏文件",
+    pendingEvents: "个待处理事件",
+    pulses: "次心跳记录",
+    decisionQueue: "决策队列",
+    decisionContext: "分析已完成，但尚未记录人工处置",
+    allRuns: "全部运行",
+    noDecisions: "没有等待记录人工决策的已完成分析。",
+    findings: "项发现",
+    runWatch: "运行监视",
+    runWatchContext: "需要操作者关注的活跃工作与失败",
+    noRunWatch: "尚未记录活跃或异常运行。",
+    repoFleet: "仓库舰队",
+    repoFleetContext: "每个已观察仓库的最近审查状态",
+    reviews: "次审查",
+    monitored: "实时监控",
+    noFleet: "尚无仓库产生审查或心跳。",
+    signalWatch: "信号监视",
+    signalWatchContext: "仅展示当前 API 载荷中真实存在的信号",
+    regression: "回归信号",
+    automationFailure: "自动化失败",
+    riskWorsened: "仓库风险指数上升",
+    noWorsening: "最近窗口内没有恶化的仓库风险趋势。",
+    noRegressionSource: "未记录 · 仓库健康历史不可用。",
+    automationUnavailable: "未接入 · 收件箱尚未获得自动化执行历史。",
+    securityDebt: "项未结安全债务",
+    recentRuns: "最近审查",
+    recentRunsContext: "仓库舰队中最新记录的运行",
+    noRuns: "尚未记录审查运行。",
+    repository: "仓库",
+    state: "状态",
+    risk: "风险",
+    duration: "耗时",
+    updated: "更新时间",
+    noReport: "未报告",
+    runPending: "分析尚未生成报告。"
+  }
+} as const;
+
+function epoch(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
 function duration(milliseconds: number): string {
   if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
@@ -16,8 +138,54 @@ function duration(milliseconds: number): string {
 }
 
 function jobDuration(job: ReviewJob): string {
-  if (!job.startedAt || !job.finishedAt) return "-";
-  return duration(new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime());
+  if (!job.startedAt || !job.finishedAt) return "—";
+  return duration(Math.max(0, epoch(job.finishedAt) - epoch(job.startedAt)));
+}
+
+export function buildInboxModel(jobs: ReviewJob[], reports: ReviewReport[], heartbeat?: DashboardHeartbeat) {
+  const reportByJob = new Map(reports.map(report => [report.jobId, report]));
+  const sortedJobs = [...jobs].sort((left, right) => epoch(right.createdAt) - epoch(left.createdAt));
+  const reportFor = (job: ReviewJob) => job.report?.jobId === job.id ? job.report : reportByJob.get(job.id);
+  const decisions = sortedJobs.flatMap(job => {
+    const report = reportFor(job);
+    return report && DECISION_READY_STATUSES.has(job.status) ? [{ job, report }] : [];
+  }).sort((left, right) =>
+    RISK_WEIGHT[right.report.riskLevel] - RISK_WEIGHT[left.report.riskLevel]
+      || epoch(right.report.createdAt) - epoch(left.report.createdAt)
+  );
+  const activeRuns = sortedJobs.filter(job => ACTIVE_STATUSES.has(job.status));
+  const degradedRuns = sortedJobs.filter(job => DEGRADED_STATUSES.has(job.status));
+  const fleetByName = new Map<string, { name: string; reviewCount: number; latestJob?: ReviewJob; monitored: boolean }>();
+
+  for (const job of sortedJobs) {
+    const current = fleetByName.get(job.repositoryFullName);
+    if (current) current.reviewCount += 1;
+    else fleetByName.set(job.repositoryFullName, { name: job.repositoryFullName, reviewCount: 1, latestJob: job, monitored: false });
+  }
+  const monitoredName = heartbeat?.pulse?.repository.root;
+  if (monitoredName && monitoredName !== "unknown") {
+    const current = fleetByName.get(monitoredName);
+    if (current) current.monitored = true;
+    else fleetByName.set(monitoredName, { name: monitoredName, reviewCount: 0, monitored: true });
+  }
+
+  return {
+    decisions,
+    activeRuns,
+    degradedRuns,
+    watchedRuns: [...degradedRuns, ...activeRuns],
+    repositories: [...fleetByName.values()].sort((left, right) =>
+      Number(right.monitored) - Number(left.monitored)
+        || epoch(right.latestJob?.createdAt ?? "") - epoch(left.latestJob?.createdAt ?? "")
+    ),
+    recentJobs: sortedJobs.slice(0, 6),
+    reportFor,
+    riskTrend: heartbeat?.pulse?.metrics
+  };
+}
+
+function PanelHeading({ title, context, action }: { title: string; context: string; action?: React.ReactNode }) {
+  return <header className="ops-panel-heading"><div><h2>{title}</h2><p>{context}</p></div>{action}</header>;
 }
 
 export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onAnalyzePublicPr, publicPrAnalyzing, publicPrError, publicPrAccessMode, heartbeat }: {
@@ -30,93 +198,101 @@ export function DashboardPage({ stats, jobs, reports, onOpenJob, onOpenJobs, onA
   publicPrAnalyzing?: boolean;
   publicPrError?: string;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
-  heartbeat?: { pulse: HeartbeatPulse | null; history: HeartbeatPulse[]; unavailable: boolean };
+  heartbeat?: DashboardHeartbeat;
 }) {
   const { locale, t } = useI18n();
+  const copy = COPY[locale];
   const [publicPrUrl, setPublicPrUrl] = useState("");
-  const severityWeight = { critical: 4, high: 3, medium: 2, low: 1, info: 0 } as const;
-  const successRate = stats.totalJobs ? Math.round(stats.succeededJobs / stats.totalJobs * 1000) / 10 : 0;
-  const queuedJobs = jobs.filter(job => job.status === "queued").length;
-  const metrics = [
-    { label: t("Total reviews"), value: stats.totalJobs, note: t("{count} reports available", { count: reports.length }), icon: GitPullRequest, tone: "green" },
-    { label: t("Succeeded"), value: stats.succeededJobs, note: t("{rate}% success rate", { rate: successRate }), icon: CheckCircle2, tone: "success" },
-    { label: t("Running"), value: stats.runningJobs, note: t("{count} queued", { count: queuedJobs }), icon: Activity, tone: "blue" },
-    { label: t("Avg duration"), value: duration(stats.averageDuration), note: t("Across completed jobs"), icon: Timer, tone: "amber" }
-  ] as const;
-  const riskLevels = ["low", "medium", "high", "critical"] as const;
-  const totalRisk = Math.max(1, riskLevels.reduce((sum, level) => sum + (stats.riskDistribution[level] ?? 0), 0));
-  const recentFindings = reports.flatMap(report => report.findings.map(finding => ({ finding, report })))
-    .sort((left, right) => severityWeight[right.finding.severity] - severityWeight[left.finding.severity])
-    .slice(0, 5);
-  const retrievalReport = reports.find(report => report.retrieval?.packs.length);
-  const elevatedReviews = (stats.riskDistribution.high ?? 0) + (stats.riskDistribution.critical ?? 0);
+  const model = useMemo(() => buildInboxModel(jobs, reports, heartbeat), [heartbeat, jobs, reports]);
+  const publicPrEnabled = (publicPrAccessMode === "anonymous" || publicPrAccessMode === "pat") && Boolean(onAnalyzePublicPr);
+  const accessLabel = publicPrAccessMode === "pat" ? copy.patRead : publicPrAccessMode === "anonymous" ? copy.anonymousRead : publicPrAccessMode === "disabled" ? copy.disabled : copy.accessPending;
+  const monitorTone = heartbeat?.unavailable || heartbeat?.pulse?.state === "degraded" ? "degraded" : heartbeat?.pulse ? "connected" : "idle";
+  const formatDate = (value: string) => new Date(value).toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-  return <div className="page-stack dashboard-page">
-    <section className="dashboard-intro">
-      <div className="intro-copy"><span className="eyebrow"><Radar size={15} />{t("Review pulse")}</span><h2>{t("Focus attention where the evidence is strongest.")}</h2><p>{t("One view for review progress, risk concentration, and the context behind every finding.")}</p></div>
-      <div className="attention-signal"><span>{t("Needs attention")}</span><strong>{elevatedReviews}</strong><small>{t(elevatedReviews === 1 ? "elevated review" : "elevated reviews")}</small></div>
-      <div className="review-track" aria-label={t("Review workflow")}><span className="done">{t("Intake")}</span><span className="done">{t("Analysis")}</span><span className="active">{t("Evidence")}</span><span>{t("Decision")}</span></div>
+  return <div className="page-stack dashboard-page operations-dashboard">
+    <section className="ops-commandbar" aria-labelledby="operations-inbox-title">
+      <div className="ops-command-summary">
+        <div><span className="panel-kicker"><ScanSearch size={13} />{copy.subtitle}</span><h2 id="operations-inbox-title">{copy.title}</h2></div>
+        <div className="ops-counters" role="list" aria-label={copy.subtitle}>
+          <span role="listitem"><strong>{model.decisions.length}</strong>{copy.needsDecision}</span>
+          <span role="listitem"><strong>{model.activeRuns.length}</strong>{copy.activeRuns}</span>
+          <span className={model.degradedRuns.length ? "degraded" : ""} role="listitem"><strong>{model.degradedRuns.length}</strong>{copy.degradedRuns}</span>
+          <span role="listitem"><strong>{model.repositories.length}</strong>{copy.repositories}</span>
+        </div>
+        <small>{stats.totalJobs} {copy.recorded} · {reports.length} {copy.reports} · {copy.average} {duration(stats.averageDuration)}</small>
+      </div>
+      <form className="ops-pr-tool" aria-label={copy.analyzePublicPr} onSubmit={event => {
+        event.preventDefault();
+        if (publicPrEnabled && publicPrUrl.trim() && onAnalyzePublicPr) void onAnalyzePublicPr(publicPrUrl.trim());
+      }}>
+        <div className="ops-pr-label"><Github size={15} /><span><strong>{publicPrEnabled ? copy.analyzePublicPr : copy.publicPrUnavailable}</strong><small>{accessLabel}</small></span></div>
+        <label><span className="sr-only">{t("GitHub pull request URL")}</span><input aria-label={t("GitHub pull request URL")} value={publicPrUrl} onChange={event => setPublicPrUrl(event.target.value)} placeholder="github.com/owner/repo/pull/123" /></label>
+        <button type="submit" aria-label={t("Analyze PR")} disabled={!publicPrEnabled || publicPrAnalyzing || !publicPrUrl.trim()}>{publicPrAnalyzing ? t("Resolving…") : <ArrowRight size={15} />}</button>
+        {publicPrError ? <small className="ops-pr-error" role="alert">{publicPrError}</small> : null}
+      </form>
     </section>
-    <section className="public-pr-intake">
-      <div className="public-pr-copy"><span className="panel-kicker">{t("Public PR analysis")} · {publicPrAccessMode === "pat" ? t("PAT read") : publicPrAccessMode === "disabled" ? t("disabled") : t("anonymous read")}</span><h2>{t("Bring a public pull request into the evidence workspace.")}</h2><p>{t("No GitHub App installation is required. The URL flow reads public code, creates an analysis-only job and never posts a comment.")}</p></div>
-      <form onSubmit={event => { event.preventDefault(); if (publicPrUrl.trim() && onAnalyzePublicPr) void onAnalyzePublicPr(publicPrUrl.trim()); }}><label><span className="command-prompt" aria-hidden="true">&gt;</span><Github size={15} /><span className="sr-only">{t("GitHub pull request URL")}</span><input aria-label={t("GitHub pull request URL")} value={publicPrUrl} onChange={event => setPublicPrUrl(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" /></label><button type="submit" disabled={!onAnalyzePublicPr || publicPrAnalyzing || !publicPrUrl.trim()}>{publicPrAnalyzing ? t("Resolving…") : t("Analyze PR")}<ArrowRight size={14} /></button></form>
-      {publicPrError && <small className="public-pr-error">{publicPrError}</small>}
-    </section>
-    <section className="metric-grid" aria-label={t("Review statistics")}>
-      {metrics.map(({ label, value, note, icon: Icon, tone }) => <article className="metric-card" key={label}>
-        <div className={`metric-icon metric-icon-${tone}`}><Icon aria-hidden="true" size={19} /></div>
-        <div className="metric-copy"><span>{label}</span><strong>{value}</strong></div>
-        <small>{note}</small>
-      </article>)}
-    </section>
-    {heartbeat && <HeartbeatWidget pulse={heartbeat.pulse} history={heartbeat.history} unavailable={heartbeat.unavailable} />}
 
-    <section className="dashboard-split">
-      <article className="section-block risk-panel">
-        <div className="panel-title"><div><span className="panel-kicker">{t("Decision signal")}</span><h2>{t("Risk distribution")} <span>{t("Completed reviews")}</span></h2></div><button className="link-button" type="button" onClick={onOpenJobs}>{t("Open queue")} <ArrowRight size={14} /></button></div>
-        <div className="risk-bar" aria-label={t("Risk distribution")}>
-          {riskLevels.map(level => {
-            const count = stats.riskDistribution[level] ?? 0;
-            const percent = count / totalRisk * 100;
-            return <span className={`risk-segment risk-${level}`} key={level} style={{ width: `${percent}%` }}>{percent >= 12 ? `${Math.round(percent)}%` : ""}</span>;
+    <section className={`ops-runtime-strip ${monitorTone}`} aria-label={copy.monitor}>
+      <span className="ops-runtime-state"><Radio size={13} /><strong>{copy.monitor}</strong><i aria-hidden="true" />{heartbeat?.unavailable ? copy.monitorUnavailable : heartbeat?.pulse?.state ?? copy.noHeartbeat}</span>
+      {heartbeat?.pulse ? <><strong>{heartbeat.pulse.repository.root}</strong><code>{heartbeat.pulse.repository.branch ?? "detached"}</code><span>{heartbeat.pulse.dirtyFileCount} {copy.dirtyFiles} · {heartbeat.pulse.pendingEvents} {copy.pendingEvents}</span><time dateTime={heartbeat.pulse.observedAt}>{formatDate(heartbeat.pulse.observedAt)}</time></> : <span>{heartbeat?.history.length ?? 0} {copy.pulses}</span>}
+    </section>
+
+    <section className="ops-board">
+      <section className="ops-panel ops-decisions">
+        <PanelHeading title={copy.decisionQueue} context={copy.decisionContext} action={<button type="button" onClick={onOpenJobs}>{copy.allRuns}<ArrowRight size={13} /></button>} />
+        <div className="ops-row-list">
+          {model.decisions.length === 0 ? <div className="ops-empty"><ScanSearch size={16} /><span>{copy.noDecisions}</span></div> : model.decisions.slice(0, 4).map(({ job, report }) => <button className="ops-decision-row" type="button" key={job.id} onClick={() => onOpenJob(job)}>
+            <i className={`ops-risk-mark risk-${report.riskLevel}`} aria-hidden="true" />
+            <span><strong>{job.repositoryFullName}{job.pullRequestNumber ? ` · #${job.pullRequestNumber}` : ""}</strong><small>{report.summary}</small></span>
+            <span className="ops-row-signals"><StatusBadge value={report.riskLevel} /><b>{report.findings.length} {copy.findings}</b></span>
+          </button>)}
+        </div>
+      </section>
+
+      <section className="ops-panel ops-run-watch">
+        <PanelHeading title={copy.runWatch} context={copy.runWatchContext} />
+        <div className="ops-row-list">
+          {model.watchedRuns.length === 0 ? <div className="ops-empty"><Activity size={16} /><span>{copy.noRunWatch}</span></div> : model.watchedRuns.slice(0, 4).map(job => <button className="ops-run-row" type="button" key={job.id} onClick={() => onOpenJob(job)}>
+            <StatusBadge value={job.status} /><span><strong>{job.repositoryFullName}</strong><small>{job.error ?? `${job.headSha.slice(0, 10)} · ${job.report?.summary ?? copy.runPending}`}</small></span><time dateTime={job.createdAt}>{formatDate(job.createdAt)}</time>
+          </button>)}
+        </div>
+      </section>
+
+      <section className="ops-panel ops-fleet">
+        <PanelHeading title={copy.repoFleet} context={copy.repoFleetContext} />
+        <div className="ops-row-list">
+          {model.repositories.length === 0 ? <div className="ops-empty"><Radio size={16} /><span>{copy.noFleet}</span></div> : model.repositories.slice(0, 4).map(repository => {
+            const content = <><span className={repository.monitored ? "ops-repo-mark monitored" : "ops-repo-mark"}><i aria-hidden="true" /></span><span><strong>{repository.name}</strong><small>{repository.reviewCount} {copy.reviews}{repository.monitored ? ` · ${copy.monitored}` : ""}</small></span>{repository.latestJob ? <StatusBadge value={repository.latestJob.status} /> : <code>{heartbeat?.pulse?.state ?? "idle"}</code>}</>;
+            return repository.latestJob ? <button className="ops-fleet-row" type="button" key={repository.name} onClick={() => onOpenJob(repository.latestJob!)}>{content}</button> : <div className="ops-fleet-row" key={repository.name}>{content}</div>;
           })}
         </div>
-        <div className="risk-list">
-          {riskLevels.map(level => <div key={level}><span><i className={`risk-dot risk-${level}`} />{t(level)}</span><strong>{stats.riskDistribution[level]}</strong></div>)}
-          <div className="risk-total"><span>{t("Total")}</span><strong>{Object.values(stats.riskDistribution).reduce((sum, count) => sum + count, 0)}</strong></div>
-        </div>
-      </article>
+      </section>
 
-      <article className="section-block findings-panel">
-        <div className="panel-title"><div><span className="panel-kicker">{t("Highest priority")}</span><h2>{t("Recent findings")}</h2></div><button className="link-button" type="button" onClick={onOpenJobs}>{t("View all")} <ArrowRight size={14} /></button></div>
-        <div className="priority-table">
-          {recentFindings.length === 0 ? <div className="empty-inline">{t("No findings reported")}</div> : recentFindings.map(({ finding, report }) => <div className="priority-row" key={finding.id}>
-            <StatusBadge value={finding.severity} />
-            <strong>{finding.title}</strong>
-            <span>{report.repositoryFullName}</span>
-            <code>{finding.file}{finding.startLine ? `:${finding.startLine}` : ""}</code>
-          </div>)}
+      <section className="ops-panel ops-signals">
+        <PanelHeading title={copy.signalWatch} context={copy.signalWatchContext} />
+        <div className="ops-signal-list">
+          <article className={model.riskTrend && model.riskTrend.riskIndexTrend > 0 ? "warning" : model.riskTrend ? "clear" : "missing"}>
+            <span><AlertTriangle size={15} /><strong>{copy.regression}</strong></span>
+            {model.riskTrend ? model.riskTrend.riskIndexTrend > 0
+              ? <p>{copy.riskWorsened} +{Math.round(model.riskTrend.riskIndexTrend * 100)}% · {model.riskTrend.unsettledSecurityDebt} {copy.securityDebt}</p>
+              : <p>{copy.noWorsening}</p>
+              : <p>{copy.noRegressionSource}</p>}
+          </article>
+          <article className="missing"><span><Timer size={15} /><strong>{copy.automationFailure}</strong></span><p>{copy.automationUnavailable}</p></article>
         </div>
-      </article>
+      </section>
     </section>
 
-    <EvidencePanel retrieval={retrievalReport?.retrieval} />
-
-    <section className="section-block table-section">
-      <div className="panel-title"><div><span className="panel-kicker">{t("Review trail")}</span><h2>{t("Recent PR review jobs")}</h2></div><button className="link-button" type="button" onClick={onOpenJobs}>{t("View all jobs")} <ArrowRight size={14} /></button></div>
-      <div className="data-table dashboard-table">
-        <div className="table-row table-head"><span>{t("Repository")}</span><span>{t("Pull request")}</span><span>{t("Status")}</span><span>{t("Risk")}</span><span>{t("Score")}</span><span>{t("Duration")}</span><span>{t("Created")}</span><span /></div>
-        {jobs.slice(0, 8).map(job => <button className="table-row" key={job.id} type="button" onClick={() => onOpenJob(job)}>
-          <span className="repository-cell"><Github size={17} /><strong>{job.repositoryFullName}</strong></span>
-          <span className="pr-cell"><b>#{job.pullRequestNumber}</b><small>{job.report?.summary ?? t("Pull request review in progress")}</small></span>
-          <span><StatusBadge value={job.status} /></span>
-          <span className="risk-cell">{job.report ? <><i className={`risk-dot risk-${job.report.riskLevel}`} />{t(job.report.riskLevel)}</> : "-"}</span>
-          <span className="score-cell">{job.report?.score ?? "-"}</span>
-          <span>{jobDuration(job)}</span>
-          <span>{new Date(job.createdAt).toLocaleString(locale, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-          <span className="row-action"><FileText size={16} /></span>
-        </button>)}
-      </div>
+    <section className="ops-recent">
+      <PanelHeading title={copy.recentRuns} context={copy.recentRunsContext} action={<button type="button" onClick={onOpenJobs}>{copy.allRuns}<ArrowRight size={13} /></button>} />
+      {model.recentJobs.length === 0 ? <div className="ops-empty"><Activity size={16} /><span>{copy.noRuns}</span></div> : <div className="ops-table-wrap"><table>
+        <caption className="sr-only">{copy.recentRuns}</caption>
+        <thead><tr><th scope="col">{copy.repository}</th><th scope="col">{copy.state}</th><th scope="col">{copy.risk}</th><th scope="col">{copy.duration}</th><th scope="col">{copy.updated}</th></tr></thead>
+        <tbody>{model.recentJobs.map(job => {
+          const report = model.reportFor(job);
+          return <tr key={job.id}><td><button type="button" onClick={() => onOpenJob(job)}><strong>{job.repositoryFullName}</strong><small>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : t("Local repository")}</small></button></td><td><StatusBadge value={job.status} /></td><td>{report ? <StatusBadge value={report.riskLevel} /> : <span className="ops-muted">{copy.noReport}</span>}</td><td>{jobDuration(job)}</td><td><time dateTime={job.createdAt}>{formatDate(job.createdAt)}</time></td></tr>;
+        })}</tbody>
+      </table></div>}
     </section>
   </div>;
 }

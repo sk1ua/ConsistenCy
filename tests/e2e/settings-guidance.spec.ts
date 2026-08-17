@@ -2,8 +2,10 @@ import { expect, test } from "@playwright/test";
 
 test.describe("beginner settings guidance", () => {
   test("explains credential modes and never returns a saved public-read token", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("button", { name: /Settings|设置/ }).click();
+    await page.addInitScript(() => window.localStorage.setItem("consistency.locale.v1", "en-US"));
+    await page.goto("/#/inbox");
+    await page.locator(".activity-rail").getByRole("link", { name: "Settings", exact: true }).click();
+    await expect(page).toHaveURL(/#\/settings$/);
     await expect(page.locator(".settings-editor")).toBeVisible();
 
     await expect(page.locator(".source-mode-guide > span")).toHaveCount(3);

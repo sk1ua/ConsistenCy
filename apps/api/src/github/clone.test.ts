@@ -33,7 +33,10 @@ describe("clonePullRequestWorkspace", () => {
     expect(workspace).toBe(join(root, "job_123"));
     expect(calls.map(call => call.args[0])).toEqual(["clone", "fetch", "checkout"]);
     expect(JSON.stringify(calls.map(call => call.args))).not.toContain("secret-installation-token");
-    const header = calls[0]?.env.GIT_CONFIG_VALUE_0 ?? "";
+    expect(calls[0]?.env.GIT_CONFIG_COUNT).toBe("2");
+    expect(calls[0]?.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
+    expect(calls[0]?.env.GIT_CONFIG_VALUE_0).toBe("");
+    const header = calls[0]?.env.GIT_CONFIG_VALUE_1 ?? "";
     expect(header).toMatch(/^Authorization: Basic /);
     expect(Buffer.from(header.replace("Authorization: Basic ", ""), "base64").toString("utf8"))
       .toBe("x-access-token:secret-installation-token");
@@ -67,7 +70,9 @@ describe("clonePullRequestWorkspace", () => {
     });
 
     expect(calls[0]?.env.GIT_TERMINAL_PROMPT).toBe("0");
-    expect(calls[0]?.env.GIT_CONFIG_COUNT).toBeUndefined();
-    expect(calls[0]?.env.GIT_CONFIG_VALUE_0).toBeUndefined();
+    expect(calls[0]?.env.GIT_CONFIG_COUNT).toBe("1");
+    expect(calls[0]?.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
+    expect(calls[0]?.env.GIT_CONFIG_VALUE_0).toBe("");
+    expect(calls[0]?.env.GIT_CONFIG_VALUE_1).toBeUndefined();
   });
 });

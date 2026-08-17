@@ -25,6 +25,7 @@ export const jobTypeSchema = z.literal("PR_REVIEW");
 export const publicationPolicySchema = z.enum(["github_comment", "disabled"]);
 export const reviewAccessModeSchema = z.enum(["github_app", "public_read", "local_git"]);
 
+/** Renderer-facing job DTO. Checkout locations remain in the API job store. */
 export const reviewJobSchema = z.object({
   id: z.string().trim().min(1),
   type: jobTypeSchema,
@@ -32,8 +33,6 @@ export const reviewJobSchema = z.object({
   repositoryFullName: z.string().trim().min(1),
   /** Absent for local reviews, which have no pull request. */
   pullRequestNumber: z.number().int().positive().optional(),
-  /** Absolute path to the checkout; set only for local reviews. */
-  repoPath: z.string().trim().min(1).optional(),
   installationId: z.number().int().positive().optional(),
   accessMode: reviewAccessModeSchema.default("github_app"),
   baseSha: z.string().trim().min(1),
@@ -46,13 +45,6 @@ export const reviewJobSchema = z.object({
   report: reviewReportSchema.optional()
 }).strict().superRefine((job, issues) => {
   if (job.accessMode === "local_git") {
-    if (job.repoPath === undefined) {
-      issues.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "A local_git job requires repoPath",
-        path: ["repoPath"]
-      });
-    }
     if (job.publicationPolicy !== "disabled") {
       issues.addIssue({
         code: z.ZodIssueCode.custom,

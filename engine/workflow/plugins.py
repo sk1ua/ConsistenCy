@@ -97,6 +97,15 @@ class SubprocessPlugin(BaseAnalyzerPlugin):
 
     async def analyze(self, context: AnalysisContext) -> PluginReport:
         argv = (self.executable, *self.base_args, *self.extra_args())
+        execution_profile = context.options.get("execution_profile", "static_readonly")
+        if execution_profile != "trusted_sandbox":
+            return PluginReport(
+                command=argv,
+                summary=f"{self.executable} is disabled for {execution_profile!r} execution",
+                skipped_reason=(
+                    "External tools require options.execution_profile='trusted_sandbox'"
+                ),
+            )
         if context.workspace_path is None:
             # Without an explicit workspace the tool would inherit the process
             # CWD and scan whatever happens to be there. Refuse instead.

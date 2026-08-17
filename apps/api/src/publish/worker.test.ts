@@ -54,7 +54,11 @@ describe("PublishWorker & Outbox Pipeline Test Suite", () => {
         "0007_notebook_citations",
         "0008_public_read_access_mode",
         "0009_local_git_jobs",
-        "0010_local_notebook_sources"
+        "0010_local_notebook_sources",
+        "0011_audit_control_plane",
+        "0012_repository_pulses",
+        "0013_audit_run_planning_receipts",
+        "0014_automation_scheduler"
       ]);
     } finally {
       database.close();

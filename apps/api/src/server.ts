@@ -12,9 +12,10 @@ import { GitHubAppAuthenticator } from "./github/auth";
 import { createContextBuilder } from "./review/context/contextRouter";
 import { triggerLocalReview } from "./trigger/local";
 import { HeartbeatDaemon } from "./heartbeat/daemon";
+import { RepositorySupervisor } from "./heartbeat/repositorySupervisor";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createLLMProvider } from "./review/llm/factory";
-import { redactSensitiveText, sanitizePublishFailure } from "./security/redact";
+import { redactSensitiveText, sanitizePublicError, sanitizePublishFailure } from "./security/redact";
 import { loadRealData } from "./data/realData";
 import { DeterministicAnalyzer } from "./review/deterministic";
 import { SQLiteNotebookStore } from "./notebook/store";
@@ -24,11 +25,16 @@ import { enqueuePublicPrReview } from "./review/publicPr";
 import { fileURLToPath } from "node:url";
 import { WorkflowStore } from "./workflows/store";
 import { resolveJobDiff } from "./review/jobDiff";
+import { SQLiteAuditDomainStore } from "./audit/store";
+import { buildRepositorySupervisorRegistrations } from "./audit/repositorySupervision";
+import { AuditRunPlanner } from "./audit/planner";
+import { AutomationScheduler } from "./audit/scheduler";
 
 const { config, store: settingsStore } = loadRuntimeConfig();
 const database = openDatabase(config.databasePath);
 runMigrations(database);
 const jobs = new SQLiteJobStore(database);
+const auditStore = new SQLiteAuditDomainStore(database);
 const notebookStore = new SQLiteNotebookStore(database);
 const recoveredJobs = jobs.recoverStaleRunningJobs(new Date(Date.now() - 15 * 60 * 1_000));
 if (recoveredJobs > 0) {
@@ -159,10 +165,65 @@ export const heartbeat = new HeartbeatDaemon({
   }
 });
 
+function repositorySupervisorRegistrations() {
+  return buildRepositorySupervisorRegistrations(
+    auditStore,
+    config.CONSISTENCY_HEARTBEAT_INTERVAL_MS
+  );
+}
+
+export const auditRunPlanner = new AuditRunPlanner(auditStore);
+export const automationScheduler = new AutomationScheduler(auditStore, auditRunPlanner, {
+  pollIntervalMs: config.CONSISTENCY_AUTOMATION_SCHEDULER_INTERVAL_MS,
+  onError: failure => {
+    logger.warn({
+      automationId: failure.automationId,
+      error: sanitizePublicError(
+        failure.error instanceof Error ? failure.error.message : "Unknown automation scheduler error"
+      )
+    }, "Automation scheduler evaluation failed");
+  }
+});
+
+/**
+ * Read-only, multi-repository observation. The sink persists evidence and may
+ * plan a durable `created` AuditRun; it never queues execution or runs code from
+ * a monitored checkout.
+ */
+export const repositorySupervisor = new RepositorySupervisor(
+  repositorySupervisorRegistrations(),
+  {
+    sink: {
+      writePulse: (repositoryId, pulse) => {
+        auditStore.saveRepositoryPulse(repositoryId, pulse);
+      },
+      writeChangeEvent: event => {
+        const persisted = auditStore.saveRepositoryEvent(event);
+        auditRunPlanner.planRepositoryEvent(persisted);
+      }
+    },
+    onError: failure => {
+      logger.warn({
+        repositoryId: failure.repositoryId,
+        phase: failure.phase,
+        error: sanitizePublicError(
+          failure.error instanceof Error ? failure.error.message : "Unknown repository supervision error"
+        )
+      }, "Repository supervision failed");
+    }
+  }
+);
+
+async function reconcileRepositorySupervisor(): Promise<void> {
+  await repositorySupervisor.reconcile(repositorySupervisorRegistrations());
+  if (automationScheduler.isRunning) automationScheduler.tick();
+}
+
 export const server = createApiServer({
   jobs,
   githubWebhookSecret: config.GITHUB_WEBHOOK_SECRET,
   apiToken: config.CONSISTENCY_API_TOKEN,
+  desktopControlToken: config.CONSISTENCY_DESKTOP_CONTROL_TOKEN,
   nodeEnv: config.NODE_ENV,
   allowedOrigins: config.allowedOrigins,
   workspaceRoot: config.workspaceRoot,
@@ -183,6 +244,10 @@ export const server = createApiServer({
   localReview: input => triggerLocalReview(jobs, input, {
     allowedRoots: config.localReviewRoots
   }),
+  auditStore,
+  auditPlanner: auditRunPlanner,
+  automationScheduler,
+  onAuditRepositoriesChanged: reconcileRepositorySupervisor,
   workflows,
   jobDiff: jobId => resolveJobDiff(jobId, {
     jobs,
@@ -208,7 +273,10 @@ export const server = createApiServer({
       githubAppConfigured: Boolean(config.GITHUB_APP_ID && config.GITHUB_PRIVATE_KEY),
       webhookSecretConfigured: Boolean(config.GITHUB_WEBHOOK_SECRET),
       publicReadTokenConfigured: Boolean(config.GITHUB_PUBLIC_READ_TOKEN),
-      databasePath: config.databasePath,
+      storage: {
+        kind: config.databasePath === ":memory:" ? "memory" : "file",
+        configured: config.databasePath.trim().length > 0
+      },
       workerConcurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
       publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY,
       demoMode: provider.name === "mock"
@@ -226,7 +294,17 @@ export async function shutdownApplication(): Promise<void> {
     if (server.listening) {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    // 2. Stop the heartbeat first: it only observes, so nothing depends on it.
+    // 2. Stop schedulers and read-only observers before persistence is closed.
+    try {
+      automationScheduler.stop();
+    } catch (err) {
+      logger.error({ error: err }, "Error stopping automation scheduler during shutdown");
+    }
+    try {
+      repositorySupervisor.stop();
+    } catch (err) {
+      logger.error({ error: err }, "Error stopping repository supervisor during shutdown");
+    }
     try {
       heartbeat.stop();
     } catch (err) {
@@ -284,6 +362,12 @@ if (process.env.NODE_ENV !== "test") {
     publishWorker.start();
   }
   heartbeat.start();
+  automationScheduler.start();
+  void repositorySupervisor.start().catch(error => {
+    logger.error({
+      error: sanitizePublicError(error instanceof Error ? error.message : "Unknown repository supervision error")
+    }, "Repository supervisor failed to start");
+  });
   server.listen(config.PORT, config.HOST, () => {
     logger.info({
       host: config.HOST,
@@ -293,12 +377,12 @@ if (process.env.NODE_ENV !== "test") {
       publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY,
       // Surfaced at startup because any checkout under these roots is readable
       // through POST /reviews/local.
-      localReviewRoots: config.localReviewRoots
+      localReviewRootCount: config.localReviewRoots.length
     }, "ConsistenCy API listening");
 
     if (config.localReviewRootsAreDefaulted) {
       logger.warn({
-        localReviewRoots: config.localReviewRoots
+        localReviewRootCount: config.localReviewRoots.length
       }, "CONSISTENCY_LOCAL_REVIEW_ROOTS is unset; every repository under the project's parent directory can be read via POST /reviews/local");
     }
   });

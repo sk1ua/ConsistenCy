@@ -68,8 +68,16 @@ _CREDENTIAL_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r'ghp_[A-Za-z0-9]{36}'), "GitHub Personal Access Token"),
     # GitHub Fine-grained PAT
     (re.compile(r'github_pat_[A-Za-z0-9_]{82}'), "GitHub Fine-grained PAT"),
+    # GitLab personal/project/group access tokens
+    (re.compile(r'glpat-[A-Za-z0-9_\-]{20,}'), "GitLab Access Token"),
+    # npm automation/access token
+    (re.compile(r'npm_[A-Za-z0-9]{36}'), "npm Access Token"),
+    # PyPI upload token
+    (re.compile(r'pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\-]{20,}'), "PyPI API Token"),
     # OpenAI API Key
     (re.compile(r'sk-[A-Za-z0-9]{48,}'), "OpenAI API Key"),
+    # Stripe live-mode secret key (test keys are intentionally excluded)
+    (re.compile(r'sk_live_[A-Za-z0-9]{20,}'), "Stripe Live Secret Key"),
     # Slack tokens
     (re.compile(r'xox[baprs]-[0-9A-Za-z\-]{10,}'), "Slack Token"),
     # Private key header

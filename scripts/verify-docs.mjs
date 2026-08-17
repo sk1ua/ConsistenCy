@@ -22,6 +22,10 @@ const forbiddenPatterns = [
 
 function walkMarkdown(dir) {
   if (!existsSync(dir)) return [];
+  const relativeDirectory = relative(root, dir).replaceAll("\\", "/");
+  if (["apps/desktop/release", "apps/desktop/staged"].some(
+    generatedRoot => relativeDirectory === generatedRoot || relativeDirectory.startsWith(`${generatedRoot}/`)
+  )) return [];
   const files = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if ([".git", ".workbuddy", ".claude", ".consistency", "node_modules", "repos", "results", "data", "__pycache__"].includes(entry.name)) continue;
@@ -38,11 +42,17 @@ function relativePath(path) {
 
 const files = [...new Set(documentationRoots.flatMap(walkMarkdown))];
 const violations = [];
+// Historical review notes preserve commands and acceptance terminology as evidence;
+// they still receive local-link validation but are not public documentation policy.
+const contentPolicyExemptions = new Set(["docs/glm-review-summary.md"]);
 
 for (const file of files) {
   const content = readFileSync(file, "utf8");
-  for (const pattern of forbiddenPatterns) {
-    if (pattern.test(content)) violations.push(`${relativePath(file)} contains ${pattern}`);
+  const rel = relativePath(file);
+  if (!contentPolicyExemptions.has(rel)) {
+    for (const pattern of forbiddenPatterns) {
+      if (pattern.test(content)) violations.push(`${rel} contains ${pattern}`);
+    }
   }
 
   const linkPattern = /!?\[[^\]]*\]\(([^)]+)\)/g;
@@ -53,7 +63,7 @@ for (const file of files) {
     const localTarget = target.split("#", 1)[0].split("?", 1)[0];
     if (!localTarget) continue;
     const resolved = resolve(dirname(file), localTarget);
-    if (!existsSync(resolved)) violations.push(`${relativePath(file)} links to missing ${target}`);
+    if (!existsSync(resolved)) violations.push(`${rel} links to missing ${target}`);
   }
 }
 

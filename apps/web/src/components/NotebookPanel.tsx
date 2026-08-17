@@ -89,6 +89,9 @@ export function NotebookPanel({ notebookId }: { notebookId?: string }) {
   const { t } = useI18n();
   const railRef = useRef<HTMLElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const refreshAbortRef = useRef<AbortController | undefined>(undefined);
+  const streamAbortRef = useRef<AbortController | undefined>(undefined);
+  const cardAbortRef = useRef<AbortController | undefined>(undefined);
   const [notebook, setNotebook] = useState<Notebook>();
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
@@ -98,24 +101,38 @@ export function NotebookPanel({ notebookId }: { notebookId?: string }) {
   const [cardLoading, setCardLoading] = useState<NotebookCardKind>();
   const [error, setError] = useState<string>();
 
-  async function refresh() {
+  async function refresh(signal?: AbortSignal) {
     if (!notebookId) return;
     try {
-      const loaded = await api.notebook(notebookId);
+      const loaded = await api.notebook(notebookId, signal);
+      if (signal?.aborted) return;
       setNotebook(loaded);
       setSelectedSources(current => current.length > 0 ? current.filter(id => loaded.sources.some(source => source.jobId === id)) : loaded.sources.slice(-1).map(source => source.jobId));
       setError(undefined);
     } catch (caught) {
+      if (signal?.aborted) return;
       setError(caught instanceof Error ? caught.message : t("Notebook unavailable"));
     }
   }
 
   useEffect(() => {
+    const controller = new AbortController();
+    refreshAbortRef.current?.abort();
+    streamAbortRef.current?.abort();
+    cardAbortRef.current?.abort();
+    refreshAbortRef.current = controller;
     setNotebook(undefined);
     setDraft(undefined);
     setEvents([]);
-    void refresh();
+    void refresh(controller.signal);
+    return () => controller.abort();
   }, [notebookId]);
+
+  useEffect(() => () => {
+    refreshAbortRef.current?.abort();
+    streamAbortRef.current?.abort();
+    cardAbortRef.current?.abort();
+  }, []);
 
   const messages = useMemo(() => [...(notebook?.messages ?? []), ...(draft ? [draft] : [])], [notebook?.messages, draft]);
   const latestRun = [...messages].reverse().find(message => message.role === "assistant" && message.provider);
@@ -132,19 +149,26 @@ export function NotebookPanel({ notebookId }: { notebookId?: string }) {
     setEvents([]);
     setError(undefined);
     setDraft({ id: "draft", notebookId, role: "assistant", content: "", status: "streaming", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), sourceJobIds: selectedSources, citations: [] });
+    const controller = new AbortController();
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = controller;
     try {
-      for await (const eventItem of api.streamNotebookMessage(notebookId, content, selectedSources)) {
+      for await (const eventItem of api.streamNotebookMessage(notebookId, content, selectedSources, controller.signal)) {
         const text = eventItem.event === "text.delta" ? String((eventItem.data as { text?: unknown }).text ?? "") : undefined;
         if (text) setDraft(current => current ? { ...current, content: current.content + text } : current);
         const log = eventText(eventItem, t);
         if (log) setEvents(current => [...current.slice(-5), log]);
       }
-      await refresh();
+      await refresh(controller.signal);
     } catch (caught) {
+      if (controller.signal.aborted) return;
       setError(caught instanceof Error ? caught.message : t("Notebook stream failed"));
     } finally {
-      setDraft(undefined);
-      setStreaming(false);
+      if (streamAbortRef.current === controller) {
+        streamAbortRef.current = undefined;
+        setDraft(undefined);
+        setStreaming(false);
+      }
     }
   }
 
@@ -169,16 +193,23 @@ export function NotebookPanel({ notebookId }: { notebookId?: string }) {
     if (!notebookId || selectedSources.length === 0 || cardLoading) return;
     setCardLoading(kind);
     setError(undefined);
+    const controller = new AbortController();
+    cardAbortRef.current?.abort();
+    cardAbortRef.current = controller;
     try {
-      for await (const eventItem of api.streamNotebookCard(notebookId, kind, selectedSources)) {
+      for await (const eventItem of api.streamNotebookCard(notebookId, kind, selectedSources, controller.signal)) {
         const log = eventText(eventItem, t);
         if (log) setEvents(current => [...current.slice(-5), log]);
       }
-      await refresh();
+      await refresh(controller.signal);
     } catch (caught) {
+      if (controller.signal.aborted) return;
       setError(caught instanceof Error ? caught.message : t("Card generation failed"));
     } finally {
-      setCardLoading(undefined);
+      if (cardAbortRef.current === controller) {
+        cardAbortRef.current = undefined;
+        setCardLoading(undefined);
+      }
     }
   }
 

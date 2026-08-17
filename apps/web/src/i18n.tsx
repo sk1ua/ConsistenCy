@@ -193,13 +193,22 @@ const zh: Record<string, string> = {
   "Database path": "数据库路径",
   "Database": "数据库",
   "Local database configured": "本地数据库已配置",
+  "In-memory storage configured": "已配置内存存储",
+  "Local file storage configured": "已配置本地文件存储",
+  "In-memory storage": "内存存储",
+  "Local file storage": "本地文件存储",
+  "Workspace": "工作区",
+  "Review workspace configured": "审查工作区已配置",
+  "Review workspace not configured": "审查工作区未配置",
   "Stopped": "已停止",
   "Workspace root": "工作区根目录",
   "Worker concurrency": "工作进程并发数",
   "Poll interval (ms)": "轮询间隔（毫秒）",
   "Web URL": "网页地址",
   "API bearer token": "API 访问令牌",
-  "Configured for the API. Keep VITE_API_TOKEN synchronized before restarting the web app.": "已为 API 配置。重启网页应用前请保持 VITE_API_TOKEN 一致。",
+  "API session": "API 会话",
+  "Protected API session configured": "已配置受保护的 API 会话",
+  "Browser development session is not protected": "浏览器开发会话未受保护",
   "Optional. Configure it from the CLI so the API and Vite client can be updated together.": "可选。请通过 CLI 配置，以便同时更新 API 与 Vite 客户端。",
   "Active runtime": "当前运行状态",
   "These values describe the currently running API process.": "以下为当前 API 进程的实际运行状态。",
@@ -425,6 +434,9 @@ const zh: Record<string, string> = {
   "Local repository": "本地仓库",
   // Diff workspace
   "Diff": "差异",
+  "Diff view mode": "差异视图模式",
+  "Unified": "统一视图",
+  "Split": "分栏视图",
   "No changes to show.": "没有可显示的变更。"
 };
 

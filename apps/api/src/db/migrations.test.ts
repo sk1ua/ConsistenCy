@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { openDatabase } from "./connection";
 import { migrations, runMigrations, type Migration } from "./migrations";
+import { workflowSpecSchema } from "@consistency/schema";
+import { SQLiteAuditDomainStore } from "../audit/store";
 
 describe("SQLite foundation", () => {
   it("enables foreign keys and creates the migration table", () => {
@@ -17,7 +19,11 @@ describe("SQLite foundation", () => {
         "0007_notebook_citations",
         "0008_public_read_access_mode",
         "0009_local_git_jobs",
-        "0010_local_notebook_sources"
+        "0010_local_notebook_sources",
+        "0011_audit_control_plane",
+        "0012_repository_pulses",
+        "0013_audit_run_planning_receipts",
+        "0014_automation_scheduler"
       ]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
@@ -75,7 +81,11 @@ describe("SQLite foundation", () => {
         "0007_notebook_citations",
         "0008_public_read_access_mode",
         "0009_local_git_jobs",
-        "0010_local_notebook_sources"
+        "0010_local_notebook_sources",
+        "0011_audit_control_plane",
+        "0012_repository_pulses",
+        "0013_audit_run_planning_receipts",
+        "0014_automation_scheduler"
       ]);
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
@@ -120,7 +130,11 @@ describe("SQLite foundation", () => {
         "0007_notebook_citations",
         "0008_public_read_access_mode",
         "0009_local_git_jobs",
-        "0010_local_notebook_sources"
+        "0010_local_notebook_sources",
+        "0011_audit_control_plane",
+        "0012_repository_pulses",
+        "0013_audit_run_planning_receipts",
+        "0014_automation_scheduler"
       ]);
 
       // Assert data preserved
@@ -220,7 +234,14 @@ describe("0009_local_git_jobs", () => {
       runMigrations(database, upTo0008);
       seedGitHubJob(database);
 
-      expect(runMigrations(database, migrations)).toEqual(["0009_local_git_jobs", "0010_local_notebook_sources"]);
+      expect(runMigrations(database, migrations)).toEqual([
+        "0009_local_git_jobs",
+        "0010_local_notebook_sources",
+        "0011_audit_control_plane",
+        "0012_repository_pulses",
+        "0013_audit_run_planning_receipts",
+        "0014_automation_scheduler"
+      ]);
 
       const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_kept'").get() as any;
       expect(job).toMatchObject({
@@ -290,6 +311,171 @@ describe("0009_local_git_jobs", () => {
     try {
       runMigrations(database);
       expect(runMigrations(database, [migration0009])).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("0011_audit_control_plane", () => {
+  it("backfills a renderer-safe display name while retaining the local locator only server-side", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database, migrations.filter(migration => migration.id < "0011"));
+      database.prepare(`
+        INSERT INTO jobs (
+          id, type, status, repository_full_name, pull_request_number, repo_path,
+          base_sha, head_sha, publication_policy, access_mode, created_at, updated_at
+        ) VALUES (
+          'job_private_path', 'PR_REVIEW', 'queued', 'D:/private/customer/repository', NULL,
+          'D:/private/customer/repository', 'base', 'WORKING_TREE', 'disabled', 'local_git',
+          '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z'
+        )
+      `).run();
+
+      expect(runMigrations(database, migrations.filter(migration => migration.id <= "0011_audit_control_plane")))
+        .toEqual(["0011_audit_control_plane"]);
+      const repository = database.prepare(`
+        SELECT display_name, source, server_locator FROM repositories
+        WHERE identity_key = 'local:D:/private/customer/repository'
+      `).get() as { display_name: string; source: string; server_locator: string };
+      expect(repository).toEqual({
+        display_name: "Local repository",
+        source: "local_git",
+        server_locator: "D:/private/customer/repository"
+      });
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("0013_audit_run_planning_receipts", () => {
+  it("refuses to hide pre-existing duplicate active runs when adding the coalescence constraint", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database, migrations.filter(migration => migration.id <= "0012_repository_pulses"));
+      const store = new SQLiteAuditDomainStore(database);
+      const repository = store.createRepository({
+        displayName: "trusted-local",
+        source: "local_git",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/server-only/trusted-local", trustLevel: "trusted_local" });
+      const workflow = store.createWorkflowRevision({
+        workflowId: "migration-test",
+        spec: workflowSpecSchema.parse({
+          version: 2,
+          name: "migration-test",
+          nodes: [{ id: "security", uses: "engine.security" }],
+          verifiers: [],
+          synthesizer: { needs: ["security"] }
+        })
+      });
+      const policy = store.createPolicyRevision({
+        policyId: "migration-test",
+        name: "Migration test",
+        requiredChecks: [],
+        minimumCoverage: 0,
+        warnAtRiskScore: 40,
+        failAtRiskScore: 70,
+        enforcement: "advisory"
+      });
+      const automation = store.createAutomation({
+        repositoryId: repository.id,
+        name: "duplicate-active",
+        trigger: { type: "manual" },
+        workflowRevisionId: workflow.id,
+        policyRevisionId: policy.id,
+        executionProfile: "trusted_sandbox",
+        enabled: true
+      });
+      // This fixture intentionally remains on 0012. Insert the legacy shape
+      // directly because the current store targets the fully migrated schema.
+      const insertLegacyDraft = database.prepare(`
+        INSERT INTO audit_runs (
+          id, repository_id, source, automation_id, workflow_revision_id,
+          policy_revision_id, execution_profile, status, publication_status, created_at
+        ) VALUES (?, ?, 'manual', ?, ?, ?, 'trusted_sandbox', 'created', 'skipped', ?)
+      `);
+      insertLegacyDraft.run("audit_run_duplicate_1", repository.id, automation.id, workflow.id, policy.id, "2026-08-14T00:00:00.000Z");
+      insertLegacyDraft.run("audit_run_duplicate_2", repository.id, automation.id, workflow.id, policy.id, "2026-08-14T00:01:00.000Z");
+
+      expect(() => runMigrations(database, migrations)).toThrow(/multiple active runs/i);
+      expect(database.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name = 'audit_run_planning_receipts'
+      `).get()).toBeUndefined();
+      expect(database.prepare(`
+        SELECT id FROM schema_migrations WHERE id = '0013_audit_run_planning_receipts'
+      `).get()).toBeUndefined();
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("0014_automation_scheduler", () => {
+  it("preserves legacy planning receipts and adds durable schedule provenance", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database, migrations.filter(migration => migration.id <= "0013_audit_run_planning_receipts"));
+      const store = new SQLiteAuditDomainStore(database);
+      const repository = store.createRepository({
+        displayName: "scheduler-migration",
+        source: "local_git",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/server-only/scheduler-migration", trustLevel: "trusted_local" });
+      const workflow = store.createWorkflowRevision({
+        workflowId: "scheduler-migration",
+        spec: workflowSpecSchema.parse({
+          version: 2,
+          name: "scheduler-migration",
+          nodes: [{ id: "security", uses: "engine.security" }],
+          verifiers: [],
+          synthesizer: { needs: ["security"] }
+        })
+      });
+      const policy = store.createPolicyRevision({
+        policyId: "scheduler-migration",
+        name: "Scheduler migration",
+        requiredChecks: [],
+        minimumCoverage: 0,
+        warnAtRiskScore: 40,
+        failAtRiskScore: 70,
+        enforcement: "advisory"
+      });
+      const automation = store.createAutomation({
+        repositoryId: repository.id,
+        name: "legacy-manual",
+        trigger: { type: "manual" },
+        workflowRevisionId: workflow.id,
+        policyRevisionId: policy.id,
+        executionProfile: "static_readonly",
+        enabled: true
+      });
+      database.prepare(`
+        INSERT INTO audit_runs (
+          id, repository_id, source, automation_id, workflow_revision_id,
+          policy_revision_id, execution_profile, status, publication_status, created_at
+        ) VALUES ('audit_run_legacy', ?, 'manual', ?, ?, ?, 'static_readonly', 'created', 'skipped', ?)
+      `).run(repository.id, automation.id, workflow.id, policy.id, "2026-08-14T00:00:00.000Z");
+      database.prepare(`
+        INSERT INTO audit_run_planning_receipts (
+          id, planning_key, repository_id, automation_id, workflow_digest,
+          source, source_event_id, audit_run_id, disposition, created_at
+        ) VALUES ('receipt_legacy', ?, ?, ?, ?, 'manual', NULL, 'audit_run_legacy', 'created', ?)
+      `).run("a".repeat(64), repository.id, automation.id, workflow.digest, "2026-08-14T00:00:00.000Z");
+
+      expect(runMigrations(database, migrations)).toEqual(["0014_automation_scheduler"]);
+      expect(database.prepare("SELECT scheduled_for FROM audit_runs WHERE id = 'audit_run_legacy'").get())
+        .toEqual({ scheduled_for: null });
+      expect(database.prepare("SELECT scheduled_for FROM audit_run_planning_receipts WHERE id = 'receipt_legacy'").get())
+        .toEqual({ scheduled_for: null });
+      expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'automation_schedule_states'").get())
+        .toBeTruthy();
+      expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'automation_schedule_windows'").get())
+        .toBeTruthy();
+      expect(database.pragma("foreign_key_check")).toEqual([]);
     } finally {
       database.close();
     }

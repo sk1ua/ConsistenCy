@@ -1,81 +1,172 @@
-/* ===== Diff workspace ===== */
+/* ===== Diff evidence workspace ===== */
 .finding-locate {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--primary);
-  font-size: 12px;
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  font: 11px/1.35 var(--font-mono);
+  text-align: left;
+}
+
+.finding-locate:hover {
+  border-color: var(--primary-faint);
+  background: var(--primary-soft);
+}
+
+.finding-locate:focus-visible,
+.diff-file-list button:focus-visible,
+.diff-row:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .diff-viewer {
+  min-width: 0;
+  min-height: 420px;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 290px minmax(0, 1fr);
   gap: var(--space-md);
   align-items: stretch;
-  min-height: 420px;
 }
 
 .diff-file-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  min-width: 0;
+  max-height: 640px;
+  overflow: auto;
   padding: var(--space-md);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  max-height: 640px;
-  overflow: auto;
 }
 
 .diff-file-list h3 {
   margin: 0 0 var(--space-sm);
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  display: flex;
+  justify-content: space-between;
   color: var(--muted);
+  font-size: 13px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
 }
 
-.diff-file-list button {
+.diff-file-list h3 span {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-tree,
+.diff-tree-findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diff-tree {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 8px;
+  gap: 3px;
+}
+
+.diff-tree-file {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 8px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  text-align: left;
+  color: var(--foreground);
   cursor: pointer;
+  text-align: left;
 }
 
-.diff-file-list button:hover {
+.diff-tree-file:hover {
   background: var(--surface-subtle);
 }
 
-.diff-file-list button.active {
+.diff-tree-file.active {
   border-color: var(--primary);
   background: var(--primary-soft);
 }
 
-.diff-file-list code {
+.diff-tree-file code {
   overflow: hidden;
+  color: inherit;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.diff-file-list small {
+.diff-tree-file small {
   grid-column: 2;
   color: var(--muted);
-  font-size: 12px;
+  font: 11px/1.4 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
+.diff-tree-findings {
+  margin: 3px 0 7px 18px;
+  padding-left: 10px;
+  display: grid;
+  gap: 2px;
+  border-left: 1px solid var(--border-strong);
+}
+
+.diff-tree-finding {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  text-align: left;
+}
+
+.diff-tree-finding:hover {
+  background: var(--surface-subtle);
+}
+
+.diff-tree-finding > span:last-child,
+.diff-tree-finding strong,
+.diff-tree-finding small {
+  min-width: 0;
+  display: block;
+}
+
+.diff-tree-finding strong {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-tree-finding small {
+  margin-top: 2px;
+  color: var(--muted);
+  font: 10px/1.3 var(--font-mono);
+}
+
 .diff-status {
+  width: 20px;
+  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
   border-radius: 5px;
   font-size: 11px;
   font-weight: 800;
@@ -105,85 +196,142 @@
 }
 
 .diff-content {
+  min-width: 0;
+  min-height: 420px;
+  max-height: 640px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  overflow: auto;
-  max-height: 640px;
 }
 
 .diff-file-head {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
   background: var(--surface);
   z-index: 1;
 }
 
 .diff-file-head strong {
-  font-family: var(--font-mono);
-  font-size: 13px;
+  min-width: 0;
+  flex: 1;
   overflow: hidden;
+  font: 13px/1.4 var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.diff-grid {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) 52px minmax(0, 1fr);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
+.diff-mode-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+}
+
+.diff-mode-toggle button {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.diff-mode-toggle button.active {
+  color: var(--foreground);
+  background: var(--surface-muted);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.diff-grid,
+.diff-code-viewport {
+  min-height: 0;
+  overflow: auto;
+  font: 12px/1.5 var(--font-mono);
+}
+
+.diff-virtual-canvas {
+  position: relative;
+  min-width: 720px;
 }
 
 .diff-row {
-  display: contents;
+  width: 100%;
+  min-width: 720px;
+  min-height: 24px;
+  display: grid;
+  grid-template-columns: 52px minmax(240px, 1fr) 52px minmax(240px, 1fr);
+  align-items: stretch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.diff-row.diff-mode-unified {
+  grid-template-columns: 52px 52px minmax(520px, 1fr);
+}
+
+.diff-row:hover > .diff-code {
+  background: var(--surface-subtle);
 }
 
 .diff-row > span {
-  padding: 0 6px;
+  min-width: 0;
+  padding: 2px 6px;
   border-bottom: 1px solid var(--shadow-soft);
 }
 
 .diff-ln {
+  background: var(--surface-subtle);
   color: var(--muted);
   text-align: right;
   user-select: none;
-  background: var(--surface-subtle);
 }
 
 .diff-code {
-  white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: pre;
 }
 
-.diff-row-add .diff-code:nth-of-type(2),
-.diff-row-add .diff-code:nth-of-type(4) {
+.diff-row-add > .diff-code:nth-child(4),
+.diff-row-add > .diff-ln:nth-child(3) {
   background: var(--success-soft);
 }
 
-.diff-row-del .diff-code:nth-of-type(2) {
-  background: var(--danger-soft);
-}
-
-.diff-row-add .diff-ln:nth-of-type(3) {
+.diff-row-add.diff-mode-unified > .diff-code {
   background: var(--success-soft);
 }
 
-.diff-row-del .diff-ln:nth-of-type(1) {
+.diff-row-del > .diff-code:nth-child(2),
+.diff-row-del > .diff-ln:nth-child(1) {
   background: var(--danger-soft);
+}
+
+.diff-row-del.diff-mode-unified > .diff-code {
+  background: var(--danger-soft);
+}
+
+.diff-row-meta {
+  color: var(--muted);
+  cursor: default;
 }
 
 .diff-row.diff-finding .diff-code {
-  box-shadow: inset 3px 0 0 var(--danger);
-}
-
-.diff-row.diff-finding-critical .diff-code {
   box-shadow: inset 3px 0 0 var(--danger);
 }
 
@@ -195,7 +343,8 @@
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
-.diff-row.diff-finding-low .diff-code {
+.diff-row.diff-finding-low .diff-code,
+.diff-row.diff-finding-info .diff-code {
   box-shadow: inset 3px 0 0 var(--success);
 }
 
@@ -210,12 +359,12 @@
   flex-wrap: wrap;
   gap: var(--space-sm);
   padding: 8px 12px !important;
-  background: var(--surface) !important;
   border-top: 1px solid var(--border);
+  background: var(--surface) !important;
   box-shadow: 0 4px 14px var(--shadow-card);
 }
 
-.diff-popover span {
+.diff-popover > span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -226,5 +375,9 @@
 @media (max-width: 860px) {
   .diff-viewer {
     grid-template-columns: 1fr;
+  }
+
+  .diff-file-list {
+    max-height: 280px;
   }
 }

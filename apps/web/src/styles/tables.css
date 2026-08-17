@@ -6,6 +6,87 @@
   max-width: 100%;
   overflow-x: auto;
 }
+.semantic-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  text-align: left;
+}
+.semantic-table th,
+.semantic-table td {
+  min-width: 0;
+  height: 42px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+.semantic-table th {
+  height: 34px;
+  border-top: 0;
+  color: var(--muted);
+  font: 700 11px/1.4 var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.semantic-table tbody tr:hover,
+.semantic-table tbody tr:focus-within {
+  background: var(--surface-muted);
+}
+.semantic-row-open {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  border: 0;
+  color: var(--foreground);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.semantic-row-open:not(.repository-cell) {
+  display: grid;
+}
+.semantic-row-open strong,
+.semantic-row-open small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dashboard-table .semantic-table { min-width: 960px; }
+.jobs-table .semantic-table { min-width: 880px; }
+.dashboard-table .semantic-table col,
+.jobs-table .semantic-table col { min-width: 0; }
+.dashboard-table .semantic-table th:nth-child(1),
+.dashboard-table .semantic-table td:nth-child(1) { width: 18%; }
+.dashboard-table .semantic-table th:nth-child(2),
+.dashboard-table .semantic-table td:nth-child(2) { width: 24%; }
+.dashboard-table .semantic-table th:nth-child(3),
+.dashboard-table .semantic-table td:nth-child(3) { width: 10%; }
+.dashboard-table .semantic-table th:nth-child(4),
+.dashboard-table .semantic-table td:nth-child(4) { width: 9%; }
+.dashboard-table .semantic-table th:nth-child(5),
+.dashboard-table .semantic-table td:nth-child(5) { width: 7%; }
+.dashboard-table .semantic-table th:nth-child(6),
+.dashboard-table .semantic-table td:nth-child(6) { width: 8%; }
+.dashboard-table .semantic-table th:nth-child(7),
+.dashboard-table .semantic-table td:nth-child(7) { width: 14%; }
+.dashboard-table .semantic-table th:nth-child(8),
+.dashboard-table .semantic-table td:nth-child(8) { width: 4%; }
+.jobs-table .semantic-table th:nth-child(1),
+.jobs-table .semantic-table td:nth-child(1) { width: 30%; }
+.jobs-table .semantic-table th:nth-child(2),
+.jobs-table .semantic-table td:nth-child(2) { width: 13%; }
+.jobs-table .semantic-table th:nth-child(3),
+.jobs-table .semantic-table td:nth-child(3) { width: 12%; }
+.jobs-table .semantic-table th:nth-child(4),
+.jobs-table .semantic-table td:nth-child(4) { width: 9%; }
+.jobs-table .semantic-table th:nth-child(5),
+.jobs-table .semantic-table td:nth-child(5) { width: 20%; }
+.jobs-table .semantic-table th:nth-child(6),
+.jobs-table .semantic-table td:nth-child(6) { width: 16%; }
 .table-row {
   width: 100%;
   min-height: 42px;
@@ -119,7 +200,7 @@
 .badge-public-read {
   border-color: var(--primary-faint);
   background: var(--primary-soft);
-  color: #17628f;
+  color: var(--primary-strong);
 }
 
 /* ===== Jobs Page ===== */
@@ -191,6 +272,12 @@
 .jobs-table .table-row strong, .jobs-table .table-row small {
   display: block;
 }
+.jobs-table .semantic-row-open strong,
+.jobs-table .semantic-row-open small {
+  display: block;
+}
+.jobs-table .semantic-row-open strong { font-size: 13px; }
+.jobs-table .semantic-row-open small { margin-top: 3px; color: var(--muted); font-size: 12px; }
 .jobs-table .table-row strong {
   font-size: 13px;
 }

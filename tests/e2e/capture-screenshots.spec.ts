@@ -1,127 +1,143 @@
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-const outputDir = join(process.cwd(), "docs", "screenshots");
-mkdirSync(outputDir, { recursive: true });
-
-// 仅截图模式：禁用 animation/transition 并强制页面容器处于最终可见状态。
-// 通过 addStyleTag 注入，不影响生产环境的正常 UI 动画。
+const outputDir = resolve(process.env.CONSISTENCY_SCREENSHOT_DIR ?? join(process.cwd(), "docs", "screenshots"));
 const captureOnlyCss = `
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .page-stack { opacity: 1 !important; transform: none !important; }
 `;
 
-// 稳定等待：页面根节点与必要数据节点可见、字体就绪、根节点 opacity 为 1、
-// 且不存在仍在运行的入场动画。不依赖固定 waitForTimeout。
-async function stabilize(page: Page, rootSelector: string, dataSelectors: string[] = []) {
+type Theme = "dark" | "light";
+type Locale = "en-US" | "zh-CN";
+type Presentation = { width: 1440 | 1280 | 1100; theme: Theme; locale: Locale };
+
+const presentations: Presentation[] = ([1440, 1280, 1100] as const).flatMap(width =>
+  (["dark", "light"] as const).flatMap(theme =>
+    (["en-US", "zh-CN"] as const).map(locale => ({ width, theme, locale }))
+  )
+);
+
+async function stabilize(page: Page, rootSelector: string, dataSelectors: string[] = []): Promise<void> {
   const root = page.locator(rootSelector).first();
   await expect(root).toBeVisible();
-  for (const selector of dataSelectors) {
-    await expect(page.locator(selector).first()).toBeVisible();
-  }
+  for (const selector of dataSelectors) await expect(page.locator(selector).first()).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   await expect(root).toHaveCSS("opacity", "1");
-  await page.waitForFunction(() =>
-    document
-      .getAnimations({ subtree: true })
-      .every((animation) => animation.playState === "finished" || animation.playState === "idle")
-  );
+  await page.evaluate(() => {
+    for (const animation of document.getAnimations({ subtree: true })) animation.cancel();
+  });
+  await expect.poll(() => page.evaluate(() => document.getAnimations({ subtree: true }).filter(animation =>
+    animation.playState === "running" || animation.playState === "pending"
+  ).length)).toBe(0);
 }
 
-async function capture(page: Page, name: string) {
+async function applyPresentation(page: Page, presentation: Presentation): Promise<void> {
+  await page.setViewportSize({ width: presentation.width, height: 900 });
+  await page.evaluate(({ width, theme, locale }) => {
+    window.localStorage.setItem("consistency.theme.v1", theme);
+    window.localStorage.setItem("consistency.locale.v1", locale);
+    window.localStorage.setItem("consistency.workbench-layout.v1", JSON.stringify({
+      version: 1,
+      explorerCollapsed: false,
+      explorerWidth: 258,
+      inspectorOpen: width >= 1440,
+      inspectorWidth: 360,
+      ledgerOpen: false
+    }));
+  }, presentation);
+  await page.reload();
+  await page.addStyleTag({ content: captureOnlyCss });
+  await expect(page.locator("html")).toHaveAttribute("lang", presentation.locale);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", presentation.theme);
+}
+
+async function expectWorkbenchIntegrity(page: Page): Promise<void> {
+  const workbench = page.locator(".audit-workbench");
+  await expect(workbench).toBeVisible();
+  const box = await workbench.boundingBox();
+  expect(box, "audit-workbench must have a rendered box").not.toBeNull();
+  expect(box!.width, "audit-workbench must retain a usable center column").toBeGreaterThanOrEqual(640);
+
+  const offenders = await workbench.evaluate(root => {
+    const results: Array<{ text: string; lines: number; charactersPerLine: number }> = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      const text = node.textContent?.replace(/\s+/g, " ").trim() ?? "";
+      const parent = node.parentElement;
+      if (parent && text.length >= 6 && !parent.closest("[aria-hidden='true']")) {
+        const style = window.getComputedStyle(parent);
+        const parentBox = parent.getBoundingClientRect();
+        if (style.display !== "none" && style.visibility !== "hidden" && parentBox.width > 0 && parentBox.height > 0) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const lineTops = [...range.getClientRects()]
+            .filter(rect => rect.width > 0 && rect.height > 0)
+            .map(rect => Math.round(rect.top));
+          const lines = [...new Set(lineTops)].length;
+          const characters = [...text.replace(/\s/g, "")].length;
+          const charactersPerLine = lines > 0 ? characters / lines : characters;
+          if (lines >= 3 && charactersPerLine < 3) {
+            results.push({ text: text.slice(0, 80), lines, charactersPerLine });
+          }
+        }
+      }
+      node = walker.nextNode();
+    }
+    return results;
+  });
+  expect(offenders, `text wrapped one word/character per line: ${JSON.stringify(offenders)}`).toEqual([]);
+}
+
+async function capture(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(outputDir, name), fullPage: true });
 }
 
-test.describe("public project screenshot capture", () => {
-  test.setTimeout(90_000);
+test.describe("audit workbench screenshot capture", () => {
+  test.beforeAll(() => mkdirSync(outputDir, { recursive: true }));
+  test.setTimeout(180_000);
 
-  test("captures deterministic demo and available public-data views", async ({ page }) => {
-    await page.goto("/");
-    await page.addStyleTag({ content: captureOnlyCss });
-    await expect(page.locator("h1")).toContainText(/Review overview|审查概览/i);
-    await page.locator("button").filter({ hasText: /Load demo data|加载演示数据/ }).click();
-    await expect(page.locator(".demo-indicator")).toBeVisible();
-    await page.locator("select[aria-label='Language'], select[aria-label='语言']").selectOption("en-US");
+  test("captures the responsive theme and locale matrix plus primary review surfaces", async ({ page, request }) => {
+    const seedResponse = await request.post("http://127.0.0.1:3001/demo/seed", { data: {} });
+    expect(seedResponse.ok()).toBe(true);
 
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro", ".metric-grid .metric-card"]);
-    await capture(page, "dashboard-demo-desktop.png");
+    await page.goto("/#/inbox");
+    for (const presentation of presentations) {
+      await applyPresentation(page, presentation);
+      await stabilize(page, ".audit-shell", [".audit-workbench", ".dashboard-page"]);
+      await expectWorkbenchIntegrity(page);
+      const localeLabel = presentation.locale === "en-US" ? "en" : "zh";
+      await capture(page, `audit-inbox-${presentation.width}-${presentation.theme}-${localeLabel}.png`);
+    }
 
-    await page.getByRole("button", { name: /Jobs|任务/ }).click();
-    await expect(page.locator("h1")).toContainText(/Review queue|审查队列/i);
-    await stabilize(page, ".jobs-page", [".jobs-table .table-row"]);
-    await capture(page, "jobs-dark-desktop.png");
+    await applyPresentation(page, { width: 1440, theme: "dark", locale: "en-US" });
+    await page.locator(".activity-rail").getByRole("link", { name: "Runs", exact: true }).click();
+    await stabilize(page, ".audit-shell", [".jobs-table tbody tr"]);
+    await expectWorkbenchIntegrity(page);
+    await capture(page, "audit-runs-1440-dark-en.png");
 
-    const succeededJob = page.locator(".jobs-table button.table-row").filter({ hasText: /succeeded|已完成|已成功/i }).first();
-    await expect(succeededJob).toBeVisible();
-    await succeededJob.click();
-    await stabilize(page, ".report-workspace", [".report-header", ".notebook-panel"]);
-    await expect(page.locator(".notebook-source-bar")).toBeVisible();
-    await capture(page, "report-demo-desktop.png");
+    const succeededRow = page.getByRole("table", { name: "Review queue" }).getByRole("row").filter({ hasText: /Succeeded/i }).first();
+    await succeededRow.getByRole("button").click();
+    await expect(page.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
+    await stabilize(page, ".report-workspace", [".report-header", ".report-ide .finding-item", ".report-ide .evidence-panel"]);
+    await expectWorkbenchIntegrity(page);
+    await capture(page, "audit-run-overview-1440-dark-en.png");
 
-    // IDE split in report mode: findings | evidence | agent timeline
-    await page.getByRole("button", { name: "Review report", exact: true }).click();
-    await stabilize(page, ".report-workspace", [".report-header", ".report-ide .finding-item", ".report-ide .agent-timeline"]);
-    await capture(page, "report-mode-desktop.png");
-    await page.getByRole("button", { name: "Notebook workspace", exact: true }).click();
-    await expect(page.locator(".notebook-source-bar")).toBeVisible();
+    await page.getByRole("tab", { name: "Notebook", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "Notebook", exact: true })).toHaveAttribute("aria-selected", "true");
+    await stabilize(page, ".notebook-panel", [".notebook-source-bar", ".notebook-conversation"]);
+    await expectWorkbenchIntegrity(page);
+    await capture(page, "audit-run-notebook-1440-dark-en.png");
 
-    const notebookQuestion = page.locator("textarea[aria-label='Ask Repository Notebook']");
-    await notebookQuestion.fill("Why should a reviewer inspect the selected evidence first?");
-    await page.locator(".notebook-composer button[type='submit']").click();
-    await expect(page.locator(".notebook-message.assistant").last()).toContainText(/evidence|证据/i, { timeout: 15_000 });
-    await expect(page.locator(".notebook-citations").last()).toBeVisible();
-    await page.getByRole("button", { name: "Change Map" }).click();
-    await expect(page.locator(".notebook-card").first()).toBeVisible();
-    await capture(page, "report-notebook-demo-desktop.png");
-
-    await page.getByRole("button", { name: /Workflows|工作流/ }).click();
-    await expect(page.locator("h1")).toContainText(/Workflow builder|工作流构建器/i);
+    await page.locator(".activity-rail").getByRole("link", { name: "Workflows", exact: true }).click();
     await stabilize(page, ".workflows-page", [".workflow-list", ".react-flow"]);
-    await capture(page, "workflows-dark-desktop.png");
+    await expectWorkbenchIntegrity(page);
+    await capture(page, "audit-workflows-1440-dark-en.png");
 
-    await page.getByRole("button", { name: /Settings|设置/ }).click();
-    await expect(page.locator("h1")).toContainText(/System status|系统状态/i);
+    await page.locator(".activity-rail").getByRole("link", { name: "Settings", exact: true }).click();
     await stabilize(page, ".settings-editor", [".settings-group"]);
-    await capture(page, "settings-demo-desktop.png");
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("button", { name: /Toggle navigation|切换导航/ }).click();
-    await page.getByRole("button", { name: /Dashboard|仪表盘/ }).click();
-    await expect(page.locator("h1")).toContainText(/Review overview|审查概览/i);
-    await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro"]);
-    await capture(page, "dashboard-demo-mobile.png");
-
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    // The real-data view was removed from the web UI during the local-first
-    // refactor (data:import remains a CLI concern), so no real-data page is
-    // captured here anymore; the archived pre-redesign screenshot stays as
-    // historical reference.
-
-    // Capture Chinese mode screenshot for CJK verification
-    await page.locator("select[aria-label='Language'], select[aria-label='语言']").selectOption("zh-CN");
-    await page.getByRole("button", { name: /Dashboard|仪表盘/ }).click();
-    await expect(page.locator("h1")).toContainText("审查概览");
-    await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro"]);
-    await capture(page, "dashboard-demo-zh-desktop.png");
-
-    // Light-theme pass for dual-theme verification (default is dark).
-    await page.evaluate(() => window.localStorage.setItem("consistency.theme.v1", "light"));
-    await page.reload();
-    await expect(page.locator("h1")).toContainText(/Review overview|审查概览/i);
-    await stabilize(page, ".page-stack.dashboard-page", [".dashboard-intro", ".metric-grid .metric-card"]);
-    await capture(page, "dashboard-light-desktop.png");
-    await page.getByRole("button", { name: "任务", exact: true }).click();
-    await expect(page.locator("h1")).toContainText(/Review queue|审查队列/i);
-    await stabilize(page, ".jobs-page", [".jobs-table .table-row"]);
-    await capture(page, "jobs-light-desktop.png");
-    await page.getByRole("button", { name: "设置", exact: true }).click();
-    await expect(page.locator("h1")).toContainText(/System status|系统状态/i);
-    await stabilize(page, ".settings-editor", [".settings-group"]);
-    await capture(page, "settings-light-desktop.png");
-
-    // Restore the dark default for the next capture run.
-    await page.evaluate(() => window.localStorage.setItem("consistency.theme.v1", "dark"));
+    await expectWorkbenchIntegrity(page);
+    await capture(page, "audit-settings-1440-dark-en.png");
   });
 });

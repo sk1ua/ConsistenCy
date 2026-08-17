@@ -72,7 +72,7 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: {
-        VITE_API_BASE_URL: "http://127.0.0.1:3001"
+        CONSISTENCY_DEV_API_TARGET: "http://127.0.0.1:3001"
       }
     }
   ]
