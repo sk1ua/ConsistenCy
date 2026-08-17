@@ -31,6 +31,7 @@ export { normaliseResourcePath } from "./identity/resource.js";
 // Capability
 export type { Action, CapabilityHandle, CapabilityRecord } from "./capability/types.js";
 export { asCapabilityHandle } from "./capability/types.js";
+export { auditFingerprint } from "./capability/handle.js";
 export type { IssueRequest, AuthoriseRequest, ReservationToken } from "./capability/broker.js";
 export { CapabilityBroker } from "./capability/broker.js";
 export type { PrivilegeRing } from "./capability/policy.js";
@@ -61,3 +62,65 @@ export { MemoryJournal } from "./audit/memoryJournal.js";
 // Budget
 export type { CapabilityBudget, BudgetState, ReserveRequest, ReserveResult } from "./budget/types.js";
 export { BudgetAccountant } from "./budget/accounting.js";
+
+// Run (generic execution instance of a Job)
+export type {
+  Run,
+  RunId,
+  RunSnapshot,
+  RunState,
+  CreateRunRequest,
+} from "./run/types.js";
+export {
+  asRunId,
+  RUN_STATES,
+  TERMINAL_RUN_STATES,
+  RUN_TRANSITIONS,
+  canTransitionRun,
+  transitionRun,
+  RunStateTransitionError,
+} from "./run/types.js";
+export { RunRegistry } from "./run/registry.js";
+
+// Agent process model (ACB)
+export type {
+  AgentId,
+  AgentState,
+  AgentSnapshot,
+  AgentControlBlock,
+  CapabilityRef,
+  ExecutionDomain,
+  ModelPolicy,
+  PendingOperation,
+  RegisterAgentRequest,
+} from "./agent/types.js";
+export {
+  asAgentId,
+  AGENT_STATES,
+  TERMINAL_AGENT_STATES,
+  WAIT_AGENT_STATES,
+  AgentTreeInvariantError,
+} from "./agent/types.js";
+export {
+  AGENT_TRANSITIONS,
+  canTransitionAgent,
+  transitionAgent,
+  AgentStateTransitionError,
+} from "./agent/state.js";
+export { AgentRegistry } from "./agent/registry.js";
+
+// ContextImage reference contract (Context VM arrives in PR-3)
+export type { ContextImageId } from "./identity/context-image.js";
+export { asContextImageId } from "./identity/context-image.js";
+
+// Scheduler (admission control + cooperative scheduling)
+export type {
+  SchedulerConfig,
+  SchedulerEvent,
+  SchedulerEventListener,
+  WaitDetails,
+} from "./scheduler/types.js";
+export { WAIT_STATE_BY_KIND, pendingOperationFor } from "./scheduler/types.js";
+export { SchedulerEventBus } from "./scheduler/events.js";
+export { KernelScheduler } from "./scheduler/scheduler.js";
+export type { KernelSchedulerOptions } from "./scheduler/scheduler.js";
