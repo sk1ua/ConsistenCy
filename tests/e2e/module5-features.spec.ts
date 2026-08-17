@@ -58,7 +58,7 @@ test.describe("Module 5 feature suite", () => {
     expect(diff.available).toBe(true);
 
     await page.goto(`/#/runs/${encodeURIComponent(body.jobId)}/overview`);
-    const diffTab = page.getByRole("tab", { name: "Diff", exact: true });
+    const diffTab = page.getByLabel(/Run views|运行视图/i).getByRole("tab", { name: /Diff|差异/i, exact: true });
     await expect(diffTab).toBeVisible();
     await diffTab.click();
     await expect(page).toHaveURL(new RegExp(`#\\/runs\\/${body.jobId}\\/diff$`));
