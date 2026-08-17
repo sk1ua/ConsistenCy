@@ -71,7 +71,7 @@ test.describe("Module 5 feature suite", () => {
   test("Inbox renders the live heartbeat card in development", async ({ page }) => {
     await page.goto("/#/inbox");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review inbox");
-    await expect(page.locator(".heartbeat-card")).toBeVisible();
-    await expect(page.locator(".heartbeat-card")).toContainText("Live project status");
+    await expect(page.locator(".ops-runtime-strip, .heartbeat-card")).toBeVisible();
+    await expect(page.locator(".ops-runtime-strip, .heartbeat-card")).toContainText("Repository monitor");
   });
 });
