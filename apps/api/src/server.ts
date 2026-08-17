@@ -29,6 +29,7 @@ import { SQLiteAuditDomainStore } from "./audit/store";
 import { buildRepositorySupervisorRegistrations } from "./audit/repositorySupervision";
 import { AuditRunPlanner } from "./audit/planner";
 import { AutomationScheduler } from "./audit/scheduler";
+import { RuntimeRegistry } from "./review/runtimeRegistry";
 
 const { config, store: settingsStore } = loadRuntimeConfig();
 const database = openDatabase(config.databasePath);
@@ -72,6 +73,7 @@ const notebookGraph = new NotebookGraph({
 });
 
 export const workflows = new WorkflowStore();
+export const runtimeRegistry = new RuntimeRegistry();
 
 export const worker = new ReviewWorker({
   jobStore: jobs,
@@ -82,6 +84,7 @@ export const worker = new ReviewWorker({
     deterministicAnalyzer,
     reportLanguage: config.reportLanguage,
     reviewWorkflow: config.reviewWorkflow,
+    runtimeRegistry,
     reviewWorkflowSpec: name => {
       const found = workflows.get(name);
       return found?.source === "draft" ? found.spec : undefined;
@@ -221,6 +224,7 @@ async function reconcileRepositorySupervisor(): Promise<void> {
 
 export const server = createApiServer({
   jobs,
+  runtimeRegistry,
   githubWebhookSecret: config.GITHUB_WEBHOOK_SECRET,
   apiToken: config.CONSISTENCY_API_TOKEN,
   desktopControlToken: config.CONSISTENCY_DESKTOP_CONTROL_TOKEN,
