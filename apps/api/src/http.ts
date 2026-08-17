@@ -1313,7 +1313,7 @@ const routes: Route[] = [
     auth: true,
     handler: ({ request, response, allowedOrigins, nodeEnv, jobs, options }) => {
       if (nodeEnv === "production") throw new ApiError("Demo seed is disabled in production", "DEMO_DISABLED", 404);
-      sendJson(request, response, 201, seedDemoData(jobs, options.notebookStore), allowedOrigins);
+      sendJson(request, response, 201, seedDemoData(jobs, options.notebookStore, options.runtimeRegistry ?? defaultRuntimeRegistry), allowedOrigins);
     }
   },
   {
