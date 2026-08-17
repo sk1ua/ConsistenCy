@@ -1,4 +1,3 @@
-import { RunnableLambda } from "@langchain/core/runnables";
 import {
   reviewFindingSchema,
   reviewAgentNameSchema,
@@ -64,14 +63,14 @@ export abstract class BaseLLMProvider implements LLMProvider {
   }): Promise<CompletionResponse>;
 
   async invokeWithSchema<T>(request: StructuredInvocation<T>): Promise<StructuredResult<T>> {
-    const runnable = RunnableLambda.from(async (repairPrompt: string | undefined) => {
+    const completeCall = async (repairPrompt: string | undefined) => {
       return this.complete({
         systemPrompt: `${request.systemPrompt}\nReturn only valid JSON.`,
         userPrompt: repairPrompt ?? request.userPrompt,
         schemaName: request.schemaName,
         jsonSchema: zodToJsonSchema(request.schema, request.schemaName)
       });
-    });
+    };
 
     let previousContent = "";
     let lastError: unknown;
@@ -80,7 +79,7 @@ export abstract class BaseLLMProvider implements LLMProvider {
         const repairPrompt = attempt === 0
           ? undefined
           : `${request.userPrompt}\n\nThe previous JSON failed schema validation. Produce a corrected JSON object only. Previous output:\n${previousContent.slice(0, 12_000)}`;
-        const completion = await runnable.invoke(repairPrompt);
+        const completion = await completeCall(repairPrompt);
         previousContent = completion.content;
         return {
           data: request.schema.parse(extractJson(completion.content)),

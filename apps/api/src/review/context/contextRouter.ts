@@ -1,5 +1,5 @@
 import { WORKING_TREE_REV } from "@consistency/schema";
-import type { ContextBuilder } from "../agents/types";
+import type { ContextBuilder } from "../workloadRuntime";
 import { buildPRContext } from "./buildPRContext";
 import { buildLocalContext, type BuildLocalContextDependencies } from "./buildLocalContext";
 

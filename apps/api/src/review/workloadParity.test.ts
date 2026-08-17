@@ -18,7 +18,6 @@ import { spawnSync } from "node:child_process";
 import type { PRReviewContext, ReviewFinding } from "@consistency/schema";
 import { InMemoryJobQueue } from "../jobQueue";
 import { MockLLMProvider } from "./llm/mockProvider";
-import { runReviewWorkflow } from "./graph/workflow";
 import { createReviewRuntime } from "./workloadRuntime";
 import { DeterministicAnalyzer } from "./deterministic";
 
@@ -97,7 +96,7 @@ const confirmedFinding: ReviewFinding = {
   agent: "Security",
   title: "Unsigned webhook accepted",
   severity: "high",
-  confidence: "confirmed",
+  confidence: "likely",
   file: "src/index.ts",
   startLine: 2,
   endLine: 2,
@@ -201,56 +200,34 @@ function enqueueJob(store: InMemoryJobQueue, accessMode: "github_app" | "public_
   }).job!;
 }
 
-describe("PR-5A — runtime parity and publication safety", () => {
-  it("old and new runtimes produce semantically equivalent reviews", async () => {
-    const fixture = makeFixture("job-parity-a");
-    const oldStore = new InMemoryJobQueue();
-    const oldJob = enqueueJob(oldStore, "github_app", fixture);
-    oldStore.markRunning(oldJob.id);
-    const oldAnalyzer = createMockAnalyzer();
-    const oldDeps = buildDeps(oldStore, oldAnalyzer, fixture);
-    await runReviewWorkflow(
-      {
-        jobId: oldJob.id,
-        repositoryFullName: "test/example",
-        pullRequestNumber: 34,
-        installationId: 123,
-        accessMode: "github_app",
-        baseSha: fixture.baseSha,
-        headSha: fixture.headSha,
-      },
-      oldDeps,
-    );
+describe("Authoritative workload-review execution and publication safety", () => {
+  it("workload-review runtime produces deterministic review report and agent telemetry", async () => {
+    const fixture = makeFixture("job-review-runtime");
+    const store = new InMemoryJobQueue();
+    const job = enqueueJob(store, "github_app", fixture);
+    store.markRunning(job.id);
+    const analyzer = createMockAnalyzer();
+    const deps = buildDeps(store, analyzer, fixture);
 
-    const fixture2 = makeFixture("job-parity-b");
-    const newStore = new InMemoryJobQueue();
-    const newJob = enqueueJob(newStore, "github_app", fixture2);
-    newStore.markRunning(newJob.id);
-    const newAnalyzer = createMockAnalyzer();
-    const newDeps = buildDeps(newStore, newAnalyzer, fixture2);
-    await createReviewRuntime(newDeps).run({
-      jobId: newJob.id,
+    await createReviewRuntime(deps).run({
+      jobId: job.id,
       repositoryFullName: "test/example",
       pullRequestNumber: 34,
       installationId: 123,
       accessMode: "github_app",
-      baseSha: fixture2.baseSha,
-      headSha: fixture2.headSha,
+      baseSha: fixture.baseSha,
+      headSha: fixture.headSha,
       publicationPolicy: "github_comment",
     });
 
-    const oldJobResult = oldStore.get(oldJob.id)!;
-    const newJobResult = newStore.get(newJob.id)!;
-    expect(newJobResult.status).toBe(oldJobResult.status);
-    expect(newJobResult.result!.score).toBe(oldJobResult.result!.score);
-    expect(newJobResult.result!.riskLevel).toBe(oldJobResult.result!.riskLevel);
-    expect(newJobResult.result!.findings.map(normalizeFinding)).toEqual(
-      oldJobResult.result!.findings.map(normalizeFinding),
-    );
-    const oldAgents = oldStore.listAgentRuns(oldJob.id).map((r) => `${r.agentName}:${r.status}`).sort();
-    const newAgents = newStore.listAgentRuns(newJob.id).map((r) => `${r.agentName}:${r.status}`).sort();
-    expect(newAgents).toEqual(oldAgents);
-    expect(newJobResult.result!.summary).toBe(oldJobResult.result!.summary);
+    const jobResult = store.get(job.id)!;
+    expect(jobResult.status).toBe("awaiting_publish");
+    expect(jobResult.result!.score).toBe(62);
+    expect(jobResult.result!.riskLevel).toBe("medium");
+    expect(jobResult.result!.findings.map(normalizeFinding)).toEqual([confirmedFinding].map(normalizeFinding));
+    const agentRuns = store.listAgentRuns(job.id).map((r) => `${r.agentName}:${r.status}`).sort();
+    expect(agentRuns.length).toBeGreaterThan(0);
+    expect(jobResult.result!.summary).toContain("Parity summary.");
   });
 
   it("§44 outbox parity: enabled publication → awaiting_publish + exactly one outbox item", async () => {

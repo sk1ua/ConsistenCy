@@ -43,16 +43,43 @@ import type {
   DomainAnalyzeResponse,
   PRReviewContext,
   PublicationPolicy,
+  ReviewAccessMode,
   ReviewReport,
   WorkflowSpec,
 } from "@consistency/schema";
+import type { ReviewJobStore } from "../jobQueue";
+import type { DeterministicAnalyzer } from "./deterministic";
 import { knowledgeIndexPathFor } from "./knowledgeIndex";
+import type { LLMProvider } from "./llm/types";
+import type { RuntimeRegistry } from "./runtimeRegistry";
 import { workflowRunToAnalyzeResult } from "./workflowAdapter";
-import {
-  DEFAULT_REVIEW_WORKFLOW,
-  type ReviewWorkflowDependencies,
-  type ReviewWorkflowInput,
-} from "./graph/workflow";
+
+export const DEFAULT_REVIEW_WORKFLOW = "pr-review";
+
+export type ReviewWorkflowInput = {
+  jobId: string;
+  repositoryFullName: string;
+  pullRequestNumber?: number;
+  repoPath?: string;
+  installationId?: number;
+  accessMode?: ReviewAccessMode;
+  baseSha: string;
+  headSha: string;
+};
+
+export type ContextBuilder = (input: ReviewWorkflowInput) => Promise<PRReviewContext>;
+
+export type ReviewWorkflowDependencies = {
+  contextBuilder: ContextBuilder;
+  provider: LLMProvider;
+  jobStore: ReviewJobStore;
+  deterministicAnalyzer: DeterministicAnalyzer;
+  reportLanguage?: "zh-CN" | "en-US";
+  reviewWorkflow?: string | null;
+  reviewWorkflowSpec?: (name: string) => WorkflowSpec | undefined;
+  workspaceRoot?: string;
+  runtimeRegistry?: RuntimeRegistry;
+};
 
 async function runWorkflowStage(
   analyzer: ReviewWorkflowDependencies["deterministicAnalyzer"],

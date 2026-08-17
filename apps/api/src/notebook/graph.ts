@@ -16,7 +16,7 @@ import {
   type NotebookSourceSelection,
   validateNotebookAnswer
 } from "./tools";
-import { reportLanguageInstruction } from "../review/agents/prompt";
+import { reportLanguageInstruction } from "../review/promptInstruction";
 
 export type NotebookStreamEvent = {
   event: string;

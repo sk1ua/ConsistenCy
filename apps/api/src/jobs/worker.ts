@@ -1,6 +1,5 @@
 import type { ReviewJob, ReviewJobStore } from "../jobQueue";
-import type { ReviewWorkflowDependencies } from "../review/graph/workflow";
-import { createReviewRuntime } from "../review/workloadRuntime";
+import { createReviewRuntime, type ReviewWorkflowDependencies } from "../review/workloadRuntime";
 import { PublicPrSnapshotChangedError } from "../review/context/buildPRContext";
 import { PublicPrError } from "../review/publicPr";
 import { sanitizePublicError } from "../security/redact";
