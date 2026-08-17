@@ -38,6 +38,15 @@ export { ACTION_RINGS, SERVICE_RING, CAPABILITY_ISSUABLE_RING, RING_ALLOWED_KIND
 export type { DenyReason } from "./capability/errors.js";
 export { CapabilityError } from "./capability/errors.js";
 
+// Capability lifecycle notifications (Cordis-free subscription bus)
+export type {
+  CapabilityChangeEvent,
+  CapabilityChangeListener,
+  CapabilityIssuedChangeEvent,
+  CapabilityRevokedChangeEvent,
+} from "./capability/events.js";
+export { CapabilityChangeBus } from "./capability/events.js";
+
 // Syscall
 export type { EffectClass, SyscallDefinition } from "./syscall/types.js";
 export { SYSCALL_DEFINITIONS, getSyscallDefinition } from "./syscall/types.js";

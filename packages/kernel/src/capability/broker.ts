@@ -34,6 +34,7 @@ import type { CapabilityBudget } from "../budget/types.js";
 import type { Principal, PrincipalId } from "../identity/principal.js";
 import type { Resource, ResourceScope } from "../identity/resource.js";
 import { normaliseResourcePath } from "../identity/resource.js";
+import type { CapabilityChangeBus } from "./events.js";
 
 // ---------------------------------------------------------------------------
 // IssueRequest — what callers provide to request a Capability
@@ -93,10 +94,16 @@ export class CapabilityBroker {
   readonly #accountants = new Map<string, BudgetAccountant>();
   readonly #journal: AuditJournal;
   readonly #clock: () => number;
+  readonly #events?: CapabilityChangeBus;
 
-  constructor(journal: AuditJournal, clock: () => number = Date.now) {
+  constructor(
+    journal: AuditJournal,
+    clock: () => number = Date.now,
+    events?: CapabilityChangeBus
+  ) {
     this.#journal = journal;
     this.#clock = clock;
+    this.#events = events;
   }
 
   // -------------------------------------------------------------------------
@@ -161,6 +168,17 @@ export class CapabilityBroker {
       expiresAt,
     });
 
+    // Lifecycle notification (NOT authorization — see events.ts). The
+    // fingerprint only: subscribers never receive the raw handle.
+    this.#events?.emit({
+      type: "capability.issued",
+      timestamp: now,
+      subject: subject.id,
+      action,
+      resourceKind: resource.kind,
+      handleFingerprint: auditFingerprint(handle),
+    });
+
     return handle;
   }
 
@@ -178,13 +196,24 @@ export class CapabilityBroker {
     const record = this.#records.get(handle);
     if (!record) throw new CapabilityError("unknown_capability");
     record.revoked = true;
+    const timestamp = this.#clock();
     this.#journal.record({
       type: "capability.revoked",
-      timestamp: this.#clock(),
+      timestamp,
       handleFingerprint: auditFingerprint(handle),
       capabilityId: record.id,
       subject: record.subject,
       revokedBy,
+    });
+
+    // Lifecycle notification (NOT authorization — see events.ts).
+    this.#events?.emit({
+      type: "capability.revoked",
+      timestamp,
+      subject: record.subject,
+      action: record.action,
+      resourceKind: record.resource.kind,
+      handleFingerprint: auditFingerprint(handle),
     });
   }
 
