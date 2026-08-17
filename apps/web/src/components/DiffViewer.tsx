@@ -168,7 +168,7 @@ function StaticDiffRows({ rows, path, findingIndex, activeLine, onActiveLine, mo
     activeRef.current?.scrollIntoView({ block: "center" });
   }, [activeLine, path]);
 
-  return <div className="diff-grid">
+  return <div className="diff-grid" tabIndex={0} role="region" aria-label="Code diff">
     {rows.map((row, index) => {
       const coordinate = activeCoordinate(row);
       return <DiffRowButton
