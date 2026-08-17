@@ -154,7 +154,7 @@ describe("PR-6B Task Manager / Runtime Observability (AC-TM-1..18)", () => {
     scheduler.admit(); // RUNNING
 
     // Transition to WAIT_LLM
-    scheduler.wait(agentId, { kind: "llm", provider: "openai", model: "gpt-4o" });
+    scheduler.wait(agentId, { kind: "llm", provider: "openai" });
     expect(scheduler.getAgent(agentId)?.state).toBe("WAIT_LLM");
 
     const registry = new RuntimeRegistry();
