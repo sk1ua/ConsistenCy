@@ -27,7 +27,13 @@ const findingBase = z.object({
   reasoning: nonEmpty,
   recommendation: nonEmpty,
   suggestedPatch: nonEmpty.optional(),
-  tags: z.array(nonEmpty).optional()
+  tags: z.array(nonEmpty).optional(),
+  /**
+   * Canonical v3 grounding: references into the Kernel EvidenceStore for the
+   * run. OPTIONAL and additive — legacy findings without evidenceIds remain
+   * valid during migration; the Review workload attaches and validates them.
+   */
+  evidenceIds: z.array(nonEmpty).optional()
 });
 
 const confirmedFindingSchema = findingBase.extend({

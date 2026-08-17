@@ -111,6 +111,46 @@ export class KernelScheduler {
     return after;
   }
 
+  /** Non-terminal → SUCCEEDED (terminal). */
+  succeedRun(id: RunId): RunSnapshot {
+    const before = this.#runs.get(id);
+    if (!before) {
+      throw new Error(`Unknown Run: ${id}`);
+    }
+    if (TERMINAL_RUN_STATES.includes(before.state)) {
+      throw new RunStateTransitionError(before.state, "SUCCEEDED");
+    }
+    const after = this.#runs.transition(id, "SUCCEEDED");
+    this.#bus.emit({
+      type: "run.stateChanged",
+      timestamp: this.#clock(),
+      runId: id,
+      from: before.state,
+      to: after.state,
+    });
+    return after;
+  }
+
+  /** Non-terminal → FAILED (terminal). */
+  failRun(id: RunId): RunSnapshot {
+    const before = this.#runs.get(id);
+    if (!before) {
+      throw new Error(`Unknown Run: ${id}`);
+    }
+    if (TERMINAL_RUN_STATES.includes(before.state)) {
+      throw new RunStateTransitionError(before.state, "FAILED");
+    }
+    const after = this.#runs.transition(id, "FAILED");
+    this.#bus.emit({
+      type: "run.stateChanged",
+      timestamp: this.#clock(),
+      runId: id,
+      from: before.state,
+      to: after.state,
+    });
+    return after;
+  }
+
   /**
    * Cancel a Run and every non-terminal Agent in it.
    *

@@ -11,8 +11,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@consistency/repository": "0.1.0",
     "@consistency/schema": "0.1.0",
     "@consistency/vcs-core": "0.1.0",
+    "@consistency/workload-review": "0.1.0",
     "@langchain/core": "^1.1.48",
     "@langchain/langgraph": "^1.3.7",
     "@octokit/auth-app": "^8.2.0",

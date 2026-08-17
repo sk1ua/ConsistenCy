@@ -1,6 +1,6 @@
 import type { ReviewJob, ReviewJobStore } from "../jobQueue";
 import type { ReviewWorkflowDependencies } from "../review/graph/workflow";
-import { runReviewWorkflow } from "../review/graph/workflow";
+import { createReviewRuntime } from "../review/workloadRuntime";
 import { PublicPrSnapshotChangedError } from "../review/context/buildPRContext";
 import { PublicPrError } from "../review/publicPr";
 import { sanitizePublicError } from "../security/redact";
@@ -77,10 +77,13 @@ export class ReviewWorker {
   async execute(job: ReviewJob): Promise<void> {
     this.activeJobs += 1;
     try {
-      await runReviewWorkflow(workflowInput(job), {
+      // PR-5A: apps/api is now the HOST — review execution runs on the
+      // workload-review runtime (Kernel Run / ACBs / Scheduler / Context VM).
+      const runtime = createReviewRuntime({
         ...this.options.workflow,
         jobStore: this.options.jobStore
       });
+      await runtime.run({ ...workflowInput(job), publicationPolicy: job.publicationPolicy });
       this.options.onSucceeded?.(job);
     } catch (error) {
       const current = this.options.jobStore.get(job.id);
