@@ -891,8 +891,8 @@ body,
 }
 
 .inspector-decision small {
-  color: var(--muted);
-  font: 9px/1.45 var(--font-mono);
+  color: var(--muted-strong);
+  font: 11px/1.45 var(--font-mono);
 }
 
 .run-ledger {
