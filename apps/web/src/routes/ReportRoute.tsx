@@ -15,11 +15,12 @@ import { nextTabId } from "../utils/tabNavigation";
 
 const REPORT_STATUSES = new Set<ReviewJob["status"]>(["awaiting_publish", "publishing", "succeeded", "publish_failed"]);
 const NotebookPanel = lazy(() => import("../components/NotebookPanel").then(module => ({ default: module.NotebookPanel })));
-type RunMode = "overview" | "diff" | "evidence" | "notebook";
+const RuntimePanel = lazy(() => import("../components/runtime/RuntimePanel").then(module => ({ default: module.RuntimePanel })));
+type RunMode = "overview" | "diff" | "evidence" | "notebook" | "runtime";
 
 export function runModeFromPath(pathname: string): RunMode {
   const segment = pathname.split("/").filter(Boolean).at(-1);
-  return segment === "diff" || segment === "evidence" || segment === "notebook" ? segment : "overview";
+  return segment === "diff" || segment === "evidence" || segment === "notebook" || segment === "runtime" ? segment : "overview";
 }
 
 function RunModeTabs({ runId, mode, notebookId, zh, scope }: { runId: string; mode: RunMode; notebookId?: string; zh: boolean; scope: string }) {
@@ -29,7 +30,8 @@ function RunModeTabs({ runId, mode, notebookId, zh, scope }: { runId: string; mo
     { id: "overview", label: zh ? "概览" : "Overview" },
     { id: "diff", label: zh ? "差异" : "Diff" },
     { id: "evidence", label: zh ? "证据" : "Evidence" },
-    { id: "notebook", label: zh ? "笔记本" : "Notebook" }
+    { id: "notebook", label: zh ? "笔记本" : "Notebook" },
+    { id: "runtime", label: zh ? "运行流程" : "Runtime" }
   ];
   function destination(id: RunMode): string {
     return `/runs/${encodeURIComponent(runId)}/${id}${id === "notebook" ? suffix : ""}`;
@@ -136,8 +138,9 @@ export function ReportRoute({ jobs, reports, health, jobsUnavailable, reportsUna
         <div className="run-mode-context"><button type="button" onClick={() => navigate("/runs")}>{zh ? "返回运行列表" : "Back to runs"}</button><span><strong>{job?.repositoryFullName ?? (zh ? "运行待加载" : "Run pending")}</strong><code>{job?.id ?? selectedRunId}</code></span><small>{job?.status ?? (zh ? "未记录" : "not recorded")}</small></div>
         {mode === "diff" ? <DiffMode job={job} report={verifiedReport} zh={zh} />
           : mode === "evidence" ? <EvidenceMode report={verifiedReport} zh={zh} />
-            : notebookQuery.isFetching && !notebookId ? <div className="loading-state">{zh ? "正在加载笔记本" : "Loading notebook"}</div>
-              : <Suspense fallback={<div className="loading-state">{zh ? "正在加载笔记本" : "Loading notebook"}</div>}><NotebookPanel notebookId={notebookId} /></Suspense>}
+            : mode === "runtime" ? <Suspense fallback={<div className="loading-state">{zh ? "正在加载运行架构" : "Loading runtime"}</div>}><RuntimePanel runId={selectedRunId} job={job} report={verifiedReport} /></Suspense>
+              : notebookQuery.isFetching && !notebookId ? <div className="loading-state">{zh ? "正在加载笔记本" : "Loading notebook"}</div>
+                : <Suspense fallback={<div className="loading-state">{zh ? "正在加载笔记本" : "Loading notebook"}</div>}><NotebookPanel notebookId={notebookId} /></Suspense>}
       </div>}
     </div>
   </>;

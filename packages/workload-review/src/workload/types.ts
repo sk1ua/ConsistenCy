@@ -16,6 +16,7 @@ import type {
   WireComposeReviewFile,
 } from "@consistency/schema";
 import type {
+  CapabilityBroker,
   ContextImageId,
   ContextManager,
   EvidenceId,
@@ -125,6 +126,15 @@ export type AgentAdmittedHook = (info: {
   readonly revoke: (kind: "llm" | "repo" | "evidenceRead" | "evidenceWrite") => void;
 }) => void | Promise<void>;
 
+export type RunCreatedHook = (info: {
+  readonly runId: RunId;
+  readonly jobId: string;
+  readonly scheduler: KernelScheduler;
+  readonly contextManager: ContextManager;
+  readonly baseContextImage?: ContextImageId;
+  readonly broker: CapabilityBroker;
+}) => void | Promise<void>;
+
 export interface ReviewWorkloadOptions {
   /** Immutable SHA-pinned content source (PR-4 RepositorySnapshot). */
   readonly snapshot: RepositorySnapshot;
@@ -143,6 +153,8 @@ export interface ReviewWorkloadOptions {
   readonly knowledgeIndexPath?: string;
   /** Observability hook (tests + future Task Manager). */
   readonly onAgentAdmitted?: AgentAdmittedHook;
+  /** Observability hook fired when Kernel Run and ContextVM are created. */
+  readonly onRunCreated?: RunCreatedHook;
 }
 
 export interface ReviewWorkloadResult {

@@ -12,6 +12,7 @@ import {
   createPolicyRevisionRequestSchema,
   createRepositoryRequestSchema,
   createWorkflowRevisionRequestSchema,
+  DEFAULT_SECURITY_GUARANTEES,
   evaluateAuditPolicy,
   internalLocalRepositoryRegistrationRequestSchema,
   localReviewRequestSchema,
@@ -42,6 +43,7 @@ import { JobDiffError, type JobDiffResult } from "./review/jobDiff";
 import { AuditDomainError, type AuditDomainStore } from "./audit/store";
 import { validateLocalRepositoryRegistration } from "./audit/localRegistration";
 import { AuditRunPlanner } from "./audit/planner";
+import { RuntimeRegistry } from "./review/runtimeRegistry";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -275,6 +277,7 @@ export type CreateApiServerOptions = {
   notebookEnabled?: boolean;
   notebookStore?: NotebookStore;
   notebookGraph?: NotebookGraph;
+  runtimeRegistry?: RuntimeRegistry;
 };
 
 type RequestContext = {
@@ -1351,8 +1354,55 @@ const routes: Route[] = [
       if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
       sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
     }
+  },
+  {
+    method: "GET",
+    path: /^\/(?:api\/)?runtime\/runs$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      const registry = options.runtimeRegistry ?? defaultRuntimeRegistry;
+      sendJson(request, response, 200, { runs: registry.listRunSummaries() }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/(?:api\/)?runtime\/runs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const registry = options.runtimeRegistry ?? defaultRuntimeRegistry;
+      const snapshot = registry.getSnapshot(id);
+
+      if (snapshot) {
+        sendJson(request, response, 200, snapshot, allowedOrigins);
+        return;
+      }
+
+      // Check if job exists in jobStore to see if it's an old run without telemetry
+      const job = jobs.get(id) ?? jobs.list().find(j => j.id === id);
+      if (job) {
+        sendJson(request, response, 200, {
+          runId: job.id,
+          workloadKind: "pr_review",
+          jobId: job.id,
+          state: job.status.toUpperCase(),
+          createdAt: job.createdAt,
+          finishedAt: job.finishedAt,
+          telemetryStatus: "unavailable",
+          agentCounts: { total: 0, running: 0, waiting: 0, terminal: 0 },
+          concurrency: 1,
+          securityGuarantees: DEFAULT_SECURITY_GUARANTEES,
+          agents: []
+        }, allowedOrigins);
+        return;
+      }
+
+      throw new ApiError("Run runtime snapshot not found", "RUN_NOT_FOUND", 404);
+    }
   }
 ];
+
+const defaultRuntimeRegistry = new RuntimeRegistry();
 
 export function createApiServer(options: CreateApiServerOptions = {}) {
   const jobs = options.jobs ?? new InMemoryJobQueue();

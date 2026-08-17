@@ -347,6 +347,17 @@ export class CapabilityBroker {
   _getRecord(handle: CapabilityHandle): CapabilityRecord | undefined {
     return this.#records.get(handle);
   }
+
+  /** Return internal records for a subject (for kernel-tier observability / diagnostics). */
+  getRecordsForSubject(subject: PrincipalId): readonly CapabilityRecord[] {
+    const results: CapabilityRecord[] = [];
+    for (const record of this.#records.values()) {
+      if (record.subject === subject) {
+        results.push(record);
+      }
+    }
+    return results;
+  }
 }
 
 // ---------------------------------------------------------------------------

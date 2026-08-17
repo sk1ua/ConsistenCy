@@ -18,6 +18,9 @@ export type { AgentAttachment, HarnessRuntimeOptions } from "./runtime/harness.j
 export { CapabilityLifecycleAdapter } from "./runtime/adapter.js";
 export { SchedulerAgentBridge } from "./runtime/scheduler-bridge.js";
 export type { AgentFiberHandle, AgentFiberInstrumentation } from "./runtime/scheduler-bridge.js";
+export { SandboxAgentBridge } from "./runtime/sandbox-bridge.js";
+export { buildRunRuntimeSnapshot } from "./runtime/observability.js";
+export type { BuildRunRuntimeSnapshotOptions } from "./runtime/observability.js";
 
 // Capability-bound facade (what Agents actually receive)
 export { CapabilityBoundAstFacade } from "./facade/ast-facade.js";

@@ -185,6 +185,7 @@ export class SandboxSession {
       startedAt: this.#startedAt,
       endedAt: this.#endedAt,
       terminationReason: this.#terminationReason,
+      error: this.#error,
       exitCode: this.#exitCode,
       exitSignal: this.#exitSignal,
       processExited: this.#processExited,

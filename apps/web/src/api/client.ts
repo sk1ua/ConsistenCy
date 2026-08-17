@@ -20,11 +20,15 @@ import {
   repositoryEventSchema,
   repositoryPulseSchema,
   repositorySchema,
+  runRuntimeSnapshotSchema,
+  runtimeRunsResponseSchema,
   type JobStatus,
   type Notebook,
   type NotebookCardKind,
   type ReviewJob,
   type ReviewReport,
+  type RunRuntimeSnapshot,
+  type RuntimeRunsResponse,
   type Severity,
   type StatsResponse,
   type HeartbeatPulse,
@@ -329,5 +333,11 @@ export const api = {
   },
   async deleteWorkflow(name: string): Promise<void> {
     await request(`/workflows/${encodeURIComponent(name)}`, { method: "DELETE" });
+  },
+  async runtimeRuns(): Promise<RuntimeRunsResponse> {
+    return runtimeRunsResponseSchema.parse(await request("/runtime/runs"));
+  },
+  async runtimeSnapshot(runId: string, signal?: AbortSignal): Promise<RunRuntimeSnapshot> {
+    return runRuntimeSnapshotSchema.parse(await request(`/runtime/runs/${encodeURIComponent(runId)}`, { signal }));
   }
 };

@@ -195,6 +195,17 @@ export class ReviewWorkload {
         publicationPolicy: options.publicationPolicy,
       });
 
+      if (options.onRunCreated) {
+        await options.onRunCreated({
+          runId,
+          jobId,
+          scheduler,
+          contextManager,
+          baseContextImage: baseImage,
+          broker,
+        });
+      }
+
       // -------------------------------------------------------------------
       // 5. Legacy deterministic stage (WAIT_TOOL) — parity provider.
       // -------------------------------------------------------------------

@@ -221,6 +221,7 @@ export function App() {
         <Route path="/runs/:runId/diff" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/runs/:runId/evidence" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/runs/:runId/notebook" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/runs/:runId/runtime" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/runs/:runId/*" element={<RunIndexRedirect />} />
         <Route path="/findings" element={queries.reports.isPending ? <RouteLoading label={zh ? "正在加载发现" : "Loading findings"} /> : <FindingsPage reports={reports} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/jobs" element={<Navigate replace to="/runs" />} />

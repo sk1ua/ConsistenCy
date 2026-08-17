@@ -27,6 +27,7 @@ import {
   type JsonValue,
   type Principal,
   type RepositorySnapshotId,
+  type RunId,
 } from "@consistency/kernel";
 import { RepositorySnapshot } from "@consistency/repository";
 import { createHash } from "node:crypto";
@@ -246,15 +247,38 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: knowledgeIndexPathFor(input.repositoryFullName, workspaceRoot),
+        onRunCreated: (info) => {
+          runId = info.runId;
+          dependencies.runtimeRegistry?.registerLiveRun({
+            runId: info.runId,
+            jobId: input.jobId,
+            workloadKind: "pr_review",
+            scheduler: info.scheduler,
+            contextManager: info.contextManager,
+            baseContextImageId: info.baseContextImage,
+            broker: info.broker,
+          });
+        },
       });
 
-      const result = await workload.run();
-      return {
-        ...result,
-        commit: commitState
-          ? { intents: commitState.coordinator.listIntents(), journal: commitState.journal.entries() }
-          : undefined,
-      };
+      let runId: RunId | undefined;
+      try {
+        const result = await workload.run();
+        if (runId) {
+          dependencies.runtimeRegistry?.completeRun(runId);
+        }
+        return {
+          ...result,
+          commit: commitState
+            ? { intents: commitState.coordinator.listIntents(), journal: commitState.journal.entries() }
+            : undefined,
+        };
+      } catch (error) {
+        if (runId) {
+          dependencies.runtimeRegistry?.completeRun(runId);
+        }
+        throw error;
+      }
     },
   };
 }

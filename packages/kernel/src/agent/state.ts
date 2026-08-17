@@ -25,8 +25,8 @@ import type { AgentState } from "./types.js";
  * - Terminal states (SUCCEEDED, FAILED, CANCELLED) have NO exits.
  */
 export const AGENT_TRANSITIONS: Readonly<Record<AgentState, readonly AgentState[]>> = {
-  NEW: ["READY", "CANCELLED"],
-  READY: ["RUNNING", "SUSPENDED", "CANCELLED"],
+  NEW: ["READY", "FAILED", "CANCELLED"],
+  READY: ["RUNNING", "SUSPENDED", "FAILED", "CANCELLED"],
   RUNNING: [
     "WAIT_LLM",
     "WAIT_TOOL",
@@ -38,12 +38,12 @@ export const AGENT_TRANSITIONS: Readonly<Record<AgentState, readonly AgentState[
     "FAILED",
     "CANCELLED",
   ],
-  WAIT_LLM: ["READY", "SUSPENDED", "CANCELLED"],
-  WAIT_TOOL: ["READY", "SUSPENDED", "CANCELLED"],
-  WAIT_IO: ["READY", "SUSPENDED", "CANCELLED"],
-  WAIT_AGENT: ["READY", "SUSPENDED", "CANCELLED"],
-  WAIT_HUMAN: ["READY", "SUSPENDED", "CANCELLED"],
-  SUSPENDED: ["READY", "CANCELLED"],
+  WAIT_LLM: ["READY", "SUSPENDED", "FAILED", "CANCELLED"],
+  WAIT_TOOL: ["READY", "SUSPENDED", "FAILED", "CANCELLED"],
+  WAIT_IO: ["READY", "SUSPENDED", "FAILED", "CANCELLED"],
+  WAIT_AGENT: ["READY", "SUSPENDED", "FAILED", "CANCELLED"],
+  WAIT_HUMAN: ["READY", "SUSPENDED", "FAILED", "CANCELLED"],
+  SUSPENDED: ["READY", "FAILED", "CANCELLED"],
   SUCCEEDED: [],
   FAILED: [],
   CANCELLED: [],

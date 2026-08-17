@@ -20,6 +20,8 @@ import { buildComposeReviewFileResults } from "./composeBuilder";
 
 export const DEFAULT_REVIEW_WORKFLOW = "pr-review";
 
+import type { RuntimeRegistry } from "../runtimeRegistry";
+
 export type ReviewWorkflowDependencies = {
   contextBuilder: ContextBuilder;
   provider: LLMProvider;
@@ -35,6 +37,8 @@ export type ReviewWorkflowDependencies = {
   reviewWorkflowSpec?: (name: string) => WorkflowSpec | undefined;
   /** Used to locate the sibling `knowledge/` directory for project memory. */
   workspaceRoot?: string;
+  /** Host-side runtime observer for live and completed Task Manager telemetry. */
+  runtimeRegistry?: RuntimeRegistry;
 };
 
 /**

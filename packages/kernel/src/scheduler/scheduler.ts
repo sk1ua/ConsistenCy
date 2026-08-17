@@ -334,11 +334,19 @@ export class KernelScheduler {
     return snapshot;
   }
 
-  /** RUNNING → FAILED (terminal). */
+  /** Any non-terminal → FAILED (terminal). */
   failAgent(agentId: AgentId): AgentSnapshot {
-    this.#assertState(agentId, "RUNNING", "FAILED");
-    const snapshot = this.#changeState(agentId, "FAILED");
-    this.#runningCount -= 1;
+    const agent = this.#agents.get(agentId);
+    if (!agent) {
+      throw new Error(`Unknown Agent: ${agentId}`);
+    }
+    if (agent.state === "FAILED") return agent;
+    if (TERMINAL_AGENT_STATES.includes(agent.state)) {
+      throw new AgentStateTransitionError(agent.state, "FAILED");
+    }
+    this.#dequeue(agentId);
+    const snapshot = this.#changeState(agentId, "FAILED", { pendingOperation: undefined });
+    if (agent.state === "RUNNING") this.#runningCount -= 1;
     return snapshot;
   }
 
@@ -358,6 +366,11 @@ export class KernelScheduler {
       throw new AgentStateTransitionError(agent.state, "CANCELLED");
     }
     this.#cancelAgentInternal(agentId, "explicit");
+  }
+
+  /** Configured maximum concurrent RUNNING agents. */
+  get maxRunningAgents(): number {
+    return this.#maxRunningAgents;
   }
 
   /** How many Agents currently occupy RUNNING capacity. */

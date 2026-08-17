@@ -160,6 +160,7 @@ export interface SandboxSessionSnapshot {
   readonly startedAt: number;
   readonly endedAt?: number;
   readonly terminationReason?: SandboxTerminationReason;
+  readonly error?: { readonly code: string; readonly message: string };
   readonly exitCode?: number | null;
   readonly exitSignal?: string | null;
   readonly processExited: boolean;
