@@ -349,6 +349,7 @@ export const ianaTimezoneSchema = nonEmpty.max(100).superRefine((value, context)
 });
 
 export const cronScheduleSpecSchema = z.object({
+  type: z.literal("schedule").optional(),
   cron: cronExpressionSchema,
   timezone: ianaTimezoneSchema,
   missedRunPolicy: z.literal("skip").default("skip")

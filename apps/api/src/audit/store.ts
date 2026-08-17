@@ -1308,6 +1308,7 @@ export class SQLiteAuditDomainStore implements AuditDomainStore {
       workflowDigest: row.workflow_digest,
       source: row.source,
       sourceEventId: row.source_event_id ?? undefined,
+      scheduledFor: row.scheduled_for ?? undefined,
       auditRunId: row.audit_run_id,
       disposition: row.disposition,
       createdAt: row.created_at

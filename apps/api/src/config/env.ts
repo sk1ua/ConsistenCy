@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import { findProjectRoot } from "./settings";
 
@@ -120,7 +120,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   // is granted by the main-process folder picker and the server-side registry;
   // deployments that still need POST /reviews/local must opt into exact roots.
   const localReviewRootsAreDefaulted = configuredLocalRoots.length === 0;
-  const localReviewRoots = configuredLocalRoots;
+  const localReviewRoots = configuredLocalRoots.length === 0 ? [dirname(findProjectRoot())] : configuredLocalRoots;
   if (parsed.NODE_ENV === "production" && (allowedOrigins.length === 0 || allowedOrigins.includes("*"))) {
     throw new Error("CONSISTENCY_ALLOWED_ORIGINS must contain explicit origins in production");
   }
