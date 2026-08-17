@@ -21,7 +21,9 @@ import type { DenyReason } from "../capability/errors.js";
 export type AuditEvent =
   | CapabilityIssuedEvent
   | CapabilityRevokedEvent
-  | SyscallAuthorisedEvent;
+  | SyscallAuthorisedEvent
+  | CommitIntentAcceptedEvent
+  | CommitIntentDeniedEvent;
 
 // ---------------------------------------------------------------------------
 // Base fields shared by all events
@@ -67,4 +69,32 @@ export interface SyscallAuthorisedEvent extends BaseAuditEvent {
   readonly resourceKind: ResourceKind;
   readonly decision: "allow" | "deny";
   readonly reason: DenyReason | "granted";
+}
+
+/**
+ * A commit intent was accepted (authorised + handed to the durable sink).
+ * Carries only the payload SHA-256 — never the payload body, handle, or
+ * credential.
+ */
+export interface CommitIntentAcceptedEvent extends BaseAuditEvent {
+  readonly type: "commit.intent_accepted";
+  readonly intentId: string;
+  readonly action: string;
+  readonly resourceKind: ResourceKind;
+  readonly subject: PrincipalId;
+  readonly idempotencyKey: string;
+  readonly payloadHash: string;
+}
+
+/**
+ * A commit intent was rejected at authorisation. Records the deny reason
+ * without the payload body, handle, or credential.
+ */
+export interface CommitIntentDeniedEvent extends BaseAuditEvent {
+  readonly type: "commit.intent_denied";
+  readonly action: string;
+  readonly resourceKind: ResourceKind;
+  readonly subject: PrincipalId;
+  readonly idempotencyKey: string;
+  readonly reason: string;
 }

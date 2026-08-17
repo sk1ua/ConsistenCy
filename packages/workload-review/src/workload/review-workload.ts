@@ -424,8 +424,11 @@ export class ReviewWorkload {
 
       // -------------------------------------------------------------------
       // 10. Compatibility boundary: durable report + existing Outbox path.
+      //    PR-5B: the host may route this through the CommitCoordinator, which
+      //    is async (authorisation + durable sink). Await it so a commit DENY
+      //    or sink failure surfaces as a failed job instead of a silent success.
       // -------------------------------------------------------------------
-      persistence.persistReportAndEnqueuePublish(jobId, report);
+      await Promise.resolve(persistence.persistReportAndEnqueuePublish(jobId, report));
 
       // -------------------------------------------------------------------
       // 11. Project memory write-back (best effort — parity).

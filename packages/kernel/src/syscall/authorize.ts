@@ -4,9 +4,10 @@
  * `SyscallGateway` is the thin layer between a caller (Agent / Cordis Fiber)
  * and the `CapabilityBroker`. It:
  *
- * 1. Looks up the syscall's EffectClass in the registry.
- * 2. For `commit` syscalls, asserts a CommitCoordinator is wired in
- *    (stubbed in PR-1; enforced from PR-5 when the Outbox migrates here).
+ * 1. Looks up the syscall's EffectClass + DispatchPolicy in the registry.
+ * 2. For `dispatch = "intent"` syscalls (github.publish, repo.write), throws
+ *    `CommitCoordinatorRequiredError` BEFORE authorisation — they must route
+ *    through the CommitCoordinator, never inline.
  * 3. Delegates the actual authorisation check to `CapabilityBroker.authorise`.
  * 4. If authorised, calls the provided `handler` thunk.
  * 5. On success: **commits** the reservation with actual usage from the handler.
@@ -21,6 +22,7 @@
 
 import type { CapabilityBroker } from "../capability/broker.js";
 import type { AuthoriseRequest } from "../capability/broker.js";
+import { CommitCoordinatorRequiredError } from "../commit/errors.js";
 import { getSyscallDefinition } from "./types.js";
 
 /**
@@ -64,10 +66,12 @@ export class SyscallGateway {
   ): Promise<T> {
     const def = getSyscallDefinition(request.action);
 
-    // Commit-class syscalls must eventually route through CommitCoordinator.
-    // In PR-1 we note but do not block — the hard guard lands in PR-5.
-    if (def?.effect === "commit") {
-      // TODO(PR-5): reject if no CommitCoordinator is registered.
+    // Intent-class syscalls (github.publish, repo.write) must route through the
+    // CommitCoordinator — they are NEVER dispatched inline, even by trusted
+    // in-process code. This gate fires BEFORE authorisation: on denial the
+    // handler is never called and no syscall.authorised event is emitted.
+    if (def?.dispatch === "intent") {
+      throw new CommitCoordinatorRequiredError(request.action);
     }
 
     // Authorise (throws CapabilityError on DENY — handler NOT called).

@@ -10,6 +10,8 @@ import type {
   AuditEvent,
   CapabilityIssuedEvent,
   CapabilityRevokedEvent,
+  CommitIntentAcceptedEvent,
+  CommitIntentDeniedEvent,
   SyscallAuthorisedEvent,
 } from "./types.js";
 
@@ -22,7 +24,9 @@ import type {
 export type AuditEventInput =
   | (Omit<CapabilityIssuedEvent,    "id"> & { id?: string })
   | (Omit<CapabilityRevokedEvent,   "id"> & { id?: string })
-  | (Omit<SyscallAuthorisedEvent,   "id"> & { id?: string });
+  | (Omit<SyscallAuthorisedEvent,   "id"> & { id?: string })
+  | (Omit<CommitIntentAcceptedEvent, "id"> & { id?: string })
+  | (Omit<CommitIntentDeniedEvent,   "id"> & { id?: string });
 
 export interface AuditJournal {
   /**

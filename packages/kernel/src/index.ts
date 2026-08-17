@@ -49,13 +49,40 @@ export type {
 export { CapabilityChangeBus } from "./capability/events.js";
 
 // Syscall
-export type { EffectClass, SyscallDefinition } from "./syscall/types.js";
+export type { EffectClass, DispatchPolicy, SyscallDefinition } from "./syscall/types.js";
 export { SYSCALL_DEFINITIONS, getSyscallDefinition } from "./syscall/types.js";
 export type { SyscallOutcome } from "./syscall/authorize.js";
 export { SyscallGateway } from "./syscall/authorize.js";
 
+// CommitCoordinator (durable intent gate for irreversible external mutations)
+export type {
+  CommitAction,
+  CommitIntentId,
+  CommitIntent,
+  CommitReceipt,
+  CommitReceiptStatus,
+  CommitIntentSink,
+  CommitAcceptRequest,
+  CommitCoordinatorSnapshot,
+} from "./commit/types.js";
+export { asCommitIntentId } from "./commit/types.js";
+export {
+  CommitCoordinatorRequiredError,
+  CommitIntentRejectedError,
+  CommitSinkError,
+} from "./commit/errors.js";
+export type { CommitCoordinatorOptions } from "./commit/coordinator.js";
+export { CommitCoordinator } from "./commit/coordinator.js";
+
 // Audit
-export type { AuditEvent, CapabilityIssuedEvent, CapabilityRevokedEvent, SyscallAuthorisedEvent } from "./audit/types.js";
+export type {
+  AuditEvent,
+  CapabilityIssuedEvent,
+  CapabilityRevokedEvent,
+  SyscallAuthorisedEvent,
+  CommitIntentAcceptedEvent,
+  CommitIntentDeniedEvent,
+} from "./audit/types.js";
 export type { AuditJournal } from "./audit/journal.js";
 export { MemoryJournal } from "./audit/memoryJournal.js";
 

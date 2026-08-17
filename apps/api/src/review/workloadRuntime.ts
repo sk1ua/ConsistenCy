@@ -16,6 +16,16 @@
 
 import {
   asRepositorySnapshotId,
+  CapabilityBroker,
+  CommitCoordinator,
+  MemoryJournal,
+  makePrincipalId,
+  type AuditEvent,
+  type CommitIntent,
+  type CommitIntentSink,
+  type CommitReceipt,
+  type JsonValue,
+  type Principal,
   type RepositorySnapshotId,
 } from "@consistency/kernel";
 import { RepositorySnapshot } from "@consistency/repository";
@@ -32,6 +42,7 @@ import type {
   DomainAnalyzeResponse,
   PRReviewContext,
   PublicationPolicy,
+  ReviewReport,
   WorkflowSpec,
 } from "@consistency/schema";
 import { knowledgeIndexPathFor } from "./knowledgeIndex";
@@ -90,8 +101,16 @@ function contentBackedSnapshot(context: PRReviewContext): ReviewWorkloadOptions[
   } as ReviewWorkloadOptions["snapshot"];
 }
 
+export type ReviewRuntimeResult = ReviewWorkloadResult & {
+  /** Commit coordinator diagnostics — present only when publication is enabled. */
+  readonly commit?: {
+    readonly intents: readonly CommitIntent[];
+    readonly journal: readonly AuditEvent[];
+  };
+};
+
 export type ReviewRuntime = {
-  run(input: ReviewWorkflowInput & { publicationPolicy: PublicationPolicy }): Promise<ReviewWorkloadResult>;
+  run(input: ReviewWorkflowInput & { publicationPolicy: PublicationPolicy }): Promise<ReviewRuntimeResult>;
 };
 
 export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): ReviewRuntime {
@@ -138,6 +157,58 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
           }),
       };
 
+      // ---------------------------------------------------------------------
+      // Commit path (PR-5B): the trusted host mediates github.publish through
+      // the Kernel CommitCoordinator. The workload never receives
+      // github.publish; it only hands the report + jobId back across the
+      // persistence boundary. Publication is routed to a durable intent which
+      // is persisted by the EXISTING Outbox sink (report + outbox transaction).
+      // The commit machinery is built lazily, only when publication is enabled.
+      // ---------------------------------------------------------------------
+      let commitState: {
+        readonly journal: MemoryJournal;
+        readonly broker: CapabilityBroker;
+        readonly principal: Principal;
+        readonly handle: ReturnType<CapabilityBroker["issue"]>;
+        readonly coordinator: CommitCoordinator;
+      } | undefined;
+
+      let pendingCommit: { jobId: string; report: ReviewReport } | undefined;
+
+      const ensureCommitState = () => {
+        if (commitState) return commitState;
+        const journal = new MemoryJournal();
+        const broker = new CapabilityBroker(journal);
+        const principal = { id: makePrincipalId("kernel", "review-commit"), kind: "kernel" as const };
+        const handle = broker.issue({
+          subject: principal,
+          action: "github.publish",
+          resource: {
+            kind: "github.publish",
+            repositoryId: input.repositoryFullName,
+            pullNumber: input.pullRequestNumber,
+          },
+        });
+        const sink: CommitIntentSink = {
+          async persist(intent: CommitIntent): Promise<CommitReceipt> {
+            if (!pendingCommit) {
+              throw new Error("Commit sink invoked without a pending report payload");
+            }
+            // Terminal op = the existing durable report + outbox transaction.
+            dependencies.jobStore.persistReportAndEnqueuePublish(pendingCommit.jobId, pendingCommit.report);
+            return {
+              intentId: intent.id,
+              idempotencyKey: intent.idempotencyKey,
+              acceptedAt: intent.createdAt,
+              status: "accepted",
+            };
+          },
+        };
+        const coordinator = new CommitCoordinator(broker, journal, { sink });
+        commitState = { journal, broker, principal, handle, coordinator };
+        return commitState;
+      };
+
       const workload = new ReviewWorkload({
         snapshot,
         context,
@@ -145,8 +216,31 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         deterministic: stage,
         persistence: {
           saveAgentRun: (run) => dependencies.jobStore.saveAgentRun(run),
-          persistReportAndEnqueuePublish: (jobId, report) =>
-            dependencies.jobStore.persistReportAndEnqueuePublish(jobId, report),
+          persistReportAndEnqueuePublish: (jobId, report) => {
+            // Publication disabled → persist the report only (existing path);
+            // no commit intent, no outbox row, no publish capability issued.
+            if (input.publicationPolicy === "disabled") {
+              return dependencies.jobStore.persistReportAndEnqueuePublish(jobId, report);
+            }
+
+            const { principal, handle, coordinator } = ensureCommitState();
+            pendingCommit = { jobId, report };
+            // Strip undefined-typed fields so the payload is canonicalizable;
+            // the durable Outbox row is still written from the raw report.
+            const payload = JSON.parse(JSON.stringify(report)) as JsonValue;
+            return coordinator.accept({
+              principal,
+              handle,
+              action: "github.publish",
+              resource: {
+                kind: "github.publish",
+                repositoryId: input.repositoryFullName,
+                pullNumber: input.pullRequestNumber,
+              },
+              idempotencyKey: `github_comment:${jobId}`,
+              payload,
+            });
+          },
         },
         reportLanguage: dependencies.reportLanguage ?? "zh-CN",
         publicationPolicy: input.publicationPolicy,
@@ -154,7 +248,13 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         knowledgeIndexPath: knowledgeIndexPathFor(input.repositoryFullName, workspaceRoot),
       });
 
-      return workload.run();
+      const result = await workload.run();
+      return {
+        ...result,
+        commit: commitState
+          ? { intents: commitState.coordinator.listIntents(), journal: commitState.journal.entries() }
+          : undefined,
+      };
     },
   };
 }

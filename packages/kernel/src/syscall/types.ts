@@ -35,11 +35,31 @@ import type { Resource, ResourceScope } from "../identity/resource.js";
 export type EffectClass = "pure" | "read" | "revertible" | "commit";
 
 // ---------------------------------------------------------------------------
+// DispatchPolicy
+// ---------------------------------------------------------------------------
+
+/**
+ * Orthogonal to {@link EffectClass}: how a syscall must be *dispatched*.
+ *
+ * - **direct**: The trusted handler runs inline through `SyscallGateway.invoke`
+ *   after authorisation. This covers every non-commit syscall AND `llm.invoke`
+ *   (a commit-class call whose trusted Ring 1 driver executes inline).
+ * - **intent**: The syscall must NOT be dispatched inline. It is routed through
+ *   the {@link CommitCoordinator}, which authorises the caller, records a
+ *   durable CommitIntent, and hands off to the persistent Outbox. This covers
+ *   `github.publish` and `repo.write` — irreversible external mutations.
+ *
+ * `SyscallGateway.invoke` hard-DENIES direct dispatch of any `intent` action,
+ * even for trusted in-process callers (handler invocation count = 0).
+ */
+export type DispatchPolicy = "direct" | "intent";
+
+// ---------------------------------------------------------------------------
 // SyscallDefinition
 // ---------------------------------------------------------------------------
 
 /**
- * Declares a syscall's action and its effect class.
+ * Declares a syscall's action, effect class, and dispatch policy.
  *
  * This registry is used by the Kernel to refuse `commit` calls that have not
  * been routed through the CommitCoordinator, and to record correct effect
@@ -48,6 +68,7 @@ export type EffectClass = "pure" | "read" | "revertible" | "commit";
 export interface SyscallDefinition {
   readonly action: Action;
   readonly effect: EffectClass;
+  readonly dispatch: DispatchPolicy;
   /**
    * Human-readable description. Not shown to Agents; used in documentation
    * and audit log enrichment.
@@ -61,21 +82,22 @@ export interface SyscallDefinition {
 
 export const SYSCALL_DEFINITIONS: readonly SyscallDefinition[] = [
   // --- pure ---
-  { action: "ast.query",       effect: "pure",       description: "Query an AST parse tree" },
+  { action: "ast.query",       effect: "pure",       dispatch: "direct", description: "Query an AST parse tree" },
   // --- read ---
-  { action: "repo.read",       effect: "read",       description: "Read repository file content" },
-  { action: "repo.search",     effect: "read",       description: "Search repository file paths or symbols" },
-  { action: "repo.diff",       effect: "read",       description: "Compute diff between two SHAs" },
-  { action: "evidence.read",   effect: "read",       description: "Read evidence records for a Run" },
-  { action: "workspace.read",  effect: "read",       description: "Read files from the run workspace" },
-  { action: "audit.read",      effect: "read",       description: "Read audit journal entries (Ring 0)" },
+  { action: "repo.read",       effect: "read",       dispatch: "direct", description: "Read repository file content" },
+  { action: "repo.search",     effect: "read",       dispatch: "direct", description: "Search repository file paths or symbols" },
+  { action: "repo.diff",       effect: "read",       dispatch: "direct", description: "Compute diff between two SHAs" },
+  { action: "evidence.read",   effect: "read",       dispatch: "direct", description: "Read evidence records for a Run" },
+  { action: "workspace.read",  effect: "read",       dispatch: "direct", description: "Read files from the run workspace" },
+  { action: "audit.read",      effect: "read",       dispatch: "direct", description: "Read audit journal entries (Ring 0)" },
   // --- revertible ---
-  { action: "workspace.write", effect: "revertible", description: "Write temporary files to the run workspace" },
-  { action: "evidence.write", effect: "revertible", description: "Store a new Evidence record (protected internal state — undoable, NOT an external commit)" },
-  // --- commit ---
-  { action: "repo.write",      effect: "commit",     description: "Write to a repository (push / patch)" },
-  { action: "llm.invoke",      effect: "commit",     description: "Issue a paid LLM inference request" },
-  { action: "github.publish",  effect: "commit",     description: "Publish a PR comment / status to GitHub" },
+  { action: "workspace.write", effect: "revertible", dispatch: "direct", description: "Write temporary files to the run workspace" },
+  { action: "evidence.write", effect: "revertible", dispatch: "direct", description: "Store a new Evidence record (protected internal state — undoable, NOT an external commit)" },
+  // --- commit: direct (llm.invoke executes inline via trusted Ring 1 driver) ---
+  { action: "llm.invoke",      effect: "commit",     dispatch: "direct", description: "Issue a paid LLM inference request" },
+  // --- commit: intent (must route through CommitCoordinator, never inline) ---
+  { action: "repo.write",      effect: "commit",     dispatch: "intent", description: "Write to a repository (push / patch)" },
+  { action: "github.publish",  effect: "commit",     dispatch: "intent", description: "Publish a PR comment / status to GitHub" },
 ];
 
 /** Look up a SyscallDefinition by action. Returns undefined if not registered. */
