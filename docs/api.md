@@ -32,6 +32,8 @@ Authorization: Bearer <CONSISTENCY_API_TOKEN>
 | `GET` | `/notebooks/:id/sources` | 仓库、PR、base/head SHA 和索引状态 |
 | `POST` | `/notebooks/:id/messages` | 只读 Notebook 对话，返回 SSE |
 | `POST` | `/notebooks/:id/cards` | 生成 Notebook 卡片，返回 SSE |
+| `GET` | `/api/runtime/runs` | 运行遥测 Run 概览列表 (Task Manager) |
+| `GET` | `/api/runtime/runs/:runId` | 运行遥测 Run 完整快照，包含 ACB 进程树、上下文 VM 及沙箱状态 |
 
 共享类型位于 `packages/schema/src/`。HTTP、ReviewReport、Job 和 JSON-over-stdio contract 使用同一套 Zod Schema 边界。
 

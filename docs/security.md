@@ -15,6 +15,19 @@
 - Notebook 来源绑定 repository、PR、base/head SHA；文件读取拒绝绝对路径、路径穿越、Secret 路径、二进制和超出预算的内容。
 - Notebook Agent 只读、无 shell、无工作区写入、无测试执行、无补丁应用和无 GitHub 发布权限；补丁建议只是文本。
 - SQLite、workspace、Outbox 和本地评估结果不应直接暴露给公网。
+- 运行时可观测性 DTO (`GET /api/runtime/runs/:runId`) 和 Task Manager 页面严格去敏感化：永不包含原始 CapabilityHandle (`cap_<64hex>`)、GitHub token、LLM API key、父进程环境变量或 Context 源码全文，只提供 12 位 Hex 指纹、元数据和截断的 Diagnostics。
+
+## v3 运行时安全维度
+
+| 安全维度 | 机制 | 状态 / 声明 |
+| --- | --- | --- |
+| 授权 (Authorization) | `CapabilityBroker` 按 Syscall 逐次鉴权 | **已强制 (ENFORCED)** |
+| 外部 Commit 发布 | `CommitCoordinator` 拦截 `github.publish` / `repo.write` | **已强制 (ENFORCED)** |
+| 进程内存隔离 | Node `child-process` 沙箱独立 PID 与 Heap | **已强制 (ENFORCED)** |
+| 父进程密钥隔离 | 沙箱显式环境变量 Allowlist，不继承父进程 `process.env` | **已强制 (ENFORCED)** |
+| 文件系统 OS 隔离 | 节点系统级文件访问未施加 OS 级限制 | **未强制 (NOT ENFORCED)** |
+| 网络 OS 隔离 | 节点网络套接字创建未施加 OS 级限制 | **未强制 (NOT ENFORCED)** |
+| 子进程 OS 隔离 | 节点子进程衍生未施加 OS 级限制 | **未强制 (NOT ENFORCED)** |
 
 ## 访问模式
 

@@ -11,14 +11,16 @@ ConsistenCy 是一个 GitHub Pull Request 审查平台。它的产品价值不�
 
 这条边界带来两个直接收益：分析层的输入、输出和错误行为可以被测试锁定；MockLLM 可以在完整流程中替换真实模型，编排行为因此也能进 CI。
 
-## 一次审查如何流动
+## 一次审查如何流动 (v3 运行时)
 
 1. GitHub Webhook 或本地 API 创建 Job。
-2. ReviewWorker 准备 PR context 和隔离工作区。
-3. Python Engine 返回确定性信号与 Evidence Pack。
-4. Planner、可选 LLM Agents、Compose 和 Synthesizer 形成 ReviewReport。
-5. 报告在 SQLite 中持久化，并以原子事务写入 Outbox。
-6. PublishWorker 获得租约后发布或幂等更新 GitHub 评论。
+2. ReviewWorker 准备 RepositorySnapshot 与 PR Context，并在 Kernel 注册 Run。
+3. 确定性分析器 (PR-4 Style/Secret & Python Engine) 产出可复现 Evidence 存入 EvidenceStore。
+4. KernelScheduler 调度 Supervisor & 专项 Review Agents (in-process) 或 3rd-party 插件 (child-process 沙箱)，按优先级与并发限制准入运行。
+5. 每次跨边界调用经 SyscallGateway → CapabilityBroker 动态鉴权，ContextVM 管理 COW 页面与 WorkingSet 估算。
+6. 最终 ReviewReport 提交给 CommitCoordinator 生成 CommitIntent，并在 SQLite 中原子持久化写入 Outbox。
+7. PublishWorker 获得租约后发布或幂等更新 GitHub 评论。
+8. 运行全过程可通过 `/runs/:runId/runtime` 任务管理器实时/事后观测。
 
 发布失败进入 `publish_failed`，不会抹掉已完成的报告。完整生命周期图与发布状态机见[架构](architecture.md)。
 
