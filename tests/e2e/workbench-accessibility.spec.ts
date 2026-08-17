@@ -33,10 +33,11 @@ test.describe("audit workbench accessibility", () => {
     await expect(firstRun).toBeVisible();
     await firstRun.click();
 
-    const overviewTab = page.getByRole("tab", { name: /Overview|概览/i });
+    const runModeNav = page.getByLabel(/Run views|运行视图/i);
+    const overviewTab = runModeNav.getByRole("tab", { name: /Overview|概览/i });
     await overviewTab.focus();
     await page.keyboard.press("ArrowRight");
-    await expect(page.getByRole("tab", { name: /Diff|差异/i })).toBeFocused();
+    await expect(runModeNav.getByRole("tab", { name: /Diff|差异/i })).toBeFocused();
     await expect(page).toHaveURL(/#\/runs\/[^/]+\/diff/);
 
     const inspectorTabs = page.locator(".inspector-tabs [role='tab']");
