@@ -126,6 +126,7 @@ export {
   AGENT_STATES,
   TERMINAL_AGENT_STATES,
   WAIT_AGENT_STATES,
+  EXECUTABLE_EXECUTION_DOMAINS,
   AgentTreeInvariantError,
 } from "./agent/types.js";
 export {
@@ -223,3 +224,62 @@ export { WAIT_STATE_BY_KIND, pendingOperationFor } from "./scheduler/types.js";
 export { SchedulerEventBus } from "./scheduler/events.js";
 export { KernelScheduler } from "./scheduler/scheduler.js";
 export type { KernelSchedulerOptions } from "./scheduler/scheduler.js";
+
+// Sandbox (child-process execution domain, PR-6A)
+export type {
+  SandboxSessionId,
+  SandboxSessionState,
+  SandboxTerminationReason,
+  PluginDescriptor,
+  BoundOperation,
+  TrustedOperationContext,
+  TrustedOperationHandler,
+  SandboxLaunchOptions,
+  SandboxRunResult,
+  SandboxSessionSnapshot,
+  SandboxLaunch,
+} from "./sandbox/types.js";
+export { asSandboxSessionId, TERMINAL_SANDBOX_STATES } from "./sandbox/types.js";
+export {
+  SandboxError,
+  UnsupportedExecutionDomainError,
+  SandboxLaunchError,
+  SandboxProtocolViolationError,
+  SandboxTimeoutError,
+  SandboxCancelledError,
+  ForbiddenRpcMethodError,
+  InvalidSandboxConfigurationError,
+} from "./sandbox/errors.js";
+export {
+  RPC_PROTOCOL_VERSION,
+  MAX_RPC_MESSAGE_BYTES,
+  MAX_DIAGNOSTIC_BYTES,
+  validateChildMessage,
+  buildResponseOk,
+  buildResponseError,
+  buildCancelMessage,
+  buildFinishMessage,
+} from "./sandbox/protocol.js";
+export type {
+  RpcReadyMessage,
+  RpcRequestMessage,
+  RpcRunResultMessage,
+  RpcRunErrorMessage,
+  RpcChildMessage,
+  RpcResponseOkMessage,
+  RpcResponseErrorMessage,
+  RpcCancelMessage,
+  RpcFinishMessage,
+  RpcParentMessage,
+  InboundValidation,
+} from "./sandbox/protocol.js";
+export { buildSandboxEnvironment, CREDENTIAL_ENV_HINTS } from "./sandbox/env.js";
+export type { SandboxPlugin, SandboxPluginContext } from "./sandbox/plugin-contract.js";
+export type { SandboxLifecycleEvent, SandboxLifecycleListener } from "./sandbox/events.js";
+export { SandboxLifecycleBus } from "./sandbox/events.js";
+export type { SandboxManagerOptions } from "./sandbox/manager.js";
+export { SandboxManager } from "./sandbox/manager.js";
+export { SandboxSession } from "./sandbox/session.js";
+export type { SandboxSessionConfig } from "./sandbox/session.js";
+export type { SandboxChildProcess, SandboxSpawnOptions } from "./sandbox/runner.js";
+export { spawnSandboxChild } from "./sandbox/runner.js";

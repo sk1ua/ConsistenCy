@@ -85,6 +85,20 @@ export const WAIT_AGENT_STATES: readonly AgentState[] = [
 export type ExecutionDomain = "in-process" | "worker-thread" | "child-process";
 
 /**
+ * Execution domains that have a REAL executor in this build:
+ *   - "in-process"    — trusted built-ins run directly in the harness process,
+ *   - "child-process" — SandboxManager forks a worker process (PR-6A).
+ *
+ * "worker-thread" is a DECLARED FUTURE domain: it exists in the type model
+ * but has no executor. Components that must not silently substitute domains
+ * (e.g. SandboxManager) consult this list and fail closed otherwise.
+ */
+export const EXECUTABLE_EXECUTION_DOMAINS: readonly ExecutionDomain[] = [
+  "in-process",
+  "child-process",
+];
+
+/**
  * Capability metadata recorded on an ACB — a DESCRIPTOR, never a credential
  * and never an authorization decision. Authorization still happens per-call
  * through SyscallGateway → CapabilityBroker.authorise(). Presence of a ref in
