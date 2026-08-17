@@ -113,6 +113,38 @@ export { AgentRegistry } from "./agent/registry.js";
 export type { ContextImageId } from "./identity/context-image.js";
 export { asContextImageId } from "./identity/context-image.js";
 
+// RepositorySnapshot identity policy (materialization lives in @consistency/repository)
+export type { RepositorySnapshotId, SnapshotIdentity } from "./identity/snapshot.js";
+export {
+  asRepositorySnapshotId,
+  SNAPSHOT_URI_SCHEME,
+  SnapshotUriError,
+  formatSnapshotUri,
+  parseSnapshotUri,
+} from "./identity/snapshot.js";
+
+// Evidence — canonical deterministic grounding records (PR-4)
+export type {
+  EvidenceId,
+  EvidenceSource,
+  EvidenceLocation,
+  EvidenceProvenance,
+  EvidenceInput,
+  Evidence,
+  EvidenceSnapshot,
+  EvidenceQuery,
+  JsonValue,
+} from "./evidence/types.js";
+export { asEvidenceId } from "./evidence/types.js";
+export {
+  EvidenceError,
+  EvidenceValidationError,
+  EvidenceIdConflictError,
+  CanonicalizationError,
+} from "./evidence/errors.js";
+export { canonicalizeJson, computeEvidenceFingerprint } from "./evidence/fingerprint.js";
+export { EvidenceStore } from "./evidence/store.js";
+
 // Context VM (PR-3): virtual context memory primitives
 export type {
   ContextPageId,

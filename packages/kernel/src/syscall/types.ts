@@ -71,9 +71,9 @@ export const SYSCALL_DEFINITIONS: readonly SyscallDefinition[] = [
   { action: "audit.read",      effect: "read",       description: "Read audit journal entries (Ring 0)" },
   // --- revertible ---
   { action: "workspace.write", effect: "revertible", description: "Write temporary files to the run workspace" },
+  { action: "evidence.write", effect: "revertible", description: "Store a new Evidence record (protected internal state — undoable, NOT an external commit)" },
   // --- commit ---
   { action: "repo.write",      effect: "commit",     description: "Write to a repository (push / patch)" },
-  { action: "evidence.write",  effect: "commit",     description: "Persist a new Evidence record" },
   { action: "llm.invoke",      effect: "commit",     description: "Issue a paid LLM inference request" },
   { action: "github.publish",  effect: "commit",     description: "Publish a PR comment / status to GitHub" },
 ];
