@@ -19,7 +19,7 @@ import { minimatch } from "minimatch";
 import { generateCapabilityHandle, auditFingerprint } from "./handle.js";
 import { CapabilityError, type DenyReason } from "./errors.js";
 import {
-  ACTION_RINGS,
+  CAPABILITY_ISSUABLE_RING,
   RING_ALLOWED_KINDS,
   type PrivilegeRing,
 } from "./policy.js";
@@ -114,8 +114,10 @@ export class CapabilityBroker {
     const { subject, action, resource, scope, expiresAt, budget } = request;
     const now = this.#clock();
 
-    // Policy check: is the subject's kind allowed to hold this action's ring?
-    const ring: PrivilegeRing = ACTION_RINGS[action];
+    // Policy check: is the subject's kind allowed to be issued this action?
+    // Uses CAPABILITY_ISSUABLE_RING, not SERVICE_RING — these are not the same.
+    // e.g. llm.invoke service is Ring 1 but the capability is issuable to Ring 3 agents.
+    const ring: PrivilegeRing = CAPABILITY_ISSUABLE_RING[action];
     const allowedKinds = RING_ALLOWED_KINDS[ring];
     if (!allowedKinds.includes(subject.kind)) {
       throw new CapabilityError(
@@ -223,7 +225,9 @@ export class CapabilityBroker {
     }
 
     // ---- 3. Not expired ----
-    if (!denyReason && record!.expiresAt !== undefined && record!.expiresAt < now) {
+    // Use <= so that a capability expiring at exactly `now` is also denied.
+    // A capability valid up to T means it is usable strictly before T.
+    if (!denyReason && record!.expiresAt !== undefined && record!.expiresAt <= now) {
       denyReason = "expired";
     }
 
@@ -298,8 +302,8 @@ export class CapabilityBroker {
   // Budget phase-2 helpers
   // -------------------------------------------------------------------------
 
-  commitTokens(token: ReservationToken, actualTokens: number): void {
-    this.#accountants.get(token.handle)?.commit(token.reservationId, actualTokens);
+  commitTokens(token: ReservationToken, actualTokens: number, actualCostUsdMicros = 0n): void {
+    this.#accountants.get(token.handle)?.commit(token.reservationId, actualTokens, actualCostUsdMicros);
   }
 
   releaseTokens(token: ReservationToken): void {
@@ -344,8 +348,17 @@ function matchResource(cap: Resource, req: Resource): DenyReason | null {
       return (req as typeof cap).runId === cap.runId ? null : "resource_mismatch";
     case "workspace":
       return (req as typeof cap).runId === cap.runId ? null : "resource_mismatch";
-    case "github.publish":
-      return (req as typeof cap).repositoryId === cap.repositoryId ? null : "resource_mismatch";
+    case "github.publish": {
+      const capGh = cap as import("../identity/resource.js").GitHubPublishResource;
+      const reqGh = req as import("../identity/resource.js").GitHubPublishResource;
+      if (reqGh.repositoryId !== capGh.repositoryId) return "resource_mismatch";
+      // If the capability constrains a specific PR number, the request must match.
+      // Principle: if the capability has a constraint, the request must satisfy it.
+      if (capGh.pullNumber !== undefined && reqGh.pullNumber !== capGh.pullNumber) {
+        return "resource_mismatch";
+      }
+      return null;
+    }
     case "llm":
       return (req as typeof cap).provider === cap.provider ? null : "resource_mismatch";
     case "ast":
@@ -360,13 +373,21 @@ function matchResource(cap: Resource, req: Resource): DenyReason | null {
 function checkScope(scope: ResourceScope | undefined, req: AuthoriseRequest): DenyReason | null {
   if (!scope) return null;
 
-  // SHA check
-  if (scope.sha !== undefined && req.sha !== undefined && scope.sha !== req.sha) {
-    return "scope_violation";
+  // SHA check.
+  // IMPORTANT: if the capability declares a sha constraint, the request MUST
+  // supply a sha. Omitting req.sha when scope.sha is set is a scope_violation,
+  // not a free pass. Callers cannot bypass a SHA pin by simply not sending one.
+  if (scope.sha !== undefined) {
+    if (req.sha === undefined) return "scope_violation";
+    if (scope.sha !== req.sha) return "scope_violation";
   }
 
-  // Path check
-  if (scope.paths !== undefined && req.path !== undefined) {
+  // Path check.
+  // Same principle: if the capability declares path constraints, the request
+  // MUST supply a path. Omitting req.path bypasses the glob check otherwise.
+  if (scope.paths !== undefined) {
+    if (req.path === undefined) return "scope_violation";
+
     let normalised: string;
     try {
       normalised = normaliseResourcePath(req.path);

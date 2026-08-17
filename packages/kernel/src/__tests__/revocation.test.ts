@@ -88,13 +88,14 @@ describe("CapabilityBroker — revocation", () => {
         { principal: agentA, handle, action: "repo.read", resource: repo },
         () => {
           handlerInvoked = true;
-          return "should not reach here";
+          return { value: "should not reach here" };
         }
       )
     ).rejects.toThrow(CapabilityError);
 
     expect(handlerInvoked).toBe(false);
   });
+
 
   it("AC-9: every allow and deny produces an audit syscall event", () => {
     const handle = broker.issue({ subject: agentA, action: "repo.read", resource: repo });

@@ -34,13 +34,14 @@ export { asCapabilityHandle } from "./capability/types.js";
 export type { IssueRequest, AuthoriseRequest, ReservationToken } from "./capability/broker.js";
 export { CapabilityBroker } from "./capability/broker.js";
 export type { PrivilegeRing } from "./capability/policy.js";
-export { ACTION_RINGS, RING_ALLOWED_KINDS } from "./capability/policy.js";
+export { ACTION_RINGS, SERVICE_RING, CAPABILITY_ISSUABLE_RING, RING_ALLOWED_KINDS } from "./capability/policy.js";
 export type { DenyReason } from "./capability/errors.js";
 export { CapabilityError } from "./capability/errors.js";
 
 // Syscall
 export type { EffectClass, SyscallDefinition } from "./syscall/types.js";
 export { SYSCALL_DEFINITIONS, getSyscallDefinition } from "./syscall/types.js";
+export type { SyscallOutcome } from "./syscall/authorize.js";
 export { SyscallGateway } from "./syscall/authorize.js";
 
 // Audit
