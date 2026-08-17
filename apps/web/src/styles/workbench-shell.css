@@ -859,14 +859,14 @@ body,
 .inspector-agent-list small,
 .inspector-agent-list code {
   overflow: hidden;
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .inspector-agent-list small,
 .inspector-agent-list code {
-  color: var(--muted);
+  color: var(--muted-strong);
   font-family: var(--font-mono);
 }
 
