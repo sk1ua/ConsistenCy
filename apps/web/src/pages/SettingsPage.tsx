@@ -122,8 +122,11 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     return Boolean(secrets[name].trim()) || (configured && !clearSecrets[name]);
   }
 
-  const llmReady = Boolean(draft && settings && (draft.llm.provider === "mock"
-    || (draft.llm.provider === "deepseek" ? secretReady("deepseekApiKey", settings.llm.deepseekApiKeyConfigured) : secretReady("openaiApiKey", settings.llm.openaiApiKeyConfigured))));
+  const llmReady = Boolean(draft && settings && (
+    (draft.llm.provider === "deepseek" ? secretReady("deepseekApiKey", settings.llm.deepseekApiKeyConfigured)
+     : draft.llm.provider === "openai" ? secretReady("openaiApiKey", settings.llm.openaiApiKeyConfigured)
+     : false)
+  ));
   const githubAppReady = Boolean(draft && settings && draft.github.appId
     && secretReady("privateKey", settings.github.privateKeyConfigured)
     && secretReady("webhookSecret", settings.github.webhookSecretConfigured));
@@ -193,14 +196,14 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
   if (loading) return <div className="loading-state"><LoaderCircle size={22} /><span>{t("Loading configuration")}</span></div>;
   if (!draft || !settings) return <div className="empty-state">{t("Configuration editor is unavailable. Run {command} for details.", { command: "npm run config -- doctor" })}</div>;
 
-  return <form className="settings-editor" onSubmit={event => void save(event)}>
-    <section className="settings-intro">
-      <div><span className="eyebrow"><Sparkles size={15} />{t("Workspace setup")}</span><h2>{t("Configure the review pipeline without editing environment files.")}</h2><p>{t("Secrets can be replaced but are never returned to this page. Environment variables remain the final override.")}</p></div>
-      <div className="readiness-score"><strong>{readiness.complete}/{readiness.total}</strong><span>{t("configuration groups ready")}</span></div>
-      <div className="setup-rail" aria-label={t("Configuration readiness")}>
-        <span className={llmReady ? "ready" : ""}><i>{llmReady ? <Check size={12} /> : "1"}</i>{t("Model")}</span>
-        <span className={sourceReady ? "ready" : ""}><i>{sourceReady ? <Check size={12} /> : "2"}</i>{t("Repository source")}</span>
-        <span className={runtimeReady ? "ready" : ""}><i>{runtimeReady ? <Check size={12} /> : "3"}</i>{t("Runtime")}</span>
+  return <form className="settings-editor page-stack" onSubmit={event => void save(event)}>
+    <section className="section-block settings-header-strip">
+      <div className="settings-title-wrap">
+        <ServerCog size={20} className="settings-icon-main" />
+        <div>
+          <h2>{t("Settings")}</h2>
+          <p>{t("Configure models, GitHub connections, and review worker runtime settings.")}</p>
+        </div>
       </div>
     </section>
 
@@ -208,9 +211,9 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     {draft.overriddenByEnvironment.length > 0 && <div className="settings-message warning">{t("Environment variables override: {keys}", { keys: draft.overriddenByEnvironment.join(", ") })}</div>}
 
     <section className="settings-group section-block">
-      <div className="settings-group-title"><Sparkles size={18} /><div><span>{t("01 · Model")}</span><h3>{t("Evidence synthesis model")}</h3><p>{t("Choose the model used for evidence synthesis and reviewer handoff.")}</p></div></div>
+      <div className="settings-group-title"><Sparkles size={18} /><div><h3>{t("Model")}</h3><p>{t("Choose the model used for evidence synthesis and reviewer handoff.")}</p></div></div>
       <div className="settings-fields">
-        <div className="setting-field"><label htmlFor="setting-provider">{t("Provider")}</label><select id="setting-provider" aria-describedby="setting-provider-help" value={draft.llm.provider} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, provider: event.target.value as SettingsSnapshot["llm"]["provider"] } }) : current)}><option value="mock">{t("Mock · no external model")}</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select><SettingHelp id="setting-provider-help" text="Mock mode needs no API key. Select a provider only when you want LLM synthesis and dialogue." /></div>
+        <div className="setting-field"><label htmlFor="setting-provider">{t("Provider")}</label><select id="setting-provider" aria-describedby="setting-provider-help" value={draft.llm.provider ?? "none"} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, provider: event.target.value as SettingsSnapshot["llm"]["provider"] } }) : current)}><option value="none">{t("Not configured")}</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select><SettingHelp id="setting-provider-help" text="ConsistenCy requires a real LLM Provider (DeepSeek or OpenAI) to execute reviews." /></div>
         {draft.llm.provider === "deepseek" && <>
           <div className="setting-field"><label htmlFor="setting-deepseek-model">{t("Model")}</label><input id="setting-deepseek-model" aria-describedby="setting-deepseek-model-help" value={draft.llm.deepseekModel} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekModel: event.target.value } }) : current)} /><SettingHelp id="setting-deepseek-model-help" text="Use a model name supported by your DeepSeek account." /></div>
           <div className="setting-field setting-field-wide"><label htmlFor="setting-deepseek-url">{t("Base URL")}</label><input id="setting-deepseek-url" aria-describedby="setting-deepseek-url-help" type="url" value={draft.llm.deepseekBaseUrl} onChange={event => setDraft(current => current ? ({ ...current, llm: { ...current.llm, deepseekBaseUrl: event.target.value } }) : current)} /><SettingHelp id="setting-deepseek-url-help" text="Keep the official endpoint unless your organization provides a compatible gateway." /></div>
@@ -224,7 +227,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     </section>
 
     <section className="settings-group section-block">
-      <div className="settings-group-title"><Github size={18} /><div><span>{t("02 · GitHub")}</span><h3>{t("Pull request connection")}</h3><p>{t("Start with anonymous public PR analysis, then add credentials only for the mode you need.")}</p></div></div>
+      <div className="settings-group-title"><Github size={18} /><div><h3>{t("GitHub")}</h3><p>{t("Start with anonymous public PR analysis, then add credentials only for the mode you need.")}</p></div></div>
       <div className="settings-fields">
         <div className="source-mode-guide setting-field-wide" aria-label={t("GitHub connection modes")}>
           <span><strong>{t("Anonymous public PR")}</strong><small>{t("Recommended for trying ConsistenCy. No GitHub App or token is required.")}</small></span>

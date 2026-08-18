@@ -31,14 +31,25 @@ export function JobsPage({ jobs, onOpenJob }: { jobs: ReviewJob[]; onOpenJob: (j
       <table className="semantic-table">
         <caption className="sr-only">{t("Review queue")}</caption>
         <thead><tr><th scope="col">{t("Repository / PR")}</th><th scope="col">{t("Status")}</th><th scope="col">{t("Risk")}</th><th scope="col">{t("Findings")}</th><th scope="col">{t("Commit range")}</th><th scope="col">{t("Created")}</th></tr></thead>
-        <tbody>{filtered.map(job => <tr key={job.id}>
-          <td><button className="semantic-row-open" type="button" onClick={() => onOpenJob(job)}><strong>{job.repositoryFullName}</strong><small>{job.pullRequestNumber === undefined ? t("Local repository") : `PR #${job.pullRequestNumber}`}</small></button></td>
-          <td><StatusBadge value={job.status} /></td>
-          <td>{job.report ? <StatusBadge value={job.report.riskLevel} /> : "-"}</td>
-          <td>{job.report?.findings.length ?? "-"}</td>
-          <td className="commit-range">{job.baseSha.slice(0, 7)}..{job.headSha.slice(0, 7)}</td>
-          <td>{new Date(job.createdAt).toLocaleDateString(locale)}</td>
-        </tr>)}</tbody>
+        <tbody>{filtered.map(job => {
+          const isDemo = job.id.startsWith("job_demo");
+          const baseDisplay = job.baseSha.startsWith("demo-base-") ? "demo-base" : job.baseSha.slice(0, 7);
+          const headDisplay = job.headSha.startsWith("demo-head-") ? "demo-head" : job.headSha.slice(0, 7);
+          return <tr key={job.id}>
+            <td>
+              <button className="semantic-row-open" type="button" onClick={() => onOpenJob(job)}>
+                <strong>{job.repositoryFullName}</strong>
+                <small>{job.pullRequestNumber === undefined ? t("Local repository") : `PR #${job.pullRequestNumber}`}</small>
+                {isDemo && <span className="provenance-pill demo-provenance">{locale === "zh-CN" ? "演示数据" : "FIXTURE"}</span>}
+              </button>
+            </td>
+            <td><StatusBadge value={job.status} /></td>
+            <td>{job.report ? <StatusBadge value={job.report.riskLevel} /> : "-"}</td>
+            <td>{job.report?.findings.length ?? "-"}</td>
+            <td className="commit-range"><code>{baseDisplay} → {headDisplay}</code></td>
+            <td>{new Date(job.createdAt).toLocaleDateString(locale)}</td>
+          </tr>;
+        })}</tbody>
       </table>
       {filtered.length === 0 && <div className="empty-state" role="status">{t("No review jobs match these filters.")}</div>}
     </div>

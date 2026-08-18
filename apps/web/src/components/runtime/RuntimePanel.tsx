@@ -13,14 +13,20 @@ import {
   Activity,
   Box,
   CheckCircle2,
+  Clock,
   Cpu,
+  CornerDownRight,
+  Fingerprint,
+  Info,
   Layers,
   LoaderCircle,
   Lock,
+  Radio,
   RefreshCw,
   Server,
   Shield,
   ShieldAlert,
+  Sparkles,
   Terminal,
   Zap,
 } from "lucide-react";
@@ -29,7 +35,7 @@ import { useI18n } from "../../i18n";
 import { workspaceQueryKeys } from "../../query/client";
 import { safeRequestError } from "../../query/safeRequestError";
 
-function formatStateLabel(state: string, zh: boolean): string {
+export function formatStateLabel(state: string, zh: boolean): string {
   switch (state) {
     case "NEW": return zh ? "新建" : "NEW";
     case "READY": return zh ? "就绪" : "READY";
@@ -49,7 +55,7 @@ function formatStateLabel(state: string, zh: boolean): string {
   }
 }
 
-function stateBadgeClass(state: string): string {
+export function stateBadgeClass(state: string): string {
   if (state === "RUNNING") return "status-badge status-running";
   if (state.startsWith("WAIT_")) return "status-badge status-queued";
   if (state === "SUCCEEDED") return "status-badge status-succeeded";
@@ -58,7 +64,18 @@ function stateBadgeClass(state: string): string {
   return "status-badge status-idle";
 }
 
-function SecurityGuaranteesPanel({ guarantees, zh }: { guarantees: SecurityGuarantees; zh: boolean }) {
+function getAgentIcon(agentId: string, label: string) {
+  const name = (label || agentId).toLowerCase();
+  if (name.includes("supervisor")) return <Cpu size={14} className="agent-icon-role" />;
+  if (name.includes("sec")) return <Shield size={14} className="agent-icon-role" />;
+  if (name.includes("corr")) return <CheckCircle2 size={14} className="agent-icon-role" />;
+  if (name.includes("plugin") || name.includes("3rd")) return <Box size={14} className="agent-icon-role" />;
+  if (name.includes("synth")) return <Sparkles size={14} className="agent-icon-role" />;
+  if (name.includes("tool")) return <Terminal size={14} className="agent-icon-role" />;
+  return <Cpu size={14} className="agent-icon-role" />;
+}
+
+export function SecurityGuaranteesPanel({ guarantees, zh }: { guarantees: SecurityGuarantees; zh: boolean }) {
   const items = [
     { label: zh ? "进程内存隔离" : "Process Memory Isolation", status: guarantees.processMemoryIsolation },
     { label: zh ? "环境变量密钥隔离" : "Parent Env Secret Isolation", status: guarantees.parentEnvSecretIsolation },
@@ -103,31 +120,37 @@ function SecurityGuaranteesPanel({ guarantees, zh }: { guarantees: SecurityGuara
           );
         })}
       </div>
+
+      <div className="security-footer-note">
+        <Info size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+        {zh
+          ? "Kernel RPC 与内存边界受严格策略保护；当前运行配置未启用 OS 级沙箱隔离。"
+          : "Kernel RPC and memory boundaries are strictly enforced; OS-level sandbox containment is not enforced in the current profile."}
+      </div>
     </section>
   );
 }
 
-function AgentDetailDrawer({
+export function AgentInspectorContent({
   agent,
-  zh,
-  onClose,
+  zh
 }: {
   agent: AgentRuntimeSnapshot;
   zh: boolean;
-  onClose: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"process" | "capabilities" | "context" | "sandbox">("process");
 
   return (
-    <div className="agent-detail-drawer" role="dialog" aria-label={agent.label}>
-      <div className="drawer-header">
+    <div className="agent-inspector-content" role="region" aria-label={agent.label}>
+      <div className="inspector-agent-head">
         <div>
-          <span className="panel-kicker">{zh ? "智能体进程详情" : "Agent Process Detail"}</span>
-          <h3>{agent.label} <code>({agent.agentId})</code></h3>
+          <span className="panel-kicker">{zh ? "智能体进程" : "Agent Process"}</span>
+          <h3>
+            <span>{agent.label}</span>
+            <code>({agent.agentId})</code>
+          </h3>
         </div>
-        <button type="button" className="drawer-close-btn" onClick={onClose}>
-          ✕
-        </button>
+        <span className={stateBadgeClass(agent.state)}>{formatStateLabel(agent.state, zh)}</span>
       </div>
 
       <div className="drawer-tabs" role="tablist">
@@ -175,17 +198,35 @@ function AgentDetailDrawer({
         {activeTab === "process" && (
           <div className="drawer-section">
             <div className="kv-grid">
-              <div><strong>{zh ? "状态" : "State"}</strong><span className={stateBadgeClass(agent.state)}>{formatStateLabel(agent.state, zh)}</span></div>
-              <div><strong>{zh ? "优先级" : "Priority"}</strong><span>{agent.priority}</span></div>
-              <div><strong>{zh ? "特权环" : "Logical Ring"}</strong><span>Ring {agent.logicalRing}</span></div>
-              <div><strong>{zh ? "执行域" : "Execution Domain"}</strong><code>{agent.executionDomain}</code></div>
-              <div><strong>{zh ? "父进程 ID" : "Parent Agent"}</strong><code>{agent.parent ?? (zh ? "无 (根节点)" : "None (Root)")}</code></div>
-              <div><strong>{zh ? "子进程数" : "Children"}</strong><span>{agent.children.length}</span></div>
+              <div>
+                <strong>{zh ? "状态" : "State"}</strong>
+                <span className={stateBadgeClass(agent.state)}>{formatStateLabel(agent.state, zh)}</span>
+              </div>
+              <div>
+                <strong>{zh ? "优先级" : "Priority"}</strong>
+                <span>P{agent.priority}</span>
+              </div>
+              <div>
+                <strong>{zh ? "特权环" : "Logical Ring"}</strong>
+                <span>Ring {agent.logicalRing}</span>
+              </div>
+              <div>
+                <strong>{zh ? "执行域" : "Execution Domain"}</strong>
+                <code>{agent.executionDomain}</code>
+              </div>
+              <div>
+                <strong>{zh ? "父进程 ID" : "Parent Agent"}</strong>
+                <code>{agent.parent ?? (zh ? "无 (根节点)" : "None (Root)")}</code>
+              </div>
+              <div>
+                <strong>{zh ? "子进程数" : "Children"}</strong>
+                <span>{agent.children.length}</span>
+              </div>
               {agent.pendingOperation && (
                 <div className="kv-wide">
-                  <strong>{zh ? "等待操作" : "Pending Operation"}</strong>
+                  <strong>{zh ? "当前等待操作" : "Pending Operation"}</strong>
                   <div className="pending-op-badge">
-                    <code>{agent.pendingOperation.kind}</code>
+                    <code>{agent.pendingOperation.kind.toUpperCase()}</code>
                     <span>{agent.pendingOperation.description}</span>
                   </div>
                 </div>
@@ -237,7 +278,12 @@ function AgentDetailDrawer({
           <div className="drawer-section">
             {agent.contextImageId ? (
               <div className="context-detail">
-                <div><strong>ContextImageId:</strong> <code>{agent.contextImageId}</code></div>
+                <div className="kv-grid">
+                  <div>
+                    <strong>{zh ? "镜像 ID" : "Context Image ID"}</strong>
+                    <code>{agent.contextImageId}</code>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="empty-inline">{zh ? "无关联的 ContextImage。" : "No associated ContextImage."}</div>
@@ -272,14 +318,18 @@ export function RuntimePanel({
   runId,
   job,
   report,
+  onSelectAgent,
+  selectedAgentId: controlledSelectedAgentId,
 }: {
   runId: string;
   job?: ReviewJob;
   report?: ReviewReport;
+  onSelectAgent?: (agent: AgentRuntimeSnapshot) => void;
+  selectedAgentId?: string;
 }) {
   const { locale } = useI18n();
   const zh = locale === "zh-CN";
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [internalSelectedAgentId, setInternalSelectedAgentId] = useState<string | null>(null);
 
   const runtimeQuery = useQuery({
     queryKey: workspaceQueryKeys.runtimeSnapshot(runId),
@@ -322,11 +372,25 @@ export function RuntimePanel({
     );
   }
 
-  const selectedAgent = snapshot.agents.find((a) => a.agentId === selectedAgentId);
+  const selectedAgentId = controlledSelectedAgentId ?? internalSelectedAgentId;
+  const defaultAgent = snapshot.agents.find((a) => a.state.startsWith("WAIT_") || a.state === "RUNNING") ?? snapshot.agents[0];
+  const selectedAgent = snapshot.agents.find((a) => a.agentId === selectedAgentId) ?? defaultAgent;
+
+  const isDemo = Boolean(
+    job?.id.startsWith("job_demo") ||
+    job?.baseSha.startsWith("demo-base-") ||
+    job?.headSha.startsWith("demo-head-") ||
+    snapshot.runId.startsWith("run_job_demo")
+  );
+
+  function handleNodeClick(agent: AgentRuntimeSnapshot) {
+    setInternalSelectedAgentId(agent.agentId);
+    onSelectAgent?.(agent);
+  }
 
   return (
     <div className="run-runtime-panel page-stack">
-      {/* Top Overview Cards */}
+      {/* 1. Top Overview Hero Bar */}
       <section className="section-block runtime-overview-header">
         <div className="runtime-summary-bar">
           <div className="summary-item">
@@ -335,13 +399,20 @@ export function RuntimePanel({
           </div>
           <div className="summary-item">
             <span className="summary-label">{zh ? "遥测状态" : "Telemetry Status"}</span>
-            <span className={`status-pill telemetry-${snapshot.telemetryStatus}`}>
-              {snapshot.telemetryStatus === "live" ? (
-                <><RefreshCw size={12} className="spinning" /> {zh ? "实时运行" : "LIVE"}</>
-              ) : (
-                <><CheckCircle2 size={12} /> {zh ? "已完成快照" : "COMPLETED SNAPSHOT"}</>
+            <div className="telemetry-status-group">
+              <span className={`status-pill telemetry-${snapshot.telemetryStatus}`}>
+                {snapshot.telemetryStatus === "live" ? (
+                  <><RefreshCw size={12} className="spinning" /> {zh ? "实时运行" : "LIVE"}</>
+                ) : (
+                  <><CheckCircle2 size={12} /> {zh ? "已完成快照" : "COMPLETED SNAPSHOT"}</>
+                )}
+              </span>
+              {isDemo && (
+                <span className="provenance-tag">
+                  {zh ? "演示数据" : "FIXTURE"}
+                </span>
               )}
-            </span>
+            </div>
           </div>
           <div className="summary-item">
             <span className="summary-label">{zh ? "运行状态" : "Run State"}</span>
@@ -362,75 +433,7 @@ export function RuntimePanel({
         </div>
       </section>
 
-      {/* Security Guarantees */}
-      <SecurityGuaranteesPanel guarantees={snapshot.securityGuarantees} zh={zh} />
-
-      {/* Context VM Overview */}
-      {snapshot.context && (
-        <section className="section-block context-vm-summary-panel">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "虚拟上下文" : "Context VM"}</span>
-              <h2>{zh ? "工作集与 COW 页面分布" : "WorkingSet & Page Table Distribution"}</h2>
-            </div>
-            <Layers size={18} className="panel-icon" />
-          </div>
-
-          <div className="context-vm-grid">
-            <div className="vm-stat-card">
-              <span className="stat-label">{zh ? "工作集估算 Token" : "Working Set Estimated Tokens"}</span>
-              <strong className="stat-value">{snapshot.context.workingSetTokens.toLocaleString()}</strong>
-              <small className="stat-sub">{zh ? "仅为 ContextVM 估算值，非模型实际消费" : "ContextVM estimate, not actual model tokens"}</small>
-            </div>
-            <div className="vm-stat-card">
-              <span className="stat-label">{zh ? "活动页面总数" : "Working Set Page Count"}</span>
-              <strong className="stat-value">{snapshot.context.workingSetPageCount}</strong>
-            </div>
-            <div className="vm-stat-card">
-              <span className="stat-label">{zh ? "页面驻留分布 (Residency)" : "Page Residency Distribution"}</span>
-              <div className="residency-pills">
-                {Object.entries(snapshot.context.pageCountsByResidency).map(([res, count]) => (
-                  <span key={res} className={`residency-pill res-${res.toLowerCase()}`}>
-                    {res.toUpperCase()}: {count}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Page Metadata Table */}
-          {snapshot.context.pages.length > 0 && (
-            <div className="context-pages-table-wrapper">
-              <table className="context-pages-table">
-                <thead>
-                  <tr>
-                    <th>{zh ? "页面 ID" : "Page ID"}</th>
-                    <th>{zh ? "类型 Kind" : "Kind"}</th>
-                    <th>{zh ? "驻留状态" : "Residency"}</th>
-                    <th>{zh ? "估算 Token" : "Est. Tokens"}</th>
-                    <th>{zh ? "内容 Hash" : "Content Hash"}</th>
-                    <th>{zh ? "来源引用" : "Source Ref"}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {snapshot.context.pages.map((p) => (
-                    <tr key={p.pageId}>
-                      <td><code>{p.pageId}</code></td>
-                      <td><span className="kind-tag">{p.kind}</span></td>
-                      <td><span className={`residency-pill res-${p.residency.toLowerCase()}`}>{p.residency}</span></td>
-                      <td>{p.estimatedTokens}</td>
-                      <td><code>{p.contentHash}</code></td>
-                      <td>{p.sourceRef ? <code>{p.sourceRef}</code> : <span className="muted-text">—</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Agent Process Table / Tree */}
+      {/* 2. Full-Width Agent Process Hierarchy Tree */}
       <section className="section-block agent-processes-panel">
         <div className="panel-title">
           <div>
@@ -440,83 +443,136 @@ export function RuntimePanel({
           <Cpu size={18} className="panel-icon" />
         </div>
 
-        <div className="agent-table-wrapper">
-          <table className="agent-process-table">
-            <thead>
-              <tr>
-                <th>{zh ? "智能体 Label / AgentId" : "Agent Label / ID"}</th>
-                <th>{zh ? "状态" : "State"}</th>
-                <th>{zh ? "优先级" : "Priority"}</th>
-                <th>{zh ? "执行域" : "Execution Domain"}</th>
-                <th>{zh ? "特权环" : "Ring"}</th>
-                <th>{zh ? "当前等待操作" : "Pending Operation"}</th>
-                <th>{zh ? "能力数" : "Capabilities"}</th>
-                <th>{zh ? "沙箱状态" : "Sandbox Status"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.agents.map((agent) => (
-                <tr
-                  key={agent.agentId}
-                  className={`agent-row ${selectedAgentId === agent.agentId ? "selected" : ""}`}
-                  onClick={() => setSelectedAgentId(agent.agentId)}
-                >
-                  <td className="agent-id-cell">
-                    <div className="agent-label-wrapper">
-                      <strong>{agent.label}</strong>
-                      <code>{agent.agentId}</code>
-                    </div>
-                  </td>
-                  <td>
+        <div className="agent-process-tree" role="list" aria-label={zh ? "智能体进程列表" : "Agent Process List"}>
+          {snapshot.agents.map((agent) => {
+            const isSelected = selectedAgent?.agentId === agent.agentId;
+            const isChild = Boolean(agent.parent);
+            return (
+              <div
+                key={agent.agentId}
+                role="button"
+                tabIndex={0}
+                className={`agent-tree-node ${isChild ? "child-node" : "root-node"} ${isSelected ? "selected" : ""}`}
+                onClick={() => handleNodeClick(agent)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleNodeClick(agent); }}
+              >
+                <div className="node-primary-row">
+                  <div className="node-title-group">
+                    {isChild && <CornerDownRight size={13} className="tree-branch-icon" />}
+                    {getAgentIcon(agent.agentId, agent.label)}
+                    <strong className="agent-name">{agent.label}</strong>
+                  </div>
+                  <div className="node-badge-group">
                     <span className={stateBadgeClass(agent.state)}>
                       {formatStateLabel(agent.state, zh)}
                     </span>
-                  </td>
-                  <td>{agent.priority}</td>
-                  <td>
+                    <span className="priority-pill">P{agent.priority}</span>
+                  </div>
+                </div>
+
+                <div className="node-secondary-row">
+                  <div className="node-meta-chips">
+                    <code className="agent-id-tag">{agent.agentId}</code>
                     <span className={`domain-badge domain-${agent.executionDomain}`}>
                       {agent.executionDomain === "child-process" ? (
-                        <><Box size={12} /> {zh ? "子进程" : "child-process"}</>
+                        <><Box size={11} /> {zh ? "子进程" : "child-process"}</>
                       ) : (
-                        <><Zap size={12} /> {zh ? "进程内" : "in-process"}</>
+                        <><Zap size={11} /> {zh ? "进程内" : "in-process"}</>
                       )}
                     </span>
-                  </td>
-                  <td>Ring {agent.logicalRing}</td>
-                  <td>
-                    {agent.pendingOperation ? (
-                      <span className="pending-op-summary">
-                        <code>{agent.pendingOperation.kind}</code> {agent.pendingOperation.description}
-                      </span>
-                    ) : (
-                      <span className="muted-text">—</span>
+                    <span className="ring-chip">Ring {agent.logicalRing}</span>
+                    {agent.capabilities.length > 0 && (
+                      <span className="caps-chip">{agent.capabilities.length} {zh ? "能力" : "caps"}</span>
                     )}
-                  </td>
-                  <td>{agent.capabilities.length}</td>
-                  <td>
-                    {agent.sandbox ? (
-                      <span className={`sandbox-pill sbx-${agent.sandbox.state}`}>
+                    {agent.sandbox && (
+                      <span className="sandbox-pill">
                         PID {agent.sandbox.pid ?? "?"} · {agent.sandbox.state}
                       </span>
-                    ) : (
-                      <span className="muted-text">{zh ? "N/A (进程内)" : "N/A (in-process)"}</span>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  {agent.pendingOperation && (
+                    <div className="node-pending-op">
+                      <Clock size={11} className="pending-clock-icon" />
+                      <span>{agent.pendingOperation.description}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 
-      {/* Selected Agent Detail Drawer */}
-      {selectedAgent && (
-        <AgentDetailDrawer
-          agent={selectedAgent}
-          zh={zh}
-          onClose={() => setSelectedAgentId(null)}
-        />
-      )}
+      {/* 3. Bottom Grid: Context VM & Security Guarantees */}
+      <div className="runtime-sub-grid">
+        {snapshot.context && (
+          <section className="section-block context-vm-summary-panel">
+            <div className="panel-title">
+              <div>
+                <span className="panel-kicker">{zh ? "虚拟上下文" : "Context VM"}</span>
+                <h2>{zh ? "工作集与 COW 页面分布" : "WorkingSet & Page Table Distribution"}</h2>
+              </div>
+              <Layers size={18} className="panel-icon" />
+            </div>
+
+            <div className="context-vm-grid">
+              <div className="vm-stat-card">
+                <span className="stat-label">{zh ? "工作集估算 Token" : "Working Set Estimated Tokens"}</span>
+                <strong className="stat-value">{snapshot.context.workingSetTokens.toLocaleString()}</strong>
+                <small className="stat-sub">{zh ? "仅为 ContextVM 估算值，非模型实际消费" : "ContextVM estimate, not actual model tokens"}</small>
+              </div>
+              <div className="vm-stat-card">
+                <span className="stat-label">{zh ? "活动页面总数" : "Working Set Page Count"}</span>
+                <strong className="stat-value">{snapshot.context.workingSetPageCount}</strong>
+                <small className="stat-sub">{zh ? "已装载 COW 页面" : "Loaded COW Pages"}</small>
+              </div>
+              <div className="vm-stat-card">
+                <span className="stat-label">{zh ? "页面驻留分布 (Residency)" : "Page Residency Distribution"}</span>
+                <div className="residency-pills">
+                  {Object.entries(snapshot.context.pageCountsByResidency).map(([res, count]) => (
+                    <span key={res} className={`residency-pill res-${res.toLowerCase()}`}>
+                      {res.toUpperCase()}: {count}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Compact Page Metadata Table */}
+            {snapshot.context.pages.length > 0 && (
+              <div className="context-pages-table-wrapper">
+                <table className="context-pages-table">
+                  <thead>
+                    <tr>
+                      <th>{zh ? "页面 ID" : "Page ID"}</th>
+                      <th>{zh ? "类型 Kind" : "Kind"}</th>
+                      <th>{zh ? "驻留状态" : "Residency"}</th>
+                      <th>{zh ? "估算 Token" : "Est. Tokens"}</th>
+                      <th>{zh ? "内容 Hash" : "Content Hash"}</th>
+                      <th>{zh ? "来源引用" : "Source Ref"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshot.context.pages.map((p) => (
+                      <tr key={p.pageId}>
+                        <td><code>{p.pageId}</code></td>
+                        <td><span className="kind-tag">{p.kind}</span></td>
+                        <td><span className={`residency-pill res-${p.residency.toLowerCase()}`}>{p.residency}</span></td>
+                        <td>{p.estimatedTokens}</td>
+                        <td><code>{p.contentHash}</code></td>
+                        <td>{p.sourceRef ? <code>{p.sourceRef}</code> : <span className="muted-text">—</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Security Guarantees */}
+        <SecurityGuaranteesPanel guarantees={snapshot.securityGuarantees} zh={zh} />
+      </div>
     </div>
   );
 }

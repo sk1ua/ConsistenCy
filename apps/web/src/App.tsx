@@ -1,6 +1,6 @@
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ReviewJob, StatsResponse } from "@consistency/schema";
+import type { AgentRuntimeSnapshot, ReviewJob, StatsResponse } from "@consistency/schema";
 import { RefreshCw } from "lucide-react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "./api/client";
@@ -69,28 +69,26 @@ export function App() {
   const meta = routeMeta(location.pathname, locale);
   const zh = locale === "zh-CN";
   const themeLabel = t(preference === "dark" ? "Dark" : preference === "light" ? "Light" : "System");
+  const [selectedAgent, setSelectedAgent] = useState<AgentRuntimeSnapshot | undefined>();
+
   const inspectorContext = useMemo(() => {
     const match = location.pathname.match(/^\/runs\/([^/]+)/);
-    if (!match?.[1]) return undefined;
-    let runId: string;
-    try { runId = decodeURIComponent(match[1]); } catch { return undefined; }
-    const job = jobs.find(candidate => candidate.id === runId);
-    const embedded = job && job.report?.jobId === job.id ? job.report : undefined;
-    const report = embedded ?? reports.find(candidate => candidate.jobId === job?.id);
-    return { runId, ...(job ? { job } : {}), ...(report ? { report } : {}) };
-  }, [jobs, location.pathname, reports]);
+    if (match?.[1]) {
+      let runId: string;
+      try { runId = decodeURIComponent(match[1]); } catch { return undefined; }
+      const job = jobs.find(candidate => candidate.id === runId);
+      const embedded = job && job.report?.jobId === job.id ? job.report : undefined;
+      const report = embedded ?? reports.find(candidate => candidate.jobId === job?.id);
+      return { runId, ...(job ? { job } : {}), ...(report ? { report } : {}), ...(selectedAgent ? { agent: selectedAgent } : {}) };
+    }
+    return selectedAgent ? { agent: selectedAgent } : undefined;
+  }, [jobs, location.pathname, reports, selectedAgent]);
 
   const analyzePublicPr = useMutation({
     mutationFn: (url: string) => api.analyzePublicPr(url),
     onSuccess: result => {
       void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
       navigate(`/runs/${encodeURIComponent(result.jobId)}/notebook?notebook=${encodeURIComponent(result.notebookId)}`);
-    }
-  });
-  const seedDemo = useMutation({
-    mutationFn: () => api.seedDemo(),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
     }
   });
   const selectRepository = useMutation({
@@ -153,11 +151,8 @@ export function App() {
     if ((isOverview || isRepositories || isReports || isSettings) && queries.health.error) {
       add("health", zh ? "运行状态暂不可用" : "Runtime status unavailable", queries.health.error);
     }
-    if (seedDemo.error) {
-      add("seed", zh ? "无法加载演示数据" : "Could not load demo data", seedDemo.error);
-    }
     return visible;
-  }, [location.pathname, queries.health.error, queries.jobs.error, queries.reports.error, queries.stats.error, seedDemo.error, zh]);
+  }, [location.pathname, queries.health.error, queries.jobs.error, queries.reports.error, queries.stats.error, zh]);
 
   const firstLoad = queries.jobs.isPending || queries.reports.isPending || queries.stats.isPending;
 
@@ -176,13 +171,9 @@ export function App() {
     health={health}
     healthUnavailable={queries.health.isError}
     inspectorContext={inspectorContext}
-    demoMode={health?.configuration.demoMode ?? false}
     notices={notices}
     refreshing={queries.isFetching}
-    canSeedDemo={queries.jobs.isSuccess && jobs.length === 0}
-    seedingDemo={seedDemo.isPending}
     onRefresh={() => void queries.refresh()}
-    onSeedDemo={() => seedDemo.mutate()}
   >
     <Suspense fallback={<RouteLoading label={zh ? "正在加载工作台" : "Loading workspace"} />}>
       <Routes>
@@ -217,11 +208,11 @@ export function App() {
         <Route path="/repositories/:repositoryId/*" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository source"} /> : <RepositoryDetailPage jobs={jobs} repositories={repositories} automations={automations} pulse={heartbeatPulse} />} />
         <Route path="/runs" element={queries.jobs.isPending ? <RouteLoading label={zh ? "正在加载审查队列" : "Loading review queue"} /> : <JobsPage jobs={jobs} onOpenJob={openJob} />} />
         <Route path="/runs/:runId" element={<RunIndexRedirect />} />
-        <Route path="/runs/:runId/overview" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
-        <Route path="/runs/:runId/diff" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
-        <Route path="/runs/:runId/evidence" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
-        <Route path="/runs/:runId/notebook" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
-        <Route path="/runs/:runId/runtime" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/runs/:runId/overview" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/diff" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/evidence" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/notebook" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/runtime" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
         <Route path="/runs/:runId/*" element={<RunIndexRedirect />} />
         <Route path="/findings" element={queries.reports.isPending ? <RouteLoading label={zh ? "正在加载发现" : "Loading findings"} /> : <FindingsPage reports={reports} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/jobs" element={<Navigate replace to="/runs" />} />

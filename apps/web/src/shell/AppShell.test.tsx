@@ -1,64 +1,65 @@
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { AppShell, isCommandPaletteShortcut, nextWorkbenchTabId } from "./AppShell";
+import { AppShell, isCommandPaletteShortcut } from "./AppShell";
 
-function attribute(tag: string, name: string): string | undefined {
-  return tag.match(new RegExp(`${name}="([^"]*)"`))?.[1];
+function renderShell(path = "/runs", overrides = {}): string {
+  return renderToString(
+    <MemoryRouter initialEntries={[path]}>
+      <AppShell
+        path={path}
+        routeHref={path}
+        meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
+        locale="en-US"
+        setLocale={() => undefined}
+        themePreference="dark"
+        themeLabel="Dark"
+        cycleTheme={() => undefined}
+        jobs={[]}
+        pulse={null}
+        healthUnavailable={false}
+        notices={[]}
+        refreshing={false}
+        onRefresh={() => undefined}
+        {...overrides}
+      >
+        <p>Route content</p>
+      </AppShell>
+    </MemoryRouter>
+  );
 }
 
-function renderShell(path = "/runs"): string {
-  return renderToString(<MemoryRouter initialEntries={[path]}><AppShell
-    path={path}
-    routeHref={path}
-    meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
-    locale="en-US"
-    setLocale={() => undefined}
-    themePreference="dark"
-    themeLabel="Dark"
-    cycleTheme={() => undefined}
-    jobs={[]}
-    pulse={null}
-    healthUnavailable={false}
-    demoMode={false}
-    notices={[]}
-    refreshing={false}
-    canSeedDemo={false}
-    seedingDemo={false}
-    onRefresh={() => undefined}
-    onSeedDemo={() => undefined}
-  ><p>Route content</p></AppShell></MemoryRouter>);
-}
+describe("Repository-Centric AppShell", () => {
+  it("renders a single repository-first left sidebar without duplicate activity rail", () => {
+    const html = renderShell("/repositories", {
+      repositories: [
+        {
+          id: "repo_1",
+          displayName: "ConsistenCy",
+          source: "local_git",
+          defaultBranch: "v3",
+          trustLevel: "trusted_local",
+          monitoringEnabled: true,
+          createdAt: "2026-08-18T00:00:00.000Z",
+          updatedAt: "2026-08-18T00:00:00.000Z"
+        }
+      ]
+    });
 
-describe("Workbench tabs", () => {
-  it("connects a horizontal tablist to one labelled tabpanel with roving tabindex", () => {
-    const html = renderShell();
-    const tablist = html.match(/<div(?=[^>]*role="tablist")[^>]*>/)?.[0];
-    const tabs = html.match(/<a(?=[^>]*role="tab")[^>]*>/g) ?? [];
-    const panel = html.match(/<div(?=[^>]*role="tabpanel")[^>]*>/)?.[0];
+    // Contains the single repository-first sidebar
+    expect(html).toContain("repo-first-sidebar");
+    expect(html).toContain("ConsistenCy");
 
-    expect(tablist).toContain('aria-orientation="horizontal"');
-    expect(tabs).toHaveLength(2);
-    expect(attribute(tabs[0]!, "aria-selected")).toBe("false");
-    expect(attribute(tabs[0]!, "tabindex")).toBe("-1");
-    expect(attribute(tabs[1]!, "aria-selected")).toBe("true");
-    expect(attribute(tabs[1]!, "tabindex")).toBe("0");
-    expect(attribute(tabs[0]!, "aria-controls")).toBe(attribute(panel!, "id"));
-    expect(attribute(tabs[1]!, "aria-controls")).toBe(attribute(panel!, "id"));
-    expect(attribute(panel!, "aria-labelledby")).toBe(attribute(tabs[1]!, "id"));
-    expect(attribute(panel!, "tabindex")).toBe("0");
+    // Does NOT contain obsolete chrome
+    expect(html).not.toContain("activity-rail");
+    expect(html).not.toContain("workbench-tabs");
+    expect(html).not.toContain("run-ledger-toggle");
   });
 
-  it("supports wrapped horizontal arrows plus Home and End", () => {
-    const tabs = ["inbox", "current"] as const;
-
-    expect(nextWorkbenchTabId(tabs, "inbox", "ArrowRight")).toBe("current");
-    expect(nextWorkbenchTabId(tabs, "current", "ArrowRight")).toBe("inbox");
-    expect(nextWorkbenchTabId(tabs, "inbox", "ArrowLeft")).toBe("current");
-    expect(nextWorkbenchTabId(tabs, "current", "Home")).toBe("inbox");
-    expect(nextWorkbenchTabId(tabs, "inbox", "End")).toBe("current");
-    expect(nextWorkbenchTabId(tabs, "inbox", "ArrowDown")).toBeUndefined();
-    expect(nextWorkbenchTabId(tabs, "inbox", "Tab")).toBeUndefined();
+  it("renders clear location breadcrumbs in the header", () => {
+    const html = renderShell("/repositories/sk1ua%2FConsistenCy/history");
+    expect(html).toContain("location-breadcrumbs");
+    expect(html).toContain("Git History");
   });
 
   it("reserves Ctrl/Command K and P for the workspace command palette", () => {
@@ -75,5 +76,55 @@ describe("Workbench tabs", () => {
     expect(isCommandPaletteShortcut(event("P", { metaKey: true }))).toBe(true);
     expect(isCommandPaletteShortcut(event("k", { ctrlKey: true, shiftKey: true }))).toBe(false);
     expect(isCommandPaletteShortcut(event("p"))).toBe(false);
+  });
+
+  it("displays real LLM provider status when configured and unconfigured link when absent without mock badge", () => {
+    // Configured real provider
+    const htmlConfigured = renderShell("/runs", {
+      locale: "zh-CN",
+      health: {
+        ok: true,
+        service: "consistency-api",
+        database: { ok: true },
+        worker: { running: true, activeJobs: 0, concurrency: 1 },
+        llmConfigured: true,
+        llmProvider: "DeepSeek",
+        llmModel: "deepseek-chat",
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "file", configured: true },
+          workerConcurrency: 1
+        }
+      }
+    });
+    expect(htmlConfigured).toContain("DeepSeek");
+    expect(htmlConfigured).toContain("deepseek-chat");
+    expect(htmlConfigured).not.toContain("Mock 模型");
+    expect(htmlConfigured).not.toContain("Demo mode");
+
+    // Unconfigured LLM
+    const htmlUnconfigured = renderShell("/runs", {
+      locale: "zh-CN",
+      health: {
+        ok: true,
+        service: "consistency-api",
+        database: { ok: true },
+        worker: { running: true, activeJobs: 0, concurrency: 1 },
+        llmConfigured: false,
+        llmProvider: "none",
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "file", configured: true },
+          workerConcurrency: 1
+        }
+      }
+    });
+    expect(htmlUnconfigured).toContain("LLM 未配置");
+    expect(htmlUnconfigured).not.toContain("Mock 模型");
+    expect(htmlUnconfigured).not.toContain("Demo mode");
   });
 });

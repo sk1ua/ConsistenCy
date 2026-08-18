@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-const outputDir = resolve(join(process.cwd(), "artifacts", "v3-rc-preview"));
+const outputDir = resolve(join(process.cwd(), "artifacts", "v3-rc-preview-polished"));
 
 const captureOnlyCss = `
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -36,7 +36,7 @@ async function applySettings(
   await page.evaluate(() => document.fonts.ready);
 }
 
-test.describe("v3 Release Candidate Frontend Visual Preview", () => {
+test.describe("v3 Release Candidate Frontend Visual Preview - Polished Pass", () => {
   test.beforeAll(() => {
     mkdirSync(outputDir, { recursive: true });
   });
@@ -57,56 +57,60 @@ test.describe("v3 Release Candidate Frontend Visual Preview", () => {
     await page.goto("/#/inbox");
     await applySettings(page, { locale: "zh-CN", theme: "dark" });
     await expect(page.locator(".dashboard-page")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "01-inbox.png"), fullPage: true });
+    await page.screenshot({ path: join(outputDir, "01-inbox-polished.png"), fullPage: true });
 
     // --- B. Run Overview (zh-CN, dark) ---
     await page.goto(`/#/runs/${encodeURIComponent(jobId!)}/overview`);
     await applySettings(page, { locale: "zh-CN", theme: "dark" });
     await expect(page.locator(".report-workspace")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "02-run-overview.png"), fullPage: true });
+    await page.screenshot({ path: join(outputDir, "02-run-overview-polished.png"), fullPage: true });
 
     // --- C. Diff Viewer (zh-CN, dark) ---
     await page.goto(`/#/runs/${encodeURIComponent(jobId!)}/diff`);
     await applySettings(page, { locale: "zh-CN", theme: "dark" });
     await expect(page.locator(".run-mode-route")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "03-diff.png"), fullPage: true });
+    await page.screenshot({ path: join(outputDir, "03-diff-polished.png"), fullPage: true });
 
     // --- D. Evidence (zh-CN, dark) ---
     await page.goto(`/#/runs/${encodeURIComponent(jobId!)}/evidence`);
     await applySettings(page, { locale: "zh-CN", theme: "dark" });
     await expect(page.locator(".run-evidence-mode")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "04-evidence.png"), fullPage: true });
+    await page.screenshot({ path: join(outputDir, "04-evidence-polished.png"), fullPage: true });
 
     // --- E. Notebook (zh-CN, dark) ---
     await page.goto(`/#/runs/${encodeURIComponent(jobId!)}/notebook`);
     await applySettings(page, { locale: "zh-CN", theme: "dark" });
     await expect(page.locator(".notebook-panel")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "05-notebook.png"), fullPage: true });
+    await page.screenshot({ path: join(outputDir, "05-notebook-polished.png"), fullPage: true });
 
     // --- F. Agent Task Manager / Runtime (zh-CN, dark) ---
     await page.goto(`/#/runs/${encodeURIComponent(jobId!)}/runtime`);
     await applySettings(page, { locale: "zh-CN", theme: "dark" });
     await expect(page.locator(".run-runtime-panel")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "06-runtime-task-manager.png"), fullPage: true });
+    await page.screenshot({ path: join(outputDir, "06-runtime-task-manager-polished-dark-zh.png"), fullPage: true });
 
-    // --- G. Live RUNNING / WAIT_LLM Runtime (zh-CN, dark) ---
+    // --- G. Agent Task Manager / Runtime (zh-CN, light) ---
+    await page.goto(`/#/runs/${encodeURIComponent(jobId!)}/runtime`);
+    await applySettings(page, { locale: "zh-CN", theme: "light" });
+    await expect(page.locator(".run-runtime-panel")).toBeVisible();
+    await page.screenshot({ path: join(outputDir, "07-runtime-task-manager-polished-light-zh.png"), fullPage: true });
+
+    // --- H. Agent Task Manager / Runtime (en-US, dark) ---
+    await applySettings(page, { locale: "en-US", theme: "dark" });
+    await expect(page.locator(".run-runtime-panel")).toBeVisible();
+    await page.screenshot({ path: join(outputDir, "08-runtime-task-manager-polished-dark-en.png"), fullPage: true });
+
+    // --- I. Live RUNNING / WAIT_LLM Runtime (zh-CN, dark) ---
     const runningJobId = jobs.find(j => j.status === "running")?.id;
     if (runningJobId) {
       await page.goto(`/#/runs/${encodeURIComponent(runningJobId)}/runtime`);
       await applySettings(page, { locale: "zh-CN", theme: "dark" });
       await expect(page.locator(".run-runtime-panel")).toBeVisible();
-      await page.screenshot({ path: join(outputDir, "07-runtime-live-wait-llm.png"), fullPage: true });
+      const secAgent = page.locator(".agent-tree-node", { hasText: "Security" }).first();
+      if (await secAgent.count() > 0) {
+        await secAgent.click();
+      }
+      await page.screenshot({ path: join(outputDir, "09-runtime-live-wait-llm-polished.png"), fullPage: true });
     }
-
-    // --- H. Agent Task Manager / Runtime (zh-CN, light) ---
-    await page.goto(`/#/runs/${encodeURIComponent(jobId!)}/runtime`);
-    await applySettings(page, { locale: "zh-CN", theme: "light" });
-    await expect(page.locator(".run-runtime-panel")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "08-runtime-light-zh.png"), fullPage: true });
-
-    // --- I. Agent Task Manager / Runtime (en-US, dark) ---
-    await applySettings(page, { locale: "en-US", theme: "dark" });
-    await expect(page.locator(".run-runtime-panel")).toBeVisible();
-    await page.screenshot({ path: join(outputDir, "09-runtime-dark-en.png"), fullPage: true });
   });
 });

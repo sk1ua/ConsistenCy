@@ -46,8 +46,7 @@ export function parseWorkbenchLayout(serialized: string | null, fallback: Workbe
 
 function readLayout(): WorkbenchLayout {
   if (typeof window === "undefined") return DEFAULT_LAYOUT;
-  const responsiveDefault = { ...DEFAULT_LAYOUT, inspectorOpen: window.innerWidth >= 1440 };
-  return parseWorkbenchLayout(window.localStorage.getItem(WORKBENCH_LAYOUT_STORAGE_KEY), responsiveDefault);
+  return parseWorkbenchLayout(window.localStorage.getItem(WORKBENCH_LAYOUT_STORAGE_KEY), DEFAULT_LAYOUT);
 }
 
 export function useWorkbenchLayout() {

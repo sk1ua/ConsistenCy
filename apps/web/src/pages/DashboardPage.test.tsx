@@ -74,14 +74,11 @@ describe("DashboardPage operations inbox", () => {
     const html = renderDashboard({ heartbeat: { pulse, history: [pulse], unavailable: false } });
     const text = html.replaceAll("<!-- -->", "");
 
-    expect(text).toContain("Operations inbox");
-    expect(text).toContain("Decision queue");
+    expect(text).toContain("Inbox");
+    expect(text).toContain("Needs Attention");
     expect(text).toContain("acme/payments-api");
-    expect(text).toContain("Run watch");
-    expect(text).toContain("Repository fleet");
-    expect(text).toContain("Repository risk index worsened +20%");
-    expect(text).toContain("Inbox does not receive automation execution history");
-    expect(text).toContain("Recent reviews");
+    expect(text).toContain("Active Reviews");
+    expect(text).toContain("Recent Reviews");
     expect(text).not.toContain("Focus attention where the evidence is strongest");
     expect(text).not.toContain("Review workflow");
     expect(text).not.toContain("metric-card");
@@ -90,11 +87,7 @@ describe("DashboardPage operations inbox", () => {
   it("renders explicit source-aware empty states", () => {
     const html = renderDashboard({ stats: emptyStats, jobs: [], reports: [], heartbeat: { pulse: null, history: [], unavailable: false } });
 
-    expect(html).toContain("No completed analyses are waiting for a recorded decision");
-    expect(html).toContain("No active or degraded runs are recorded");
-    expect(html).toContain("No repository has produced a review or heartbeat yet");
-    expect(html).toContain("repository health history is unavailable");
-    expect(html).toContain("automation execution history");
-    expect(html).toContain("No review runs have been recorded");
+    expect(html).toContain("No reviews requiring attention or disposition");
+    expect(html).toContain("No review runs recorded");
   });
 });

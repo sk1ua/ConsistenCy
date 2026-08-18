@@ -20,6 +20,9 @@ import {
   repositoryEventSchema,
   repositoryPulseSchema,
   repositorySchema,
+  repositoryGitStatusResponseSchema,
+  repositoryCommitsResponseSchema,
+  repositoryPullRequestsResponseSchema,
   runRuntimeSnapshotSchema,
   runtimeRunsResponseSchema,
   type JobStatus,
@@ -29,6 +32,10 @@ import {
   type ReviewReport,
   type RunRuntimeSnapshot,
   type RuntimeRunsResponse,
+  type RepositoryGitStatusResponse,
+  type RepositoryCommitsResponse,
+  type RepositoryPullRequestsResponse,
+  type PullRequestSummary,
   type Severity,
   type StatsResponse,
   type HeartbeatPulse,
@@ -59,6 +66,7 @@ export type HealthResponse = {
   database: { ok: boolean };
   worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
   deterministicAnalyzer?: { running: boolean; generation: number; pendingCount: number };
+  llmConfigured?: boolean;
   llmProvider: string;
   llmModel?: string;
   publicPrAnalysis?: boolean;
@@ -71,13 +79,12 @@ export type HealthResponse = {
     storage: { kind: "memory" | "file"; configured: boolean };
     workerConcurrency: number;
     publishWorkerConcurrency?: number;
-    demoMode: boolean;
   };
 };
 
 export type SettingsSnapshot = {
   llm: {
-    provider: "mock" | "deepseek" | "openai";
+    provider?: "deepseek" | "openai" | "none";
     deepseekBaseUrl: string;
     deepseekModel: string;
     openaiModel: string;
@@ -271,6 +278,16 @@ export const api = {
     const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/issues`, { signal }) as { issues?: unknown };
     return auditIssueSchema.array().parse(payload.issues);
   },
+  async repositoryGitStatus(repositoryId: string, signal?: AbortSignal): Promise<RepositoryGitStatusResponse> {
+    return repositoryGitStatusResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/git/status`, { signal }));
+  },
+  async repositoryCommits(repositoryId: string, depth?: number, signal?: AbortSignal): Promise<RepositoryCommitsResponse> {
+    const query = depth ? `?depth=${depth}` : "";
+    return repositoryCommitsResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/git/commits${query}`, { signal }));
+  },
+  async repositoryPullRequests(repositoryId: string, signal?: AbortSignal): Promise<RepositoryPullRequestsResponse> {
+    return repositoryPullRequestsResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/pull-requests`, { signal }));
+  },
   async automations(signal?: AbortSignal): Promise<Automation[]> {
     const payload = await request("/automations", { signal }) as { automations?: unknown };
     return automationSchema.array().parse(payload.automations);
@@ -298,9 +315,6 @@ export const api = {
   },
   async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
     return (await request("/settings", { method: "PUT", body: JSON.stringify(patch) }) as { settings: SettingsSnapshot }).settings;
-  },
-  async seedDemo(): Promise<{ created: number; notebooks?: Array<{ jobId: string; notebookId: string }> }> {
-    return await request("/demo/seed", { method: "POST", body: "{}" }) as { created: number; notebooks?: Array<{ jobId: string; notebookId: string }> };
   },
   async analyzePublicPr(url: string) {
     return publicPrResponseSchema.parse(await request("/reviews/public-pr", { method: "POST", body: JSON.stringify({ url }) }));

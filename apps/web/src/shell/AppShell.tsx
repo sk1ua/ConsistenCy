@@ -1,38 +1,63 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
-import type { HeartbeatPulse, Repository, ReviewJob, ReviewReport } from "@consistency/schema";
+import type {
+  AgentRuntimeSnapshot,
+  HeartbeatPulse,
+  Repository,
+  ReviewFinding,
+  ReviewJob,
+  ReviewReport
+} from "@consistency/schema";
 import {
   Activity,
-  Bot,
+  ArrowRight,
   CalendarClock,
-  ChevronDown,
-  ChevronUp,
+  CheckCircle2,
+  FileCode2,
   FileSearch2,
   FlaskConical,
   FolderGit2,
+  FolderPlus,
   GitBranch,
+  GitCommit,
+  GitPullRequest,
   Globe2,
   Inbox,
+  Layers,
   Menu,
   Monitor,
   Moon,
   PanelRight,
+  Plus,
   Radio,
   RefreshCw,
   ScanSearch,
   Search,
   Settings,
+  ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Sun,
+  Terminal,
   Workflow,
   X
 } from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type ReactNode
+} from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import type { HealthResponse } from "../api/client";
 import type { Locale } from "../i18n";
-import type { ThemePreference } from "../theme";
 import type { RouteMeta } from "../routes/meta";
+import type { ThemePreference } from "../theme";
 import { nextTabId } from "../utils/tabNavigation";
 import { useWorkbenchLayout, WORKBENCH_BOUNDS } from "./useWorkbenchLayout";
+import { AgentInspectorContent } from "../components/runtime/RuntimePanel";
 
 export type DataNotice = {
   id: string;
@@ -123,13 +148,13 @@ const copyByLocale: Record<Locale, Copy> = {
     reviewSources: "Review sources",
     noMonitor: "No live monitor connected",
     noSources: "No review sources yet",
-    openRepositoryView: "Open repository view",
-    inspector: "Context inspector",
+    openRepositoryView: "Open repository hub",
+    inspector: "Context Inspector",
     evidence: "Evidence",
     agent: "Agent",
     decision: "Decision",
     inspectorEmpty: "Nothing selected",
-    inspectorHint: "Select a finding, run, or evidence marker in the workbench.",
+    inspectorHint: "Select an agent, finding, evidence, or commit to inspect details.",
     evidenceStages: ["Trigger", "Snapshot SHA", "Deterministic signal", "Evidence pack", "LLM explanation", "Human decision"],
     notRecorded: "Not recorded",
     runLedger: "Run ledger",
@@ -145,7 +170,7 @@ const copyByLocale: Record<Locale, Copy> = {
     resizeExplorer: "Resize workspace explorer",
     resizeInspector: "Resize context inspector",
     loadDemo: "Load demo data",
-    demoMode: "Demo mode",
+    demoMode: "Mock model",
     source: "Source",
     connected: "API connected",
     unavailable: "API unavailable",
@@ -194,7 +219,7 @@ const copyByLocale: Record<Locale, Copy> = {
     agent: "智能体",
     decision: "决策",
     inspectorEmpty: "尚未选择内容",
-    inspectorHint: "在工作台中选择发现、运行或证据标记。",
+    inspectorHint: "在工作台中选择智能体、发现、证据或提交以查看详情。",
     evidenceStages: ["触发", "快照 SHA", "确定性信号", "证据包", "LLM 解释", "人工决策"],
     notRecorded: "未记录",
     runLedger: "运行账本",
@@ -210,7 +235,7 @@ const copyByLocale: Record<Locale, Copy> = {
     resizeExplorer: "调整工作区浏览器宽度",
     resizeInspector: "调整上下文检查器宽度",
     loadDemo: "加载演示数据",
-    demoMode: "演示模式",
+    demoMode: "Mock 模型",
     source: "来源",
     connected: "API 已连接",
     unavailable: "API 不可用",
@@ -240,9 +265,11 @@ const copyByLocale: Record<Locale, Copy> = {
 };
 
 export type InspectorContext = {
-  runId: string;
+  runId?: string;
   job?: ReviewJob;
   report?: ReviewReport;
+  agent?: AgentRuntimeSnapshot;
+  finding?: ReviewFinding;
 };
 
 export type WorkbenchTabId = "inbox" | "current";
@@ -264,28 +291,6 @@ function repositoryName(pulse: HeartbeatPulse): string {
   return pulse.repository.root.split(/[\\/]/).filter(Boolean).at(-1) ?? "Local repository";
 }
 
-function activityActive(path: string, target: string): boolean {
-  if (target === "/inbox") return path === "/" || path.startsWith("/inbox");
-  if (target === "/runs") return path.startsWith("/runs") || path.startsWith("/jobs") || path.startsWith("/reports");
-  return path.startsWith(target);
-}
-
-function ActivityRail({ path, copy, onNavigate }: { path: string; copy: Copy; onNavigate: () => void }) {
-  const items = [
-    { to: "/inbox", label: copy.inbox, icon: Inbox },
-    { to: "/repositories", label: copy.repositories, icon: FolderGit2 },
-    { to: "/runs", label: copy.runs, icon: ScanSearch },
-    { to: "/findings", label: copy.findings, icon: FileSearch2 },
-    { to: "/automations", label: copy.automations, icon: CalendarClock },
-    { to: "/workflows", label: copy.workflows, icon: Workflow }
-  ];
-  return <aside className="activity-rail">
-    <NavLink className="activity-brand" to="/inbox" aria-label="ConsistenCy"><img src="/consistency-logo.png" alt="" /></NavLink>
-    <nav aria-label={copy.primaryNavigation}>{items.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} title={label} aria-label={label} aria-current={activityActive(path, to) ? "page" : undefined} className={activityActive(path, to) ? "active" : ""} onClick={onNavigate}><Icon aria-hidden="true" size={19} /></NavLink>)}</nav>
-    <NavLink className={activityActive(path, "/settings") ? "activity-settings active" : "activity-settings"} to="/settings" title={copy.settings} aria-label={copy.settings} aria-current={activityActive(path, "/settings") ? "page" : undefined} onClick={onNavigate}><Settings aria-hidden="true" size={19} /></NavLink>
-  </aside>;
-}
-
 function ResizeHandle({ value, min, max, direction, label, onChange }: {
   value: number;
   min: number;
@@ -294,164 +299,373 @@ function ResizeHandle({ value, min, max, direction, label, onChange }: {
   label: string;
   onChange: (value: number) => void;
 }) {
-  return <div
-    className="workbench-resize-handle"
-    role="separator"
-    aria-label={label}
-    aria-orientation="vertical"
-    aria-valuemin={min}
-    aria-valuemax={max}
-    aria-valuenow={value}
-    tabIndex={0}
-    onKeyDown={event => {
-      if (event.key === "Home") onChange(min);
-      else if (event.key === "End") onChange(max);
-      else if (event.key === "ArrowLeft") onChange(value - 12 * direction);
-      else if (event.key === "ArrowRight") onChange(value + 12 * direction);
-      else return;
-      event.preventDefault();
-    }}
-    onPointerDown={event => {
-      event.preventDefault();
-      const originX = event.clientX;
-      const originValue = value;
-      const pointerId = event.pointerId;
-      event.currentTarget.setPointerCapture(pointerId);
-      const move = (moveEvent: PointerEvent) => onChange(originValue + (moveEvent.clientX - originX) * direction);
-      const stop = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", stop);
-        window.removeEventListener("pointercancel", stop);
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", stop, { once: true });
-      window.addEventListener("pointercancel", stop, { once: true });
-    }}
-  />;
+  return (
+    <div
+      className="workbench-resize-handle"
+      role="separator"
+      aria-label={label}
+      aria-orientation="vertical"
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      tabIndex={0}
+      onKeyDown={event => {
+        if (event.key === "Home") onChange(min);
+        else if (event.key === "End") onChange(max);
+        else if (event.key === "ArrowLeft") onChange(value - 12 * direction);
+        else if (event.key === "ArrowRight") onChange(value + 12 * direction);
+        else return;
+        event.preventDefault();
+      }}
+      onPointerDown={event => {
+        event.preventDefault();
+        const originX = event.clientX;
+        const originValue = value;
+        const pointerId = event.pointerId;
+        event.currentTarget.setPointerCapture(pointerId);
+        const move = (moveEvent: PointerEvent) => onChange(originValue + (moveEvent.clientX - originX) * direction);
+        const stop = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", stop);
+          window.removeEventListener("pointercancel", stop);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", stop, { once: true });
+        window.addEventListener("pointercancel", stop, { once: true });
+      }}
+    />
+  );
 }
 
-function ContextExplorer({ open, hidden, jobs, repositories, pulse, copy, explorerWidth, onResize, onNavigate, onClose }: {
+function RepositorySidebar({
+  open,
+  hidden,
+  jobs,
+  repositories,
+  pulse,
+  copy,
+  currentPath,
+  zh,
+  onNavigate,
+  onClose
+}: {
   open: boolean;
   hidden: boolean;
   jobs: ReviewJob[];
   repositories: Repository[];
   pulse: HeartbeatPulse | null;
   copy: Copy;
-  explorerWidth: number;
-  onResize: (value: number) => void;
+  currentPath: string;
+  zh: boolean;
   onNavigate: () => void;
   onClose: () => void;
 }) {
-  const monitored = useMemo(() => repositories.filter(repository => repository.monitoringEnabled).slice(0, 4), [repositories]);
-  const registeredRemoteNames = useMemo(() => new Set(repositories.map(repository => repository.remoteFullName).filter(Boolean)), [repositories]);
-  const repositoryNames = useMemo(() => [...new Set(jobs.map(job => job.repositoryFullName).filter(name => !registeredRemoteNames.has(name)))].slice(0, 4), [jobs, registeredRemoteNames]);
-  return <aside className={`context-explorer${open ? " open" : ""}`} aria-label={copy.workspace} aria-hidden={hidden || undefined} inert={hidden || undefined}>
-    <div className="context-explorer-head"><div><strong>ConsistenCy</strong><span>{copy.localHarness}</span></div><button type="button" onClick={onClose} aria-label={copy.closeNavigation}>×</button></div>
-    <div className="context-explorer-scroll">
-      <section className="explorer-section">
-        <div className="explorer-section-title"><span>{copy.monitoredRepositories}</span><NavLink to="/repositories" onClick={onNavigate}>{copy.openRepositoryView}</NavLink></div>
-        {monitored.length > 0 ? monitored.map(repository => <NavLink className="explorer-repository live" key={repository.id} to={`/repositories/${encodeURIComponent(repository.id)}`} onClick={onNavigate}><span><i /><FolderGit2 size={15} /></span><strong>{repository.displayName}</strong><small>{repository.trustLevel === "trusted_local" ? "trusted local" : "static read-only"}</small></NavLink>)
-          : pulse ? <NavLink className="explorer-repository live" to={`/repositories/${encodeURIComponent(`local:${repositoryName(pulse)}`)}`} onClick={onNavigate}><span><i /><FolderGit2 size={15} /></span><strong>{repositoryName(pulse)}</strong><small>{pulse.repository.branch ?? pulse.state}</small></NavLink>
-          : <div className="explorer-empty"><Radio size={14} />{copy.noMonitor}</div>}
-      </section>
-      <section className="explorer-section">
-        <div className="explorer-section-title"><span>{copy.reviewSources}</span><small>{repositoryNames.length}</small></div>
-        {repositoryNames.length > 0 ? repositoryNames.map(name => <NavLink className="explorer-repository" key={name} to={`/repositories/${encodeURIComponent(name)}`} onClick={onNavigate}><FolderGit2 size={14} /><strong>{name}</strong></NavLink>) : <div className="explorer-empty"><FolderGit2 size={14} />{copy.noSources}</div>}
-      </section>
-      <section className="explorer-section explorer-navigation">
-        <span className="explorer-section-label">{copy.reviews}</span>
-        <NavLink to="/inbox" onClick={onNavigate}><Inbox size={15} />{copy.inbox}</NavLink>
-        <NavLink to="/runs" onClick={onNavigate}><ScanSearch size={15} />{copy.runs}</NavLink>
-        <NavLink to="/findings" onClick={onNavigate}><FileSearch2 size={15} />{copy.findings}</NavLink>
-        <span className="explorer-section-label">Harness</span>
-        <NavLink to="/automations" onClick={onNavigate}><CalendarClock size={15} />{copy.automations}</NavLink>
-        <NavLink to="/workflows" onClick={onNavigate}><Workflow size={15} />{copy.workflows}</NavLink>
-      </section>
-    </div>
-    <ResizeHandle value={explorerWidth} min={WORKBENCH_BOUNDS.explorer.min} max={WORKBENCH_BOUNDS.explorer.max} direction={1} label={copy.resizeExplorer} onChange={onResize} />
-  </aside>;
+  const registeredRemoteNames = useMemo(() => new Set(repositories.map(r => r.remoteFullName).filter(Boolean)), [repositories]);
+  const hasLocalPulse = Boolean(pulse);
+  const historyRepoNames = useMemo(() => {
+    return [...new Set(jobs.map(job => job.repositoryFullName).filter(name => {
+      if (registeredRemoteNames.has(name)) return false;
+      // If local repository is active, unify sk1ua/ConsistenCy with the local entry
+      if (hasLocalPulse && (name === "sk1ua/ConsistenCy" || name === "ConsistenCy")) return false;
+      return true;
+    }))];
+  }, [jobs, registeredRemoteNames, hasLocalPulse]);
+  const recentRuns = useMemo(() => jobs.slice(0, 4), [jobs]);
+
+  return (
+    <aside className={`context-explorer repo-first-sidebar${open ? " open" : ""}`} aria-label={copy.workspace} aria-hidden={hidden || undefined} inert={hidden || undefined}>
+      <div className="context-explorer-head">
+        <NavLink to="/repositories" className="sidebar-brand-link" onClick={onNavigate}>
+          <img src="/consistency-logo.png" alt="" className="brand-icon-small" />
+          <div>
+            <strong>ConsistenCy</strong>
+            <span>{copy.localHarness}</span>
+          </div>
+        </NavLink>
+        <button type="button" onClick={onClose} aria-label={copy.closeNavigation}>×</button>
+      </div>
+
+      <div className="context-explorer-scroll">
+        {/* Repositories Section */}
+        <section className="explorer-section">
+          <div className="explorer-section-title">
+            <span>{copy.repositories}</span>
+            <NavLink to="/repositories" onClick={onNavigate} title={zh ? "连接代码仓库" : "Connect repository"} className="sidebar-connect-link">
+              <Plus size={13} /> {zh ? "连接" : "Connect"}
+            </NavLink>
+          </div>
+
+          <div className="sidebar-repo-list" role="list">
+            {/* Unified Local Pulse Repository (Model A) */}
+            {pulse && (
+              <NavLink
+                to={`/repositories/${encodeURIComponent("sk1ua/ConsistenCy")}`}
+                className={`sidebar-repo-item ${currentPath.includes("ConsistenCy") || currentPath.includes("sk1ua%2FConsistenCy") ? "active" : ""}`}
+                onClick={onNavigate}
+              >
+                <span className="repo-dot monitored" />
+                <FolderGit2 size={14} className="repo-icon" />
+                <div className="repo-text-group">
+                  <strong>ConsistenCy</strong>
+                  <small>{zh ? "本地 Git · GitHub 公开" : "local · GitHub public"} · {pulse.repository.branch ?? "v3-pr2"}</small>
+                </div>
+              </NavLink>
+            )}
+
+            {/* Registered Repositories (non-local pulse) */}
+            {repositories.filter(r => !pulse || (r.displayName !== repositoryName(pulse) && r.remoteFullName !== "sk1ua/ConsistenCy")).map(repo => {
+              const active = currentPath.startsWith(`/repositories/${encodeURIComponent(repo.id)}`) || currentPath.startsWith(`/repositories/${encodeURIComponent(repo.remoteFullName ?? "")}`);
+              return (
+                <NavLink
+                  key={repo.id}
+                  to={`/repositories/${encodeURIComponent(repo.id)}`}
+                  className={`sidebar-repo-item ${active ? "active" : ""}`}
+                  onClick={onNavigate}
+                >
+                  <span className={`repo-dot ${repo.monitoringEnabled ? "monitored" : ""}`} />
+                  <FolderGit2 size={14} className="repo-icon" />
+                  <div className="repo-text-group">
+                    <strong>{repo.displayName}</strong>
+                    <small>{repo.source === "local_git" ? (zh ? "本地 Git" : "local") : (zh ? "GitHub 远端" : "GitHub")} · {repo.defaultBranch ?? "main"}</small>
+                  </div>
+                </NavLink>
+              );
+            })}
+
+            {/* History Review Repositories (Fixture) */}
+            {historyRepoNames.map(name => {
+              const active = currentPath.startsWith(`/repositories/${encodeURIComponent(name)}`);
+              const isDemo = name.startsWith("acme/") || name.startsWith("studio/");
+              return (
+                <NavLink
+                  key={name}
+                  to={`/repositories/${encodeURIComponent(name)}`}
+                  className={`sidebar-repo-item ${active ? "active" : ""}`}
+                  onClick={onNavigate}
+                >
+                  <span className="repo-dot" />
+                  <FolderGit2 size={14} className="repo-icon" />
+                  <div className="repo-text-group">
+                    <strong>{name}</strong>
+                    <small>{isDemo ? (zh ? "演示数据 · FIXTURE" : "fixture") : (zh ? "GitHub · 公开" : "GitHub · public")}</small>
+                  </div>
+                </NavLink>
+              );
+            })}
+
+            {repositories.length === 0 && !pulse && historyRepoNames.length === 0 && (
+              <div className="explorer-empty">
+                <FolderPlus size={14} />
+                <span>{copy.noSources}</span>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Recent Review Runs */}
+        <section className="explorer-section">
+          <div className="explorer-section-title">
+            <span>{copy.reviews}</span>
+            <NavLink to="/runs" onClick={onNavigate}>{zh ? "全部" : "All"}</NavLink>
+          </div>
+
+          <div className="sidebar-recent-runs" role="list">
+            {recentRuns.length > 0 ? (
+              recentRuns.map(job => {
+                const isDemo = job.id.startsWith("job_demo");
+                return (
+                  <NavLink
+                    key={job.id}
+                    to={`/runs/${encodeURIComponent(job.id)}/overview`}
+                    className={`sidebar-run-item ${currentPath.includes(job.id) ? "active" : ""}`}
+                    onClick={onNavigate}
+                  >
+                    <span className={`ledger-state ${job.status}`} />
+                    <div className="run-text-group">
+                      <strong>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : job.id.slice(0, 8)}</strong>
+                      <small>{job.repositoryFullName}{isDemo ? ` · ${zh ? "演示数据" : "FIXTURE"}` : ""}</small>
+                    </div>
+                  </NavLink>
+                );
+              })
+            ) : (
+              <div className="explorer-empty">{copy.noActiveRuns}</div>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* Fixed Bottom Navigation (No implementation labels) */}
+      <nav className="sidebar-bottom-nav" aria-label={copy.primaryNavigation}>
+        <NavLink to="/runs" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><ScanSearch size={14} /><span>{copy.runs}</span></NavLink>
+        <NavLink to="/inbox" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Inbox size={14} /><span>{copy.inbox}</span></NavLink>
+        <NavLink to="/findings" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><FileSearch2 size={14} /><span>{copy.findings}</span></NavLink>
+        <NavLink to="/automations" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><CalendarClock size={14} /><span>{copy.automations}</span></NavLink>
+        <NavLink to="/workflows" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Workflow size={14} /><span>{copy.workflows}</span></NavLink>
+        <NavLink to="/settings" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Settings size={14} /><span>{copy.settings}</span></NavLink>
+      </nav>
+    </aside>
+  );
 }
 
-function InspectorDock({ open, width, copy, context, activeTab, onResize, onTab, onClose }: {
+function ContextInspectorDock({
+  open,
+  width,
+  copy,
+  context,
+  activeTab,
+  zh,
+  onTab,
+  onResize,
+  onClose
+}: {
   open: boolean;
   width: number;
   copy: Copy;
   context?: InspectorContext;
   activeTab: "evidence" | "agent" | "decision";
-  onResize: (value: number) => void;
+  zh: boolean;
   onTab: (tab: "evidence" | "agent" | "decision") => void;
+  onResize: (value: number) => void;
   onClose: () => void;
 }) {
   const scope = useId();
-  if (!open) return null;
-  const tabs = [
-    { id: "evidence" as const, label: copy.evidence, icon: ShieldCheck },
-    { id: "agent" as const, label: copy.agent, icon: Bot },
-    { id: "decision" as const, label: copy.decision, icon: Activity }
-  ];
-  const report = context?.job && context.report?.jobId === context.job.id ? context.report : undefined;
-  const deterministic = report?.agentRuns.find(run => run.agentName === "DeterministicAnalyzer");
-  const synthesizer = report?.agentRuns.find(run => run.agentName === "Synthesizer");
-  const selectedEvidence = report?.retrieval?.packs.reduce(
-    (count, pack) => count + pack.selected_evidence.length,
-    0
-  );
-  const trigger = context?.job
-    ? context.job.accessMode === "public_read" ? copy.publicReadTrigger
-      : context.job.accessMode === "local_git" ? copy.localTrigger : copy.githubTrigger
-    : undefined;
-  const stages = [
-    trigger,
-    context?.job?.headSha,
-    deterministic ? `${deterministic.status} · ${deterministic.findings.length} ${copy.findingsRecorded}` : undefined,
-    selectedEvidence !== undefined ? `${report?.retrieval?.packs.length ?? 0} packs · ${selectedEvidence} ${copy.evidenceItems}` : undefined,
-    synthesizer ? `${synthesizer.status}${synthesizer.provider ? ` · ${synthesizer.provider}${synthesizer.model ? ` / ${synthesizer.model}` : ""}` : ""}` : undefined,
+  const report = context?.report;
+  const job = context?.job;
+  const agent = context?.agent;
+
+  const stages = useMemo(() => [
+    job ? (job.accessMode === "public_read" ? copy.publicReadTrigger : job.accessMode === "local_git" ? copy.localTrigger : copy.githubTrigger) : undefined,
+    job?.headSha,
+    report ? `${report.findings.length} ${copy.findingsRecorded}` : undefined,
+    report?.retrieval ? `${report.retrieval.packs.length} packs · ${report.retrieval.summary.total_selected_evidence} ${copy.evidenceItems}` : undefined,
+    report?.summary,
     undefined
+  ], [copy, job, report]);
+
+  const tabs: Array<{ id: "evidence" | "agent" | "decision"; label: string; icon: typeof FileSearch2 }> = [
+    { id: "evidence", label: copy.evidence, icon: FileSearch2 },
+    { id: "agent", label: copy.agent, icon: Terminal },
+    { id: "decision", label: copy.decision, icon: Activity }
   ];
 
   function handleTabKey(event: KeyboardEvent<HTMLButtonElement>, current: "evidence" | "agent" | "decision") {
-    const next = nextTabId(tabs.map(tab => tab.id), current, event.key);
+    const next = nextTabId(tabs.map(t => t.id), current, event.key);
     if (!next) return;
     event.preventDefault();
     onTab(next);
     window.requestAnimationFrame(() => document.getElementById(`${scope}-inspector-tab-${next}`)?.focus());
   }
 
-  return <aside className="inspector-dock" aria-label={copy.inspector}>
-    <ResizeHandle value={width} min={WORKBENCH_BOUNDS.inspector.min} max={WORKBENCH_BOUNDS.inspector.max} direction={-1} label={copy.resizeInspector} onChange={onResize} />
-    <div className="inspector-head"><strong>{copy.inspector}</strong><button type="button" onClick={onClose} aria-label="Close inspector">×</button></div>
-    <div className="inspector-tabs" role="tablist" aria-label={copy.inspector}>{tabs.map(({ id, label, icon: Icon }) => <button id={`${scope}-inspector-tab-${id}`} key={id} type="button" role="tab" aria-selected={activeTab === id} aria-controls={`${scope}-inspector-panel`} tabIndex={activeTab === id ? 0 : -1} className={activeTab === id ? "active" : ""} onKeyDown={event => handleTabKey(event, id)} onClick={() => onTab(id)}><Icon aria-hidden="true" size={14} />{label}</button>)}</div>
-    <div id={`${scope}-inspector-panel`} className="inspector-empty" role="tabpanel" aria-labelledby={`${scope}-inspector-tab-${activeTab}`} tabIndex={0}>
-      <strong>{context ? `${copy.selectedRun} · ${context.runId}` : copy.inspectorEmpty}</strong>
-      {!context && <p>{copy.inspectorHint}</p>}
-      {activeTab === "evidence" ? <ol className="evidence-spine" aria-label={copy.evidence}>{copy.evidenceStages.map((stage, index) => <li className={stages[index] ? "recorded" : "missing"} key={stage}><i aria-hidden="true" /><span><strong>{stage}</strong><small>{stages[index] ?? copy.notRecorded}</small></span></li>)}</ol>
-        : activeTab === "agent" ? <div className="inspector-agent-list">{report?.agentRuns.length ? report.agentRuns.map(run => <article key={run.id}><span className={`ledger-state ${run.status}`} /><div><strong>{run.agentName}</strong><small>{run.provider ? `${run.provider}${run.model ? ` / ${run.model}` : ""}` : copy.notRecorded}</small></div><code>{run.status}</code></article>) : <p>{copy.noAgentRuns}</p>}</div>
-          : <div className="inspector-decision"><strong>{report ? `${copy.legacyDecisionSignal} · ${report.score}/100` : copy.notRecorded}</strong>{report && <p>{report.summary}</p>}<small>{copy.humanDecisionPending}</small></div>}
-    </div>
-  </aside>;
+  return (
+    <aside className={`inspector-dock ${open ? "open" : ""}`} aria-label={copy.inspector}>
+      <ResizeHandle value={width} min={WORKBENCH_BOUNDS.inspector.min} max={WORKBENCH_BOUNDS.inspector.max} direction={-1} label={copy.resizeInspector} onChange={onResize} />
+      <div className="inspector-head">
+        <strong>{copy.inspector}</strong>
+        <button type="button" onClick={onClose} aria-label="Close inspector">×</button>
+      </div>
+
+      {agent ? (
+        <div className="inspector-scroll-body">
+          <AgentInspectorContent agent={agent} zh={zh} />
+        </div>
+      ) : (
+        <>
+          <div className="inspector-tabs" role="tablist" aria-label={copy.inspector}>
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button
+                id={`${scope}-inspector-tab-${id}`}
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === id}
+                aria-controls={`${scope}-inspector-panel`}
+                tabIndex={activeTab === id ? 0 : -1}
+                className={activeTab === id ? "active" : ""}
+                onKeyDown={event => handleTabKey(event, id)}
+                onClick={() => onTab(id)}
+              >
+                <Icon aria-hidden="true" size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div id={`${scope}-inspector-panel`} className="inspector-empty" role="tabpanel" aria-labelledby={`${scope}-inspector-tab-${activeTab}`} tabIndex={0}>
+            <strong>{context?.runId ? `${copy.selectedRun} · ${context.runId}` : copy.inspectorEmpty}</strong>
+            {!context?.runId && <p>{copy.inspectorHint}</p>}
+            {activeTab === "evidence" ? (
+              <ol className="evidence-spine" aria-label={copy.evidence}>
+                {copy.evidenceStages.map((stage, index) => (
+                  <li className={stages[index] ? "recorded" : "missing"} key={stage}>
+                    <i aria-hidden="true" />
+                    <span>
+                      <strong>{stage}</strong>
+                      <small>{stages[index] ?? copy.notRecorded}</small>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : activeTab === "agent" ? (
+              <div className="inspector-agent-list">
+                {report?.agentRuns.length ? (
+                  report.agentRuns.map(run => (
+                    <article key={run.id}>
+                      <span className={`ledger-state ${run.status}`} />
+                      <div>
+                        <strong>{run.agentName}</strong>
+                        <small>{run.provider ? `${run.provider}${run.model ? ` / ${run.model}` : ""}` : copy.notRecorded}</small>
+                      </div>
+                      <code>{run.status}</code>
+                    </article>
+                  ))
+                ) : (
+                  <p>{copy.noAgentRuns}</p>
+                )}
+              </div>
+            ) : (
+              <div className="inspector-decision">
+                <strong>{report ? `${copy.legacyDecisionSignal} · ${report.score}/100` : copy.notRecorded}</strong>
+                {report && <p>{report.summary}</p>}
+                <small>{copy.humanDecisionPending}</small>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </aside>
+  );
 }
 
-function RunLedger({ open, jobs, copy, onToggle }: { open: boolean; jobs: ReviewJob[]; copy: Copy; onToggle: () => void }) {
-  const active = jobs.filter(job => job.status === "running" || job.status === "queued");
-  return <section className={`run-ledger${open ? " open" : ""}`}>
-    <button className="run-ledger-toggle" type="button" aria-expanded={open} aria-controls="run-ledger-content" onClick={onToggle}><span><Activity size={14} /><strong>{copy.runLedger}</strong><small>{active.length > 0 ? `${active.filter(job => job.status === "running").length} ${copy.activeRuns} · ${active.filter(job => job.status === "queued").length} ${copy.queued}` : copy.noActiveRuns}</small></span>{open ? <ChevronDown size={15} /> : <ChevronUp size={15} />}</button>
-    {open && <div id="run-ledger-content" className="run-ledger-content">{active.length === 0 ? <div className="ledger-empty"><Radio size={15} />{copy.noActiveRuns}</div> : active.slice(0, 5).map(job => <NavLink key={job.id} to={`/runs/${encodeURIComponent(job.id)}/overview`}><span className={`ledger-state ${job.status}`} /><strong>{job.repositoryFullName}</strong><small>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : job.id}</small><code>{job.status}</code></NavLink>)}</div>}
-  </section>;
-}
-
-function StatusBar({ health, healthUnavailable, pulse, selectedRepository, copy }: { health?: HealthResponse; healthUnavailable: boolean; pulse: HeartbeatPulse | null; selectedRepository?: Repository; copy: Copy }) {
+function StatusBar({ health, healthUnavailable, pulse, selectedRepository, jobs, copy }: {
+  health?: HealthResponse;
+  healthUnavailable: boolean;
+  pulse: HeartbeatPulse | null;
+  selectedRepository?: Repository;
+  jobs: ReviewJob[];
+  copy: Copy;
+}) {
+  const activeJobs = jobs.filter(j => j.status === "running" || j.status === "queued");
   const apiLabel = healthUnavailable ? copy.unavailable : health ? copy.connected : copy.checking;
-  return <footer className="audit-status-bar">
-    <span><i className={health?.ok ? "online" : "offline"} />{apiLabel}</span>
-    <span><GitBranch size={11} />{copy.branch}: {pulse?.repository.branch ?? "—"}</span>
-    <span><ShieldCheck size={11} />{copy.trust}: {selectedRepository?.trustLevel ?? "—"}</span>
-    <span><Radio size={11} />{copy.engine}: {health?.deterministicAnalyzer?.running ? "active" : "idle"}</span>
-    <span>{copy.worker}: {health ? `${health.worker.activeJobs}/${health.worker.concurrency}` : "—"}</span>
-    <span>{copy.model}: {health?.llmModel ?? health?.llmProvider ?? "—"}</span>
-    <span>{copy.lastScan}: {pulse?.observedAt ? new Date(pulse.observedAt).toLocaleTimeString() : copy.noScan}</span>
-    <span className="status-spacer" />
-    <span><ShieldCheck size={11} />{copy.localFirst}</span>
-  </footer>;
+
+  return (
+    <footer className="audit-status-bar">
+      <span><i className={health?.ok ? "online" : "offline"} />{apiLabel}</span>
+      <span><GitBranch size={11} />{copy.branch}: {pulse?.repository.branch ?? "—"}</span>
+      <span><ShieldCheck size={11} />{copy.trust}: {selectedRepository?.trustLevel ?? "—"}</span>
+      <span><Radio size={11} />{copy.engine}: {health?.deterministicAnalyzer?.running ? "active" : "idle"}</span>
+      <span>{copy.worker}: {health ? `${health.worker.activeJobs}/${health.worker.concurrency}` : "—"}</span>
+      <span>{copy.model}: {health?.llmModel ?? health?.llmProvider ?? "—"}</span>
+      <Link to="/runs" className="status-runs-link">
+        <Activity size={11} />
+        {activeJobs.length > 0
+          ? `${activeJobs.filter(j => j.status === "running").length} ${copy.activeRuns} · ${activeJobs.filter(j => j.status === "queued").length} ${copy.queued}`
+          : copy.noActiveRuns}
+      </Link>
+      <span className="status-spacer" />
+      <span><ShieldCheck size={11} />{copy.localFirst}</span>
+    </footer>
+  );
 }
 
 function CommandPalette({ copy, onClose, onNavigate }: {
@@ -465,14 +679,15 @@ function CommandPalette({ copy, onClose, onNavigate }: {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const commands = useMemo(() => [
-    { to: "/inbox", label: copy.inbox, group: copy.reviews },
     { to: "/repositories", label: copy.repositories, group: copy.workspace },
     { to: "/runs", label: copy.runs, group: copy.reviews },
+    { to: "/inbox", label: copy.inbox, group: copy.reviews },
     { to: "/findings", label: copy.findings, group: copy.reviews },
     { to: "/automations", label: copy.automations, group: "Harness" },
     { to: "/workflows", label: copy.workflows, group: "Harness" },
     { to: "/settings", label: copy.settings, group: copy.workspace }
   ], [copy]);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return needle.length === 0
@@ -511,63 +726,97 @@ function CommandPalette({ copy, onClose, onNavigate }: {
     focusable[next]?.focus();
   }
 
-  return <div className="command-palette-backdrop" onPointerDown={event => event.target === event.currentTarget && onClose()}>
-    <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-labelledby={`${scope}-title`} onKeyDown={handleDialogKey}>
-      <header><div><Search aria-hidden="true" size={16} /><strong id={`${scope}-title`}>{copy.commandPalette}</strong></div><button type="button" aria-label={copy.closeNavigation} onClick={onClose}><X aria-hidden="true" size={15} /></button></header>
-      <div className="command-palette-search">
-        <Search aria-hidden="true" size={15} />
-        <input
-          ref={inputRef}
-          type="search"
-          role="combobox"
-          aria-controls={`${scope}-commands`}
-          aria-expanded="true"
-          aria-activedescendant={filtered[activeIndex] ? `${scope}-command-${activeIndex}` : undefined}
-          aria-label={copy.commandPlaceholder}
-          placeholder={copy.commandPlaceholder}
-          value={query}
-          onChange={event => { setQuery(event.target.value); setActiveIndex(0); }}
-          onKeyDown={event => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              setActiveIndex(index => filtered.length === 0 ? 0 : (index + 1) % filtered.length);
-            } else if (event.key === "ArrowUp") {
-              event.preventDefault();
-              setActiveIndex(index => filtered.length === 0 ? 0 : (index - 1 + filtered.length) % filtered.length);
-            } else if (event.key === "Home") {
-              event.preventDefault();
-              setActiveIndex(0);
-            } else if (event.key === "End") {
-              event.preventDefault();
-              setActiveIndex(Math.max(filtered.length - 1, 0));
-            } else if (event.key === "Enter") {
-              event.preventDefault();
-              activate(activeIndex);
-            }
-          }}
-        />
-        <kbd>Ctrl K</kbd>
-      </div>
-      <div id={`${scope}-commands`} className="command-palette-list" role="listbox" aria-label={copy.commandPalette}>
-        {filtered.length === 0 ? <p role="status">{copy.noCommands}</p> : filtered.map((command, index) => <button
-          id={`${scope}-command-${index}`}
-          key={command.to}
-          type="button"
-          role="option"
-          aria-selected={index === activeIndex}
-          className={index === activeIndex ? "active" : ""}
-          onPointerMove={() => setActiveIndex(index)}
-          onClick={() => activate(index)}
-        ><span><strong>{command.label}</strong><small>{command.group}</small></span><code>{command.to}</code></button>)}
-      </div>
-    </section>
-  </div>;
+  return (
+    <div className="command-palette-backdrop" onPointerDown={event => event.target === event.currentTarget && onClose()}>
+      <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-labelledby={`${scope}-title`} onKeyDown={handleDialogKey}>
+        <header>
+          <div>
+            <Search aria-hidden="true" size={16} />
+            <strong id={`${scope}-title`}>{copy.commandPalette}</strong>
+          </div>
+          <button type="button" aria-label={copy.closeNavigation} onClick={onClose}><X aria-hidden="true" size={15} /></button>
+        </header>
+        <div className="command-palette-search">
+          <Search aria-hidden="true" size={15} />
+          <input
+            ref={inputRef}
+            type="search"
+            role="combobox"
+            aria-controls={`${scope}-commands`}
+            aria-expanded="true"
+            aria-activedescendant={filtered[activeIndex] ? `${scope}-command-${activeIndex}` : undefined}
+            aria-label={copy.commandPlaceholder}
+            placeholder={copy.commandPlaceholder}
+            value={query}
+            onChange={event => { setQuery(event.target.value); setActiveIndex(0); }}
+            onKeyDown={event => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setActiveIndex(index => filtered.length === 0 ? 0 : (index + 1) % filtered.length);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setActiveIndex(index => filtered.length === 0 ? 0 : (index - 1 + filtered.length) % filtered.length);
+              } else if (event.key === "Home") {
+                event.preventDefault();
+                setActiveIndex(0);
+              } else if (event.key === "End") {
+                event.preventDefault();
+                setActiveIndex(Math.max(filtered.length - 1, 0));
+              } else if (event.key === "Enter") {
+                event.preventDefault();
+                activate(activeIndex);
+              }
+            }}
+          />
+          <kbd>Ctrl K</kbd>
+        </div>
+        <div id={`${scope}-commands`} className="command-palette-list" role="listbox" aria-label={copy.commandPalette}>
+          {filtered.length === 0 ? <p role="status">{copy.noCommands}</p> : filtered.map((command, index) => (
+            <button
+              id={`${scope}-command-${index}`}
+              key={command.to}
+              type="button"
+              role="option"
+              aria-selected={index === activeIndex}
+              className={index === activeIndex ? "active" : ""}
+              onPointerMove={() => setActiveIndex(index)}
+              onClick={() => activate(index)}
+            >
+              <span>
+                <strong>{command.label}</strong>
+                <small>{command.group}</small>
+              </span>
+              <code>{command.to}</code>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
-export function AppShell({ children, path, routeHref, meta, locale, setLocale, themePreference, themeLabel, cycleTheme, jobs, repositories = [], pulse, health, healthUnavailable, inspectorContext, demoMode, notices, refreshing, canSeedDemo, seedingDemo, onRefresh, onSeedDemo }: {
+export function AppShell({
+  children,
+  path,
+  meta,
+  locale,
+  setLocale,
+  themePreference,
+  themeLabel,
+  cycleTheme,
+  jobs,
+  repositories = [],
+  pulse,
+  health,
+  healthUnavailable,
+  inspectorContext,
+  notices,
+  refreshing,
+  onRefresh
+}: {
   children: ReactNode;
   path: string;
-  routeHref: string;
+  routeHref?: string;
   meta: RouteMeta;
   locale: Locale;
   setLocale: (locale: Locale) => void;
@@ -580,44 +829,36 @@ export function AppShell({ children, path, routeHref, meta, locale, setLocale, t
   health?: HealthResponse;
   healthUnavailable: boolean;
   inspectorContext?: InspectorContext;
-  demoMode: boolean;
+  demoMode?: boolean;
   notices: DataNotice[];
   refreshing: boolean;
-  canSeedDemo: boolean;
-  seedingDemo: boolean;
+  canSeedDemo?: boolean;
+  seedingDemo?: boolean;
   onRefresh: () => void;
-  onSeedDemo: () => void;
+  onSeedDemo?: () => void;
 }) {
   const copy = copyByLocale[locale];
+  const zh = locale === "zh-CN";
   const navigate = useNavigate();
-  const workbenchTabScope = useId();
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const commandButtonRef = useRef<HTMLButtonElement>(null);
   const [inspectorTab, setInspectorTab] = useState<"evidence" | "agent" | "decision">("evidence");
   const [compactExplorer, setCompactExplorer] = useState(false);
-  const { layout, setExplorerCollapsed, setExplorerWidth, setInspectorOpen, setInspectorWidth, setLedgerOpen } = useWorkbenchLayout();
+  const { layout, setExplorerCollapsed, setExplorerWidth, setInspectorOpen, setInspectorWidth } = useWorkbenchLayout();
   const themeIcon = themePreference === "dark" ? <Moon size={15} /> : themePreference === "light" ? <Sun size={15} /> : <Monitor size={15} />;
-  const inboxActive = path === "/" || path.startsWith("/inbox");
-  const routeWorkbenchTab = inboxActive ? undefined : { label: meta.shortTitle, to: routeHref };
-  const [lastWorkbenchTab, setLastWorkbenchTab] = useState(routeWorkbenchTab);
-  const currentWorkbenchTab = routeWorkbenchTab ?? lastWorkbenchTab;
-  const workbenchTabs = currentWorkbenchTab ? [
-    { id: "inbox" as const, label: copy.inbox, to: "/inbox" },
-    { id: "current" as const, label: currentWorkbenchTab.label, to: currentWorkbenchTab.to }
-  ] : [{ id: "inbox" as const, label: copy.inbox, to: "/inbox" }];
-  const activeWorkbenchTab: WorkbenchTabId = inboxActive ? "inbox" : "current";
-  const workbenchPanelId = `${workbenchTabScope}-workbench-panel`;
+
   const selectedRepository = useMemo(() => {
     const match = path.match(/^\/repositories\/([^/]+)/);
     if (!match?.[1]) return undefined;
     try {
       const id = decodeURIComponent(match[1]);
-      return repositories.find(repository => repository.id === id);
+      return repositories.find(repository => repository.id === id || repository.remoteFullName === id || repository.displayName === id);
     } catch {
       return undefined;
     }
   }, [path, repositories]);
+
   const explorerHidden = compactExplorer ? !explorerOpen : layout.explorerCollapsed;
   const shellStyle = {
     "--explorer-width": `${layout.explorerWidth}px`,
@@ -642,76 +883,239 @@ export function AppShell({ children, path, routeHref, meta, locale, setLocale, t
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
 
-  useEffect(() => {
-    if (inboxActive) return;
-    setLastWorkbenchTab(current => current?.label === meta.shortTitle && current.to === routeHref
-      ? current
-      : { label: meta.shortTitle, to: routeHref });
-  }, [inboxActive, meta.shortTitle, routeHref]);
+  // Compute location breadcrumbs for the top bar
+  const breadcrumb = useMemo(() => {
+    const repoMatch = path.match(/^\/repositories\/([^/]+)(?:\/([^/]+))?/);
+    if (repoMatch?.[1]) {
+      const rawId = decodeURIComponent(repoMatch[1]);
+      const sub = repoMatch[2];
+      const repoObj = repositories.find(r => r.id === rawId || r.remoteFullName === rawId || r.displayName === rawId);
+      const repoDisplayName = repoObj?.displayName ?? (rawId.startsWith("local:") ? rawId.replace(/^local:/, "") : rawId);
+      const subLabel = sub === "changes" ? (zh ? "变更" : "Changes")
+        : sub === "history" ? (zh ? "提交历史" : "Git History")
+        : sub === "pull-requests" ? (zh ? "拉取请求" : "Pull Requests")
+        : sub === "runs" ? (zh ? "审查" : "Reviews")
+        : sub === "automations" ? (zh ? "自动化" : "Automations")
+        : (zh ? "概览" : "Overview");
 
-  function handleWorkbenchTabKey(event: KeyboardEvent<HTMLAnchorElement>, current: WorkbenchTabId) {
-    const next = nextWorkbenchTabId(workbenchTabs.map(tab => tab.id), current, event.key);
-    if (!next) return;
-    event.preventDefault();
-    const target = workbenchTabs.find(tab => tab.id === next);
-    if (!target) return;
-    navigate(target.to);
-    window.requestAnimationFrame(() => document.getElementById(`${workbenchTabScope}-workbench-tab-${next}`)?.focus());
-  }
+      return (
+        <div className="location-breadcrumbs">
+          <Link to="/repositories">{copy.repositories}</Link>
+          <span className="breadcrumb-sep">/</span>
+          <Link to={`/repositories/${encodeURIComponent(rawId)}`}><strong>{repoDisplayName}</strong></Link>
+          {sub && (
+            <>
+              <span className="breadcrumb-sep">/</span>
+              <span>{subLabel}</span>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    const runMatch = path.match(/^\/runs\/([^/]+)(?:\/([^/]+))?/);
+    if (runMatch?.[1]) {
+      const runId = decodeURIComponent(runMatch[1]);
+      const mode = runMatch[2] ?? "overview";
+      const job = jobs.find(j => j.id === runId);
+      const repoName = job?.repositoryFullName ?? (zh ? "审查" : "Review");
+      const prText = job?.pullRequestNumber ? `PR #${job.pullRequestNumber}` : (zh ? "任务" : "Task");
+      const modeLabel = mode === "diff" ? (zh ? "差异" : "Diff")
+        : mode === "evidence" ? (zh ? "证据" : "Evidence")
+        : mode === "notebook" ? (zh ? "笔记本" : "Notebook")
+        : mode === "runtime" ? (zh ? "运行流程" : "Runtime")
+        : (zh ? "概览" : "Overview");
+
+      return (
+        <div className="location-breadcrumbs">
+          <Link to={job?.repositoryFullName ? `/repositories/${encodeURIComponent(job.repositoryFullName)}` : "/runs"}>
+            {repoName}
+          </Link>
+          <span className="breadcrumb-sep">/</span>
+          <Link to={`/runs/${encodeURIComponent(runId)}/overview`}><strong>{prText}</strong></Link>
+          <span className="breadcrumb-sep">/</span>
+          <span>{modeLabel}</span>
+        </div>
+      );
+    }
+
+    if (path === "/inbox") {
+      return (
+        <div className="location-breadcrumbs">
+          <strong>{copy.inbox}</strong>
+        </div>
+      );
+    }
+
+    if (path === "/runs") {
+      return (
+        <div className="location-breadcrumbs">
+          <strong>{copy.runs}</strong>
+        </div>
+      );
+    }
+
+    if (path === "/findings") {
+      return (
+        <div className="location-breadcrumbs">
+          <strong>{copy.findings}</strong>
+        </div>
+      );
+    }
+
+    if (path === "/settings") {
+      return (
+        <div className="location-breadcrumbs">
+          <strong>{copy.settings}</strong>
+        </div>
+      );
+    }
+
+    return (
+      <div className="location-breadcrumbs">
+        <span>{meta.section}</span>
+        <span className="breadcrumb-sep">/</span>
+        <strong>{meta.shortTitle}</strong>
+      </div>
+    );
+  }, [copy.inbox, copy.findings, copy.repositories, copy.runs, copy.settings, jobs, meta.section, meta.shortTitle, path, repositories, zh]);
 
   function closeCommandPalette() {
     setCommandPaletteOpen(false);
     window.requestAnimationFrame(() => commandButtonRef.current?.focus());
   }
 
-  return <div className={`audit-shell${layout.explorerCollapsed ? " explorer-collapsed" : ""}`} style={shellStyle}>
-    <ActivityRail path={path} copy={copy} onNavigate={() => setExplorerOpen(false)} />
-    <ContextExplorer open={explorerOpen} hidden={explorerHidden} explorerWidth={layout.explorerWidth} onResize={setExplorerWidth} jobs={jobs} repositories={repositories} pulse={pulse} copy={copy} onNavigate={() => setExplorerOpen(false)} onClose={() => setExplorerOpen(false)} />
-    {compactExplorer && explorerOpen && <button type="button" className="explorer-backdrop" aria-label={copy.closeNavigation} onClick={() => setExplorerOpen(false)} />}
-    <section className="audit-stage">
-      <header className="workbench-header">
-        <button className="workbench-menu" type="button" aria-label={explorerHidden ? copy.openNavigation : copy.closeNavigation} aria-expanded={!explorerHidden} onClick={() => compactExplorer ? setExplorerOpen(value => !value) : setExplorerCollapsed(!layout.explorerCollapsed)}><Menu size={18} /></button>
-        <div className="workbench-heading"><span>{meta.section} / {meta.shortTitle}</span><h1>{meta.title}</h1><p>{meta.description}</p></div>
-        <div className="workbench-actions">
-          {demoMode && <span className="shell-demo"><FlaskConical size={13} />{copy.demoMode}</span>}
-          {canSeedDemo && <button type="button" className="shell-seed" disabled={seedingDemo} onClick={onSeedDemo}><FlaskConical size={14} />{copy.loadDemo}</button>}
-          <button ref={commandButtonRef} type="button" className="shell-command-button" aria-label={copy.commandPalette} aria-haspopup="dialog" aria-expanded={commandPaletteOpen} aria-keyshortcuts="Control+K Meta+K Control+P Meta+P" onClick={() => setCommandPaletteOpen(true)}><Search aria-hidden="true" size={14} /><span>{copy.commandPalette}</span><kbd>Ctrl K</kbd></button>
-          <button type="button" className="shell-icon-button" aria-label={`${copy.theme}: ${themeLabel}`} title={`${copy.theme}: ${themeLabel}`} onClick={cycleTheme}>{themeIcon}</button>
-          <label className="shell-language"><Globe2 size={13} /><span className="sr-only">{copy.language}</span><select aria-label={copy.language} value={locale} onChange={event => setLocale(event.target.value as Locale)}><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
-          <button type="button" className="shell-icon-button" aria-label={copy.refresh} title={copy.refresh} onClick={onRefresh} disabled={refreshing}><RefreshCw className={refreshing ? "spinning" : ""} size={15} /></button>
-          <button type="button" className={layout.inspectorOpen ? "shell-icon-button active" : "shell-icon-button"} aria-label={copy.inspector} aria-expanded={layout.inspectorOpen} onClick={() => setInspectorOpen(!layout.inspectorOpen)}><PanelRight size={16} /></button>
-        </div>
-      </header>
-      <div className="workbench-tabs" role="tablist" aria-label={copy.workbenchTabs} aria-orientation="horizontal">
-        {workbenchTabs.map(tab => {
-          const selected = tab.id === activeWorkbenchTab;
-          return <Link
-            id={`${workbenchTabScope}-workbench-tab-${tab.id}`}
-            key={tab.id}
-            role="tab"
-            aria-selected={selected}
-            aria-controls={workbenchPanelId}
-            tabIndex={selected ? 0 : -1}
-            className={`${selected ? "active " : ""}${tab.id === "inbox" ? "pinned" : ""}`.trim()}
-            to={tab.to}
-            onKeyDown={event => handleWorkbenchTabKey(event, tab.id)}
-          >{tab.id === "inbox" ? <Inbox size={13} /> : <span className="tab-state" />}{tab.label}</Link>;
-        })}
-      </div>
-      <div className={`workbench-frame${layout.inspectorOpen ? " inspector-open" : ""}`}>
-        <main className="audit-workbench">
-          <div id={workbenchPanelId} className="audit-route-scroll" role="tabpanel" aria-labelledby={`${workbenchTabScope}-workbench-tab-${activeWorkbenchTab}`} tabIndex={0}>
-            <div className="app-content audit-route-content">
-              {notices.length > 0 && <div className="route-notice-stack">{notices.map(notice => <div className="route-query-notice" role="status" key={notice.id}><span><strong>{notice.label}</strong><small>{notice.message}</small></span><button type="button" onClick={onRefresh}>{copy.retry}</button></div>)}</div>}
-              {children}
-            </div>
+  return (
+    <div className={`audit-shell${layout.explorerCollapsed ? " explorer-collapsed" : ""}`} style={shellStyle}>
+      {/* 1. Single Repository-First Left Sidebar */}
+      <RepositorySidebar
+        open={explorerOpen}
+        hidden={explorerHidden}
+        jobs={jobs}
+        repositories={repositories}
+        pulse={pulse}
+        copy={copy}
+        currentPath={path}
+        zh={zh}
+        onNavigate={() => setExplorerOpen(false)}
+        onClose={() => setExplorerOpen(false)}
+      />
+      {compactExplorer && explorerOpen && (
+        <button type="button" className="explorer-backdrop" aria-label={copy.closeNavigation} onClick={() => setExplorerOpen(false)} />
+      )}
+
+      {/* 2. Main Stage with Location Header */}
+      <section className="audit-stage">
+        <header className="workbench-header">
+          <button
+            className="workbench-menu"
+            type="button"
+            aria-label={explorerHidden ? copy.openNavigation : copy.closeNavigation}
+            aria-expanded={!explorerHidden}
+            onClick={() => compactExplorer ? setExplorerOpen(value => !value) : setExplorerCollapsed(!layout.explorerCollapsed)}
+          >
+            <Menu size={18} />
+          </button>
+
+          <div className="workbench-heading">
+            {breadcrumb}
           </div>
-        </main>
-        <InspectorDock open={layout.inspectorOpen} width={layout.inspectorWidth} onResize={setInspectorWidth} copy={copy} context={inspectorContext} activeTab={inspectorTab} onTab={setInspectorTab} onClose={() => setInspectorOpen(false)} />
-      </div>
-      <RunLedger open={layout.ledgerOpen} jobs={jobs} copy={copy} onToggle={() => setLedgerOpen(!layout.ledgerOpen)} />
-    </section>
-    <StatusBar health={health} healthUnavailable={healthUnavailable} pulse={pulse} selectedRepository={selectedRepository} copy={copy} />
-    {commandPaletteOpen && <CommandPalette copy={copy} onClose={closeCommandPalette} onNavigate={to => { navigate(to); closeCommandPalette(); }} />}
-  </div>;
+
+          <div className="workbench-actions">
+            {health?.llmConfigured ? (
+              <span className="shell-provider-status" title={zh ? "已配置的大语言模型" : "Configured LLM"}><Sparkles size={13} />{health.llmProvider}{health.llmModel ? ` · ${health.llmModel}` : ""}</span>
+            ) : health && (
+              <Link to="/settings" className="shell-provider-unconfigured" title={zh ? "前往设置配置 LLM" : "Configure LLM"}><ShieldAlert size={13} />{zh ? "LLM 未配置" : "LLM not configured"}</Link>
+            )}
+            <button
+              ref={commandButtonRef}
+              type="button"
+              className="shell-command-button"
+              aria-label={copy.commandPalette}
+              aria-haspopup="dialog"
+              aria-expanded={commandPaletteOpen}
+              aria-keyshortcuts="Control+K Meta+K Control+P Meta+P"
+              onClick={() => setCommandPaletteOpen(true)}
+            >
+              <Search aria-hidden="true" size={14} />
+              <span>{copy.commandPalette}</span>
+              <kbd>Ctrl K</kbd>
+            </button>
+            <button
+              type="button"
+              className="shell-icon-button"
+              aria-label={`${copy.theme}: ${themeLabel}`}
+              title={`${copy.theme}: ${themeLabel}`}
+              onClick={cycleTheme}
+            >
+              {themeIcon}
+            </button>
+            <label className="shell-language">
+              <Globe2 size={13} />
+              <span className="sr-only">{copy.language}</span>
+              <select aria-label={copy.language} value={locale} onChange={event => setLocale(event.target.value as Locale)}>
+                <option value="zh-CN">中文</option>
+                <option value="en-US">English</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="shell-icon-button"
+              aria-label={copy.refresh}
+              title={copy.refresh}
+              onClick={onRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw className={refreshing ? "spinning" : ""} size={15} />
+            </button>
+            <button
+              type="button"
+              className={layout.inspectorOpen ? "shell-icon-button active" : "shell-icon-button"}
+              aria-label={copy.inspector}
+              aria-expanded={layout.inspectorOpen}
+              onClick={() => setInspectorOpen(!layout.inspectorOpen)}
+            >
+              <PanelRight size={16} />
+            </button>
+          </div>
+        </header>
+
+        {/* 3. Main Workspace + Single Adaptive Context Inspector */}
+        <div className={`workbench-frame${layout.inspectorOpen ? " inspector-open" : ""}`}>
+          <main className="audit-workbench">
+            <div className="audit-route-scroll" role="region" aria-label={meta.title} tabIndex={0}>
+              <div className="app-content audit-route-content">
+                {notices.length > 0 && (
+                  <div className="route-notice-stack">
+                    {notices.map(notice => (
+                      <div className="route-query-notice" role="status" key={notice.id}>
+                        <span><strong>{notice.label}</strong><small>{notice.message}</small></span>
+                        <button type="button" onClick={onRefresh}>{copy.retry}</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {children}
+              </div>
+            </div>
+          </main>
+          <ContextInspectorDock
+            open={layout.inspectorOpen}
+            width={layout.inspectorWidth}
+            onResize={setInspectorWidth}
+            copy={copy}
+            context={inspectorContext}
+            activeTab={inspectorTab}
+            zh={zh}
+            onTab={setInspectorTab}
+            onClose={() => setInspectorOpen(false)}
+          />
+        </div>
+      </section>
+
+      {/* 4. Minimal Status Bar */}
+      <StatusBar health={health} healthUnavailable={healthUnavailable} pulse={pulse} selectedRepository={selectedRepository} jobs={jobs} copy={copy} />
+      {commandPaletteOpen && <CommandPalette copy={copy} onClose={closeCommandPalette} onNavigate={to => { navigate(to); closeCommandPalette(); }} />}
+    </div>
+  );
 }

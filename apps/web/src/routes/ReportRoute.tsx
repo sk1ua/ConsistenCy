@@ -31,7 +31,7 @@ function RunModeTabs({ runId, mode, notebookId, zh, scope }: { runId: string; mo
     { id: "diff", label: zh ? "差异" : "Diff" },
     { id: "evidence", label: zh ? "证据" : "Evidence" },
     { id: "notebook", label: zh ? "笔记本" : "Notebook" },
-    { id: "runtime", label: zh ? "运行流程" : "Runtime" }
+    { id: "runtime", label: zh ? "运行" : "Runtime" }
   ];
   function destination(id: RunMode): string {
     return `/runs/${encodeURIComponent(runId)}/${id}${id === "notebook" ? suffix : ""}`;
@@ -72,12 +72,14 @@ function EvidenceMode({ report, zh }: { report?: ReviewReport; zh: boolean }) {
   return <div className="run-evidence-mode page-stack"><EvidencePanel retrieval={report.retrieval} /><section className="section-block run-evidence-findings"><div className="panel-title"><div><span className="panel-kicker">{zh ? "已记录的报告输出" : "Recorded report output"}</span><h2>{zh ? "报告发现" : "Report findings"}</h2></div><strong>{report.findings.length}</strong></div>{report.findings.length === 0 ? <div className="empty-inline">{zh ? "报告没有发现。" : "No findings were reported."}</div> : report.findings.map(finding => <FindingItem key={finding.id} finding={finding} />)}</section></div>;
 }
 
-export function ReportRoute({ jobs, reports, health, jobsUnavailable, reportsUnavailable }: {
+export function ReportRoute({ jobs, reports, health, jobsUnavailable, reportsUnavailable, onSelectAgent, selectedAgentId }: {
   jobs: ReviewJob[];
   reports: ReviewReport[];
   health?: HealthResponse;
   jobsUnavailable: boolean;
   reportsUnavailable: boolean;
+  onSelectAgent?: (agent: import("@consistency/schema").AgentRuntimeSnapshot) => void;
+  selectedAgentId?: string;
 }) {
   const { jobId = "", runId = "" } = useParams();
   const selectedRunId = runId || jobId;
@@ -133,12 +135,11 @@ export function ReportRoute({ jobs, reports, health, jobsUnavailable, reportsUna
         notebookId={notebookId}
         llmProvider={health?.llmProvider}
         llmModel={health?.llmModel}
-        onBack={() => navigate("/runs")}
+        onBack={() => navigate(job?.repositoryFullName ? `/repositories/${encodeURIComponent(job.repositoryFullName)}` : "/runs")}
       /> : <div className="run-mode-route">
-        <div className="run-mode-context"><button type="button" onClick={() => navigate("/runs")}>{zh ? "返回运行列表" : "Back to runs"}</button><span><strong>{job?.repositoryFullName ?? (zh ? "运行待加载" : "Run pending")}</strong><code>{job?.id ?? selectedRunId}</code></span><small>{job?.status ?? (zh ? "未记录" : "not recorded")}</small></div>
         {mode === "diff" ? <DiffMode job={job} report={verifiedReport} zh={zh} />
           : mode === "evidence" ? <EvidenceMode report={verifiedReport} zh={zh} />
-            : mode === "runtime" ? <Suspense fallback={<div className="loading-state">{zh ? "正在加载运行架构" : "Loading runtime"}</div>}><RuntimePanel runId={selectedRunId} job={job} report={verifiedReport} /></Suspense>
+            : mode === "runtime" ? <Suspense fallback={<div className="loading-state">{zh ? "正在加载运行架构" : "Loading runtime"}</div>}><RuntimePanel runId={selectedRunId} job={job} report={verifiedReport} onSelectAgent={onSelectAgent} selectedAgentId={selectedAgentId} /></Suspense>
               : notebookQuery.isFetching && !notebookId ? <div className="loading-state">{zh ? "正在加载笔记本" : "Loading notebook"}</div>
                 : <Suspense fallback={<div className="loading-state">{zh ? "正在加载笔记本" : "Loading notebook"}</div>}><NotebookPanel notebookId={notebookId} /></Suspense>}
       </div>}

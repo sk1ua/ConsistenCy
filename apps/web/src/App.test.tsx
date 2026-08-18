@@ -42,9 +42,9 @@ describe("App", () => {
   });
 
   it("renders dashboard, jobs, and report detail views", () => {
-    expect(renderToString(<DashboardPage stats={mockStats} jobs={mockJobs} reports={mockReports} onOpenJob={() => {}} onOpenJobs={() => {}} />)).toContain("Operations inbox");
+    expect(renderToString(<DashboardPage stats={mockStats} jobs={mockJobs} reports={mockReports} onOpenJob={() => {}} onOpenJobs={() => {}} />)).toContain("Inbox");
     expect(renderToString(<JobsPage jobs={mockJobs} onOpenJob={() => {}} />)).toContain("Search repository or PR");
-    expect(renderToString(<ReportPage job={mockJobs[0]} report={mockReports[0]} onBack={() => {}} />)).toContain("Agent runs");
+    expect(renderToString(<MemoryRouter><ReportPage job={mockJobs[0]} report={mockReports[0]} onBack={() => {}} /></MemoryRouter>)).toContain("Findings");
   });
 
   it("renders the settings editor loading state without exposing configuration", () => {
@@ -53,14 +53,13 @@ describe("App", () => {
       service: "consistency-api",
       database: { ok: true },
       worker: { running: true, activeJobs: 0, concurrency: 1 },
-      llmProvider: "mock",
+      llmProvider: "none",
       configuration: {
         githubAppConfigured: false,
         webhookSecretConfigured: false,
         publicReadTokenConfigured: false,
         storage: { kind: "file", configured: true },
-        workerConcurrency: 1,
-        demoMode: true
+        workerConcurrency: 1
       }
     }} />);
 

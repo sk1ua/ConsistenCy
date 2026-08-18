@@ -42,6 +42,118 @@
   outline-offset: 2px;
 }
 
+.notebook-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .notebook-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.notebook-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notebook-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px var(--shadow-soft);
+  min-height: 280px;
+}
+
+.notebook-stream-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.notebook-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.notebook-placeholder-compact {
+  padding: 14px 16px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notebook-placeholder-compact p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-strong);
+}
+
+.notebook-starters-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notebook-starters-compact button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.notebook-starters-compact button:hover {
+  background: var(--surface-muted);
+  border-color: var(--primary-line);
+  color: var(--primary-strong);
+}
+
+.notebook-composer-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+}
+
+.notebook-composer-form input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--foreground);
+  font-size: 13px;
+}
+
 @media (max-width: 720px) {
   .notebook-starters {
     grid-template-columns: 1fr;
