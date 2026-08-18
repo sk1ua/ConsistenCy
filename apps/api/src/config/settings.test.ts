@@ -44,9 +44,9 @@ describe("SettingsStore", () => {
   it("lets environment variables override saved values without exposing secrets", () => {
     const settings = store();
     settings.update({ llm: { provider: "deepseek", deepseekApiKey: "saved-key" } });
-    const snapshot = settings.snapshot({ LLM_PROVIDER: "mock", DEEPSEEK_API_KEY: "environment-key" });
+    const snapshot = settings.snapshot({ LLM_PROVIDER: "openai", DEEPSEEK_API_KEY: "environment-key" });
 
-    expect(snapshot.llm.provider).toBe("mock");
+    expect(snapshot.llm.provider).toBe("openai");
     expect(snapshot.llm.deepseekApiKeyConfigured).toBe(true);
     expect(snapshot.overriddenByEnvironment).toEqual(["DEEPSEEK_API_KEY", "LLM_PROVIDER"]);
     expect(JSON.stringify(snapshot)).not.toContain("saved-key");

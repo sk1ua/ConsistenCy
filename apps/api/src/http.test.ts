@@ -153,7 +153,7 @@ describe("createApiServer", () => {
     const denied = await httpJson(port, "GET", "/health", undefined, { origin: "https://evil.example.com" });
     expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
 
-    const oversized = await postJson(port, "/demo/seed", { value: "x".repeat(1024 * 1024) });
+    const oversized = await postJson(port, "/reviews/local", { value: "x".repeat(1024 * 1024) });
     expect(oversized.status).toBe(413);
     expect(oversized.body).toMatchObject({ error: { code: "BODY_TOO_LARGE" } });
   });
@@ -161,7 +161,7 @@ describe("createApiServer", () => {
   it("projects health and settings without renderer-visible filesystem paths", async () => {
     const internalSettings = {
       llm: {
-        provider: "mock" as const,
+        provider: "none" as const,
         deepseekBaseUrl: "https://api.deepseek.com",
         deepseekModel: "deepseek-chat",
         openaiModel: "gpt-4o-mini",
@@ -191,7 +191,8 @@ describe("createApiServer", () => {
       healthDetails: () => ({
         database: { ok: true },
         worker: { running: false, activeJobs: 0, concurrency: 1 },
-        llmProvider: "mock",
+        llmConfigured: false,
+        llmProvider: "none",
         configuration: {
           githubAppConfigured: false,
           webhookSecretConfigured: false,
@@ -199,8 +200,7 @@ describe("createApiServer", () => {
           storage: { kind: "file", configured: true },
           databasePath: "D:/private/state/consistency.db",
           workspaceRoot: "D:/private/workspaces",
-          workerConcurrency: 1,
-          demoMode: true
+          workerConcurrency: 1
         }
       } as any)
     });
@@ -300,6 +300,55 @@ describe("createApiServer", () => {
     expect(response.body).toMatchObject({ status: "ignored", reason: "push reviews are not supported" });
     expect(jobs.list()).toHaveLength(0);
     expect(jobs.getWebhookDelivery("delivery-push")?.status).toBe("ignored");
+  });
+
+  it("records PR webhook deliveries as ignored without creating ReviewJob when LLM is unconfigured", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({
+      jobs,
+      githubWebhookSecret: "secret",
+      llmProviderConfigured: false
+    });
+    servers.push(server);
+    const port = await listen(server);
+    const payload = {
+      action: "opened",
+      number: 42,
+      repository: { full_name: "sk1ua/ConsistenCy" },
+      sender: { login: "sk1ua" },
+      installation: { id: 123 },
+      pull_request: {
+        number: 42,
+        base: { sha: "abcdef1" },
+        head: { sha: "1234567" }
+      }
+    };
+
+    const response = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-no-llm",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      status: "ignored",
+      event: "pull_request",
+      deliveryId: "delivery-no-llm",
+      reason: "llm provider not configured"
+    });
+    expect(jobs.list()).toHaveLength(0);
+    expect(jobs.getWebhookDelivery("delivery-no-llm")?.status).toBe("ignored");
+
+    // Idempotent duplicate check
+    const duplicate = await postJson(port, "/github/webhook", payload, {
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery-no-llm",
+      "x-hub-signature-256": githubSignature(payload, "secret")
+    });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body).toMatchObject({ status: "duplicate" });
+    expect(jobs.list()).toHaveLength(0);
   });
 
   it("rejects webhook requests when no secret is configured", async () => {
@@ -402,29 +451,117 @@ describe("createApiServer", () => {
     expect(authorized.status).toBe(200);
   });
 
-  it("seeds demo reports and exposes filters, stats, and recent reports", async () => {
+  it("reports available: false for unresolvable repository git status without fabricating clean state", async () => {
+    const server = createApiServer({});
+    servers.push(server);
+    const port = await listen(server);
+
+    const res = await getJson(port, "/repositories/unknown-remote-repo/git/status");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      repositoryId: "unknown-remote-repo",
+      available: false,
+      reason: "local repository path unavailable",
+      dirtyFileCount: 0,
+      changedFiles: []
+    });
+  });
+
+  it("reports real git status and commits for the connected project root repository", async () => {
+    const server = createApiServer({});
+    servers.push(server);
+    const port = await listen(server);
+
+    const statusRes = await getJson(port, "/repositories/sk1ua%2FConsistenCy/git/status");
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body).toMatchObject({
+      repositoryId: "sk1ua/ConsistenCy",
+      available: true
+    });
+    const statusBody = statusRes.body as { available: boolean; branch: string; headSha: string; dirtyFileCount: number };
+    expect(statusBody.available).toBe(true);
+    expect(statusBody.branch).toBe("v3-pr2");
+    expect(statusBody.headSha).toMatch(/^[0-9a-f]{40}$/);
+
+    const commitsRes = await getJson(port, "/repositories/sk1ua%2FConsistenCy/git/commits?depth=5");
+    expect(commitsRes.status).toBe(200);
+    const commitsBody = commitsRes.body as { repositoryId: string; commits: Array<{ sha: string; message: string }> };
+    expect(commitsBody.repositoryId).toBe("sk1ua/ConsistenCy");
+    expect(commitsBody.commits.length).toBeGreaterThanOrEqual(1);
+    expect(commitsBody.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(commitsBody.commits[0]?.message).toBeTruthy();
+  });
+
+  it("rejects /demo/seed as route not found", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({ jobs });
+    servers.push(server);
+    const port = await listen(server);
+
+    const seeded = await postJson(port, "/demo/seed", {});
+    expect(seeded.status).toBe(404);
+  });
+
+  it("rejects review start when LLM provider is not configured", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({
+      jobs,
+      localReview: async () => ({ jobId: "job_1" }),
+      llmProviderConfigured: false
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const res = await postJson(port, "/reviews/local", { repoPath: "D:/workspace" });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      error: { code: "LLM_NOT_CONFIGURED" }
+    });
+  });
+
+  it("exposes filters, stats, and recent reports for review jobs", async () => {
     const jobs = new InMemoryJobQueue();
     const server = createApiServer({ jobs, nodeEnv: "development" });
     servers.push(server);
     const port = await listen(server);
 
-    const seeded = await postJson(port, "/demo/seed", {});
-    expect(seeded.status).toBe(201);
-    expect(seeded.body).toEqual({ created: 8 });
+    const job1 = jobs.enqueue({
+      kind: "pull_request",
+      deliveryId: "delivery-1",
+      repository: "acme/payments-api",
+      pullRequestNumber: 182,
+      baseSha: "base1",
+      headSha: "head1",
+      installationId: 123
+    });
+    jobs.markRunning(job1.id);
+    jobs.persistReportAndEnqueuePublish(job1.id, {
+      jobId: job1.id,
+      repositoryFullName: "acme/payments-api",
+      pullRequestNumber: 182,
+      baseSha: "base1",
+      headSha: "head1",
+      summary: "Payments review",
+      score: 75,
+      riskLevel: "medium",
+      agentRuns: [],
+      findings: [],
+      createdAt: new Date().toISOString()
+    });
 
-    const filtered = await getJson(port, "/jobs?status=succeeded&repository=payments&severity=medium");
+    const filtered = await getJson(port, "/jobs?status=awaiting_publish&repository=payments");
     expect(filtered.status).toBe(200);
     expect(filtered.body).toMatchObject({
-      jobs: [{ repositoryFullName: "acme/payments-api", status: "succeeded" }]
+      jobs: [{ repositoryFullName: "acme/payments-api", status: "awaiting_publish" }]
     });
 
     const stats = await getJson(port, "/stats");
-    expect(stats.body).toMatchObject({ totalJobs: 8, succeededJobs: 5, failedJobs: 1, runningJobs: 1 });
+    expect(stats.body).toMatchObject({ totalJobs: 1 });
 
-    const reports = await getJson(port, "/reports/recent?limit=2");
+    const reports = await getJson(port, "/reports/recent?limit=1");
     const recent = (reports.body as { reports: Array<{ repositoryFullName: string }> }).reports;
-    expect(recent).toHaveLength(2);
-    expect(recent[0]?.repositoryFullName).toBe("sk1ua/ConsistenCy");
+    expect(recent).toHaveLength(1);
+    expect(recent[0]?.repositoryFullName).toBe("acme/payments-api");
   });
 
   it("serves review report when job status is awaiting_publish", async () => {

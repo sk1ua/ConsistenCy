@@ -1,6 +1,17 @@
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { findProjectRoot } from "./settings";
+
+export function resolveDatabasePath(inputPath: string, root = findProjectRoot()): string {
+  if (inputPath === ":memory:") return ":memory:";
+  if (isAbsolute(inputPath)) return inputPath;
+  return resolve(root, inputPath);
+}
+
+export function resolveWorkspaceRoot(inputPath: string, root = findProjectRoot()): string {
+  if (isAbsolute(inputPath)) return inputPath;
+  return resolve(root, inputPath);
+}
 
 const optionalSecret = z.preprocess(
   value => typeof value === "string" && value.trim() === "" ? undefined : value,
@@ -22,7 +33,7 @@ export const envSchema = z.object({
   CONSISTENCY_PYTHON_PATH: z.string().trim().min(1).default("python"),
   CONSISTENCY_ENGINE_MODULE: z.string().trim().min(1).default("engine"),
   CONSISTENCY_ENGINE_ROOT: z.string().trim().min(1).optional(),
-  LLM_PROVIDER: z.enum(["mock", "deepseek", "openai"]).optional(),
+  LLM_PROVIDER: z.enum(["deepseek", "openai"]).optional(),
   CONSISTENCY_WORKERS_ENABLED: z
     .enum(["true", "false"])
     .transform(value => value === "true")
@@ -73,7 +84,7 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   localReviewRoots: string[];
   localReviewRootsAreDefaulted: boolean;
   allowedOrigins: string[];
-  LLM_PROVIDER: "mock" | "deepseek" | "openai";
+  LLM_PROVIDER?: "deepseek" | "openai";
   publicPrAnalysisEnabled: boolean;
   reportLanguage: "zh-CN" | "en-US";
   notebookEnabled: boolean;
@@ -101,7 +112,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.NODE_ENV === "production" && !githubAppConfigured && parsed.GITHUB_WEBHOOK_SECRET) {
     throw new Error("GITHUB_WEBHOOK_SECRET requires GitHub App credentials");
   }
-  const llmProvider = parsed.LLM_PROVIDER ?? (parsed.DEEPSEEK_API_KEY ? "deepseek" : "mock");
+  const llmProvider = parsed.LLM_PROVIDER ?? (parsed.DEEPSEEK_API_KEY ? "deepseek" : parsed.OPENAI_API_KEY ? "openai" : undefined);
   if (llmProvider === "deepseek" && !parsed.DEEPSEEK_API_KEY) {
     throw new Error("DEEPSEEK_API_KEY is required when LLM_PROVIDER=deepseek");
   }
@@ -138,8 +149,8 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...parsed,
     LLM_PROVIDER: llmProvider,
-    databasePath: resolve(parsed.DATABASE_PATH),
-    workspaceRoot: resolve(parsed.CONSISTENCY_WORKSPACE_ROOT),
+    databasePath: resolveDatabasePath(parsed.DATABASE_PATH),
+    workspaceRoot: resolveWorkspaceRoot(parsed.CONSISTENCY_WORKSPACE_ROOT),
     engineRoot: parsed.CONSISTENCY_ENGINE_ROOT ? resolve(parsed.CONSISTENCY_ENGINE_ROOT) : undefined,
     localReviewRoots,
     localReviewRootsAreDefaulted,

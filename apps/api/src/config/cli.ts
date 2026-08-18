@@ -11,7 +11,7 @@ type ConfigAlias = {
 };
 
 const aliases: Record<string, ConfigAlias> = {
-  "llm.provider": { secret: false, patch: value => ({ llm: { provider: value as "mock" | "deepseek" | "openai" } }) },
+  "llm.provider": { secret: false, patch: value => ({ llm: { provider: (value === "deepseek" || value === "openai" ? value : undefined) } }) },
   "llm.deepseek-base-url": { secret: false, patch: value => ({ llm: { deepseekBaseUrl: value ?? undefined } }) },
   "llm.deepseek-model": { secret: false, patch: value => ({ llm: { deepseekModel: value ?? undefined } }) },
   "llm.openai-model": { secret: false, patch: value => ({ llm: { openaiModel: value ?? undefined } }) },
@@ -87,8 +87,8 @@ async function setup(store: SettingsStore): Promise<void> {
   const current = store.snapshot(process.env);
   const rl = createInterface({ input: stdin, output: stdout });
   stdout.write("\nConsistenCy setup\nPress Enter to keep the value shown in brackets.\n\n");
-  const providerInput = await rl.question(`LLM provider mock/deepseek/openai [${current.llm.provider}]: `);
-  const provider = (providerInput.trim() || current.llm.provider) as "mock" | "deepseek" | "openai";
+  const providerInput = await rl.question(`LLM provider deepseek/openai [${current.llm.provider}]: `);
+  const provider = (providerInput.trim() || current.llm.provider) as "deepseek" | "openai" | undefined;
   const patch: SettingsPatch = { llm: { provider }, github: {}, runtime: {} };
   if (provider === "deepseek") {
     patch.llm!.deepseekBaseUrl = (await rl.question(`DeepSeek base URL [${current.llm.deepseekBaseUrl}]: `)).trim() || current.llm.deepseekBaseUrl;

@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { resolve } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z, ZodError } from "zod";
 import {
@@ -25,14 +26,42 @@ import {
   workflowSpecSchema
 } from "@consistency/schema";
 import type { HeartbeatPulse, HeartbeatStreamEvent, VcsChangedFile } from "@consistency/schema";
+import { LocalGitAdapter, parseGitHubRemote } from "@consistency/vcs-core";
+import { existsSync } from "node:fs";
+
+function resolveLocalPathForRepository(repositoryId: string, options: CreateApiServerOptions): string | undefined {
+  if (options.auditStore?.getLocalRepositoryPath) {
+    const fromStore = options.auditStore.getLocalRepositoryPath(repositoryId);
+    if (fromStore && existsSync(fromStore)) return fromStore;
+  }
+  const heartbeatPulse = options.heartbeat?.latest?.();
+  if (heartbeatPulse?.repository.root && heartbeatPulse.repository.root !== "unknown") {
+    const pulseRoot = heartbeatPulse.repository.root;
+    const pulseName = pulseRoot.split(/[\\/]/).filter(Boolean).at(-1);
+    if (repositoryId === `local:${pulseName}` || repositoryId === pulseName || repositoryId === pulseRoot) {
+      if (existsSync(pulseRoot)) return pulseRoot;
+    }
+  }
+  const projectRoot = findProjectRoot();
+  const projectName = projectRoot.split(/[\\/]/).filter(Boolean).at(-1);
+  if (
+    repositoryId === "sk1ua/ConsistenCy" ||
+    repositoryId === "ConsistenCy" ||
+    repositoryId === projectName ||
+    repositoryId === `local:${projectName}` ||
+    repositoryId.startsWith("local:ConsistenCy")
+  ) {
+    if (existsSync(projectRoot) && existsSync(resolve(projectRoot, ".git"))) return projectRoot;
+  }
+  return undefined;
+}
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
-import { seedDemoData } from "./api/demoSeed";
 import { buildHealthPayload } from "./health";
 import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
 import { LocalTriggerError } from "./trigger/local";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
 import { sanitizePublicError } from "./security/redact";
-import { settingsPatchSchema, toRendererSettings, type SettingsSnapshot } from "./config/settings";
+import { settingsPatchSchema, toRendererSettings, findProjectRoot, type SettingsSnapshot } from "./config/settings";
 import type { RealDataSnapshot } from "./data/realData";
 import { PublicPrError } from "./review/publicPr";
 import type { NotebookGraph } from "./notebook/graph";
@@ -230,6 +259,7 @@ function toRendererHeartbeatEvent(event: HeartbeatStreamEvent): HeartbeatStreamE
 export type ApiHealthDetails = {
   database: { ok: boolean };
   worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
+  llmConfigured?: boolean;
   llmProvider: string;
   llmModel?: string;
   publicPrAnalysis?: boolean;
@@ -242,7 +272,6 @@ export type ApiHealthDetails = {
     storage: { kind: "memory" | "file"; configured: boolean };
     workerConcurrency: number;
     publishWorkerConcurrency?: number;
-    demoMode: boolean;
   };
 };
 
@@ -263,6 +292,7 @@ export type CreateApiServerOptions = {
   realData?: () => RealDataSnapshot | undefined;
   publicPr?: (url: string) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
   publicPrAnalysisEnabled?: boolean;
+  llmProviderConfigured?: boolean;
   localReview?: (input: { repoPath: string; baseRef?: string; headRef?: string }) => Promise<{ jobId: string }>;
   auditStore?: AuditDomainStore;
   auditPlanner?: AuditRunPlanner;
@@ -563,6 +593,135 @@ const routes: Route[] = [
       sendJson(request, response, 200, {
         repositoryId,
         issues: options.auditStore.listIssues(repositoryId, state)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/status$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "local repository path unavailable",
+          branch: null,
+          headSha: null,
+          dirtyFileCount: 0,
+          untrackedFileCount: 0,
+          changedFiles: [],
+          untrackedFiles: [],
+          remotes: []
+        }, allowedOrigins);
+        return;
+      }
+      try {
+        const vcs = new LocalGitAdapter({ root: localPath });
+        const [branch, headSha, diff, untracked, remotes] = await Promise.all([
+          vcs.getCurrentBranch().catch(() => undefined),
+          vcs.getHeadSha().catch(() => undefined),
+          vcs.getWorkingDiff().catch(() => []),
+          vcs.getUntrackedFiles().catch(() => []),
+          vcs.getRemotes().catch(() => [])
+        ]);
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: true,
+          branch: branch ?? null,
+          headSha: headSha ?? null,
+          dirtyFileCount: diff.length,
+          untrackedFileCount: untracked.length,
+          changedFiles: diff,
+          untrackedFiles: untracked,
+          remotes,
+          primaryRemote: remotes[0]
+        }, allowedOrigins);
+      } catch {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "failed to execute git status",
+          branch: null,
+          headSha: null,
+          dirtyFileCount: 0,
+          untrackedFileCount: 0,
+          changedFiles: [],
+          untrackedFiles: [],
+          remotes: []
+        }, allowedOrigins);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/commits$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const depth = Math.min(50, Math.max(1, Number(url.searchParams.get("depth") || 30)));
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (localPath) {
+        try {
+          const vcs = new LocalGitAdapter({ root: localPath });
+          const commits = await vcs.getCommitHistory(depth);
+          sendJson(request, response, 200, { repositoryId, commits }, allowedOrigins);
+          return;
+        } catch {
+          // fall through
+        }
+      }
+      sendJson(request, response, 200, { repositoryId, commits: [] }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/pull-requests$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const allJobs = options.jobs?.list() ?? [];
+      const matchingJobs = allJobs.filter(job =>
+        job.repository === repositoryId ||
+        repositoryId.includes(job.repository) ||
+        (repositoryId.startsWith("local:") && job.accessMode === "local_git")
+      );
+
+      const prs = matchingJobs
+        .filter(job => job.pullRequestNumber !== undefined)
+        .map(job => ({
+          number: job.pullRequestNumber!,
+          title: job.result?.summary ? `Review for ${job.repository} #${job.pullRequestNumber}` : `Pull request #${job.pullRequestNumber}`,
+          state: job.status === "succeeded" ? "open" as const : job.status === "failed" ? "closed" as const : "open" as const,
+          author: "demo-contributor",
+          baseRef: "main",
+          headRef: `pr-${job.pullRequestNumber}`,
+          baseSha: job.baseSha ?? "base-sha",
+          headSha: job.headSha ?? "head-sha",
+          createdAt: job.createdAt,
+          updatedAt: job.finishedAt ?? job.startedAt ?? job.createdAt,
+          reviewStatus: job.status as "succeeded" | "running" | "failed",
+          score: job.result?.score,
+          riskLevel: job.result?.riskLevel,
+          jobId: job.id
+        }));
+
+      if (prs.length === 0 && (repositoryId.startsWith("local:") || repositoryId.startsWith("repo_"))) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "No GitHub remote connected or PR history unavailable",
+          pullRequests: []
+        }, allowedOrigins);
+        return;
+      }
+
+      sendJson(request, response, 200, {
+        repositoryId,
+        available: true,
+        pullRequests: prs
       }, allowedOrigins);
     }
   },
@@ -932,6 +1091,13 @@ const routes: Route[] = [
       if (options.publicPrAnalysisEnabled === false || (nodeEnv === "production" && options.publicPrAnalysisEnabled !== true)) {
         throw new ApiError("Public PR analysis is disabled", "PUBLIC_PR_ANALYSIS_DISABLED", 404);
       }
+      if (options.llmProviderConfigured === false) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能执行审查。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          400
+        );
+      }
       if (!options.publicPr || !options.notebookStore) {
         throw new ApiError("Public PR analysis requires a configured public GitHub read source", "PUBLIC_PR_ANALYSIS_UNAVAILABLE", 503);
       }
@@ -1006,6 +1172,13 @@ const routes: Route[] = [
     handler: async ({ request, response, allowedOrigins, options, jobs }) => {
       if (!options.localReview) {
         throw new ApiError("Local review is not configured", "LOCAL_REVIEW_UNAVAILABLE", 503);
+      }
+      if (options.llmProviderConfigured === false) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能执行审查。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          400
+        );
       }
       let body;
       try {
@@ -1108,13 +1281,14 @@ const routes: Route[] = [
     method: "POST",
     path: "/github/webhook",
     auth: false,
-    handler: async ({ request, response, allowedOrigins, githubWebhookSecret, jobs }) => {
+    handler: async ({ request, response, allowedOrigins, githubWebhookSecret, jobs, options }) => {
       if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
       const result = processGitHubWebhook({
         headers: request.headers,
         body: await readBody(request),
         secret: githubWebhookSecret,
-        jobs
+        jobs,
+        llmConfigured: options.llmProviderConfigured !== false
       });
       sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
     }
@@ -1223,15 +1397,15 @@ const routes: Route[] = [
       const details = options.healthDetails?.() ?? {
         database: { ok: true },
         worker: { running: false, activeJobs: 0, concurrency: 1 },
-        llmProvider: "mock",
+        llmConfigured: false,
+        llmProvider: "none",
         publicPrAccessMode: "disabled" as const,
         configuration: {
           githubAppConfigured: false,
           webhookSecretConfigured: Boolean(githubWebhookSecret),
           publicReadTokenConfigured: false,
           storage: { kind: "memory" as const, configured: true },
-          workerConcurrency: 1,
-          demoMode: true
+          workerConcurrency: 1
         }
       };
       sendJson(request, response, 200, {
@@ -1245,8 +1419,7 @@ const routes: Route[] = [
           workerConcurrency: details.configuration.workerConcurrency,
           ...(details.configuration.publishWorkerConcurrency === undefined
             ? {}
-            : { publishWorkerConcurrency: details.configuration.publishWorkerConcurrency }),
-          demoMode: details.configuration.demoMode
+            : { publishWorkerConcurrency: details.configuration.publishWorkerConcurrency })
         }
       }, allowedOrigins);
     }
@@ -1305,15 +1478,6 @@ const routes: Route[] = [
     auth: true,
     handler: ({ request, response, allowedOrigins, jobs }) => {
       sendJson(request, response, 200, buildStats(jobs.list()), allowedOrigins);
-    }
-  },
-  {
-    method: "POST",
-    path: "/demo/seed",
-    auth: true,
-    handler: ({ request, response, allowedOrigins, nodeEnv, jobs, options }) => {
-      if (nodeEnv === "production") throw new ApiError("Demo seed is disabled in production", "DEMO_DISABLED", 404);
-      sendJson(request, response, 201, seedDemoData(jobs, options.notebookStore, options.runtimeRegistry ?? defaultRuntimeRegistry), allowedOrigins);
     }
   },
   {

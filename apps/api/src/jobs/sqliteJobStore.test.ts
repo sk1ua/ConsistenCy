@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { seedDemoData } from "../api/demoSeed";
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
 import { SQLiteJobStore } from "./sqliteJobStore";
@@ -179,13 +178,14 @@ describe("SQLiteJobStore", () => {
     }
   });
 
-  it("seeds demo jobs without webhook delivery foreign keys", () => {
+  it("persists review jobs and filters by status", () => {
     const { database, store } = createStore();
     try {
-      expect(seedDemoData(store)).toEqual({ created: 8 });
-      expect(seedDemoData(store)).toEqual({ created: 0 });
-      expect(store.list()).toHaveLength(8);
-      expect(store.list().filter(job => job.status === "succeeded")).toHaveLength(5);
+      const job1 = acceptJob(store, "delivery-1");
+      const job2 = acceptJob(store, "delivery-2");
+      store.markRunning(job1.id);
+      expect(store.list()).toHaveLength(2);
+      expect(store.list().filter(job => job.status === "running")).toHaveLength(1);
     } finally {
       database.close();
     }

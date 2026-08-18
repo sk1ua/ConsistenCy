@@ -89,6 +89,7 @@ export type CompleteAutomationScheduleWindowInput = {
 export interface AuditDomainStore {
   listRepositories(): Repository[];
   getRepository(id: string): Repository | undefined;
+  getLocalRepositoryPath?(id: string): string | undefined;
   createRepository(input: CreateRepositoryRequest, options?: RegisterRepositoryOptions): Repository;
   setRepositoryMonitoring(id: string, enabled: boolean): Repository;
   listLocalRepositorySupervisionTargets(): LocalRepositorySupervisionTarget[];
@@ -167,6 +168,11 @@ export class SQLiteAuditDomainStore implements AuditDomainStore {
   getRepository(id: string): Repository | undefined {
     const row = this.database.prepare("SELECT * FROM repositories WHERE id = ?").get(id) as any;
     return row === undefined ? undefined : this.repositoryFromRow(row);
+  }
+
+  getLocalRepositoryPath(id: string): string | undefined {
+    const row = this.database.prepare("SELECT server_locator FROM repositories WHERE id = ?").get(id) as any;
+    return row?.server_locator ? String(row.server_locator) : undefined;
   }
 
   createRepository(input: CreateRepositoryRequest, options: RegisterRepositoryOptions = {}): Repository {

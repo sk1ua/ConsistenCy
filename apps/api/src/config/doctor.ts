@@ -52,8 +52,8 @@ export function diagnoseConfiguration(environment: NodeJS.ProcessEnv): DoctorRes
     checks.push({ id: "database", status: "fail", message: `Database directory is not writable: ${dirname(config.databasePath)}` });
   }
 
-  if (config.LLM_PROVIDER === "mock") {
-    checks.push({ id: "llm", status: "warn", message: "LLM provider is mock; reviews will not call an external model" });
+  if (!config.LLM_PROVIDER) {
+    checks.push({ id: "llm", status: "warn", message: "LLM provider is not configured; review executions will be blocked until configured" });
   } else {
     const configured = config.LLM_PROVIDER === "deepseek" ? Boolean(config.DEEPSEEK_API_KEY) : Boolean(config.OPENAI_API_KEY);
     checks.push(configured

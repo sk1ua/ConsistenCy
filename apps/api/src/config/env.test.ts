@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { loadEnv } from "./env";
+import { resolveDatabasePath, resolveWorkspaceRoot, loadEnv } from "./env";
+import { findProjectRoot } from "./settings";
+import { join } from "node:path";
 
 describe("loadEnv", () => {
   it("uses local-safe defaults", () => {
@@ -7,7 +9,7 @@ describe("loadEnv", () => {
     expect(config.HOST).toBe("127.0.0.1");
     expect(config.PORT).toBe(8787);
     expect(config.workspaceRoot).toMatch(/\.consistency[\\/]workspaces$/);
-    expect(config.LLM_PROVIDER).toBe("mock");
+    expect(config.LLM_PROVIDER).toBeUndefined();
     expect(config.CONSISTENCY_WORKER_CONCURRENCY).toBe(1);
     expect(config.CONSISTENCY_AUTOMATION_SCHEDULER_INTERVAL_MS).toBe(15_000);
     expect(config.publicPrAnalysisEnabled).toBe(true);
@@ -84,10 +86,11 @@ describe("loadEnv", () => {
     expect(config.notebookEnabled).toBe(true);
   });
 
-  it("prefers DeepSeek when its key is configured and otherwise uses mock", () => {
-    expect(loadEnv({}).LLM_PROVIDER).toBe("mock");
+  it("selects DeepSeek or OpenAI when configured and leaves LLM_PROVIDER undefined otherwise without mock fallback", () => {
+    expect(loadEnv({}).LLM_PROVIDER).toBeUndefined();
     expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).LLM_PROVIDER).toBe("deepseek");
     expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).DEEPSEEK_MODEL).toBe("deepseek-v4-flash");
+    expect(loadEnv({ OPENAI_API_KEY: "configured" }).LLM_PROVIDER).toBe("openai");
     expect(() => loadEnv({ LLM_PROVIDER: "deepseek" })).toThrow(/DEEPSEEK_API_KEY/);
     expect(() => loadEnv({ LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
   });
@@ -115,5 +118,25 @@ describe("loadEnv", () => {
       .CONSISTENCY_DESKTOP_CONTROL_TOKEN).toBe("desktop-control");
     expect(loadEnv({ CONSISTENCY_DESKTOP_CONTROL_TOKEN: "   " })
       .CONSISTENCY_DESKTOP_CONTROL_TOKEN).toBeUndefined();
+  });
+
+  it("anchors default and relative DATABASE_PATH to the project root regardless of cwd", () => {
+    const root = findProjectRoot();
+    const config = loadEnv({});
+    expect(config.databasePath).toBe(join(root, ".consistency", "consistency.db"));
+    expect(config.workspaceRoot).toBe(join(root, ".consistency", "workspaces"));
+
+    // Relative override is resolved relative to project root
+    const relativeConfig = loadEnv({ DATABASE_PATH: "custom/data.db" });
+    expect(relativeConfig.databasePath).toBe(join(root, "custom", "data.db"));
+
+    // Absolute override is preserved
+    const absolutePath = process.platform === "win32" ? "C:\\data\\test.db" : "/data/test.db";
+    const absoluteConfig = loadEnv({ DATABASE_PATH: absolutePath });
+    expect(absoluteConfig.databasePath).toBe(absolutePath);
+
+    // Memory DB is preserved
+    const memoryConfig = loadEnv({ DATABASE_PATH: ":memory:" });
+    expect(memoryConfig.databasePath).toBe(":memory:");
   });
 });

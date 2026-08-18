@@ -69,7 +69,8 @@ const pullRequestPayloadSchema = z.object({
 function enqueuePullRequest(
   payload: unknown,
   deliveryId: string,
-  jobs: ReviewJobStore
+  jobs: ReviewJobStore,
+  llmConfigured = true
 ): WebhookResult {
   const parseResult = pullRequestPayloadSchema.safeParse(payload);
   if (!parseResult.success) {
@@ -107,6 +108,18 @@ function enqueuePullRequest(
       : { status: "ignored", event: "pull_request", deliveryId, reason: `ignored action ${data.action}` };
   }
 
+  if (!llmConfigured) {
+    const acceptance = jobs.recordWebhookDelivery({
+      deliveryId,
+      event: "pull_request",
+      action: data.action,
+      status: "ignored"
+    });
+    return acceptance.duplicate
+      ? { status: "duplicate", event: "pull_request", deliveryId, reason: "delivery already processed" }
+      : { status: "ignored", event: "pull_request", deliveryId, reason: "llm provider not configured" };
+  }
+
   const acceptance = jobs.acceptWebhookJob({
     delivery: { deliveryId, event: "pull_request", action: data.action },
     job: {
@@ -131,6 +144,7 @@ export function processGitHubWebhook(options: {
   body: Buffer;
   secret: string;
   jobs: ReviewJobStore;
+  llmConfigured?: boolean;
 }): WebhookResult {
   const event = headerValue(options.headers, "x-github-event");
   const deliveryId = headerValue(options.headers, "x-github-delivery");
@@ -163,7 +177,7 @@ export function processGitHubWebhook(options: {
     }
 
     if (event === "pull_request") {
-      return enqueuePullRequest(payload, deliveryId, options.jobs);
+      return enqueuePullRequest(payload, deliveryId, options.jobs, options.llmConfigured !== false);
     }
 
     if (event === "push") {

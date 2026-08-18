@@ -71,7 +71,7 @@ export type ContextBuilder = (input: ReviewWorkflowInput) => Promise<PRReviewCon
 
 export type ReviewWorkflowDependencies = {
   contextBuilder: ContextBuilder;
-  provider: LLMProvider;
+  provider?: LLMProvider;
   jobStore: ReviewJobStore;
   deterministicAnalyzer: DeterministicAnalyzer;
   reportLanguage?: "zh-CN" | "en-US";
@@ -143,6 +143,9 @@ export type ReviewRuntime = {
 
 export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): ReviewRuntime {
   const workspaceRoot = dependencies.workspaceRoot ?? ".consistency/workspaces";
+  if (!dependencies.provider) {
+    throw new Error("LLM provider is not configured. Configure DeepSeek or OpenAI in settings before running reviews.");
+  }
   const modelDriver = legacyProviderModelDriver(dependencies.provider);
 
   return {

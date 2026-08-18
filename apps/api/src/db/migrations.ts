@@ -917,6 +917,51 @@ export const migrations: readonly Migration[] = [
         throw new Error(`Foreign key integrity check failed after migration 0014_automation_scheduler: ${JSON.stringify(violations)}`);
       }
     }
+  },
+  {
+    id: "0015_remove_demo_data",
+    up(database) {
+      database.exec(`
+        DELETE FROM notebook_citations WHERE job_id IN (
+          SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+        ) OR notebook_id NOT IN (
+          SELECT DISTINCT notebook_id FROM notebook_sources WHERE job_id NOT IN (
+            SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+          )
+        );
+        DELETE FROM notebook_cards WHERE notebook_id NOT IN (
+          SELECT DISTINCT notebook_id FROM notebook_sources WHERE job_id NOT IN (
+            SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+          )
+        );
+        DELETE FROM notebook_messages WHERE notebook_id NOT IN (
+          SELECT DISTINCT notebook_id FROM notebook_sources WHERE job_id NOT IN (
+            SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+          )
+        );
+        DELETE FROM notebook_sources WHERE job_id IN (
+          SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+        );
+        DELETE FROM notebooks WHERE id NOT IN (SELECT DISTINCT notebook_id FROM notebook_sources);
+        DELETE FROM repository_snapshot_indexes WHERE head_sha LIKE 'demo-%';
+        DELETE FROM reports WHERE job_id IN (
+          SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+        );
+        DELETE FROM agent_runs WHERE job_id IN (
+          SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+        );
+        DELETE FROM publish_outbox WHERE job_id IN (
+          SELECT id FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%'
+        );
+        DELETE FROM jobs WHERE action = 'demo' OR delivery_id LIKE 'manual:demo:%';
+        DELETE FROM webhook_deliveries WHERE delivery_id LIKE 'manual:demo:%' OR action = 'demo';
+      `);
+
+      const violations = database.pragma("foreign_key_check") as unknown[];
+      if (violations.length > 0) {
+        throw new Error(`Foreign key integrity check failed after migration 0015_remove_demo_data: ${JSON.stringify(violations)}`);
+      }
+    }
   }
 ];
 

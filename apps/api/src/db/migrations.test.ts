@@ -23,7 +23,8 @@ describe("SQLite foundation", () => {
         "0011_audit_control_plane",
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
-        "0014_automation_scheduler"
+        "0014_automation_scheduler",
+        "0015_remove_demo_data"
       ]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
@@ -85,7 +86,8 @@ describe("SQLite foundation", () => {
         "0011_audit_control_plane",
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
-        "0014_automation_scheduler"
+        "0014_automation_scheduler",
+        "0015_remove_demo_data"
       ]);
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
@@ -134,7 +136,8 @@ describe("SQLite foundation", () => {
         "0011_audit_control_plane",
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
-        "0014_automation_scheduler"
+        "0014_automation_scheduler",
+        "0015_remove_demo_data"
       ]);
 
       // Assert data preserved
@@ -240,7 +243,8 @@ describe("0009_local_git_jobs", () => {
         "0011_audit_control_plane",
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
-        "0014_automation_scheduler"
+        "0014_automation_scheduler",
+        "0015_remove_demo_data"
       ]);
 
       const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_kept'").get() as any;
@@ -466,7 +470,7 @@ describe("0014_automation_scheduler", () => {
         ) VALUES ('receipt_legacy', ?, ?, ?, ?, 'manual', NULL, 'audit_run_legacy', 'created', ?)
       `).run("a".repeat(64), repository.id, automation.id, workflow.digest, "2026-08-14T00:00:00.000Z");
 
-      expect(runMigrations(database, migrations)).toEqual(["0014_automation_scheduler"]);
+      expect(runMigrations(database, migrations)).toEqual(["0014_automation_scheduler", "0015_remove_demo_data"]);
       expect(database.prepare("SELECT scheduled_for FROM audit_runs WHERE id = 'audit_run_legacy'").get())
         .toEqual({ scheduled_for: null });
       expect(database.prepare("SELECT scheduled_for FROM audit_run_planning_receipts WHERE id = 'receipt_legacy'").get())
@@ -476,6 +480,68 @@ describe("0014_automation_scheduler", () => {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'automation_schedule_windows'").get())
         .toBeTruthy();
       expect(database.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("0015_remove_demo_data (Database Safety Test)", () => {
+  it("deletes explicitly seeded demo records while preserving real user records", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database, migrations.filter(m => m.id <= "0014_automation_scheduler"));
+
+      // 1. Insert an explicit Demo record
+      database.exec(`
+        INSERT INTO webhook_deliveries (delivery_id, event, action, received_at, status)
+        VALUES ('manual:demo:1', 'pull_request', 'demo', '2026-08-18T00:00:00.000Z', 'enqueued');
+
+        INSERT INTO jobs (
+          id, type, status, repository_full_name, pull_request_number,
+          base_sha, head_sha, delivery_id, sender_login, action, created_at, updated_at
+        ) VALUES (
+          'job_demo_1', 'PR_REVIEW', 'succeeded', 'sk1ua/ConsistenCy', 34,
+          'demo-base-1', 'demo-head-1', 'manual:demo:1', 'demo', 'demo', '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z'
+        );
+
+        INSERT INTO reports (id, job_id, report_json, created_at)
+        VALUES ('report_demo_1', 'job_demo_1', '{}', '2026-08-18T00:00:00.000Z');
+      `);
+
+      // 2. Insert a REAL user record
+      database.exec(`
+        INSERT INTO webhook_deliveries (delivery_id, event, action, received_at, status)
+        VALUES ('delivery_real_123', 'pull_request', 'opened', '2026-08-18T00:00:00.000Z', 'enqueued');
+
+        INSERT INTO jobs (
+          id, type, status, repository_full_name, pull_request_number,
+          base_sha, head_sha, delivery_id, sender_login, action, created_at, updated_at
+        ) VALUES (
+          'job_real_123', 'PR_REVIEW', 'succeeded', 'sk1ua/ConsistenCy', 42,
+          'c4de53c659334ba29bd392f11aa69d61500c29e6', '161877ca87d1e0dae806f21e3c6591b6a738dde8',
+          'delivery_real_123', 'sk1ua', 'opened', '2026-08-18T00:00:00.000Z', '2026-08-18T00:00:00.000Z'
+        );
+
+        INSERT INTO reports (id, job_id, report_json, created_at)
+        VALUES ('report_real_123', 'job_real_123', '{"score": 88}', '2026-08-18T00:00:00.000Z');
+      `);
+
+      expect(database.prepare("SELECT count(*) as count FROM jobs").get()).toEqual({ count: 2 });
+      expect(database.prepare("SELECT count(*) as count FROM reports").get()).toEqual({ count: 2 });
+
+      // 3. Run migration 0015
+      runMigrations(database, migrations.filter(m => m.id === "0015_remove_demo_data"));
+
+      // 4. Verify ONLY demo records were removed
+      const remainingJobs = database.prepare("SELECT id FROM jobs").all() as Array<{ id: string }>;
+      expect(remainingJobs).toEqual([{ id: "job_real_123" }]);
+
+      const remainingReports = database.prepare("SELECT id FROM reports").all() as Array<{ id: string }>;
+      expect(remainingReports).toEqual([{ id: "report_real_123" }]);
+
+      const remainingDeliveries = database.prepare("SELECT delivery_id FROM webhook_deliveries").all() as Array<{ delivery_id: string }>;
+      expect(remainingDeliveries).toEqual([{ delivery_id: "delivery_real_123" }]);
     } finally {
       database.close();
     }

@@ -245,6 +245,7 @@ export const server = createApiServer({
     jobs,
     publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN
   }),
+  llmProviderConfigured: Boolean(provider),
   localReview: input => triggerLocalReview(jobs, input, {
     allowedRoots: config.localReviewRoots
   }),
@@ -266,8 +267,9 @@ export const server = createApiServer({
     worker: worker.status(),
     publishWorker: publishWorker.status(),
     deterministicAnalyzer: deterministicAnalyzer.status(),
-    llmProvider: provider.name,
-    llmModel: provider.model,
+    llmConfigured: Boolean(provider),
+    llmProvider: provider?.name ?? "none",
+    llmModel: provider?.model ?? undefined,
     publicPrAnalysis: config.publicPrAnalysisEnabled,
     publicPrAccessMode: config.publicPrAnalysisEnabled
       ? config.GITHUB_PUBLIC_READ_TOKEN ? "pat" : "anonymous"
@@ -282,8 +284,7 @@ export const server = createApiServer({
         configured: config.databasePath.trim().length > 0
       },
       workerConcurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
-      publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY,
-      demoMode: provider.name === "mock"
+      publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY
     }
   })
 });
@@ -376,7 +377,7 @@ if (process.env.NODE_ENV !== "test") {
     logger.info({
       host: config.HOST,
       port: config.PORT,
-      llmProvider: provider.name,
+      llmProvider: provider ? provider.name : "none",
       workerConcurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
       publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY,
       // Surfaced at startup because any checkout under these roots is readable

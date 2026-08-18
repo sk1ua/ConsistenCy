@@ -51,6 +51,47 @@ export async function resolveJobDiff(
     } else {
       const root = workspacePathForJob(dependencies.workspaceRoot, job.id);
       if (!existsSync(root)) {
+        if (job.deliveryId?.startsWith("manual:demo:") || job.senderLogin === "demo" || job.id.startsWith("job_demo")) {
+          return {
+            files: [
+              {
+                path: "apps/api/src/http.ts",
+                status: "modified",
+                binary: false,
+                additions: 12,
+                deletions: 3,
+                hunks: [
+                  {
+                    oldStart: 85,
+                    oldLines: 7,
+                    newStart: 85,
+                    newLines: 16,
+                    header: "@@ -85,7 +85,16 @@ export function registerRoutes(app: Express) {",
+                    content: "   app.use(express.json());\n   app.use(requestLogger());\n \n-  app.post('/jobs', createJobHandler);\n-  app.get('/jobs/:id/report', getReportHandler);\n-  app.delete('/jobs/:id', deleteJobHandler);\n+  // Management endpoints require Bearer token authorization guard\n+  const authGuard = createAuthMiddleware({ token: process.env.API_AUTH_TOKEN });\n+\n+  app.post('/jobs', authGuard, createJobHandler);\n+  app.get('/jobs/:id/report', authGuard, getReportHandler);\n+  app.get('/jobs/:id/diff', authGuard, getJobDiffHandler);\n+  app.get('/runtime/runs/:runId', authGuard, getRuntimeSnapshotHandler);\n+  app.delete('/jobs/:id', authGuard, deleteJobHandler);\n+\n+  // Public health check\n+  app.get('/health', healthHandler);\n   return app;\n }"
+                  }
+                ]
+              },
+              {
+                path: "apps/web/src/components/runtime/RuntimePanel.tsx",
+                status: "added",
+                binary: false,
+                additions: 38,
+                deletions: 0,
+                hunks: [
+                  {
+                    oldStart: 0,
+                    oldLines: 0,
+                    newStart: 1,
+                    newLines: 14,
+                    header: "@@ -0,0 +1,14 @@",
+                    content: "+import { useQuery } from '@tanstack/react-query';\n+import type { RunRuntimeSnapshot } from '@consistency/schema';\n+\n+export function RuntimePanel({ runId }: { runId: string }) {\n+  const { data: snapshot } = useQuery({\n+    queryKey: ['runtime-snapshot', runId],\n+    queryFn: () => api.runtimeSnapshot(runId),\n+  });\n+  return <div className=\"run-runtime-panel\">...</div>;\n+}"
+                  }
+                ]
+              }
+            ],
+            available: true
+          };
+        }
         return { files: [], available: false };
       }
       if (!job.baseSha || !job.headSha) {

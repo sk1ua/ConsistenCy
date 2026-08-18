@@ -42,14 +42,15 @@ export default defineConfig({
     {
       command: "npm run dev:api",
       url: "http://127.0.0.1:3001/health",
-      reuseExistingServer: false,
+      reuseExistingServer: !process.env.CI,
       stdout: "pipe",
       stderr: "pipe",
+      timeout: 120000,
       env: {
         NODE_ENV: "development",
         PORT: "3001",
         HOST: "127.0.0.1",
-        LLM_PROVIDER: "mock",
+        LLM_PROVIDER: "deepseek",
         DATABASE_PATH: databasePath,
         CONSISTENCY_WORKSPACE_ROOT: workspaceRoot,
         CONSISTENCY_SETTINGS_ROOT: e2eRoot,
@@ -59,7 +60,7 @@ export default defineConfig({
         GITHUB_APP_ID: "",
         GITHUB_PRIVATE_KEY: "",
         GITHUB_WEBHOOK_SECRET: "",
-        DEEPSEEK_API_KEY: "",
+        DEEPSEEK_API_KEY: "test-deepseek-key",
         OPENAI_API_KEY: "",
         CONSISTENCY_API_TOKEN: "",
         CONSISTENCY_PYTHON_PATH: process.env.CONSISTENCY_PYTHON_PATH ?? "python"
@@ -68,9 +69,10 @@ export default defineConfig({
     {
       command: "npm run dev:web",
       url: "http://127.0.0.1:5173",
-      reuseExistingServer: false,
+      reuseExistingServer: !process.env.CI,
       stdout: "pipe",
       stderr: "pipe",
+      timeout: 120000,
       env: {
         CONSISTENCY_DEV_API_TARGET: "http://127.0.0.1:3001"
       }

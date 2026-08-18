@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
 const publicSettingsSchema = z.object({
-  LLM_PROVIDER: z.enum(["mock", "deepseek", "openai"]).optional(),
+  LLM_PROVIDER: z.enum(["deepseek", "openai"]).optional(),
   DEEPSEEK_BASE_URL: z.string().url().optional(),
   DEEPSEEK_MODEL: z.string().trim().min(1).optional(),
   OPENAI_MODEL: z.string().trim().min(1).optional(),
@@ -28,7 +28,7 @@ const secretSettingsSchema = z.object({
 
 export const settingsPatchSchema = z.object({
   llm: z.object({
-    provider: z.enum(["mock", "deepseek", "openai"]).optional(),
+    provider: z.enum(["deepseek", "openai"]).optional(),
     deepseekBaseUrl: z.string().url().optional(),
     deepseekModel: z.string().trim().min(1).optional(),
     openaiModel: z.string().trim().min(1).optional(),
@@ -56,7 +56,7 @@ export type SettingsPatch = z.infer<typeof settingsPatchSchema>;
 
 export type SettingsSnapshot = {
   llm: {
-    provider: "mock" | "deepseek" | "openai";
+    provider: "deepseek" | "openai" | "none";
     deepseekBaseUrl: string;
     deepseekModel: string;
     openaiModel: string;
@@ -276,9 +276,9 @@ export class SettingsStore {
     const overriddenByEnvironment = Object.keys(saved)
       .filter(key => environment[key] !== undefined && environment[key] !== saved[key])
       .sort();
-    const provider = effective.LLM_PROVIDER === "mock" || effective.LLM_PROVIDER === "deepseek" || effective.LLM_PROVIDER === "openai"
+    const provider = effective.LLM_PROVIDER === "deepseek" || effective.LLM_PROVIDER === "openai"
       ? effective.LLM_PROVIDER
-      : effective.DEEPSEEK_API_KEY ? "deepseek" : "mock";
+      : effective.DEEPSEEK_API_KEY ? "deepseek" : effective.OPENAI_API_KEY ? "openai" : "none";
     return {
       llm: {
         provider,

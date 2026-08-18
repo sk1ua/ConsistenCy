@@ -50,8 +50,8 @@ describe("LLM providers", () => {
   it("selects providers without mixing API keys", () => {
     const deepseek = createLLMProvider(loadEnv({ DEEPSEEK_API_KEY: "deepseek-key" }));
     const openai = createLLMProvider(loadEnv({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "openai-key" }));
-    expect(deepseek.name).toBe("deepseek");
-    expect(openai.name).toBe("openai");
+    expect(deepseek?.name).toBe("deepseek");
+    expect(openai?.name).toBe("openai");
   });
 
   it("normalizes OpenAI-compatible SSE deltas and usage into Notebook stream events", async () => {
