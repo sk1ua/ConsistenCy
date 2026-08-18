@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveDatabasePath, resolveWorkspaceRoot, loadEnv } from "./env";
 import { findProjectRoot } from "./settings";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 describe("loadEnv", () => {
   it("uses local-safe defaults", () => {
@@ -138,5 +138,25 @@ describe("loadEnv", () => {
     // Memory DB is preserved
     const memoryConfig = loadEnv({ DATABASE_PATH: ":memory:" });
     expect(memoryConfig.databasePath).toBe(":memory:");
+  });
+
+  it("strictly places default database inside .consistency directory with proper separator and never as sibling directory", () => {
+    const root = findProjectRoot();
+    const resolved = resolveDatabasePath(".consistency/consistency.db", root);
+
+    expect(resolved).toBe(join(root, ".consistency", "consistency.db"));
+    expect(dirname(resolved)).toBe(join(root, ".consistency"));
+    expect(basename(dirname(resolved))).toBe(".consistency");
+    expect(basename(resolved)).toBe("consistency.db");
+
+    // Prove it is NOT a sibling directory like root.consistency
+    expect(resolved).not.toBe(`${root}.consistency/consistency.db`);
+    expect(resolved).not.toBe(`${root}.consistency\\consistency.db`);
+
+    // Verify resolution from multiple simulated working directories
+    const appsApiCwd = join(root, "apps", "api");
+    const nestedCwd = join(root, "packages", "schema", "src");
+    expect(resolveDatabasePath(".consistency/consistency.db", findProjectRoot(appsApiCwd))).toBe(resolved);
+    expect(resolveDatabasePath(".consistency/consistency.db", findProjectRoot(nestedCwd))).toBe(resolved);
   });
 });
