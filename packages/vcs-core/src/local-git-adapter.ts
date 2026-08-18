@@ -255,4 +255,45 @@ export class LocalGitAdapter implements IVCSService {
     if (repository.headSha !== undefined) event.baseSha = repository.headSha;
     return event;
   }
+
+  /**
+   * Discovers configured git remotes.
+   */
+  async getRemotes(): Promise<Array<{ name: string; url: string; githubFullName?: string }>> {
+    try {
+      const stdout = await this.run(["remote", "-v"]);
+      const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
+      const remoteMap = new Map<string, string>();
+      for (const line of lines) {
+        const parts = line.split(/\s+/);
+        if (parts.length >= 2 && parts[0] && parts[1]) {
+          remoteMap.set(parts[0], parts[1]);
+        }
+      }
+      return Array.from(remoteMap.entries()).map(([name, url]) => {
+        const parsed = parseGitHubRemote(url);
+        return {
+          name,
+          url,
+          githubFullName: parsed?.fullName
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+}
+
+/**
+ * Robust parser for GitHub remote URLs (HTTPS, SSH, git://, etc.)
+ */
+export function parseGitHubRemote(url: string): { owner: string; repo: string; fullName: string } | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  // Handle https://github.com/owner/repo(.git), git@github.com:owner/repo(.git), ssh://git@github.com/owner/repo(.git)
+  const match = trimmed.match(/^(?:https?:\/\/|git@|ssh:\/\/git@)github\.com[:/]([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+?)(?:\.git)?$/);
+  if (!match || !match[1] || !match[2]) return null;
+  const owner = match[1];
+  const repo = match[2];
+  return { owner, repo, fullName: `${owner}/${repo}` };
 }

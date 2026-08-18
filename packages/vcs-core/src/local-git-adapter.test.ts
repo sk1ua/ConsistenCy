@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { codeChangeEventSchema, vcsChangedFileSchema } from "@consistency/schema";
 import { GitCommandError, assertSafeRef, execGit } from "./git";
-import { LocalGitAdapter } from "./local-git-adapter";
+import { LocalGitAdapter, parseGitHubRemote } from "./local-git-adapter";
 
 let root: string;
 let adapter: LocalGitAdapter;
@@ -153,6 +153,28 @@ describe("LocalGitAdapter", { timeout: 30_000 }, () => {
     const ref = await adapter.getRepoRef();
     expect(ref.branch).toBeUndefined();
     expect(ref.headSha).toBe(latest?.sha);
+  });
+});
+
+describe("parseGitHubRemote", () => {
+  it("parses https, ssh, and git URLs into canonical owner/repo", () => {
+    expect(parseGitHubRemote("https://github.com/sk1ua/ConsistenCy.git")).toEqual({
+      owner: "sk1ua",
+      repo: "ConsistenCy",
+      fullName: "sk1ua/ConsistenCy"
+    });
+    expect(parseGitHubRemote("git@github.com:sk1ua/ConsistenCy.git")).toEqual({
+      owner: "sk1ua",
+      repo: "ConsistenCy",
+      fullName: "sk1ua/ConsistenCy"
+    });
+    expect(parseGitHubRemote("ssh://git@github.com/openai/codex")).toEqual({
+      owner: "openai",
+      repo: "codex",
+      fullName: "openai/codex"
+    });
+    expect(parseGitHubRemote("https://gitlab.com/owner/repo.git")).toBeNull();
+    expect(parseGitHubRemote("not a url")).toBeNull();
   });
 });
 

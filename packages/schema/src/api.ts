@@ -3,7 +3,7 @@ import { reviewJobSchema } from "./job";
 import { notebookCardKindSchema, notebookSchema, notebookSourceSchema } from "./notebook";
 import { reviewReportSchema, riskLevelSchema } from "./report";
 import { workflowSpecSchema } from "./workflow";
-import { vcsChangedFileSchema } from "./vcs";
+import { vcsChangedFileSchema, vcsCommitSummarySchema } from "./vcs";
 
 export const jobListResponseSchema = z.object({ jobs: z.array(reviewJobSchema) }).strict();
 export const jobDetailResponseSchema = z.object({ job: reviewJobSchema }).strict();
@@ -91,6 +91,62 @@ export const jobDiffResponseSchema = z.object({
   /** False when the checkout is gone and no diff can be computed. */
   available: z.boolean()
 }).strict();
+
+export const gitRemoteInfoSchema = z.object({
+  name: z.string().trim().min(1),
+  url: z.string().trim().min(1),
+  githubFullName: z.string().optional()
+}).strict();
+
+export const repositoryGitStatusResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.boolean().optional(),
+  reason: z.string().optional(),
+  branch: z.string().nullable().optional(),
+  headSha: z.string().nullable().optional(),
+  dirtyFileCount: z.number().int().nonnegative(),
+  untrackedFileCount: z.number().int().nonnegative(),
+  changedFiles: z.array(vcsChangedFileSchema),
+  untrackedFiles: z.array(z.string()),
+  remotes: z.array(gitRemoteInfoSchema),
+  primaryRemote: gitRemoteInfoSchema.optional()
+}).strict();
+
+export const repositoryCommitsResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  commits: z.array(vcsCommitSummarySchema)
+}).strict();
+
+export const pullRequestSummarySchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string().trim().min(1),
+  state: z.enum(["open", "closed", "merged"]),
+  author: z.string().trim().min(1),
+  baseRef: z.string().trim().min(1),
+  headRef: z.string().trim().min(1),
+  baseSha: z.string().trim().min(1),
+  headSha: z.string().trim().min(1),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  mergedAt: z.string().datetime().optional(),
+  reviewStatus: z.enum(["succeeded", "running", "failed", "unreviewed"]).optional(),
+  score: z.number().optional(),
+  riskLevel: riskLevelSchema.optional(),
+  jobId: z.string().optional()
+}).strict();
+
+export const repositoryPullRequestsResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.boolean(),
+  reason: z.string().optional(),
+  pullRequests: z.array(pullRequestSummarySchema)
+}).strict();
+
+export type GitRemoteInfo = z.infer<typeof gitRemoteInfoSchema>;
+export type RepositoryGitStatusResponse = z.infer<typeof repositoryGitStatusResponseSchema>;
+export type RepositoryCommitsResponse = z.infer<typeof repositoryCommitsResponseSchema>;
+export type PullRequestSummary = z.infer<typeof pullRequestSummarySchema>;
+export type RepositoryPullRequestsResponse = z.infer<typeof repositoryPullRequestsResponseSchema>;
 
 export type JobListResponse = z.infer<typeof jobListResponseSchema>;
 export type JobDetailResponse = z.infer<typeof jobDetailResponseSchema>;
