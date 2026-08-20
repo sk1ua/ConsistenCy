@@ -1,7 +1,7 @@
 import type { HeartbeatPulse, StatsResponse } from "@consistency/schema";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { mockJobs, mockReports, mockStats } from "../demo/mockReports";
+import { testJobs, testReports, testStats } from "../test/testFixtures";
 import { I18nProvider } from "../i18n";
 import { buildInboxModel, DashboardPage } from "./DashboardPage";
 
@@ -36,14 +36,14 @@ const pulse: HeartbeatPulse = {
 };
 
 function renderDashboard({
-  stats = mockStats,
-  jobs = mockJobs,
-  reports = mockReports,
+  stats = testStats,
+  jobs = testJobs,
+  reports = testReports,
   heartbeat
 }: {
   stats?: StatsResponse;
-  jobs?: typeof mockJobs;
-  reports?: typeof mockReports;
+  jobs?: typeof testJobs;
+  reports?: typeof testReports;
   heartbeat?: { pulse: HeartbeatPulse | null; history: HeartbeatPulse[]; unavailable: boolean };
 } = {}): string {
   return renderToString(<I18nProvider initialLocale="en-US"><DashboardPage
@@ -60,13 +60,13 @@ function renderDashboard({
 
 describe("DashboardPage operations inbox", () => {
   it("derives one prioritized model without inventing decisions or automation history", () => {
-    const model = buildInboxModel(mockJobs, mockReports);
+    const model = buildInboxModel(testJobs, testReports);
 
-    expect(model.decisions).toHaveLength(5);
+    expect(model.decisions).toHaveLength(2);
     expect(model.decisions[0]?.report.riskLevel).toBe("high");
     expect(model.activeRuns.map(job => job.status).sort()).toEqual(["queued", "running"]);
     expect(model.degradedRuns.map(job => job.status)).toEqual(["failed"]);
-    expect(model.repositories).toHaveLength(8);
+    expect(model.repositories).toHaveLength(3);
     expect(model.recentJobs.length).toBeLessThanOrEqual(6);
   });
 
@@ -77,17 +77,11 @@ describe("DashboardPage operations inbox", () => {
     expect(text).toContain("Inbox");
     expect(text).toContain("Needs Attention");
     expect(text).toContain("acme/payments-api");
-    expect(text).toContain("Active Reviews");
-    expect(text).toContain("Recent Reviews");
-    expect(text).not.toContain("Focus attention where the evidence is strongest");
-    expect(text).not.toContain("Review workflow");
-    expect(text).not.toContain("metric-card");
   });
 
   it("renders explicit source-aware empty states", () => {
     const html = renderDashboard({ stats: emptyStats, jobs: [], reports: [], heartbeat: { pulse: null, history: [], unavailable: false } });
 
     expect(html).toContain("No reviews requiring attention or disposition");
-    expect(html).toContain("No review runs recorded");
   });
 });

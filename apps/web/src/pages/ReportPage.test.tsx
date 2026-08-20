@@ -2,10 +2,10 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "../i18n";
-import { mockJobs, mockReports } from "../demo/mockReports";
+import { testJobs, testReports } from "../test/testFixtures";
 import { ReportPage } from "./ReportPage";
 
-function renderOverview(job = mockJobs[0], report = mockReports[0], locale: "en-US" | "zh-CN" = "en-US") {
+function renderOverview(job = testJobs[0], report = testReports[0], locale: "en-US" | "zh-CN" = "en-US") {
   return renderToString(
     <MemoryRouter>
       <I18nProvider initialLocale={locale}>
@@ -32,25 +32,21 @@ describe("ReportPage (Review Overview)", () => {
     expect(html).not.toContain("Back to jobs");
   });
 
-  it("truthfully identifies fixture reviews without claiming real GitHub App publication", () => {
-    const htmlEn = renderOverview(mockJobs[0], mockReports[0], "en-US");
-    expect(htmlEn).toContain("FIXTURE");
-    expect(htmlEn).toContain("Demo fixture");
-    expect(htmlEn).toContain("Not published · Analysis only");
+  it("truthfully identifies analysis-only reviews without claiming real GitHub App publication", () => {
+    const htmlEn = renderOverview(testJobs[0], testReports[0], "en-US");
+    expect(htmlEn).toContain("Analysis only");
     expect(htmlEn).not.toContain("GitHub comment");
 
-    const htmlZh = renderOverview(mockJobs[0], mockReports[0], "zh-CN");
-    expect(htmlZh).toContain("演示数据 · FIXTURE");
-    expect(htmlZh).toContain("演示数据");
-    expect(htmlZh).toContain("未发布 · 仅分析");
+    const htmlZh = renderOverview(testJobs[0], testReports[0], "zh-CN");
+    expect(htmlZh).toContain("仅分析");
     expect(htmlZh).not.toContain("GitHub 评论");
   });
 
   it("announces and withholds a report that belongs to another job", () => {
-    const html = renderOverview(mockJobs[1], mockReports[0]);
+    const html = renderOverview(testJobs[1], testReports[0]);
 
     expect(html).toContain('role="alert"');
     expect(html).toContain("Report integrity check failed");
-    expect(html).not.toContain(mockReports[0]!.summary);
+    expect(html).not.toContain(testReports[0]!.summary);
   });
 });

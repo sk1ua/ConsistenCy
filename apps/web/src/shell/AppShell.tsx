@@ -102,8 +102,6 @@ type Copy = {
   closeNavigation: string;
   resizeExplorer: string;
   resizeInspector: string;
-  loadDemo: string;
-  demoMode: string;
   source: string;
   connected: string;
   unavailable: string;
@@ -169,8 +167,6 @@ const copyByLocale: Record<Locale, Copy> = {
     closeNavigation: "Close workspace explorer",
     resizeExplorer: "Resize workspace explorer",
     resizeInspector: "Resize context inspector",
-    loadDemo: "Load demo data",
-    demoMode: "Mock model",
     source: "Source",
     connected: "API connected",
     unavailable: "API unavailable",
@@ -234,8 +230,6 @@ const copyByLocale: Record<Locale, Copy> = {
     closeNavigation: "关闭工作区浏览器",
     resizeExplorer: "调整工作区浏览器宽度",
     resizeInspector: "调整上下文检查器宽度",
-    loadDemo: "加载演示数据",
-    demoMode: "Mock 模型",
     source: "来源",
     connected: "API 已连接",
     unavailable: "API 不可用",
@@ -395,7 +389,7 @@ function RepositorySidebar({
             </NavLink>
           </div>
 
-          <div className="sidebar-repo-list" role="list">
+          <div className="sidebar-repo-list">
             {/* Unified Local Pulse Repository (Model A) */}
             {pulse && (
               <NavLink
@@ -432,10 +426,9 @@ function RepositorySidebar({
               );
             })}
 
-            {/* History Review Repositories (Fixture) */}
+            {/* History Review Repositories */}
             {historyRepoNames.map(name => {
               const active = currentPath.startsWith(`/repositories/${encodeURIComponent(name)}`);
-              const isDemo = name.startsWith("acme/") || name.startsWith("studio/");
               return (
                 <NavLink
                   key={name}
@@ -447,7 +440,7 @@ function RepositorySidebar({
                   <FolderGit2 size={14} className="repo-icon" />
                   <div className="repo-text-group">
                     <strong>{name}</strong>
-                    <small>{isDemo ? (zh ? "演示数据 · FIXTURE" : "fixture") : (zh ? "GitHub · 公开" : "GitHub · public")}</small>
+                    <small>{zh ? "GitHub · 公开" : "GitHub · public"}</small>
                   </div>
                 </NavLink>
               );
@@ -469,10 +462,9 @@ function RepositorySidebar({
             <NavLink to="/runs" onClick={onNavigate}>{zh ? "全部" : "All"}</NavLink>
           </div>
 
-          <div className="sidebar-recent-runs" role="list">
+          <div className="sidebar-recent-runs">
             {recentRuns.length > 0 ? (
               recentRuns.map(job => {
-                const isDemo = job.id.startsWith("job_demo");
                 return (
                   <NavLink
                     key={job.id}
@@ -483,7 +475,7 @@ function RepositorySidebar({
                     <span className={`ledger-state ${job.status}`} />
                     <div className="run-text-group">
                       <strong>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : job.id.slice(0, 8)}</strong>
-                      <small>{job.repositoryFullName}{isDemo ? ` · ${zh ? "演示数据" : "FIXTURE"}` : ""}</small>
+                      <small>{job.repositoryFullName}</small>
                     </div>
                   </NavLink>
                 );
@@ -829,13 +821,9 @@ export function AppShell({
   health?: HealthResponse;
   healthUnavailable: boolean;
   inspectorContext?: InspectorContext;
-  demoMode?: boolean;
   notices: DataNotice[];
   refreshing: boolean;
-  canSeedDemo?: boolean;
-  seedingDemo?: boolean;
   onRefresh: () => void;
-  onSeedDemo?: () => void;
 }) {
   const copy = copyByLocale[locale];
   const zh = locale === "zh-CN";

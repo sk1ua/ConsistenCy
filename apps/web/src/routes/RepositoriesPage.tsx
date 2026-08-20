@@ -29,10 +29,6 @@ function localRepositoryName(pulse: HeartbeatPulse): string {
   return segments.at(-1) ?? "Local repository";
 }
 
-function isFixtureRepo(name: string): boolean {
-  return name.startsWith("acme/") || name.startsWith("studio/");
-}
-
 export function RepositoriesPage({
   jobs,
   pulse,
@@ -99,35 +95,24 @@ export function RepositoriesPage({
     return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
   }, [repositories, pulse, filterQuery]);
 
-  // Remote / public connected repositories (non-fixture and not unified local)
+  // Remote / public connected repositories (not unified local)
   const remoteRepos = useMemo(() => {
     const list: Array<{ id: string; name: string; branch: string; reviewCount: number; raw?: Repository }> = [];
     const localNames = new Set(localRepos.map(l => l.name));
     for (const r of repositories) {
-      if (r.source !== "local_git" && !isFixtureRepo(r.remoteFullName ?? r.displayName)) {
+      if (r.source !== "local_git") {
         if (localNames.has("ConsistenCy-pr2-clean") && (r.remoteFullName === "sk1ua/ConsistenCy" || r.displayName === "ConsistenCy")) continue;
         list.push({ id: r.id, name: r.displayName, branch: r.defaultBranch ?? "main", reviewCount: 0, raw: r });
       }
     }
     for (const s of sources) {
-      if (!isFixtureRepo(s.name) && !repositories.some(r => r.remoteFullName === s.name || r.displayName === s.name)) {
+      if (!repositories.some(r => r.remoteFullName === s.name || r.displayName === s.name)) {
         if (localNames.has("ConsistenCy-pr2-clean") && s.name === "sk1ua/ConsistenCy") continue;
         list.push({ id: s.name, name: s.name, branch: "main", reviewCount: s.jobs.length });
       }
     }
     return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
   }, [repositories, sources, localRepos, filterQuery]);
-
-  // Demo / Fixture repositories
-  const fixtureRepos = useMemo(() => {
-    const list: Array<{ id: string; name: string; latestJob?: ReviewJob; reviewCount: number }> = [];
-    for (const s of sources) {
-      if (isFixtureRepo(s.name)) {
-        list.push({ id: s.name, name: s.name, latestJob: s.jobs[0], reviewCount: s.jobs.length });
-      }
-    }
-    return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
-  }, [sources, filterQuery]);
 
   function handleConnectPublic(e: React.FormEvent) {
     e.preventDefault();
@@ -169,7 +154,7 @@ export function RepositoriesPage({
           />
         </div>
         <div className="hub-counts">
-          <span><strong>{localRepos.length + remoteRepos.length + fixtureRepos.length}</strong> {zh ? "个已观察仓库" : "observed repositories"}</span>
+          <span><strong>{localRepos.length + remoteRepos.length}</strong> {zh ? "个已观察仓库" : "observed repositories"}</span>
         </div>
       </div>
 
@@ -251,43 +236,6 @@ export function RepositoriesPage({
           </div>
         </section>
       )}
-
-      {/* Section 3: Demo / Fixture Repositories */}
-      <section className="section-block repo-group-section">
-        <div className="panel-title">
-          <div>
-            <span className="panel-kicker">{zh ? "演示与测试样例" : "Demo Samples"}</span>
-            <h2>{zh ? "演示数据仓库" : "Demo / Fixture Repositories"}</h2>
-          </div>
-          <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>
-        </div>
-
-        <div className="repo-table-rows" role="list">
-          {fixtureRepos.map(repo => (
-            <div key={repo.name} className="repo-table-row" role="listitem">
-              <div className="repo-row-title">
-                <FolderGit2 size={16} className="card-repo-icon muted" />
-                <strong>{repo.name}</strong>
-                <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>
-              </div>
-              <div className="repo-row-meta">
-                <small>{repo.reviewCount} {zh ? "次历史审查" : "reviews"}</small>
-                {repo.latestJob?.report && (
-                  <span className="score-mini-pill">
-                    <strong>{repo.latestJob.report.score}</strong>
-                    <StatusBadge value={repo.latestJob.report.riskLevel} />
-                  </span>
-                )}
-              </div>
-              <div className="repo-row-actions">
-                <Link to={`/repositories/${encodeURIComponent(repo.name)}`} className="primary-button btn-small">
-                  {zh ? "打开" : "Open"}
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
 
       {/* Connect Repository Modal */}
       {connectModalOpen && (

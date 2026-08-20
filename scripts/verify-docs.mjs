@@ -42,17 +42,12 @@ function relativePath(path) {
 
 const files = [...new Set(documentationRoots.flatMap(walkMarkdown))];
 const violations = [];
-// Historical review notes preserve commands and acceptance terminology as evidence;
-// they still receive local-link validation but are not public documentation policy.
-const contentPolicyExemptions = new Set(["docs/glm-review-summary.md"]);
 
 for (const file of files) {
   const content = readFileSync(file, "utf8");
   const rel = relativePath(file);
-  if (!contentPolicyExemptions.has(rel)) {
-    for (const pattern of forbiddenPatterns) {
-      if (pattern.test(content)) violations.push(`${rel} contains ${pattern}`);
-    }
+  for (const pattern of forbiddenPatterns) {
+    if (pattern.test(content)) violations.push(`${rel} contains ${pattern}`);
   }
 
   const linkPattern = /!?\[[^\]]*\]\(([^)]+)\)/g;

@@ -5,7 +5,6 @@ import { HashRouter } from "react-router-dom";
 import { App } from "./App";
 import { I18nProvider } from "./i18n";
 import { workspaceQueryClient } from "./query/client";
-import { migrateLegacyLocation } from "./routes/legacyLocation";
 import { ThemeProvider } from "./theme";
 import "@fontsource/ibm-plex-sans/latin-400.css";
 import "@fontsource/ibm-plex-sans/latin-600.css";
@@ -27,8 +26,6 @@ const root = document.getElementById("root");
 if (!root) {
   throw new Error("Missing root element");
 }
-
-migrateLegacyLocation();
 
 createRoot(root).render(
   <React.StrictMode>

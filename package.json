@@ -18,7 +18,6 @@
     "build": "npm run build --workspaces --if-present",
     "test:python": "python -m pytest -q",
     "test:e2e": "playwright test",
-    "capture:screenshots": "playwright test --config=playwright.capture.config.ts tests/e2e/capture-screenshots.spec.ts",
     "audit:deps": "npm audit --audit-level=high",
     "verify:runtime": "node scripts/verify-baseline.mjs",
     "verify:docs": "node scripts/verify-docs.mjs",

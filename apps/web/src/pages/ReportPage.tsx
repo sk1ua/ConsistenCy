@@ -7,41 +7,24 @@ import { useI18n } from "../i18n";
 import { bindReportToJob } from "./reportIntegrity";
 import { Link } from "react-router-dom";
 
-function formatReviewSource(job: ReviewJob, zh: boolean): { sourceText: string; publicationText: string; isFixture: boolean } {
-  const isFixture = Boolean(
-    job.id.startsWith("job_demo") ||
-    job.baseSha.startsWith("demo-base-") ||
-    job.headSha.startsWith("demo-head-")
-  );
-
-  if (isFixture) {
-    return {
-      sourceText: zh ? "演示数据" : "Demo fixture",
-      publicationText: zh ? "未发布 · 仅分析" : "Not published · Analysis only",
-      isFixture: true
-    };
-  }
-
+function formatReviewSource(job: ReviewJob, zh: boolean): { sourceText: string; publicationText: string } {
   if (job.accessMode === "local_git") {
     return {
       sourceText: zh ? "本地工作区" : "Local workspace",
-      publicationText: zh ? "仅分析" : "Analysis only",
-      isFixture: false
+      publicationText: zh ? "仅分析" : "Analysis only"
     };
   }
 
   if (job.accessMode === "public_read") {
     return {
       sourceText: zh ? "GitHub 公开只读" : "GitHub public read",
-      publicationText: zh ? "仅分析" : "Analysis only",
-      isFixture: false
+      publicationText: zh ? "仅分析" : "Analysis only"
     };
   }
 
   return {
     sourceText: "GitHub App",
-    publicationText: job.publicationPolicy === "disabled" ? (zh ? "仅分析" : "Analysis only") : (zh ? "GitHub 评论" : "GitHub comment"),
-    isFixture: false
+    publicationText: job.publicationPolicy === "disabled" ? (zh ? "仅分析" : "Analysis only") : (zh ? "GitHub 评论" : "GitHub comment")
   };
 }
 
@@ -95,7 +78,7 @@ export function ReportPage({
         <div className="review-hero-primary-row">
           <div className="review-hero-info">
             <div className="review-hero-tags">
-              <span className="provenance-pill">{provenance.isFixture ? (zh ? "演示数据 · FIXTURE" : "FIXTURE") : (zh ? "真实审查" : "REVIEW")}</span>
+              <span className="provenance-pill">{zh ? "审查" : "REVIEW"}</span>
               <span className="provenance-pill subtle">{job.repositoryFullName}</span>
             </div>
             <h2>
@@ -116,7 +99,7 @@ export function ReportPage({
         <div className="review-meta-strip">
           <div className="meta-item">
             <span className="meta-lbl">{zh ? "代码范围" : "Range"}</span>
-            <code>{job.baseSha.startsWith("demo-base-") ? "demo-base" : job.baseSha.slice(0, 7)} → {job.headSha.startsWith("demo-head-") ? "demo-head" : job.headSha.slice(0, 7)}</code>
+            <code>{job.baseSha.slice(0, 7)} → {job.headSha.slice(0, 7)}</code>
           </div>
           <div className="meta-item">
             <span className="meta-lbl">{zh ? "状态" : "Status"}</span>

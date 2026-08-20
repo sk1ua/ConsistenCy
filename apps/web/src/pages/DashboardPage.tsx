@@ -131,9 +131,6 @@ export function DashboardPage({
                         <StatusBadge value={report.riskLevel} />
                       </span>
                     )}
-                    {job.id.startsWith("job_demo") && (
-                      <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>
-                    )}
                   </div>
                   <p className="inbox-row-desc">
                     {kind === "failed" ? (job.error ?? (zh ? "审查执行失败" : "Execution failed")) : (report?.summary ?? (zh ? "分析已完成，等待人工处置" : "Completed, awaiting review"))}
@@ -170,9 +167,6 @@ export function DashboardPage({
                   <div className="inbox-row-title">
                     <StatusBadge value={job.status} />
                     <strong>{job.repositoryFullName}{job.pullRequestNumber ? ` · PR #${job.pullRequestNumber}` : ""}</strong>
-                    {job.id.startsWith("job_demo") && (
-                      <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>
-                    )}
                   </div>
                   <p className="inbox-row-desc">{job.headSha.slice(0, 10)} · {zh ? "智能体正在执行审查..." : "Agents reviewing code..."}</p>
                 </div>
@@ -214,16 +208,14 @@ export function DashboardPage({
             </div>
             {model.recentJobs.map(job => {
               const report = model.reportFor(job);
-              const isDemo = job.id.startsWith("job_demo");
               return (
                 <div key={job.id} className="table-data-row" role="row" onClick={() => onOpenJob(job)}>
-                  <div className="col-repo">
+                  <div className="col-repo" role="cell">
                     <strong>{job.repositoryFullName}</strong>
                     <small>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : job.id.slice(0, 8)}</small>
-                    {isDemo && <span className="provenance-pill demo-provenance">{zh ? "演示" : "FIXTURE"}</span>}
                   </div>
-                  <div><StatusBadge value={job.status} /></div>
-                  <div>
+                  <div role="cell"><StatusBadge value={job.status} /></div>
+                  <div role="cell">
                     {report ? (
                       <span className="score-mini-pill">
                         <strong>{report.score}</strong>
@@ -231,8 +223,8 @@ export function DashboardPage({
                       </span>
                     ) : <span className="muted-text">—</span>}
                   </div>
-                  <div><code>{jobDuration(job)}</code></div>
-                  <div><time dateTime={job.createdAt}>{formatDate(job.createdAt)}</time></div>
+                  <div role="cell"><code>{jobDuration(job)}</code></div>
+                  <div role="cell"><time dateTime={job.createdAt}>{formatDate(job.createdAt)}</time></div>
                 </div>
               );
             })}

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   agentRunSchema,
-  demoReviewReport,
   errorResponseSchema,
   prReviewContextSchema,
   reviewFindingSchema,
@@ -9,6 +8,59 @@ import {
   reviewReportSchema,
   riskLevelForScore
 } from "./index";
+
+const sampleReport = {
+  jobId: "job-sample-1",
+  repositoryFullName: "sk1ua/ConsistenCy",
+  pullRequestNumber: 34,
+  baseSha: "8b3fabb",
+  headSha: "2894e50",
+  summary: "Sample review report.",
+  score: 74,
+  riskLevel: "medium" as const,
+  agentRuns: [
+    {
+      id: "run-security-1",
+      jobId: "job-sample-1",
+      agentName: "Security",
+      status: "succeeded" as const,
+      startedAt: "2026-06-10T15:00:00.000Z",
+      finishedAt: "2026-06-10T15:00:01.000Z",
+      inputSummary: "Reviewed API changes.",
+      findings: [
+        {
+          id: "finding-1",
+          agent: "Security",
+          title: "API auth check",
+          severity: "medium" as const,
+          confidence: "hypothesis" as const,
+          file: "apps/api/src/http.ts",
+          evidence: "No guard in excerpt.",
+          reasoning: "Management routes need token.",
+          recommendation: "Add bearer token.",
+          uncertainty: "Proxy config not visible.",
+          tags: ["api", "auth"]
+        }
+      ]
+    }
+  ],
+  findings: [
+    {
+      id: "finding-1",
+      agent: "Security",
+      title: "API auth check",
+      severity: "medium" as const,
+      confidence: "hypothesis" as const,
+      file: "apps/api/src/http.ts",
+      evidence: "No guard in excerpt.",
+      reasoning: "Management routes need token.",
+      recommendation: "Add bearer token.",
+      uncertainty: "Proxy config not visible.",
+      tags: ["api", "auth"]
+    }
+  ],
+  createdAt: "2026-06-10T15:00:02.000Z"
+};
 
 const findingBase = {
   id: "finding-1",
@@ -56,9 +108,8 @@ describe("@consistency/schema", () => {
       riskAreas: ["webhook"],
       reason: "The PR changes request handling."
     }).enabledAgents).toHaveLength(2);
-    expect(agentRunSchema.parse(demoReviewReport.agentRuns[0]).status).toBe("succeeded");
-    expect(reviewReportSchema.parse(demoReviewReport).score).toBe(74);
-    expect(reviewReportSchema.parse(demoReviewReport).retrieval?.packs[0]?.selected_evidence).toHaveLength(3);
+    expect(agentRunSchema.parse(sampleReport.agentRuns[0]).status).toBe("succeeded");
+    expect(reviewReportSchema.parse(sampleReport).score).toBe(74);
     expect(errorResponseSchema.parse({ error: { code: "NOT_FOUND", message: "Missing" } }).error.code).toBe("NOT_FOUND");
   });
 

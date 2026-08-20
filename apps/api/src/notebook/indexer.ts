@@ -52,7 +52,6 @@ export type SnapshotIndexerOptions = {
   authenticator?: Pick<GitHubAppAuthenticator, "getInstallationToken">;
   publicReadToken?: string;
   workspaceRoot?: string;
-  demoWorkspacePath?: string;
   cloneWorkspace?: typeof clonePullRequestWorkspace;
   maxBytes?: number;
   maxFileBytes?: number;
@@ -166,9 +165,6 @@ export class RepositorySnapshotIndexer {
   }
 
   private async resolveWorkspace(job: ReviewJob, source: NotebookSource): Promise<string> {
-    if (job.action === "demo" && this.options.demoWorkspacePath && existsSync(this.options.demoWorkspacePath)) {
-      return resolve(this.options.demoWorkspacePath);
-    }
     if (job.repoPath && existsSync(job.repoPath) && lstatSync(job.repoPath).isDirectory()) {
       return resolve(job.repoPath);
     }

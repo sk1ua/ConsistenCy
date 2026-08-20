@@ -1,6 +1,6 @@
 # ConsistenCy 前端风格指南（Codex × ZCode 融合）
 
-> 视觉评审标准见 docs/design-qa/style-checklist.md；本文件记录实现约定，供后续开发遵循。
+本文件记录前端 UI/UX 实现约定，供开发与组件设计遵循。
 
 ## 1. 主题机制
 
@@ -47,12 +47,3 @@
 - 全局 :focus-visible 焦点环（base.css）使用 --focus-ring；复选框 accent-color。
 - 语义色对比度按 WCAG AA 校准（暗色采用 GitHub-dark 系明色）。
 - 中英双语文案一律走 i18n.tsx 的 t()，不得硬编码界面文本。
-
-## 6. 视觉 QA 回路
-
-- 截图：npm run capture:screenshots（本机 Node 25 时用
-  playwright.capture.node22.config.ts 临时配置，见 docs/design-qa/README.md）。
-- 评审：workflow agent（provider google-vertex / gemini-2.5-flash）读
-  style-checklist + 截图，输出结构化 issues；结果存 docs/design-qa/。
-- 判定：critical / high 阻断；medium 尽量当轮修复；静态截图看不到焦点环属正常
-  （焦点环只在键盘聚焦时出现），不得据此报 high。

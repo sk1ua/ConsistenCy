@@ -22,7 +22,6 @@ import { SQLiteNotebookStore } from "./notebook/store";
 import { RepositorySnapshotIndexer } from "./notebook/indexer";
 import { NotebookGraph } from "./notebook/graph";
 import { enqueuePublicPrReview } from "./review/publicPr";
-import { fileURLToPath } from "node:url";
 import { WorkflowStore } from "./workflows/store";
 import { resolveJobDiff } from "./review/jobDiff";
 import { SQLiteAuditDomainStore } from "./audit/store";
@@ -59,7 +58,6 @@ const snapshotIndexer = new RepositorySnapshotIndexer({
   authenticator,
   publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
   workspaceRoot: config.workspaceRoot,
-  demoWorkspacePath: fileURLToPath(new URL("./notebook/demo-snapshot", import.meta.url)),
   maxBytes: config.CONSISTENCY_NOTEBOOK_INDEX_MAX_BYTES
 });
 const notebookGraph = new NotebookGraph({

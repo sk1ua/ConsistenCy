@@ -1392,7 +1392,7 @@ const routes: Route[] = [
   {
     method: "GET",
     path: "/health",
-    auth: true,
+    auth: false,
     handler: ({ request, response, allowedOrigins, options, githubWebhookSecret }) => {
       const details = options.healthDetails?.() ?? {
         database: { ok: true },

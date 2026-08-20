@@ -1,6 +1,5 @@
 import type { AppConfig } from "../../config/env";
 import { DeepSeekProvider } from "./deepseekProvider";
-import { MockLLMProvider } from "./mockProvider";
 import { OpenAIProvider } from "./openaiProvider";
 import type { LLMProvider } from "./types";
 
