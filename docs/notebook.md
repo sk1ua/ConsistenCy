@@ -1,60 +1,48 @@
 # Repository Review Notebook
 
-Repository Review Notebook 是默认打开的全页来源驱动研究空间，帮助开发者理解一个或多个 PR 的影响范围，而不是替代代码执行环境。
+The Repository Review Notebook is an evidence-grounded research workspace designed to help developers inspect and explore the architectural impact and risk boundaries of pull requests.
 
-## 运行模式
+---
 
-| 模式 | 来源 | LLM | 副作用 |
-| --- | --- | --- | --- |
-| Demo Mode | 固定 seed 和本地快照 | MockLLM | 不访问 GitHub、不发布评论 |
-| Public Read — Anonymous | 公开 GitHub API 和匿名 clone | Mock、DeepSeek 或 OpenAI | 只创建分析 Job，不发布评论 |
-| Public Read — PAT | 服务端配置的本地只读 PAT | Mock、DeepSeek 或 OpenAI | 只创建分析 Job，不发布评论 |
-| Webhook Review | GitHub App installation token | Mock、DeepSeek 或 OpenAI | 继续使用既有发布策略 |
+## 1. Operating Modes
 
-## 来源边界
+| Mode | Source Authority | LLM Provider | Side Effects |
+|---|---|---|---|
+| **Public Read — Anonymous** | Public GitHub REST API & anonymous Git clone | DeepSeek or OpenAI | Creates read-only analysis Job; never publishes comments |
+| **Public Read — PAT** | Server-side read-only PAT | DeepSeek or OpenAI | Creates read-only analysis Job; never publishes comments |
+| **Webhook Review** | GitHub App installation token | DeepSeek or OpenAI | Evaluates pull request and follows configured publication policy |
 
-Notebook 是仓库级空间，但证据不是无边界的。每个 source 记录：
+---
 
-```text
-repository + pull request number + jobId + baseSha + headSha
-```
+## 2. Source Boundaries & Provenance
 
-回答默认使用当前选中的 source；跨 PR 查询必须显式传入 `sourceJobIds`。Citation 还会记录文件、起止行、head SHA 和 excerpt，因此不同 PR 或不同 head SHA 的内容不会自动混合。
+The Notebook binds strictly to an immutable repository snapshot:
 
-## 只读工具
+$$\text{Source Key} = \text{repository} + \text{pullRequestNumber} + \text{jobId} + \text{baseSha} + \text{headSha}$$
 
-- `search_repository`：按路径、符号和自然语言片段检索 SHA 绑定快照；
-- `read_file`：读取有限行区间；
-- `get_diff` / `get_base_file`：读取 PR 与 base 文件；
-- `get_evidence_pack` / `get_review_findings`：复用确定性报告；
-- `generate_patch`：返回 unified diff 文本，不写文件。
+- **Strict Citation**: Citations explicitly record file path, line numbers, head SHA, and verified code excerpts.
+- **SHA-Isolated Indices**: Repository AST indices are cached per `repository + headSha`. Working tree modifications or alternate PR branches never collide.
 
-仓库索引按 `repository + headSha` 懒加载，跳过 `.git`、依赖目录、构建产物、缓存、二进制和 Secret 路径。索引缓存不会覆盖其他 SHA。
+---
 
-## 对话与卡片
+## 3. Read-Only Tool Primitives
 
-`POST /notebooks/:id/messages` 使用 SSE。UI 会显示 source selection、tool started/result、citation、text delta、usage 和 completed/degraded 状态，但不会显示原始 prompt 或密钥。
+The Notebook agent operates with strictly limited read capabilities:
+- `search_repository`: Structural and text search across the pinned snapshot.
+- `read_file`: Line-budgeted file inspection.
+- `get_diff` / `get_base_file`: Inspection of PR changes and base file revisions.
+- `get_evidence_pack` / `get_review_findings`: Grounded review findings from deterministic analyzers.
+- `generate_patch`: Generates suggested unified diff text without filesystem write permissions.
 
-助手消息和卡片使用安全的 Markdown/GFM 渲染，原始 HTML 不会执行。用户也可以让对话把审查目标整理成待审核的 `AnalysisSpec` 草案；草案只能选择 `style`、`structural`、`semantic`、`duplication`、`security`，不会生成或执行临时 Python。
+> **Execution Boundary**: The Notebook agent has no shell access, no arbitrary code execution capabilities, no filesystem write privileges, and cannot post comments to GitHub.
 
-四类卡片：
+---
 
-1. **Change Map**：文件和目录变更范围；
-2. **Architecture Impact**：模块、入口和调用关系的证据化说明；
-3. **Risk Brief**：确定性风险信号和 findings 汇总；
-4. **Fix Plan**：优先级、建议测试范围和未应用的补丁文本。
+## 4. Analysis Cards
 
-引用不足时，Notebook 必须明确回答“当前上下文无法确认”。LLM 超时、限流或非法结果不会影响已完成的 ReviewReport；可由确定性数据支持的内容会标明降级来源，无法确认的模型结论不会伪造成成功结果。
+1. **Change Map**: File and module alteration boundaries.
+2. **Architecture Impact**: Evidence-backed explanation of module and dependency shifts.
+3. **Risk Brief**: Summary of deterministic risk signals and findings.
+4. **Fix Plan**: Prioritized recommendations, testing suggestions, and unapplied diff previews.
 
-## 配置
-
-```env
-CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED=true
-CONSISTENCY_NOTEBOOK_ENABLED=true
-CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS=8
-CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS=16000
-CONSISTENCY_NOTEBOOK_INDEX_MAX_BYTES=67108864
-GITHUB_PUBLIC_READ_TOKEN=
-```
-
-`GITHUB_PUBLIC_READ_TOKEN` 留空表示匿名公开读取；可通过 Settings 录入并存入本地加密配置，保存后 API 只返回布尔配置状态，不回显 token。健康接口显示 `anonymous`、`pat` 或 `disabled`。LLM provider 切换到 DeepSeek/OpenAI 后，Settings 会显示 provider/model，重新启动后生效。
+When evidence is insufficient, the Notebook explicitly states that the context cannot be verified rather than extrapolating speculative conclusions.

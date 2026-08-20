@@ -53,4 +53,4 @@ https://github.com/espnet/espnet/pull/6327
 
 ## 本地运行
 
-启动步骤见 [Demo 与截图](demo.md)。API 默认监听 `127.0.0.1:8787`，Web 默认监听 `127.0.0.1:5173`。生产环境使用 HTTPS、secret manager、进程管理器和隔离 workspace。
+启动步骤见 [README](../README.md)。API 默认监听 `127.0.0.1:8787`，Web 默认监听 `127.0.0.1:5173`。生产环境使用 HTTPS、secret manager、进程管理器和隔离 workspace。

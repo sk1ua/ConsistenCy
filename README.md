@@ -1,171 +1,169 @@
 # ConsistenCy
 
-**Evidence-driven review infrastructure for GitHub pull requests — deterministic analysis first, LLM as an optional reasoning layer.**
+**ConsistenCy is a repository-native Agent Harness for evidence-grounded code review.**
 
-ConsistenCy 把代码审查拆成两个清晰的职责：TypeScript 编排任务、上下文、LLM 和发布；Python 引擎只做可复现的确定性分析。结果不是一段没有出处的评论，而是带文件、行号、证据和风险边界的 ReviewReport。
+Instead of submitting raw diffs to an LLM and hoping for useful prose, ConsistenCy combines deterministic AST and security analyzers, capability-gated agent scheduling, structured Context VM paging, and real LLM reasoning into reproducible, evidence-backed Review Reports.
 
 [![CI](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml/badge.svg)](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml)
 
-## 为什么不是普通的 LLM Code Review
+---
 
-| 维度 | 普通 LLM Review | ConsistenCy |
-| --- | --- | --- |
-| 风险信号 | 直接把 diff 交给模型判断 | 确定性分析先产出可复现信号 |
-| 输出 | 一段难以追溯的散文 | 结构化报告 + Evidence Pack + 文件行号 |
-| LLM 角色 | 常常是唯一判断来源 | 可选的解释、规划和综合层 |
-| 发布 | 请求成功就直接评论 | SQLite Outbox、租约、fencing token 和幂等更新 |
-| 公开 PR | 取决于部署方式 | 可匿名只读分析，永不发布评论 |
+## What Problem Does ConsistenCy Solve?
 
-## 架构
+Traditional LLM-based code review suffers from three structural flaws:
+1. **Hallucination & Lack of Evidence**: Models produce freeform text with no verifiable grounding in AST structure, symbol definitions, or security invariants.
+2. **Uncontrolled Agent Execution**: Multi-agent review systems often run arbitrary tools and shell commands without capability authorization or execution domain isolation.
+3. **Context Pollution**: Monolithic prompts concatenate entire diffs and files, blowing token budgets and degrading model reasoning.
 
-```text
-Web → TypeScript API → Review Worker → Python deterministic engine
-                                  → SQLite / ReviewReport
-                                  → Outbox → Publish Worker → GitHub comment
+ConsistenCy solves this by dividing review into three collaborating subsystems:
+
+$$\text{ConsistenCy v3} = \text{Kernel} + \text{Cordis Harness} + \text{Evidence Engine}$$
+
+- **Repository-Aware Execution**: The Repository is the root object, linking local Git checkouts, branches, and diffs with remote GitHub Pull Request context.
+- **Capability-Secured Runtime**: The Kernel defaults to deny. Every agent operation (file read, AST query, LLM call, GitHub publish) requires an unrevoked capability handle mediated by the `SyscallGateway`.
+- **Semantic Context VM**: Immutable `ContextPage`s (SHA-256 hashed), Copy-On-Write (COW) page tables for subagents, and token-budgeted `WorkingSet` projections.
+- **Deterministic Evidence**: Grounding facts are extracted by Tree-sitter AST queries, secret detectors, and deterministic analyzers before LLM synthesis occurs.
+
+---
+
+## Architecture at a Glance
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            React / Vite Web UI                              │
+│         (Repository Workspace, Overview, Diff, Evidence, Runtime)          │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │ HTTP / SSE / Same-Origin /api
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           apps/api (Host Process)                           │
+│        (HTTP Router, SQLite Store, Workload Runtime, Electron Host)         │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+     ┌─────────────────────────────────┼─────────────────────────────────┐
+     │ Kernel Tier (@consistency/kernel)                                 │
+     ▼                                 ▼                                 ▼
+┌──────────────┐             ┌──────────────────┐             ┌─────────────────────┐
+│ Run &        │             │ SyscallGateway & │             │ Context VM &        │
+│ Scheduler    │             │ CapabilityBroker │             │ Evidence Store      │
+└──────┬───────┘             └────────┬─────────┘             └─────────────────────┘
+       │                              │
+       ▼                              ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 Harness Tier (@consistency/harness-core)                     │
+│         (Cordis Fiber Lifecycle, CapabilityLifecycleAdapter, Bridges)       │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              Workload Tier (@consistency/workload-review)                   │
+│        (ReviewWorkload: Supervisor Planner + Specialized Review Agents)     │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                 ┌─────────────────────┴─────────────────────┐
+                 ▼                                           ▼
+      In-Process Built-ins                         Child-Process Sandbox
+  (Supervisor / Review Agents)                  (Untrusted Plugins via RPC)
 ```
 
-![ConsistenCy system architecture](docs/diagrams/system-architecture.svg)
+---
 
-架构事实以 [system-architecture.mmd](docs/diagrams/system-architecture.mmd)、[review-lifecycle.mmd](docs/diagrams/review-lifecycle.mmd) 和 [job-state-machine.mmd](docs/diagrams/job-state-machine.mmd) 为准；SVG 只是便于在 GitHub 页面阅读的导出物。
+## Quick Start (Web & API)
 
-审查流水线为：
+### Prerequisites
+- Node.js 22.x
+- Python 3.12.x
 
-```text
-Trigger → Context → Deterministic Analysis → Planner → Optional LLM Agents
-        → Compose → Synthesizer → Persist → Outbox → Publish Worker
-```
-
-确定性分析即使在 LLM 不可用时也会完成。Webhook 任务可以发布 GitHub 评论；公开 URL 任务使用独立的只读访问模式，不会创建评论 Outbox。
-
-## Demo
-
-| Dashboard | Report + Repository Notebook |
-| --- | --- |
-| ![Demo Dashboard](docs/screenshots/dashboard-demo-desktop.png) | ![Demo Report and Notebook](docs/screenshots/report-notebook-demo-desktop.png) |
-
-| Real Data (espnet/espnet #6327) |
-| --- |
-| ![Real Data Verification](docs/screenshots/real-data-espnet-pr6327-desktop.png) |
-
-这些截图来自固定 Demo seed、MockLLM 及可信公开数据集，不代表实时外部服务结果。更多页面证据位于 [docs/screenshots](docs/screenshots/README.md)。
-
-## 公开 PR与 Repository Review Notebook
-
-在 Dashboard 的 **Analyze a public GitHub PR** 输入框中粘贴：
-
-```text
-https://github.com/espnet/espnet/pull/6327
-```
-
-公开读取支持两种服务端访问源：
-
-| 模式 | 需要 GitHub App 安装 | 需要 Token | 评论权限 |
-| --- | ---: | ---: | ---: |
-| Demo Mode | 否 | 否 | 无 |
-| Public Read — Anonymous | 否 | 否 | 无 |
-| Public Read — PAT | 否 | 本地只读 PAT | 无 |
-| Webhook Review | 是 | App 私钥 | 可按既有策略发布 |
-
-公开 URL 会锁定 repository、PR number、base SHA 和 head SHA，创建 `accessMode=public_read`、`publicationPolicy=disabled` 的 Job。它只读取公开 PR、生成报告和 Notebook，不调用 GitHub App installation API，不写文件，不执行命令，不应用补丁，也不发布评论。
-
-Notebook 默认以全页来源驱动研究空间打开：
-
-- Change Map、Architecture Impact、Risk Brief、Fix Plan 四类分析卡片；
-- 按 `repository + PR + head SHA` 隔离的索引和引用；
-- 支持 Markdown/GFM 的 SSE 流式回答、工具事件、provider/model 和 token usage；
-- 可通过对话整理客制化确定性 `AnalysisSpec` 草案，但只允许选择内置 Python 模块；
-- `generate_patch` 只返回 unified diff 文本，明确未应用、未执行测试。
-
-## 在 Codex 中直接使用
-
-打开仓库后，Codex 会读取根目录 `AGENTS.md`，并发现 `.agents/skills/consistency-review/`。可以直接要求：
-
-```text
-Use $consistency-review to analyze engine/config.py and return an evidence-backed report.
-```
-
-技能使用与 WebUI 相同的 Python 确定性引擎，只读仓库内源码，不执行被分析代码或 LLM 临时生成的 Python。三部分边界、当前实现状态及后续服务端 Codex SDK/MCP 方案见 [LLM、确定性分析与 Codex 集成](docs/llm-codex-integration.md)。
-
-## 30 秒启动
-
-环境基线：Node.js 22.x、Python 3.12。
-
+### 1. Install Dependencies
 ```bash
 npm ci
 python -m pip install -r requirements-lock.txt
-cp .env.example .env
-npm run dev:api    # API: http://127.0.0.1:8787
-npm run dev:web    # Web: http://127.0.0.1:5173
-curl -X POST http://127.0.0.1:8787/demo/seed
 ```
 
-Windows PowerShell：
+### 2. Configure Environment
+```bash
+cp .env.example .env
+```
+
+### 3. Start Development Services
+```bash
+# Terminal 1 — Start the API (http://127.0.0.1:8787)
+npm run dev:api
+
+# Terminal 2 — Start the Web UI (http://127.0.0.1:5173)
+npm run dev:web
+```
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
+
+---
+
+## Electron Desktop Mode
+
+ConsistenCy provides a native Windows desktop host that packages the Web UI and API into a single local application with native folder selection:
 
 ```powershell
-npm ci
-python -m pip install -r requirements-lock.txt
-Copy-Item .env.example .env
-npm run dev:api    # API: http://127.0.0.1:8787
-npm run dev:web    # Web: http://127.0.0.1:5173
-Invoke-RestMethod -Method Post http://127.0.0.1:8787/demo/seed
+# Run desktop in development
+npm run desktop:dev
+
+# Package Windows desktop binaries (unpacked & NSIS installer)
+$env:CONSISTENCY_PYTHON_BUNDLE_ROOT = "C:\path\to\Python312"
+npm run desktop:pack
 ```
 
-配置 `CONSISTENCY_API_TOKEN` 后，浏览器和 API 请求需要 `Authorization: Bearer <CONSISTENCY_API_TOKEN>`。公开 PR 分析默认在开发环境启用；`GITHUB_PUBLIC_READ_TOKEN` 可在 Settings 中录入并加密保存，保存后只向 WebUI 返回“已配置”状态，不返回明文。全栈 E2E 使用隔离数据和临时 API 端口 `3001`。
+Packaged desktop builds store persistent SQLite databases and configuration under `app.getPath("userData")`, requiring zero writes to installation directories.
 
-## HTTP 入口
+---
 
-| 能力 | 路径 |
-| --- | --- |
-| 健康状态 | `GET /health` |
-| Job 与报告 | `GET /jobs`、`GET /jobs/:id`、`GET /jobs/:id/report` |
-| 公开 PR 入队 | `POST /reviews/public-pr` |
-| Notebook | `GET /notebooks/:id`、`POST /notebooks/:id/messages`、`POST /notebooks/:id/cards` |
-| GitHub Webhook | `POST /github/webhook` |
-| Demo 数据 | `POST /demo/seed` |
+## Configuring an LLM Provider
 
-完整请求、SSE 事件和错误码见 [HTTP API](docs/api.md)。
+ConsistenCy v3 is a **real-LLM-only runtime** (no demo/mock runtime modes). Review execution and Notebook reasoning require configuring a supported model provider:
 
-## 能力矩阵
+- **DeepSeek**: Set `DEEPSEEK_API_KEY` (and optional `DEEPSEEK_MODEL`, default: `deepseek-v4-flash`).
+- **OpenAI**: Set `OPENAI_API_KEY` (and optional `OPENAI_MODEL`, default: `gpt-4.1-mini`).
 
-| 能力 | 当前实现 |
-| --- | --- |
-| GitHub 入口 | HMAC Webhook、PR Context、GitHub App 鉴权 |
-| 公开 PR | 严格 URL 校验、匿名/PAT 读取、SHA 锁定、analysis-only Job |
-| 确定性分析 | Python allowlist 模块、多信号风险分析、Evidence Pack、错误显式失败 |
-| LLM 层 | Mock、DeepSeek、OpenAI；结构化输出、Notebook SSE 和 AnalysisSpec 草案 |
-| Repository Notebook | 全页工作区、Markdown/GFM、SHA 隔离索引、只读工具、强制引用、四类卡片 |
-| Codex | 根 `AGENTS.md`、仓库技能和只读确定性分析 CLI |
-| 可靠发布 | SQLite Outbox、租约、fencing token、重试和幂等评论 |
-| 跨语言协议 | JSON-over-stdio、Correlation ID、双端 Schema 校验 |
-| 可复现性 | Demo seed、固定 MockLLM、隔离全栈 E2E 和公开数据快照 |
+You can configure keys directly in the Web/Desktop **Settings** page, via CLI (`npm run config -- set llm.deepseek-api-key`), or through `.env`. When running without an LLM configured, local repository and Git browsing remain fully accessible; review runs are disabled until credentials are provided.
 
-## 安全与边界
+---
 
-- 公开读取只接受 `https://github.com/{owner}/{repo}/pull/{number}`，遵守 GitHub API 限流；匿名读取约 60 次/小时/IP，可用本地只读 PAT 提高限额。
-- PAT 仅作为服务端环境变量使用；日志、错误、SSE 和 WebUI 不显示 token、私钥或 Authorization header。
-- 仓库内容、diff、评论和静态分析输出都按不可信输入处理；LLM 不是安全策略的唯一执行点。
-- Notebook 没有 shell、写文件、测试执行、补丁应用或 GitHub 评论权限。
-- LLM 只能起草分析计划；Python registry 拒绝未知模块，解析或模块异常不会降级成零风险结果。
-- 风险分数和公开 Review 只能作为审查排序信号，不能替代人工判断或缺陷金标准。
+## Connecting a Repository
 
-详见 [安全边界](docs/security.md)、[公开 PR API](docs/api.md) 和 [Repository Notebook](docs/notebook.md)。
+1. **Local Git Checkout**: In Desktop mode, click **Connect Repository** and use the native folder picker to select any local Git worktree. In Web mode, configure `CONSISTENCY_LOCAL_REVIEW_ROOTS`.
+2. **Public GitHub Pull Request**: Paste any public PR URL (e.g. `https://github.com/owner/repo/pull/123`) into the Public PR input. The review runs in read-only mode without requiring GitHub App installation.
+3. **GitHub App Webhook Review**: Configure `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET` to receive webhooks and post review comments automatically.
 
-## 文档导航
+---
 
-- **开始使用**：[Demo](docs/demo.md) · [HTTP API](docs/api.md) · [GitHub App 设置](docs/GITHUB_APP_SETUP.md)
-- **理解架构**：[项目概览](docs/PROJECT_OVERVIEW.md) · [架构](docs/architecture.md) · [Repository Notebook](docs/notebook.md) · [LLM / Codex 集成边界](docs/llm-codex-integration.md)
-- **数据与评估**：[输出 Schema](docs/output_schema.md) · [评估边界](docs/EVALUATION.md) · [评估数据集 Schema](evaluation/dataset_schema.md)
-- **贡献与安全**：[CONTRIBUTING](CONTRIBUTING.md) · [安全边界](docs/security.md)
+## Documentation Directory
 
-## 验证命令
+- **[System Architecture](docs/architecture.md)** — Kernel capabilities, Cordis harness, Context VM, and invariant matrix.
+- **[Security Model & Isolation Boundaries](docs/security.md)** — Capability broker, logical rings vs. execution domains, and child-process sandbox limits.
+- **[Repository Workspace Model](docs/repository-workspace.md)** — Repository-first product model and authoritative source rules.
+- **[Review Runtime & Context VM](docs/review-runtime.md)** — Detailed review execution pipeline and Context VM paging.
+- **[Configuration Reference](docs/configuration.md)** — LLM providers, precedence rules, and persistence paths.
+- **[Electron Desktop Host](docs/desktop.md)** — Desktop host architecture, IPC boundary, and packaging.
+- **[HTTP API Reference](docs/api.md)** — Endpoints, authentication, and payload schemas.
+- **[Output Schema](docs/output_schema.md)** — Structure of ReviewReport and evidence models.
+- **[GitHub App Setup](docs/GITHUB_APP_SETUP.md)** — Setting up webhooks and App credentials.
+- **[Evaluation Guidelines](docs/EVALUATION.md)** — Dataset schemas and benchmark reproduction.
+
+---
+
+## Verification & Testing
 
 ```bash
-npm run verify:runtime
-npm run verify:docs
+# Verify TypeScript types across all workspaces
 npm run typecheck
+
+# Run all TypeScript unit and integration tests (700+ tests)
 npm test
-npm run build
-python -m ruff check engine tests evaluation/scripts examples
+
+# Run deterministic Python analyzer test suite (280 tests)
 python -m pytest -q
-npm run test:e2e
+
+# Run Playwright Electron desktop tests
+npm run test:desktop
+
+# Run full baseline verification suite
+npm run verify
 ```

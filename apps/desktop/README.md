@@ -12,9 +12,9 @@ Python 3.12 JSON-over-stdio helper.
 - The API binds an ephemeral loopback port. The main process generates separate
   256-bit API-bearer and desktop-control tokens and passes them directly to the
   helper; no port or token reaches renderer state.
-- `preload.cjs` exposes only narrow repository-picker, credential-status and
-  tray capabilities. The repository picker accepts no renderer arguments:
-  main selects the directory, registers it through
+- `preload.cjs` exposes only narrow repository-picker, credential-status,
+  runtime-restart, and tray capabilities. The repository picker accepts no
+  renderer arguments: main selects the directory, registers it through
   `POST /internal/repositories/local`, and returns only the shared public
   `Repository` DTO (or a sanitized error message). Absolute paths remain in
   main/helper memory and persistence.

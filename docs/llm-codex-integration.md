@@ -1,6 +1,6 @@
 # LLM、确定性分析与 Codex 集成边界
 
-ConsistenCy v2 把“理解任务”“执行分析”“交付结果”拆成三部分。三者共用证据和 Python 引擎，但权限不同。
+ConsistenCy 把“理解任务”“执行分析”“交付结果”拆成三部分。三者共用证据和确定性引擎，但权限不同。
 
 ```mermaid
 flowchart LR

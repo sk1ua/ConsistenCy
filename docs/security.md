@@ -1,51 +1,84 @@
-# 安全边界
+# ConsistenCy Security Model & Isolation Boundaries
 
-## 控制点
+This document defines the truthful security model, authorization mechanisms, and isolation boundaries of ConsistenCy v3.
 
-- API 与 Vite dev server 默认绑定 loopback；生产环境需要显式 CORS origin、API token 和 HTTPS。
-- GitHub Webhook body 使用 HMAC-SHA-256 校验，Delivery ID 持久化用于防重放。
-- 外部命令使用 `execFile`，并校验 SHA、NUL 路径、参数、Secret、Binary 和 UTF-8 字节预算。
-- 仓库文件、diff、评论和静态分析输出都按不可信输入处理；送入 LLM 时带有边界和长度预算。
-- JSON-over-stdio 的 stdout 只允许协议消息；未知 ID、错误 Schema、非 JSON 或超长输出会触发协议熔断。
-- LLM 输出使用共享 Zod Schema 解析；LLM 不是安全策略的唯一执行点。
-- 公开 PR URL 只接受 canonical `https://github.com/{owner}/{repo}/pull/{number}`。
-- 公开读取模式不需要 GitHub App installation；可使用匿名 GitHub API，或使用 API 进程从环境变量/本地加密配置读取的 `GITHUB_PUBLIC_READ_TOKEN`。
-- PAT 认证失败不会静默降级为匿名；保存后不会向 WebUI 回显，也不进入数据库、日志、SSE 或错误响应。
-- 公开 Job 固定 `accessMode=public_read` 和 `publicationPolicy=disabled`；内存 Store 与 SQLite Store 都会再次强制这一边界。
-- Notebook 来源绑定 repository、PR、base/head SHA；文件读取拒绝绝对路径、路径穿越、Secret 路径、二进制和超出预算的内容。
-- Notebook Agent 只读、无 shell、无工作区写入、无测试执行、无补丁应用和无 GitHub 发布权限；补丁建议只是文本。
-- SQLite、workspace、Outbox 和本地评估结果不应直接暴露给公网。
-- 运行时可观测性 DTO (`GET /api/runtime/runs/:runId`) 和 Task Manager 页面严格去敏感化：永不包含原始 CapabilityHandle (`cap_<64hex>`)、GitHub token、LLM API key、父进程环境变量或 Context 源码全文，只提供 12 位 Hex 指纹、元数据和截断的 Diagnostics。
+---
 
-## v3 运行时安全维度
+## 1. Core Security Guarantees & Verification Matrix
 
-| 安全维度 | 机制 | 状态 / 声明 |
-| --- | --- | --- |
-| 授权 (Authorization) | `CapabilityBroker` 按 Syscall 逐次鉴权 | **已强制 (ENFORCED)** |
-| 外部 Commit 发布 | `CommitCoordinator` 拦截 `github.publish` / `repo.write` | **已强制 (ENFORCED)** |
-| 进程内存隔离 | Node `child-process` 沙箱独立 PID 与 Heap | **已强制 (ENFORCED)** |
-| 父进程密钥隔离 | 沙箱显式环境变量 Allowlist，不继承父进程 `process.env` | **已强制 (ENFORCED)** |
-| 文件系统 OS 隔离 | 节点系统级文件访问未施加 OS 级限制 | **未强制 (NOT ENFORCED)** |
-| 网络 OS 隔离 | 节点网络套接字创建未施加 OS 级限制 | **未强制 (NOT ENFORCED)** |
-| 子进程 OS 隔离 | 节点子进程衍生未施加 OS 级限制 | **未强制 (NOT ENFORCED)** |
+The v3 runtime enforces capability-based security at the Kernel tier and isolates untrusted plugin execution into dedicated child processes. The six core security dimensions are:
 
-## 访问模式
+| Security Dimension | Enforcement Mechanism | Current Status |
+|---|---|---|
+| **Syscall Authorization** | `CapabilityBroker` & `SyscallGateway` default-deny, per-call evaluation | **ENFORCED** |
+| **External Commit Gating** | `CommitCoordinator` intercepts and gates `github.publish` & `repo.write` | **ENFORCED** |
+| **Process Memory Isolation** | Node `child-process` execution domain with independent PID and V8 heap | **ENFORCED** |
+| **Parent Environment Secret Isolation** | Explicit environment allowlist; parent `process.env` never inherited | **ENFORCED** |
+| **Filesystem OS Containment** | OS-level filesystem chroot, sandbox, or driver container | **NOT ENFORCED** |
+| **Network OS Containment** | OS-level network socket filtering or namespace restriction | **NOT ENFORCED** |
+| **Subprocess OS Containment** | OS-level process spawning restrictions inside plugin processes | **NOT ENFORCED** |
 
-| 模式 | App 安装 | 读取凭据 | 评论 |
-| --- | ---: | --- | ---: |
-| Demo Mode | 否 | 固定本地数据 | 否 |
-| Public Read — Anonymous | 否 | 匿名公开 API/clone | 否 |
-| Public Read — PAT | 否 | 服务端本地只读 PAT | 否 |
-| Webhook Review | 是 | GitHub App installation token | 按发布策略 |
+> **Security Truth**: Current child-process plugin execution provides memory isolation, secret isolation, and Kernel RPC authorization. It does **not** provide full OS-level containment (no filesystem jail, no kernel network namespace). Plugins must be treated as partially isolated code, not a complete hostile-code sandbox. Node `vm` is never used or claimed as hostile-code isolation.
 
-匿名 GitHub REST API 和 authenticated API 遵守 GitHub 官方限流规则；应用不通过并发或重试绕过限流。[GitHub rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+---
 
-## 生产检查清单
+## 2. Logical Rings vs. Physical Execution Domains
 
-- 设置 `NODE_ENV=production`，使用 HTTPS、secret manager 和进程管理器。
-- Webhook Review 需要 GitHub App、`GITHUB_APP_ID`、`GITHUB_PRIVATE_KEY` 和 webhook secret。
-- 公开读取可不配置 App，但必须显式启用 `CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED`，并接受公开 API 限流。
-- 如果配置 `GITHUB_PUBLIC_READ_TOKEN`，选择最小权限、只读目标公开仓库的 PAT，并定期轮换。[GitHub personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
-- 限制 `CONSISTENCY_ALLOWED_ORIGINS`，不要使用通配符。
-- 检查 workspace、SQLite、日志和截图中没有 token、私钥、绝对路径或不必要的 App ID。
-- 疑似泄露后立即轮换 API token、Webhook secret、GitHub private key、public read token 和模型 key。
+### 2.1 Logical Privilege Rings
+Logical Rings define permission domains for capability issuance and service authority:
+- **Ring 0 (Kernel Authority)**: Kernel internals, `CapabilityBroker`, `SyscallGateway`, `CommitCoordinator`, and append-only `AuditJournal`.
+- **Ring 1 (Mediated Services)**: Trusted drivers (LLM provider adapters, repository snapshot services, supervisor planner agents). Agents in lower rings never hold direct handles to Ring 1 drivers.
+- **Ring 3 (Review Agents & Plugins)**: Specialized analysis agents and third-party plugins. All cross-boundary actions must be explicitly requested via capability handles and mediated by the `SyscallGateway`.
+
+### 2.2 Physical Execution Domains
+Execution domains describe the operating-system boundary in which code executes:
+- **`in-process`**: Runs in the same Node.js process as the harness supervisor. Reserved for verified built-in agents (Supervisor, Deterministic Analyzers).
+- **`child-process`**: Spawned as an isolated child Node.js process via `spawnSandboxChild` (`worker-bootstrap.mjs`). Communicates strictly over a bounded RPC v1 protocol over IPC (max message size 256KB, max 64 pending requests).
+- **`worker-thread`**: Declared for future lightweight thread-level parallel workers.
+
+---
+
+## 3. Capability Model & Syscall Mediation
+
+1. **Opaque Handles**: Agents only ever hold opaque 256-bit handles (`cap_<64hex>`).
+2. **Default-Deny**: Operations without an active, non-expired, non-revoked capability issued for the caller's `PrincipalId` and target `Resource` are rejected.
+3. **Audit Fingerprinting**: Audit journals, runtime observability DTOs, and log files record only the 12-hex-character audit fingerprint (`cap_f0123456789a`), preventing credential or token leakage.
+4. **Effect Classes & Dispatch Policies**:
+   - `pure` / `read` (e.g. `repo.read`, `evidence.read`): Directly authorized and executed.
+   - `commit` / `direct` (e.g. `llm.invoke`): Executed through trusted Ring 1 provider driver with authoritative token tracking.
+   - `commit` / `intent` (e.g. `github.publish`, `repo.write`): Intercepted by `SyscallGateway` and routed to the `CommitCoordinator` durable outbox.
+
+---
+
+## 4. Repository Workspace & PR Access Modes
+
+| Mode | GitHub App Required | Access Credentials | Comments Published |
+|---|---|---|---|
+| **Public Read — Anonymous** | No | Anonymous GitHub REST API / Git clone | No (read-only) |
+| **Public Read — PAT** | No | Server-side read-only Personal Access Token | No (read-only) |
+| **Webhook Review** | Yes | GitHub App Private Key + Webhook HMAC Secret | Yes (per publication policy) |
+
+### Access Mode Security Invariants
+- **Public PR Analysis**: Analysis of public GitHub pull requests is strictly read-only (`accessMode=public_read`, `publicationPolicy=disabled`). It will never create GitHub comments, apply patches, or execute repository commands.
+- **Credential Storage**: Secret keys (DeepSeek API key, OpenAI API key, GitHub PAT, App private keys) remain server-side. In Electron desktop mode, credentials are encrypted via OS `safeStorage` and passed only to the API child process at startup. They are never returned to the Web UI or included in logs.
+- **Rate Limits**: Anonymous and authenticated requests strictly respect GitHub REST API rate limits and never attempt bypass via parallel rotation.
+
+---
+
+## 5. Electron Desktop Security Boundary
+
+Electron acts as a native desktop host and OS boundary:
+- **Renderer Sandboxing**: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`.
+- **Preload Isolation**: Exposes only narrow, explicit methods (`appVersion`, `selectRepository`, `credentialStatus`, `setCredential`, `restartRuntime`, `updates.*`). No raw Node modules, `require`, `fs`, `child_process`, or `ipcRenderer` objects cross into the renderer.
+- **Native Repository Picker**: Folder selection occurs in the main process via `dialog.showOpenDialog`. The main process registers the repository through `POST /internal/repositories/local` using an internal `CONSISTENCY_DESKTOP_CONTROL_TOKEN` and returns only the sanitized public `Repository` DTO. Absolute filesystem paths are never leaked to the renderer.
+- **Custom Protocol**: `consistency://app` serves static web assets and proxies `/api/*` to the loopback API with bearer token injection. Renderer requests to `/api/internal/*` are rejected with HTTP 404.
+- **Navigation & Windows**: `setWindowOpenHandler` denies all popups; `will-navigate` blocks navigation away from trusted local origins.
+
+---
+
+## 6. Production Security Checklist
+
+1. Set `NODE_ENV=production` with explicit `CONSISTENCY_ALLOWED_ORIGINS` (never wildcard `*`).
+2. Require `CONSISTENCY_API_TOKEN` for all HTTP endpoints.
+3. Configure GitHub App secrets (`GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`) securely via environment variables.
+4. Rotate any leaked API tokens, PATs, or model keys immediately.
