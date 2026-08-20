@@ -25,7 +25,6 @@ process.env.CONSISTENCY_E2E_ROOT = e2eRoot;
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testIgnore: /capture-screenshots\.spec\.ts$/,
   fullyParallel: false,
   workers: 1,
   use: {
@@ -40,8 +39,8 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: "npm run dev:api",
-      url: "http://127.0.0.1:3001/health",
+      command: "node apps/api/dist/server.cjs",
+      port: 3001,
       reuseExistingServer: !process.env.CI,
       stdout: "pipe",
       stderr: "pipe",
@@ -63,12 +62,12 @@ export default defineConfig({
         DEEPSEEK_API_KEY: "test-deepseek-key",
         OPENAI_API_KEY: "",
         CONSISTENCY_API_TOKEN: "",
-        CONSISTENCY_PYTHON_PATH: process.env.CONSISTENCY_PYTHON_PATH ?? "python"
+        CONSISTENCY_PYTHON_PATH: process.env.CONSISTENCY_PYTHON_PATH ?? join(process.cwd(), ".venv", "Scripts", "python.exe")
       }
     },
     {
       command: "npm run dev:web",
-      url: "http://127.0.0.1:5173",
+      port: 5173,
       reuseExistingServer: !process.env.CI,
       stdout: "pipe",
       stderr: "pipe",

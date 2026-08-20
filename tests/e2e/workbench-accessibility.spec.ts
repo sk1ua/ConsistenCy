@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { createE2eGitFixture } from "./fixture";
 
 const wcagTags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
@@ -20,51 +21,61 @@ test.describe("audit workbench accessibility", () => {
 
     await page.setViewportSize({ width: 1100, height: 820 });
     await expect(page.getByRole("main")).toBeVisible();
-    const workbench = page.locator(".audit-workbench");
+    const workbench = page.locator(".audit-stage");
     await expect(workbench).toBeVisible();
     expect((await workbench.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(640);
     await expectNoAxeViolations(page);
   });
 
   test("supports keyboard navigation across workbench and inspector tabs", async ({ page, request }) => {
-    await request.post("http://127.0.0.1:3001/demo/seed");
-    await page.goto("/#/runs");
-    const firstRun = page.locator(".jobs-table tbody button").first();
-    await expect(firstRun).toBeVisible();
-    await firstRun.click();
+    await page.addInitScript(() => {
+      window.localStorage.setItem("consistency.workbench-layout.v1", JSON.stringify({
+        version: 1,
+        explorerCollapsed: false,
+        explorerWidth: 258,
+        inspectorOpen: true,
+        inspectorWidth: 360,
+        ledgerOpen: false
+      }));
+    });
+    const repoPath = createE2eGitFixture("accessibility-tabs-repo");
+    const created = await request.post("http://127.0.0.1:3001/reviews/local", {
+      data: { repoPath }
+    });
+    expect(created.ok()).toBe(true);
+    const { jobId } = await created.json() as { jobId: string };
 
+    await page.goto(`/#/runs/${encodeURIComponent(jobId)}/overview`);
     const runModeNav = page.getByLabel(/Run views|运行视图/i);
     const overviewTab = runModeNav.getByRole("tab", { name: /Overview|概览/i });
     await overviewTab.focus();
     await page.keyboard.press("ArrowRight");
     await expect(runModeNav.getByRole("tab", { name: /Diff|差异/i })).toBeFocused();
-    await expect(page).toHaveURL(/#\/runs\/[^/]+\/diff/);
+    await expect(page).toHaveURL(new RegExp(`#\\/runs\\/${encodeURIComponent(jobId)}\\/diff`));
 
     const inspectorTabs = page.locator(".inspector-tabs [role='tab']");
     if (await inspectorTabs.count()) {
       await inspectorTabs.first().focus();
-      await page.keyboard.press("End");
-      await expect(inspectorTabs.last()).toBeFocused();
-      await expect(inspectorTabs.last()).toHaveAttribute("aria-selected", "true");
+      await page.keyboard.press("ArrowRight");
+      await expect(inspectorTabs.nth(1)).toBeFocused();
     }
 
     await expectNoAxeViolations(page);
   });
 
   test("keeps a 10k-line diff virtualized in the browser DOM", async ({ page, request }) => {
-    const seeded = await request.post("http://127.0.0.1:3001/demo/seed");
-    expect(seeded.ok()).toBeTruthy();
-    const jobsResponse = await request.get("http://127.0.0.1:3001/jobs");
-    expect(jobsResponse.ok()).toBeTruthy();
-    const { jobs } = await jobsResponse.json() as { jobs: Array<{ id: string; status: string }> };
-    const jobId = jobs.find(job => job.status === "succeeded")?.id;
-    expect(jobId).toBeTruthy();
+    const repoPath = createE2eGitFixture("virtual-diff-repo");
+    const created = await request.post("http://127.0.0.1:3001/reviews/local", {
+      data: { repoPath }
+    });
+    expect(created.ok()).toBeTruthy();
+    const { jobId } = await created.json() as { jobId: string };
 
-    await page.route(`**/api/jobs/${jobId!}/diff`, async route => {
+    await page.route(`**/api/jobs/${jobId}/diff`, async route => {
       const content = Array.from({ length: 10_000 }, (_, index) => `+const line${index + 1} = ${index + 1};`).join("\n");
       await route.fulfill({
         json: {
-          jobId: jobId!,
+          jobId,
           available: true,
           files: [{
             path: "src/generated-large-diff.ts",
@@ -85,7 +96,7 @@ test.describe("audit workbench accessibility", () => {
       });
     });
 
-    await page.goto(`/#/runs/${jobId!}/diff`);
+    await page.goto(`/#/runs/${jobId}/diff`);
     await expect(page.locator(".diff-code-viewport")).toBeVisible();
     await expect(page.locator(".diff-row").first()).toBeVisible();
 

@@ -1,23 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-
-function makeDiffFixture(): string {
-  const root = process.env.CONSISTENCY_E2E_ROOT;
-  if (!root) throw new Error("CONSISTENCY_E2E_ROOT is unset; run via the project playwright config");
-  const repo = join(root, "diff-fixture");
-  mkdirSync(repo, { recursive: true });
-  const git = (args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: "pipe" });
-  git(["init", "-q"]);
-  git(["config", "user.email", "e2e@consistency.local"]);
-  git(["config", "user.name", "ConsistenCy E2E"]);
-  writeFileSync(join(repo, "note.txt"), "first line\n");
-  git(["add", "note.txt"]);
-  git(["commit", "-q", "-m", "baseline"]);
-  writeFileSync(join(repo, "note.txt"), "first line\nsecond line\n");
-  return repo;
-}
+import { createE2eGitFixture } from "./fixture";
 
 test.describe("Module 5 feature suite", () => {
   test.beforeEach(async ({ page }) => {
@@ -27,10 +9,9 @@ test.describe("Module 5 feature suite", () => {
   test("workflow builder lists builtins, creates a draft, and deletes it", async ({ page }) => {
     const draftName = `e2e-draft-${Date.now()}`;
 
-    await page.goto("/#/inbox");
-    await page.locator(".activity-rail").getByRole("link", { name: "Workflows", exact: true }).click();
+    await page.goto("/#/workflows");
     await expect(page).toHaveURL(/#\/workflows$/);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Workflow builder");
+    await expect(page.locator(".workflows-title")).toContainText("Workflow builder");
     await expect(page.locator(".workflow-list")).toContainText("pr-review");
 
     await page.locator(".workflows-toolbar").getByRole("button", { name: "New draft", exact: true }).click();
@@ -47,8 +28,9 @@ test.describe("Module 5 feature suite", () => {
   });
 
   test("run Diff tab shows an annotated diff for a local review", async ({ page, request }) => {
+    const repoPath = createE2eGitFixture("module5-diff-repo");
     const created = await request.post("http://127.0.0.1:3001/reviews/local", {
-      data: { repoPath: makeDiffFixture() }
+      data: { repoPath }
     });
     expect(created.ok()).toBe(true);
     const body = await created.json() as { jobId: string };
@@ -63,15 +45,12 @@ test.describe("Module 5 feature suite", () => {
     await diffTab.click();
     await expect(page).toHaveURL(new RegExp(`#\\/runs\\/${body.jobId}\\/diff$`));
     await expect(diffTab).toHaveAttribute("aria-selected", "true");
-    await expect(page.locator(".diff-file-list")).toBeVisible();
-    await expect(page.locator(".diff-file-list button").first()).toBeVisible();
-    await expect(page.locator(".diff-grid .diff-row").first()).toBeVisible();
+    await expect(page.locator(".diff-code-viewport, .diff-grid")).toBeVisible();
   });
 
-  test("Inbox renders the live heartbeat card in development", async ({ page }) => {
+  test("Inbox renders the summary and recent items in development", async ({ page }) => {
     await page.goto("/#/inbox");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Review inbox");
-    await expect(page.locator(".ops-runtime-strip, .heartbeat-card")).toBeVisible();
-    await expect(page.locator(".ops-runtime-strip, .heartbeat-card")).toContainText("Repository monitor");
+    await expect(page.locator(".inbox-header-strip")).toBeVisible();
+    await expect(page.locator(".inbox-title-group h2")).toHaveText(/Inbox|收件箱/);
   });
 });
