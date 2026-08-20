@@ -22,7 +22,6 @@ import {
   repositoryGitStatusResponseSchema,
   repositoryCommitsResponseSchema,
   repositoryPullRequestsResponseSchema,
-  reviewPreparationResponseSchema,
   runRuntimeSnapshotSchema,
   runtimeRunsResponseSchema,
   localReviewResponseSchema,
@@ -38,7 +37,6 @@ import {
   type RepositoryGitStatusResponse,
   type RepositoryCommitsResponse,
   type RepositoryPullRequestsResponse,
-  type ReviewPreparationResponse,
   type PullRequestSummary,
   type Severity,
   type StatsResponse,
@@ -295,9 +293,6 @@ export const api = {
   },
   async repositoryPullRequests(repositoryId: string, signal?: AbortSignal): Promise<RepositoryPullRequestsResponse> {
     return repositoryPullRequestsResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/pull-requests`, { signal }));
-  },
-  async reviewPreparation(repositoryId: string, signal?: AbortSignal): Promise<ReviewPreparationResponse> {
-    return reviewPreparationResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/review-preparation`, { signal }));
   },
   async automations(signal?: AbortSignal): Promise<Automation[]> {
     const payload = await request("/automations", { signal }) as { automations?: unknown };

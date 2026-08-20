@@ -10,13 +10,12 @@ function renderShell(path = "/runs", overrides = {}): string {
         path={path}
         routeHref={path}
         meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
-        locale="zh-CN"
+        locale="en-US"
         setLocale={() => undefined}
         themePreference="dark"
         themeLabel="Dark"
         cycleTheme={() => undefined}
         jobs={[]}
-        repositories={[]}
         pulse={null}
         healthUnavailable={false}
         notices={[]}
@@ -48,9 +47,8 @@ describe("Repository-Centric AppShell", () => {
     });
 
     // Contains the single repository-first sidebar
+    expect(html).toContain("repo-first-sidebar");
     expect(html).toContain("ConsistenCy");
-    expect(html).toContain("代码仓库");
-    expect(html).toContain("审查运行");
 
     // Does NOT contain obsolete chrome
     expect(html).not.toContain("activity-rail");
@@ -59,21 +57,9 @@ describe("Repository-Centric AppShell", () => {
   });
 
   it("renders clear location breadcrumbs in the header", () => {
-    const html = renderShell("/repositories/repo_1/history", {
-      repositories: [
-        {
-          id: "repo_1",
-          displayName: "ConsistenCy",
-          source: "local_git",
-          trustLevel: "trusted_local",
-          monitoringEnabled: true,
-          createdAt: "2026-08-18T00:00:00.000Z",
-          updatedAt: "2026-08-18T00:00:00.000Z"
-        }
-      ]
-    });
-    expect(html).toContain("ds-breadcrumb");
-    expect(html).toContain("ConsistenCy");
+    const html = renderShell("/repositories/sk1ua%2FConsistenCy/history");
+    expect(html).toContain("location-breadcrumbs");
+    expect(html).toContain("Git History");
   });
 
   it("reserves Ctrl/Command K and P for the workspace command palette", () => {
@@ -102,8 +88,8 @@ describe("Repository-Centric AppShell", () => {
         database: { ok: true },
         worker: { running: true, activeJobs: 0, concurrency: 1 },
         llmConfigured: true,
-        llmProvider: "deepseek",
-        llmModel: "deepseek-v4-flash",
+        llmProvider: "DeepSeek",
+        llmModel: "deepseek-chat",
         configuration: {
           githubAppConfigured: false,
           webhookSecretConfigured: false,
@@ -113,8 +99,8 @@ describe("Repository-Centric AppShell", () => {
         }
       }
     });
-    expect(htmlConfigured).toContain("deepseek");
-    expect(htmlConfigured).toContain("deepseek-v4-flash");
+    expect(htmlConfigured).toContain("DeepSeek");
+    expect(htmlConfigured).toContain("deepseek-chat");
     expect(htmlConfigured).not.toContain("Mock 模型");
     expect(htmlConfigured).not.toContain("Demo mode");
 
@@ -137,7 +123,7 @@ describe("Repository-Centric AppShell", () => {
         }
       }
     });
-    expect(htmlUnconfigured).toContain("none");
+    expect(htmlUnconfigured).toContain("LLM 未配置");
     expect(htmlUnconfigured).not.toContain("Mock 模型");
     expect(htmlUnconfigured).not.toContain("Demo mode");
   });

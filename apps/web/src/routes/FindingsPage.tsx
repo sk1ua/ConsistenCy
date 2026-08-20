@@ -1,204 +1,119 @@
-import React, { useState, useMemo } from "react";
-import type { ReviewReport, Severity, ReviewFinding } from "@consistency/schema";
-import { ShieldAlert, Search, FileCode2, ExternalLink, Filter } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import { Input } from "../design-system/Input";
-import { Select } from "../design-system/Select";
-import { Badge } from "../design-system/Badge";
-import { Button } from "../design-system/Button";
-import { DataTable, type Column } from "../design-system/DataTable";
-import { SectionHeader } from "../design-system/SectionHeader";
-import { EmptyState } from "../design-system/EmptyState";
-import { AppLink } from "../design-system/Link";
+import { useState, useMemo } from "react";
+import type { ReviewReport, Severity } from "@consistency/schema";
+import { AlertTriangle, FileSearch2, Search, ShieldCheck } from "lucide-react";
+import { Link } from "react-router-dom";
+import { FindingItem } from "../components/FindingItem";
+import { useI18n } from "../i18n";
+import { StatusBadge } from "../components/StatusBadge";
 
-const SEVERITY_ORDER: Record<Severity, number> = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-  info: 0
-};
+const SEVERITY_ORDER: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
-export interface FindingsPageProps {
-  reports: ReviewReport[];
-  reportsUnavailable?: boolean;
-}
-
-interface FindingRow {
-  finding: ReviewFinding;
-  report: ReviewReport;
-}
-
-export const FindingsPage: React.FC<FindingsPageProps> = ({ reports, reportsUnavailable = false }) => {
-  const navigate = useNavigate();
+export function FindingsPage({ reports, reportsUnavailable }: { reports: ReviewReport[]; reportsUnavailable: boolean }) {
+  const { locale } = useI18n();
+  const zh = locale === "zh-CN";
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
 
-  const allFindings = useMemo<FindingRow[]>(() => {
-    return reports
-      .flatMap(report => report.findings.map(finding => ({ finding, report })))
-      .sort(
-        (left, right) =>
-          (SEVERITY_ORDER[right.finding.severity] ?? 0) -
-          (SEVERITY_ORDER[left.finding.severity] ?? 0)
-      );
+  const allFindings = useMemo(() => {
+    return reports.flatMap(report => report.findings.map(finding => ({ finding, report })))
+      .sort((left, right) => (SEVERITY_ORDER[right.finding.severity] ?? 0) - (SEVERITY_ORDER[left.finding.severity] ?? 0));
   }, [reports]);
 
   const filtered = useMemo(() => {
     return allFindings.filter(({ finding, report }) => {
       const matchSeverity = severityFilter === "all" || finding.severity === severityFilter;
-      const matchSearch =
-        !search.trim() ||
+      const matchSearch = !search.trim() ||
         finding.title.toLowerCase().includes(search.toLowerCase()) ||
         finding.file.toLowerCase().includes(search.toLowerCase()) ||
-        report.repositoryFullName.toLowerCase().includes(search.toLowerCase()) ||
-        finding.agent.toLowerCase().includes(search.toLowerCase());
+        report.repositoryFullName.toLowerCase().includes(search.toLowerCase());
       return matchSeverity && matchSearch;
     });
   }, [allFindings, search, severityFilter]);
 
-  const columns: Column<FindingRow>[] = [
-    {
-      key: "severity",
-      header: "严重度",
-      width: 100,
-      render: ({ finding }) => (
-        <Badge
-          variant={
-            finding.severity === "critical" || finding.severity === "high"
-              ? "danger"
-              : finding.severity === "medium"
-              ? "warning"
-              : "neutral"
-          }
-          size="sm"
-        >
-          {finding.severity.toUpperCase()}
-        </Badge>
-      )
-    },
-    {
-      key: "title",
-      header: "缺陷与建议",
-      render: ({ finding }) => (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontWeight: 600, fontSize: "13px" }}>{finding.title}</span>
-          <span
-            style={{
-              fontSize: "12px",
-              color: "var(--muted)",
-              fontFamily: "var(--ds-font-mono)",
-              marginTop: "2px"
-            }}
-          >
-            {finding.file}
-            {finding.startLine !== undefined ? `:${finding.startLine}` : ""}
-          </span>
-        </div>
-      )
-    },
-    {
-      key: "agent",
-      header: "发现智能体",
-      width: 140,
-      render: ({ finding }) => (
-        <Badge variant="neutral" size="sm">
-          {finding.agent}
-        </Badge>
-      )
-    },
-    {
-      key: "confidence",
-      header: "可信度",
-      width: 110,
-      render: ({ finding }) => (
-        <Badge variant={finding.confidence === "confirmed" ? "success" : "neutral"} size="sm">
-          {finding.confidence}
-        </Badge>
-      )
-    },
-    {
-      key: "repository",
-      header: "所属代码仓库",
-      width: 180,
-      render: ({ report }) => (
-        <AppLink
-          to={`/repositories/${encodeURIComponent(report.repositoryFullName)}/overview`}
-          style={{ fontSize: "12px", fontWeight: 500 }}
-        >
-          {report.repositoryFullName}
-        </AppLink>
-      )
-    },
-    {
-      key: "actions",
-      header: "操作",
-      align: "right",
-      width: 100,
-      render: ({ report }) => (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigate(`/runs/${encodeURIComponent(report.jobId)}/overview`)}
-        >
-          查看报告
-        </Button>
-      )
-    }
-  ];
-
   return (
-    <div style={{ padding: "24px 32px", maxWidth: "1280px", margin: "0 auto" }}>
-      <SectionHeader
-        title="审查发现索引 (Findings Index)"
-        subtitle="跨所有代码仓库与审查聚合的静态及语义分析事实证据"
-      />
-
-      {/* Filters */}
-      <div style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "16px" }}>
-        <div style={{ width: "280px" }}>
-          <Input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="搜索缺陷、文件或仓库..."
-            prefixIcon={<Search size={14} />}
-            sizeVariant="sm"
-          />
+    <div className="findings-route page-stack">
+      {/* 1. Clean Developer Header */}
+      <section className="section-block findings-header-strip">
+        <div className="findings-title-wrap">
+          <FileSearch2 size={20} className="findings-icon-main" />
+          <div>
+            <h2>{zh ? "发现索引" : "Findings Index"}</h2>
+            <p>{zh ? "跨所有代码仓库与审查聚合的静态及语义分析发现。" : "Aggregated static and semantic findings across all reviewed repositories."}</p>
+          </div>
         </div>
 
-        <Select
-          sizeVariant="sm"
-          value={severityFilter}
-          onChange={e => setSeverityFilter(e.target.value)}
-          options={[
-            { label: "全部严重度 (All Severities)", value: "all" },
-            { label: "严重 (Critical)", value: "critical" },
-            { label: "高危 (High)", value: "high" },
-            { label: "中危 (Medium)", value: "medium" },
-            { label: "低危 (Low)", value: "low" }
-          ]}
-        />
+        <div className="findings-filter-bar">
+          <div className="search-input-wrap">
+            <Search size={14} className="search-icon" />
+            <input
+              type="text"
+              placeholder={zh ? "搜索发现、文件或仓库..." : "Search findings, files..."}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
 
-        <div style={{ marginLeft: "auto", fontSize: "12px", color: "var(--muted)" }}>
-          共 <strong>{filtered.length}</strong> 项发现
+          <select
+            value={severityFilter}
+            onChange={e => setSeverityFilter(e.target.value)}
+            className="filter-select"
+            aria-label={zh ? "严重度筛选" : "Severity filter"}
+          >
+            <option value="all">{zh ? "全部严重度" : "All severities"}</option>
+            <option value="critical">{zh ? "严重 (Critical)" : "Critical"}</option>
+            <option value="high">{zh ? "高危 (High)" : "High"}</option>
+            <option value="medium">{zh ? "中危 (Medium)" : "Medium"}</option>
+            <option value="low">{zh ? "低危 (Low)" : "Low"}</option>
+          </select>
         </div>
-      </div>
+      </section>
 
-      {filtered.length === 0 ? (
-        <EmptyState
-          icon={<ShieldAlert size={36} />}
-          title="未找到匹配的审查发现"
-          description="请尝试调整严重度筛选或搜索条件。"
-        />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={filtered}
-          keyExtractor={({ finding, report }) => `${report.jobId}-${finding.id}`}
-          onRowClick={({ report }) => navigate(`/runs/${encodeURIComponent(report.jobId)}/overview`)}
-        />
-      )}
+      {/* 2. Findings List */}
+      <section className="section-block findings-catalog">
+        <div className="panel-title">
+          <div>
+            <span className="panel-kicker">{zh ? "发现列表" : "Findings List"}</span>
+            <h2>{zh ? "代码缺陷与安全建议" : "Code Issues & Recommendations"}</h2>
+          </div>
+          <strong>{filtered.length} {zh ? "项" : "items"}</strong>
+        </div>
+
+        {reportsUnavailable && allFindings.length === 0 ? (
+          <div className="honest-fallback-box">
+            <AlertTriangle size={18} className="icon-warning" />
+            <div>
+              <strong>{zh ? "报告数据暂不可用" : "Report Data Unavailable"}</strong>
+              <p>{zh ? "恢复报告 API 后重试；当前不展示未经核验的推测发现。" : "Retry after the report API recovers."}</p>
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="clean-inline-status">
+            <ShieldCheck size={18} className="icon-success" />
+            <span>{zh ? "当前无匹配的审查发现。" : "No matching findings in reviewed reports."}</span>
+          </div>
+        ) : (
+          <div className="findings-catalog-list">
+            {filtered.map(({ finding, report }) => {
+              const isDemo = report.jobId.startsWith("job_demo");
+              return (
+                <article className="catalog-finding-card" key={`${report.jobId}:${finding.id}`}>
+                  <div className="catalog-finding-source">
+                    <div className="source-left">
+                      <strong>{report.repositoryFullName}</strong>
+                      <small>{report.pullRequestNumber ? `PR #${report.pullRequestNumber}` : (zh ? "本地审查" : "Local review")}</small>
+                      {isDemo && <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>}
+                    </div>
+                    <Link to={`/runs/${encodeURIComponent(report.jobId)}/diff`} className="text-link">
+                      {zh ? "查看代码差异" : "View Diff"} →
+                    </Link>
+                  </div>
+                  <FindingItem finding={finding} />
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
-};
+}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
@@ -13,9 +13,7 @@ import {
   Save,
   ShieldCheck,
   Trash2,
-  GitFork,
-  AlertCircle,
-  Layers
+  Workflow
 } from "lucide-react";
 import {
   collectWorkflowGraphIssues,
@@ -30,13 +28,6 @@ import {
 import { api } from "../api/client";
 import { WorkflowGraph } from "../components/WorkflowGraph";
 import { useI18n } from "../i18n";
-import { Tabs, type TabItem } from "../design-system/Tabs";
-import { Button } from "../design-system/Button";
-import { Badge } from "../design-system/Badge";
-import { SectionHeader } from "../design-system/SectionHeader";
-import { EmptyState } from "../design-system/EmptyState";
-import { Input } from "../design-system/Input";
-import { Select } from "../design-system/Select";
 
 const ANALYZER_KINDS = [
   "engine.style",
@@ -69,8 +60,12 @@ function stepsOf(spec: WorkflowSpec): { step: AnyStep; role: StepRole }[] {
   ];
 }
 
+function findStep(spec: WorkflowSpec, id: string): { step: AnyStep; role: StepRole } | undefined {
+  return stepsOf(spec).find(item => item.step.id === id);
+}
+
 function triggerLabel(automation: Automation, zh: boolean): string {
-  if (automation.trigger.type === "manual") return zh ? "手动触发 (Manual)" : "Manual";
+  if (automation.trigger.type === "manual") return zh ? "手动触发" : "Manual";
   if (automation.trigger.type === "schedule") return `${automation.trigger.cron} · ${automation.trigger.timezone}`;
   return automation.trigger.eventTypes.join(" · ");
 }
@@ -93,134 +88,84 @@ function WorkflowTriggersView({
   zh: boolean;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-      <section
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--ds-radius-lg)",
-          padding: "20px"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
-          <CalendarClock size={20} style={{ color: "var(--primary)" }} />
+    <div className="workflow-triggers-view page-stack">
+      <section className="section-block automation-compact-empty">
+        <div className="compact-empty-head">
+          <CalendarClock size={20} className="empty-icon" />
           <div>
-            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: 600 }}>触发器策略与能力 (Triggers & Policies)</h3>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--muted)" }}>
-              控制代码审查工作流在何时何种场景下自动或手动执行
-            </p>
+            <h3>{zh ? "触发器能力与策略" : "Trigger Capabilities & Policies"}</h3>
+            <p>{zh ? "控制工作流何时以及如何自动或手动启动审查。" : "Control when and how workflows execute automatically or manually."}</p>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "16px", fontSize: "12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <CheckCircle2 size={14} color="var(--success)" />
-            <span>手动触发与公开 PR 审查 (可用)</span>
+        <div className="automation-triggers-summary">
+          <div className="trigger-status-item">
+            <CheckCircle2 size={14} className="icon-success" />
+            <span>{zh ? "手动与公开 PR 审查 (可用)" : "Manual & Public PR Reviews (Available)"}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <CheckCircle2 size={14} color="var(--success)" />
-            <span>GitHub Webhook 自动化审查 (可用)</span>
+          <div className="trigger-status-item">
+            <CheckCircle2 size={14} className="icon-success" />
+            <span>{zh ? "GitHub Webhook 触发 (可用)" : "GitHub Webhooks (Available)"}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--muted)" }}>
+          <div className="trigger-status-item muted">
             <Radio size={14} />
-            <span>定时计划 (后续里程碑)</span>
+            <span>{zh ? "定时计划（后续里程碑）" : "Scheduled Cron (Roadmap)"}</span>
           </div>
         </div>
       </section>
 
       {actionError && (
-        <div
-          style={{
-            padding: "12px 16px",
-            background: "var(--danger-soft)",
-            color: "var(--danger-strong)",
-            borderRadius: "var(--ds-radius-md)",
-            fontSize: "13px"
-          }}
-        >
-          <strong>无法更新自动化策略: </strong>
+        <div className="route-query-notice" role="alert">
+          <strong>{zh ? "无法更新自动化策略" : "Could not update automation policy"}</strong>
           <span>{actionError}</span>
         </div>
       )}
 
-      <section
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--ds-radius-md)",
-          padding: "16px"
-        }}
-      >
-        <SectionHeader
-          title={zh ? "已配置触发策略绑定" : "Configured Trigger Bindings"}
-          subtitle={zh ? "已绑定到具体代码仓库的触发执行规则" : "Trigger execution rules bound to specific repositories"}
-          actions={
-            <Badge variant={capabilities?.automationScheduling ? "success" : "neutral"} size="sm">
-              {capabilities?.automationScheduling ? (zh ? "调度引擎已就绪" : "Scheduler ready") : (zh ? "仅保存策略定义" : "Definitions only")}
-            </Badge>
-          }
-        />
+      <section className="section-block automation-registry">
+        <div className="panel-title">
+          <div>
+            <span className="panel-kicker">{zh ? "策略绑定" : "Policy Bindings"}</span>
+            <h2>{zh ? "已配置触发策略" : "Configured Trigger Bindings"}</h2>
+          </div>
+          <span className={capabilities?.automationScheduling ? "capability-state ready" : "capability-state pending"}>
+            {capabilities?.automationScheduling ? (zh ? "调度就绪" : "Scheduler ready") : (zh ? "仅保存定义" : "Definitions only")}
+          </span>
+        </div>
 
         {automations.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div className="automation-list" role="list">
             {automations.map(automation => {
               const repository = repositories.find(candidate => candidate.id === automation.repositoryId);
               return (
-                <div
-                  key={automation.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "12px 16px",
-                    background: "var(--surface-subtle)",
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: "var(--ds-radius-md)"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <Badge variant={automation.enabled ? "success" : "neutral"} size="sm" dot={automation.enabled}>
-                      {automation.enabled ? (zh ? "已启用" : "Enabled") : (zh ? "已暂停" : "Paused")}
-                    </Badge>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: "13px" }}>{automation.name}</div>
-                      <div style={{ fontSize: "11px", color: "var(--muted)" }}>
-                        {zh ? "仓库" : "Repository"}: {repository?.displayName ?? automation.repositoryId}
-                      </div>
-                    </div>
+                <article className="automation-row" role="listitem" key={automation.id}>
+                  <span className={automation.enabled ? "automation-state enabled" : "automation-state"}>
+                    <i />{automation.enabled ? (zh ? "已启用" : "Enabled") : (zh ? "已暂停" : "Paused")}
+                  </span>
+                  <div>
+                    <strong>{automation.name}</strong>
+                    <small>{repository?.displayName ?? automation.repositoryId}</small>
                   </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "16px", fontSize: "12px" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <CalendarClock size={14} color="var(--muted)" />
-                      <span>{triggerLabel(automation, zh)}</span>
-                    </span>
-                    <Badge variant="neutral" size="sm" mono>
-                      {automation.executionProfile === "static_readonly" ? (zh ? "静态只读" : "Static read-only") : (zh ? "受信沙箱" : "Trusted sandbox")}
-                    </Badge>
-                    {onSetEnabled && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={changingAutomationId === automation.id}
-                        icon={automation.enabled ? <PauseCircle size={13} /> : <PlayCircle size={13} />}
-                        onClick={() => onSetEnabled(automation, !automation.enabled)}
-                      >
-                        {automation.enabled ? "暂停" : "恢复"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                  <span><CalendarClock size={14} />{triggerLabel(automation, zh)}</span>
+                  <span><ShieldCheck size={14} />{automation.executionProfile === "static_readonly" ? (zh ? "静态只读" : "Static read-only") : (zh ? "受信沙箱" : "Trusted sandbox")}</span>
+                  {onSetEnabled && (
+                    <button
+                      type="button"
+                      disabled={changingAutomationId === automation.id}
+                      onClick={() => onSetEnabled(automation, !automation.enabled)}
+                      className="secondary-button btn-small"
+                    >
+                      {automation.enabled ? <PauseCircle size={13} /> : <PlayCircle size={13} />}
+                      {automation.enabled ? (zh ? "暂停" : "Pause") : (zh ? "恢复" : "Resume")}
+                    </button>
+                  )}
+                </article>
               );
             })}
           </div>
         ) : (
-          <EmptyState
-            compact
-            icon={<CalendarClock size={28} />}
-            title="暂无绑定的仓库触发策略"
-            description="工作流当前通过 GitHub App Webhook 或工作区手动审查执行。"
-          />
+          <div className="empty-inline-compact">
+            {zh ? "暂无绑定的仓库触发策略。通过 GitHub App Webhook 或手动审查执行工作流。" : "No repository trigger bindings configured yet. Workflows execute on GitHub webhooks or manual review."}
+          </div>
         )}
       </section>
     </div>
@@ -246,7 +191,6 @@ export function WorkflowPage({
   const zh = locale === "zh-CN";
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") === "triggers" ? "triggers" : "definition";
-
   const [summaries, setSummaries] = useState<WorkflowSummary[]>([]);
   const [current, setCurrent] = useState<{ spec: WorkflowSpec; source: WorkflowSource } | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
@@ -255,6 +199,7 @@ export function WorkflowPage({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [withJsonError, setWithJsonError] = useState<string>();
 
   const loadList = useCallback(async () => {
     try {
@@ -275,7 +220,7 @@ export function WorkflowPage({
       const first = summaries[0];
       if (first) void openWorkflow(first.name);
     }
-  }, [loading, summaries, current, error]);
+  });
 
   async function openWorkflow(name: string) {
     setLoading(true);
@@ -294,39 +239,29 @@ export function WorkflowPage({
   }
 
   function patchSpec(updater: (spec: WorkflowSpec) => WorkflowSpec) {
-    setCurrent(previous => (previous ? { ...previous, spec: updater(previous.spec) } : previous));
+    setCurrent(previous => previous ? { ...previous, spec: updater(previous.spec) } : previous);
     setSaveError(undefined);
   }
 
   function updateStep(id: string, changes: Record<string, unknown>) {
     patchSpec(spec => ({
       ...spec,
-      nodes: spec.nodes.map(step =>
-        step.id === id ? ({ ...step, ...changes } as WorkflowSpec["nodes"][number]) : step
-      ),
-      verifiers: spec.verifiers.map(step =>
-        step.id === id ? ({ ...step, ...changes } as WorkflowSpec["verifiers"][number]) : step
-      ),
-      synthesizer:
-        spec.synthesizer.id === id
-          ? ({ ...spec.synthesizer, ...changes } as WorkflowSpec["synthesizer"])
-          : spec.synthesizer
+      nodes: spec.nodes.map(step => step.id === id ? { ...step, ...changes } as WorkflowSpec["nodes"][number] : step),
+      verifiers: spec.verifiers.map(step => step.id === id ? { ...step, ...changes } as WorkflowSpec["verifiers"][number] : step),
+      synthesizer: spec.synthesizer.id === id ? { ...spec.synthesizer, ...changes } as WorkflowSpec["synthesizer"] : spec.synthesizer
     }));
   }
 
   function connectSteps(source: string, target: string) {
     patchSpec(spec => {
-      const addNeed = (needs: string[]) => (needs.includes(source) ? needs : [...needs, source]);
+      const addNeed = (needs: string[]) => needs.includes(source) ? needs : [...needs, source];
       return {
         ...spec,
-        nodes: spec.nodes.map(step => (step.id === target ? { ...step, needs: addNeed(step.needs) } : step)),
-        verifiers: spec.verifiers.map(step =>
-          step.id === target ? { ...step, needs: addNeed(step.needs) } : step
-        ),
-        synthesizer:
-          spec.synthesizer.id === target
-            ? { ...spec.synthesizer, needs: addNeed(spec.synthesizer.needs) }
-            : spec.synthesizer
+        nodes: spec.nodes.map(step => step.id === target ? { ...step, needs: addNeed(step.needs) } : step),
+        verifiers: spec.verifiers.map(step => step.id === target ? { ...step, needs: addNeed(step.needs) } : step),
+        synthesizer: spec.synthesizer.id === target
+          ? { ...spec.synthesizer, needs: addNeed(spec.synthesizer.needs) }
+          : spec.synthesizer
       };
     });
   }
@@ -335,17 +270,14 @@ export function WorkflowPage({
     const id = `step-${stepsOf(current!.spec).length + 1}`;
     patchSpec(spec => ({
       ...spec,
-      nodes: [
-        ...spec.nodes,
-        {
-          id,
-          uses: "engine.security",
-          timeoutMs: 60_000,
-          continueOnError: false,
-          needs: [],
-          with: {}
-        }
-      ]
+      nodes: [...spec.nodes, {
+        id,
+        uses: "engine.security",
+        timeoutMs: 60_000,
+        continueOnError: false,
+        needs: [],
+        with: {}
+      }]
     }));
     setSelectedId(id);
   }
@@ -355,249 +287,230 @@ export function WorkflowPage({
       const without = (needs: string[]) => needs.filter(need => need !== id);
       return {
         ...spec,
-        nodes: spec.nodes
-          .filter(step => step.id !== id)
-          .map(step => ({ ...step, needs: without(step.needs) })),
-        verifiers: spec.verifiers
-          .filter(step => step.id !== id)
-          .map(step => ({ ...step, needs: without(step.needs) })),
+        nodes: spec.nodes.filter(step => step.id !== id).map(step => ({ ...step, needs: without(step.needs) })),
+        verifiers: spec.verifiers.filter(step => step.id !== id).map(step => ({ ...step, needs: without(step.needs) })),
         synthesizer: { ...spec.synthesizer, needs: without(spec.synthesizer.needs) }
       };
     });
     setSelectedId(undefined);
   }
 
-  const selectedStep = current ? stepsOf(current.spec).find(i => i.step.id === selectedId) : undefined;
-  const issues = current ? collectWorkflowGraphIssues(current.spec) : [];
+  function validationIssues(): string[] {
+    if (!current) return [];
+    const parsed = workflowSpecSchema.safeParse(current.spec);
+    const issues = parsed.success
+      ? []
+      : parsed.error.issues.map(issue => `${issue.path.join(".") || "workflow"}: ${issue.message}`);
+    const graphIssues = collectWorkflowGraphIssues(current.spec)
+      .map(issue => `${issue.path.join(".") || "workflow"}: ${issue.message}`);
+    return [...new Set([...issues, ...graphIssues])];
+  }
 
-  async function handleSave() {
+  async function saveDraft() {
     if (!current) return;
     setSaving(true);
     setSaveError(undefined);
     setNotice(undefined);
     try {
-      const saved = await api.saveWorkflow(current.spec);
-      setCurrent({ spec: saved.workflow, source: saved.source });
-      setNotice(zh ? "工作流定义已成功保存为草稿。" : "Workflow draft saved.");
+      const parsed = workflowSpecSchema.safeParse(current.spec);
+      if (!parsed.success) {
+        setSaveError(parsed.error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`).join("; "));
+        return;
+      }
+      await api.saveWorkflow(parsed.data);
+      setCurrent({ spec: parsed.data, source: "draft" });
+      setNotice(t("Draft saved"));
       await loadList();
     } catch (caught) {
-      setSaveError(caught instanceof Error ? caught.message : "Could not save workflow");
+      setSaveError(caught instanceof Error ? caught.message : "Could not save draft");
     } finally {
       setSaving(false);
     }
   }
 
-  const workflowTabs: TabItem[] = [
-    { id: "definition", label: "工作流定义 (DAG Builder)", icon: <GitFork size={14} /> },
-    { id: "triggers", label: "触发器与策略 (Triggers)", count: automations.length || undefined, icon: <CalendarClock size={14} /> }
-  ];
+  async function resetToBuiltin() {
+    if (!current) return;
+    if (current.source === "draft") {
+      try {
+        await api.deleteWorkflow(current.spec.name);
+      } catch {
+        // A missing draft is fine; the builtin may still exist.
+      }
+      await loadList();
+    }
+    await openWorkflow(current.spec.name);
+  }
 
-  return (
-    <div style={{ padding: "24px 32px", maxWidth: "1280px", margin: "0 auto" }}>
-      <SectionHeader
-        title="工作流与触发器 (Workflows)"
-        subtitle="定义多阶段代码审查 DAG 图、分析器拓扑与自动化触发策略"
+  async function deleteDraft() {
+    if (!current || current.source !== "draft") return;
+    await api.deleteWorkflow(current.spec.name);
+    await loadList();
+    const remaining = summaries.filter(item => item.name !== current.spec.name);
+    if (remaining.length > 0) {
+      const first = remaining[0];
+      if (first) await openWorkflow(first.name);
+    } else {
+      setCurrent(null);
+      setSelectedId(undefined);
+    }
+  }
+
+  async function newDraft() {
+    const template = current?.spec ?? (await api.workflow("pr-review")).workflow;
+    let name = "draft";
+    let counter = 2;
+    while (summaries.some(item => item.name === name)) {
+      name = `draft-${counter}`;
+      counter += 1;
+    }
+    const spec: WorkflowSpec = JSON.parse(JSON.stringify(template));
+    spec.name = name;
+    spec.description = t("Draft from {template}", { template: template.name });
+    setCurrent({ spec, source: "draft" });
+    setSelectedId(spec.nodes[0]?.id ?? spec.synthesizer.id);
+    setNotice(undefined);
+    setSaveError(undefined);
+  }
+
+  const selected = current && selectedId ? findStep(current.spec, selectedId) : undefined;
+  const issues = useMemo(validationIssues, [current]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return <div className="page-stack workflows-page">
+    <div className="workflow-sub-nav" role="tablist" aria-label={t("Workflow views")}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "definition"}
+        className={`workflow-tab ${activeTab === "definition" ? "active" : ""}`}
+        onClick={() => setSearchParams({})}
+      >
+        <Workflow size={14} />
+        {zh ? "工作流定义" : "Definitions"}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "triggers"}
+        className={`workflow-tab ${activeTab === "triggers" ? "active" : ""}`}
+        onClick={() => setSearchParams({ tab: "triggers" })}
+      >
+        <CalendarClock size={14} />
+        {zh ? "触发器与策略" : "Triggers"}
+        {automations.length > 0 && <span className="tab-count">({automations.length})</span>}
+      </button>
+    </div>
+
+    {activeTab === "triggers" ? (
+      <WorkflowTriggersView
+        automations={automations}
+        repositories={repositories}
+        capabilities={capabilities}
+        actionError={actionError}
+        changingAutomationId={changingAutomationId}
+        onSetEnabled={onSetEnabled}
+        zh={zh}
       />
-
-      <div style={{ marginBottom: "20px" }}>
-        <Tabs
-          tabs={workflowTabs}
-          activeId={activeTab}
-          onChange={id => {
-            setSearchParams(id === "triggers" ? { tab: "triggers" } : {});
-          }}
-        />
-      </div>
-
-      {activeTab === "triggers" ? (
-        <WorkflowTriggersView
-          automations={automations}
-          repositories={repositories}
-          capabilities={capabilities}
-          actionError={actionError}
-          changingAutomationId={changingAutomationId}
-          onSetEnabled={onSetEnabled}
-          zh={zh}
-        />
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Top Bar: workflow selector + actions */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "12px 16px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--ds-radius-md)"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-              <span style={{ fontSize: "13px", fontWeight: 600 }}>选择工作流:</span>
-              <Select
-                sizeVariant="sm"
-                value={current?.spec.name ?? ""}
-                onChange={e => void openWorkflow(e.target.value)}
-                options={summaries.map(s => ({
-                  label: `${s.name} (${s.source === "builtin" ? "内置" : "草稿"})`,
-                  value: s.name
-                }))}
-              />
-              {current && (
-                <Badge variant={current.source === "builtin" ? "neutral" : "primary"} size="sm">
-                  {current.source === "builtin" ? "内置规范" : "自定义草稿"}
-                </Badge>
-              )}
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Button variant="outline" size="sm" icon={<Plus size={13} />} onClick={addNode}>
-                添加分析节点
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                icon={<Save size={13} />}
-                loading={saving}
-                disabled={saving || !current || issues.length > 0}
-                onClick={() => void handleSave()}
-              >
-                保存工作流草稿
-              </Button>
-            </div>
+    ) : (
+      <>
+        <div className="workflows-toolbar">
+          <div className="workflows-title">
+            <span className="panel-kicker"><GitBranch size={14} />{t("Workflow builder")}</span>
+            {current && <>
+              <input className="workflow-name-input" aria-label={t("Name")} value={current.spec.name} onChange={event => patchSpec(spec => ({ ...spec, name: event.target.value }))} />
+              <span className={`workflow-source-badge workflow-source-${current.source}`}>{current.source === "draft" ? t("Draft") : t("Builtin")}</span>
+            </>}
           </div>
-
-          {notice && (
-            <div style={{ padding: "10px 14px", background: "var(--success-soft)", color: "var(--success-strong)", borderRadius: "var(--ds-radius-md)", fontSize: "13px" }}>
-              {notice}
-            </div>
-          )}
-
-          {saveError && (
-            <div style={{ padding: "10px 14px", background: "var(--danger-soft)", color: "var(--danger-strong)", borderRadius: "var(--ds-radius-md)", fontSize: "13px" }}>
-              {saveError}
-            </div>
-          )}
-
-          {/* Graph + Inspector Area */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "16px", minHeight: "520px" }}>
-            {/* Graph Visualizer */}
-            <div
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--ds-radius-md)",
-                overflow: "hidden",
-                height: "560px"
-              }}
-            >
-              {current ? (
-                <WorkflowGraph
-                  spec={current.spec}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onConnectSteps={connectSteps}
-                />
-              ) : (
-                <EmptyState title="正在加载工作流拓扑..." />
-              )}
-            </div>
-
-            {/* Step Editor Drawer */}
-            <div
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--ds-radius-md)",
-                padding: "16px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "14px",
-                overflowY: "auto",
-                maxHeight: "560px"
-              }}
-            >
-              <SectionHeader title={selectedStep ? `编辑节点: ${selectedStep.step.id}` : "节点属性"} />
-
-              {selectedStep ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "13px" }}>
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>
-                      节点类型 (Role)
-                    </label>
-                    <Badge variant="primary" size="sm">
-                      {selectedStep.role.toUpperCase()}
-                    </Badge>
-                  </div>
-
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>
-                      执行分析器 (Uses)
-                    </label>
-                    {"uses" in selectedStep.step ? (
-                      <Select
-                        sizeVariant="sm"
-                        value={selectedStep.step.uses}
-                        onChange={e => updateStep(selectedStep.step.id, { uses: e.target.value })}
-                        options={
-                          selectedStep.role === "node"
-                            ? ANALYZER_KINDS.map(k => ({ label: k, value: k }))
-                            : VERIFIER_KINDS.map(k => ({ label: k, value: k }))
-                        }
-                      />
-                    ) : (
-                      <span style={{ fontFamily: "var(--ds-font-mono)", fontSize: "12px" }}>
-                        {(selectedStep.step as any).uses ?? "synthesizer.default"}
-                      </span>
-                    )}
-                  </div>
-
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>
-                      超时设置 (毫秒)
-                    </label>
-                    <Input
-                      type="number"
-                      sizeVariant="sm"
-                      value={selectedStep.step.timeoutMs}
-                      onChange={e => updateStep(selectedStep.step.id, { timeoutMs: Number(e.target.value) })}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: "block", fontSize: "12px", color: "var(--muted)", marginBottom: "4px" }}>
-                      依赖的前置节点 (Needs)
-                    </label>
-                    <div style={{ fontSize: "12px", fontFamily: "var(--ds-font-mono)" }}>
-                      {selectedStep.step.needs.length > 0
-                        ? selectedStep.step.needs.join(", ")
-                        : "无前置依赖 (首批执行)"}
-                    </div>
-                  </div>
-
-                  {selectedStep.role !== "synthesizer" && (
-                    <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid var(--border)" }}>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        icon={<Trash2 size={13} />}
-                        onClick={() => removeStep(selectedStep.step.id)}
-                      >
-                        删除此节点
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div style={{ color: "var(--muted)", fontSize: "13px", textAlign: "center", padding: "24px 0" }}>
-                  在左侧拓扑图中点击节点以查看或修改配置
-                </div>
-              )}
-            </div>
+          <div className="workflows-actions">
+            <button className="secondary-button" type="button" onClick={() => void newDraft()}><Plus size={15} />{t("New draft")}</button>
+            <button className="secondary-button" type="button" onClick={() => void resetToBuiltin()} disabled={!current}><RotateCcw size={15} />{t("Reset to builtin")}</button>
+            {current?.source === "draft" && <button className="secondary-button danger" type="button" onClick={() => void deleteDraft()}><Trash2 size={15} />{t("Delete draft")}</button>}
+            <button className="primary-button" type="button" onClick={() => void saveDraft()} disabled={!current || saving}>{saving ? t("Saving…") : t("Save draft")}<Save size={15} /></button>
           </div>
         </div>
-      )}
-    </div>
-  );
+        {notice && <div className="workflow-notice">{notice}</div>}
+        {saveError && <div className="workflow-error">{saveError}</div>}
+        {issues.length > 0 && <div className="workflow-error">{t("Validation issues")}: {issues.join("; ")}</div>}
+        {error && <div className="workflow-error">{error}</div>}
+        {loading ? <div className="loading-state"><LoaderCircle className="spinning" size={22} /><span>{t("Loading workflow")}</span></div> :
+          current ? <div className="workflows-layout">
+            <aside className="workflow-list" aria-label={t("Workflows")}>
+              <h3>{t("Workflows")}</h3>
+              {summaries.map(item => <button key={`${item.source}-${item.name}`} type="button" className={current.spec.name === item.name ? "active" : ""} onClick={() => void openWorkflow(item.name)}>
+                <strong>{item.name}</strong>
+                <span className={`workflow-source-badge workflow-source-${item.source}`}>{item.source === "draft" ? t("Draft") : t("Builtin")}</span>
+                <small>{item.description ?? `${item.nodeCount} ${t("nodes")} · ${item.verifierCount} ${t("verifiers")}`}</small>
+              </button>)}
+              <button className="workflow-add" type="button" onClick={() => void newDraft()}><Plus size={15} />{t("New draft")}</button>
+            </aside>
+            <main className="workflow-canvas"><WorkflowGraph spec={current.spec} selectedId={selectedId} onSelect={setSelectedId} onConnectSteps={connectSteps} /></main>
+            <aside className="workflow-inspector">
+              {!selected ? <div className="empty-inline">{t("Select a step to edit it.")}</div> : <WorkflowStepInspector
+                key={selected.step.id}
+                step={selected.step}
+                role={selected.role}
+                allSteps={stepsOf(current.spec)}
+                onChange={updateStep}
+                onRemove={selected.role === "synthesizer" ? undefined : removeStep}
+                withJsonError={withJsonError}
+                setWithJsonError={setWithJsonError}
+              />}
+              {selected && selected.role !== "synthesizer" && <button className="secondary-button workflow-add-step" type="button" onClick={addNode}><Plus size={15} />{t("Add analyzer node")}</button>}
+            </aside>
+          </div> : <div className="empty-state">{t("No workflows available.")}</div>}
+        <p className="workflow-hint">{t("Custom workflows are saved locally under .consistency/workflows and never modify builtin YAML.")}</p>
+      </>
+    )}
+  </div>;
+}
+
+function WorkflowStepInspector({ step, role, allSteps, onChange, onRemove, withJsonError, setWithJsonError }: {
+  step: AnyStep;
+  role: StepRole;
+  allSteps: { step: AnyStep; role: StepRole }[];
+  onChange: (id: string, changes: Record<string, unknown>) => void;
+  onRemove?: (id: string) => void;
+  withJsonError?: string;
+  setWithJsonError: (value?: string) => void;
+}) {
+  const { t } = useI18n();
+  const kinds = role === "node" ? ANALYZER_KINDS : role === "verifier" ? VERIFIER_KINDS : ["synthesize.review_report"];
+  const [withText, setWithText] = useState(() => JSON.stringify(step.with ?? {}, null, 2));
+
+  return <div className="workflow-inspector-body">
+    <h3>{t(role === "node" ? "Analyzer" : role === "verifier" ? "Verifier" : "Synthesizer")} <code>{step.id}</code></h3>
+    <label>{t("Step kind")}
+      <select value={step.uses} onChange={event => onChange(step.id, { uses: event.target.value })}>
+        {kinds.map(kind => <option key={kind} value={kind}>{kind}</option>)}
+      </select>
+    </label>
+    <label>{t("Timeout (ms)")}
+      <input type="number" min={1_000} max={600_000} step={1_000} value={step.timeoutMs} onChange={event => onChange(step.id, { timeoutMs: Number(event.target.value) })} />
+    </label>
+    {role !== "synthesizer" && <label className="workflow-check"><input type="checkbox" checked={"continueOnError" in step && step.continueOnError} onChange={event => onChange(step.id, { continueOnError: event.target.checked })} />{t("Continue on error")}</label>}
+    <fieldset className="workflow-needs"><legend>{t("Needs")}</legend>
+      {allSteps.filter(item => item.step.id !== step.id).map(item => <label className="workflow-check" key={item.step.id}>
+        <input type="checkbox" checked={step.needs.includes(item.step.id)} onChange={event => {
+          const needs = event.target.checked
+            ? [...step.needs, item.step.id]
+            : step.needs.filter(need => need !== item.step.id);
+          onChange(step.id, { needs });
+        }} />
+        <code>{item.step.id}</code>
+      </label>)}
+    </fieldset>
+    <label>{t("With (JSON)")}
+      <textarea rows={5} value={withText} onChange={event => {
+        setWithText(event.target.value);
+        try {
+          const parsed = JSON.parse(event.target.value);
+          onChange(step.id, { with: parsed });
+          setWithJsonError(undefined);
+        } catch {
+          setWithJsonError(t("Invalid JSON"));
+        }
+      }} />
+    </label>
+    {withJsonError && <small className="workflow-error">{withJsonError}</small>}
+    {onRemove && <button className="secondary-button danger" type="button" onClick={() => onRemove(step.id)}><Trash2 size={15} />{t("Remove step")}</button>}
+  </div>;
 }
