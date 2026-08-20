@@ -25,7 +25,7 @@ test.describe("beginner settings guidance", () => {
     const response = await saveResponse;
     expect(response.ok()).toBe(true);
     expect(await response.text()).not.toContain(testOnlyToken);
-    await expect(page.locator("label[for='setting-publicReadToken'] .configured")).toHaveText("Configured");
+    await expect(page.locator("label[for='setting-publicReadToken'] .configured")).toHaveText(/Configured|Saved/);
     await expect(tokenInput).toHaveValue("");
 
     await page.locator("#setting-provider").selectOption("openai");

@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const boundary = require(resolve(repositoryRoot, "apps", "desktop", "src", "security-boundary.cjs")) as {
   isBlockedRendererApiPath: (pathname: string) => boolean;
+  isSafeExternalUrl: (url: string) => boolean;
   selectAndRegisterRepository: (options: {
     showOpenDialog: (_parent: unknown, options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>;
     parentWindow: unknown;
@@ -98,6 +99,7 @@ test.describe("desktop repository security boundary", () => {
     const main = readFileSync(resolve(repositoryRoot, "apps", "desktop", "src", "main.cjs"), "utf8");
     const preload = readFileSync(resolve(repositoryRoot, "apps", "desktop", "src", "preload.cjs"), "utf8");
 
+    expect(main).toContain("CONSISTENCY_SETTINGS_WRITABLE: \"true\"");
     expect(main).toContain("CONSISTENCY_DESKTOP_CONTROL_TOKEN: desktopControlToken");
     expect(main).toContain("CONSISTENCY_API_TOKEN: apiToken");
     expect(main).not.toContain('CONSISTENCY_API_TOKEN: DEV_URL ? "" : apiToken');
@@ -107,13 +109,32 @@ test.describe("desktop repository security boundary", () => {
     expect(main).toContain("isBlockedRendererApiPath(url.pathname)");
     expect(main.match(/randomBytes\(32\)\.toString\("base64url"\)/g)?.length).toBeGreaterThanOrEqual(2);
     expect(main).toContain('ipcMain.handle("runtime:restart"');
+    expect(main).toContain('ipcMain.handle("app:build-info"');
     expect(main).toContain("async function restartApi()");
+    expect(preload).toContain('appVersion: () => ipcRenderer.invoke("app:version")');
+    expect(preload).toContain('buildInfo: () => ipcRenderer.invoke("app:build-info")');
     expect(preload).toContain('selectRepository: () => ipcRenderer.invoke("repositories:select")');
     expect(preload).toContain('restartRuntime: () => ipcRenderer.invoke("runtime:restart")');
     expect(preload).not.toContain("desktopControlToken");
     expect(preload).not.toContain("apiToken");
     expect(preload).not.toContain("apiPort");
     expect(preload).not.toContain("x-consistency-desktop-control");
+  });
+
+  test("validates external URLs allowing only safe HTTPS and denying unsafe schemes", () => {
+    expect(boundary.isSafeExternalUrl("https://platform.openai.com/api-keys")).toBe(true);
+    expect(boundary.isSafeExternalUrl("https://api-docs.deepseek.com/api/deepseek-api")).toBe(true);
+    expect(boundary.isSafeExternalUrl("https://docs.github.com/en/apps/creating-github-apps")).toBe(true);
+    expect(boundary.isSafeExternalUrl("https://github.com/sk1ua/ConsistenCy")).toBe(true);
+
+    expect(boundary.isSafeExternalUrl("javascript:alert(1)")).toBe(false);
+    expect(boundary.isSafeExternalUrl("file:///C:/passwords.txt")).toBe(false);
+    expect(boundary.isSafeExternalUrl("data:text/html,<h1>evil</h1>")).toBe(false);
+    expect(boundary.isSafeExternalUrl("http://platform.openai.com/api-keys")).toBe(false);
+    expect(boundary.isSafeExternalUrl("vbscript:msgbox")).toBe(false);
+    expect(boundary.isSafeExternalUrl("custom-protocol://test")).toBe(false);
+    expect(boundary.isSafeExternalUrl("")).toBe(false);
+    expect(boundary.isSafeExternalUrl(null as any)).toBe(false);
   });
 
   test("rejects an absolute path smuggled into the public display name", () => {

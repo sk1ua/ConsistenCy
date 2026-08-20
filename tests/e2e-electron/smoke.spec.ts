@@ -41,14 +41,33 @@ test.describe("desktop shell", () => {
           body: JSON.stringify({ path: "renderer-must-not-register" })
         });
         const desktop = (window as typeof window & {
-          consistencyDesktop?: Record<string, unknown>;
+          consistencyDesktop?: {
+            buildInfo?: () => Promise<{ version: string; commitSha: string; buildMode: string }>;
+            updates?: { getState: () => Promise<Record<string, unknown>> };
+          } & Record<string, unknown>;
         }).consistencyDesktop;
-        const updates = desktop?.updates as undefined | {
-          getState: () => Promise<Record<string, unknown>>;
-        };
+        const updates = desktop?.updates;
+        const buildInfo = desktop?.buildInfo ? await desktop.buildInfo() : null;
+
+        // Verify PUT /api/settings works inside Electron desktop
+        const settingsUpdate = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            llm: {
+              provider: "deepseek",
+              deepseekModel: "deepseek-v4-flash",
+              deepseekBaseUrl: "https://api.deepseek.com"
+            }
+          })
+        });
+
         return {
           healthy: response.ok,
           internalStatus: internalResponse.status,
+          settingsUpdateStatus: settingsUpdate.status,
+          settingsUpdateOk: settingsUpdate.ok,
+          buildInfo,
           methods: desktop ? Object.keys(desktop).sort() : [],
           updateMethods: updates ? Object.keys(updates).sort() : [],
           updateState: updates ? await updates.getState() : null,
@@ -58,10 +77,17 @@ test.describe("desktop shell", () => {
       });
       expect(boundary.healthy).toBe(true);
       expect(boundary.internalStatus).toBe(404);
+      expect(boundary.settingsUpdateStatus).toBe(200);
+      expect(boundary.settingsUpdateOk).toBe(true);
+      expect(boundary.buildInfo).toMatchObject({
+        version: "0.1.1",
+        buildMode: "development"
+      });
       expect(boundary.hasRawUserDataPath).toBe(false);
       expect(boundary.hasRawIpc).toBe(false);
       expect(boundary.methods).toEqual([
         "appVersion",
+        "buildInfo",
         "credentialStatus",
         "restartRuntime",
         "selectRepository",

@@ -56,6 +56,7 @@ test.describe("audit workbench accessibility", () => {
     const inspectorTabs = page.locator(".inspector-tabs [role='tab']");
     if (await inspectorTabs.count()) {
       await inspectorTabs.first().focus();
+      await expect(inspectorTabs.first()).toBeFocused();
       await page.keyboard.press("ArrowRight");
       await expect(inspectorTabs.nth(1)).toBeFocused();
     }

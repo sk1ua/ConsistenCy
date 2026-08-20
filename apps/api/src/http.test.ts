@@ -595,4 +595,89 @@ describe("createApiServer", () => {
       }
     });
   });
+
+  it("enforces settings write capability: read-only in standalone production by default", async () => {
+    let internalSettings = {
+      llm: { provider: "deepseek" as const, deepseekModel: "deepseek-v4-flash", openaiModel: "gpt-4.1-mini" },
+      github: { appId: "123" },
+      runtime: {
+        databasePath: ":memory:",
+        workspaceRoot: "workspaces",
+        localReviewRoots: "",
+        workerConcurrency: 1,
+        workerPollIntervalMs: 1000,
+        webUrl: "http://127.0.0.1:5173",
+        apiTokenConfigured: true
+      },
+      overriddenByEnvironment: []
+    };
+    const server = createApiServer({
+      nodeEnv: "production",
+      apiToken: "secret-token",
+      settings: {
+        get: () => internalSettings as any,
+        update: patch => {
+          internalSettings = { ...internalSettings, ...(patch as any) };
+          return internalSettings as any;
+        }
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const updateRes = await fetch(`http://127.0.0.1:${port}/settings`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer secret-token",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ llm: { provider: "openai" } })
+    });
+    expect(updateRes.status).toBe(404);
+    const errorBody = await updateRes.json() as any;
+    expect(errorBody.error.code).toBe("SETTINGS_READ_ONLY");
+  });
+
+  it("enforces settings write capability: allows updates when settingsWritable is true in production", async () => {
+    let internalSettings = {
+      llm: { provider: "deepseek" as const, deepseekModel: "deepseek-v4-flash", openaiModel: "gpt-4.1-mini" },
+      github: { appId: "123" },
+      runtime: {
+        databasePath: ":memory:",
+        workspaceRoot: "workspaces",
+        localReviewRoots: "",
+        workerConcurrency: 1,
+        workerPollIntervalMs: 1000,
+        webUrl: "http://127.0.0.1:5173",
+        apiTokenConfigured: true
+      },
+      overriddenByEnvironment: []
+    };
+    const server = createApiServer({
+      nodeEnv: "production",
+      settingsWritable: true,
+      apiToken: "secret-token",
+      settings: {
+        get: () => internalSettings as any,
+        update: patch => {
+          internalSettings = { ...internalSettings, ...(patch as any) };
+          return internalSettings as any;
+        }
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const updateRes = await fetch(`http://127.0.0.1:${port}/settings`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer secret-token",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ llm: { provider: "openai" } })
+    });
+    expect(updateRes.status).toBe(200);
+    const successBody = await updateRes.json() as any;
+    expect(successBody.settings.llm.provider).toBe("openai");
+  });
 });
