@@ -55,15 +55,17 @@ function verifyPython312(executable) {
   }
 }
 
-let gitCommitSha = "";
-try {
-  const gitOutput = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
-  if (gitOutput.status === 0 && gitOutput.stdout) {
-    gitCommitSha = gitOutput.stdout.trim();
-  }
-} catch {
-  gitCommitSha = "unknown";
+const statusOutput = spawnSync("git", ["status", "--porcelain"], { encoding: "utf8" });
+const isDirty = statusOutput.status === 0 && Boolean(statusOutput.stdout.trim());
+if (isDirty && process.env.CONSISTENCY_ALLOW_DIRTY_PACK !== "true") {
+  throw new Error("Desktop package provenance requires a clean Git working tree. Commit changes before packaging.");
 }
+
+const revParseOutput = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
+if (revParseOutput.status !== 0 || !revParseOutput.stdout.trim()) {
+  throw new Error("Desktop packaging requires an accessible Git repository to resolve HEAD commit SHA");
+}
+const gitCommitSha = revParseOutput.stdout.trim();
 
 console.log(`Building same-origin renderer and bundled API (version=${desktopManifest.version}, sha=${gitCommitSha}) ...`);
 runNpm(["run", "build", "-w", "@consistency/web", "--", "--base=/"], root, {
@@ -109,6 +111,14 @@ runNpm(["install", "--omit=dev", "--no-audit", "--no-fund"], runtime, {
   npm_config_engine_strict: "true"
 });
 renameSync(join(runtime, "node_modules"), join(runtime, "modules"));
+
+const apiDistModules = join(staged, "apps", "api", "dist", "node_modules");
+mkdirSync(apiDistModules, { recursive: true });
+cpSync(join(runtime, "modules"), apiDistModules, { recursive: true });
+
+const stagedRootModules = join(staged, "node_modules");
+mkdirSync(stagedRootModules, { recursive: true });
+cpSync(join(runtime, "modules"), stagedRootModules, { recursive: true });
 
 const nodeDirectory = join(runtime, "node");
 mkdirSync(nodeDirectory, { recursive: true });

@@ -65,7 +65,38 @@ let desktopControlToken = null;
 let mainWindow = null;
 let tray = null;
 let updateCoordinator = null;
+let intentionalExit = false;
+let restarting = false;
 let quitting = false;
+
+function stopChildProcess(child, timeoutMs = 5000) {
+  return new Promise(resolve => {
+    if (!child || child.killed || child.exitCode !== null) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    child.once("exit", finish);
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      finish();
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!settled) {
+        try { child.kill("SIGKILL"); } catch {}
+        setTimeout(finish, 300);
+      }
+    }, timeoutMs);
+    timer.unref();
+  });
+}
 
 function log(message) {
   try {
@@ -319,20 +350,27 @@ function startApi(nodeHelper, python) {
   } catch {
     logFd = "ignore";
   }
-  apiProcess = spawn(nodeHelper, [serverEntry], {
+  const child = spawn(nodeHelper, [serverEntry], {
     cwd: root,
     env,
     stdio: ["ignore", logFd, logFd],
     windowsHide: true
   });
-  log(`main: API helper spawned (pid=${apiProcess.pid})`);
-  apiProcess.once("error", error => {
+  apiProcess = child;
+  log(`main: API helper spawned (pid=${child.pid})`);
+
+  child.once("error", error => {
+    if (child !== apiProcess || quitting || intentionalExit || restarting) return;
     log(`main: API helper spawn failed: ${error && error.message ? error.message : "unknown"}`);
-    if (!quitting) app.quit();
+    dialog.showErrorBox("ConsistenCy", "The local audit service could not start. See the application log for details.");
+    app.quit();
   });
-  apiProcess.once("exit", code => {
-    if (!quitting && code !== 0) {
-      log(`main: API helper exited unexpectedly (${code})`);
+
+  child.once("exit", (code, signal) => {
+    log(`main: API helper (pid=${child.pid}) exited (code=${code}, signal=${signal}, intentional=${intentionalExit || restarting || quitting})`);
+    if (child !== apiProcess) return;
+    if (quitting || intentionalExit || restarting) return;
+    if (code !== 0 && code !== null) {
       dialog.showErrorBox("ConsistenCy", "The audit service stopped unexpectedly. See the local application log.");
     }
   });
@@ -380,33 +418,35 @@ async function waitForHealth(timeoutMs) {
 async function restartApi() {
   if (quitting) return { ok: false, error: "Application is shutting down" };
   log("main: runtime restart requested");
-  if (apiProcess) {
-    try {
-      apiProcess.removeAllListeners("exit");
-      apiProcess.removeAllListeners("error");
-      apiProcess.kill();
-    } catch {
-      // already stopped
+  restarting = true;
+  const oldProcess = apiProcess;
+  apiProcess = null;
+  try {
+    if (oldProcess) {
+      await stopChildProcess(oldProcess, 4000);
     }
-    apiProcess = null;
+    const nodeHelper = resolveNode22();
+    const python = resolvePython312();
+    if (!nodeHelper || !python) {
+      throw new Error("Required Node.js 22 or Python 3.12 runtime is unavailable");
+    }
+    apiPort = DEV_URL
+      ? Number(process.env.CONSISTENCY_DESKTOP_PORT ?? 8787)
+      : await reserveLoopbackPort();
+    apiToken = randomBytes(32).toString("base64url");
+    desktopControlToken = randomBytes(32).toString("base64url");
+    startApi(nodeHelper, python);
+    if (!await waitForHealth(30_000)) {
+      throw new Error("The audit service did not become healthy after restart within 30 seconds");
+    }
+    log(`main: API helper restarted (port=${apiPort})`);
+    return { ok: true };
+  } catch (error) {
+    log(`main: restartApi failed: ${error && error.message ? error.message : "unknown"}`);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    restarting = false;
   }
-  await new Promise(resolve => setTimeout(resolve, 300));
-  const nodeHelper = resolveNode22();
-  const python = resolvePython312();
-  if (!nodeHelper || !python) {
-    throw new Error("Required Node.js 22 or Python 3.12 runtime is unavailable");
-  }
-  apiPort = DEV_URL
-    ? Number(process.env.CONSISTENCY_DESKTOP_PORT ?? 8787)
-    : await reserveLoopbackPort();
-  apiToken = randomBytes(32).toString("base64url");
-  desktopControlToken = randomBytes(32).toString("base64url");
-  startApi(nodeHelper, python);
-  if (!await waitForHealth(30_000)) {
-    throw new Error("The audit service did not become healthy after restart within 30 seconds");
-  }
-  log(`main: API helper restarted (port=${apiPort})`);
-  return { ok: true };
 }
 
 function safeAssetPath(url) {
@@ -727,8 +767,11 @@ app.on("window-all-closed", () => {
 });
 app.on("before-quit", () => {
   quitting = true;
-  if (apiProcess) {
-    try { apiProcess.kill(); } catch { /* already gone */ }
+  intentionalExit = true;
+  const child = apiProcess;
+  apiProcess = null;
+  if (child) {
+    try { child.kill(); } catch { /* already gone */ }
   }
   updateCoordinator?.dispose();
   updateCoordinator = null;

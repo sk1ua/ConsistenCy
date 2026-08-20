@@ -111,6 +111,8 @@ test.describe("desktop repository security boundary", () => {
     expect(main).toContain('ipcMain.handle("runtime:restart"');
     expect(main).toContain('ipcMain.handle("app:build-info"');
     expect(main).toContain("async function restartApi()");
+    expect(main).toContain("function stopChildProcess(");
+    expect(main).toContain("if (child !== apiProcess || quitting || intentionalExit || restarting) return;");
     expect(preload).toContain('appVersion: () => ipcRenderer.invoke("app:version")');
     expect(preload).toContain('buildInfo: () => ipcRenderer.invoke("app:build-info")');
     expect(preload).toContain('selectRepository: () => ipcRenderer.invoke("repositories:select")');
@@ -143,5 +145,13 @@ test.describe("desktop repository security boundary", () => {
       ...publicRepository,
       displayName: selectedPath
     })).toThrow(/local path/i);
+  });
+
+  test("verifies desktop pack enforces clean tree and resolves dynamic git commit", () => {
+    const packScript = readFileSync(resolve(repositoryRoot, "scripts", "desktop-pack.mjs"), "utf8");
+    expect(packScript).toContain('spawnSync("git", ["status", "--porcelain"]');
+    expect(packScript).toContain("clean Git working tree");
+    expect(packScript).toContain('spawnSync("git", ["rev-parse", "HEAD"]');
+    expect(packScript).toContain("apiDistModules");
   });
 });
