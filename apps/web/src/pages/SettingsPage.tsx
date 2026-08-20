@@ -49,6 +49,30 @@ function withDesktopCredentialStatus(settings: SettingsSnapshot, status: Desktop
   };
 }
 
+function formatSettingsError(error: unknown, t: (key: string) => string): string {
+  if (!error) return "";
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.includes("SETTINGS_READ_ONLY") || raw.includes("Settings updates are disabled")) {
+    return t("Settings updates are disabled");
+  }
+  if (raw.includes("DESKTOP_CREDENTIAL_BOUNDARY") || raw.includes("protected credential bridge")) {
+    return t("Desktop credentials must be stored through the protected credential bridge");
+  }
+  if (raw.includes("Credential value must contain at least 8 characters")) {
+    return t("Credential value must contain at least 8 characters");
+  }
+  if (raw.includes("Credential key is not allowed")) {
+    return t("Credential key is not allowed");
+  }
+  if (raw.includes("SETTINGS_UNAVAILABLE") || raw.includes("Settings service is unavailable")) {
+    return t("Settings service is unavailable");
+  }
+  if (raw.includes("Could not save settings")) {
+    return t("Could not save settings");
+  }
+  return raw;
+}
+
 function ConfigRow({ icon: Icon, label, value, ok }: { icon: typeof Github; label: string; value: string; ok?: boolean }) {
   return <div className="config-row"><Icon size={18} /><span><strong>{label}</strong><small>{value}</small></span>{ok === undefined ? null : ok ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}</div>;
 }
@@ -68,8 +92,16 @@ function SecretField({ name, label, configured, value, clear, help, helpHref, mu
   const { t } = useI18n();
   const id = `setting-${name}`;
   const helpId = `${id}-help`;
+  const isPendingSave = Boolean(value.trim());
+  const statusLabel = isPendingSave
+    ? t("Pending save")
+    : configured && !clear
+    ? t("Saved")
+    : t("Not configured");
+  const statusClass = isPendingSave ? "pending" : configured && !clear ? "configured" : "missing";
+
   return <div className="setting-field secret-field">
-    <label htmlFor={id}>{t(label)}<span className={configured ? "configured" : "missing"}>{t(configured ? "Configured" : "Not configured")}</span></label>
+    <label htmlFor={id}>{t(label)}<span className={statusClass}>{statusLabel}</span></label>
     {multiline
       ? <textarea id={id} aria-describedby={helpId} rows={3} value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Paste a PEM key or enter a readable file path")} />
       : <input id={id} aria-describedby={helpId} type="password" autoComplete="new-password" value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Enter a new secret")} />}
@@ -94,10 +126,16 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
   const [restarting, setRestarting] = useState(false);
   const [restartNeeded, setRestartNeeded] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string }>();
+  const [buildInfo, setBuildInfo] = useState<{ version: string; commitSha: string } | null>(null);
 
   useEffect(() => {
     let active = true;
     const bridge = desktopBridge();
+    if (bridge?.buildInfo) {
+      bridge.buildInfo().then(info => {
+        if (active && info?.version) setBuildInfo(info);
+      }).catch(() => {});
+    }
     void Promise.all([
       api.settings(),
       bridge?.credentialStatus().catch(() => undefined)
@@ -107,10 +145,10 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       setSettings(loaded);
       setDraft(loaded);
     }).catch(error => {
-      if (active) setMessage({ tone: "error", text: error instanceof Error ? error.message : t("Could not load settings") });
+      if (active) setMessage({ tone: "error", text: formatSettingsError(error, t) });
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [t]);
 
   function updateSecret(name: SecretName, value: string) {
     setSecrets(current => ({ ...current, [name]: value }));
@@ -189,7 +227,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       setRestartNeeded(true);
       setMessage({ tone: "success", text: t("Settings saved. Restart the API to apply the new runtime configuration.") });
     } catch (error) {
-      setMessage({ tone: "error", text: error instanceof Error ? error.message : t("Could not save settings") });
+      setMessage({ tone: "error", text: formatSettingsError(error, t) });
     } finally {
       setSaving(false);
     }
@@ -232,6 +270,11 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
           <p>{t("Configure models, GitHub connections, and review worker runtime settings.")}</p>
         </div>
       </div>
+      {buildInfo && (
+        <div className="settings-build-badge" title={`Commit ${buildInfo.commitSha}`}>
+          <code>ConsistenCy {buildInfo.version} · build {buildInfo.commitSha.slice(0, 7)}</code>
+        </div>
+      )}
     </section>
 
     {message && (

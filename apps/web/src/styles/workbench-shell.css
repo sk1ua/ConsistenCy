@@ -710,6 +710,98 @@
   overflow: hidden;
 }
 
+.modal-card.connect-repo-modal {
+  max-width: 600px;
+  width: 92%;
+}
+
+.connect-option-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.connect-option-block:focus-within {
+  border-color: var(--primary);
+}
+
+.connect-option-block .option-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.connect-option-block .option-head svg {
+  color: var(--primary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.connect-option-block .option-head strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.connect-option-block .option-head p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.connect-option-block .connect-action-btn {
+  height: 38px;
+  min-height: 38px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  align-self: flex-start;
+}
+
+.public-connect-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.public-connect-input-group input {
+  flex: 1;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+}
+
+.public-connect-input-group input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.public-connect-input-group button {
+  height: 38px;
+  min-height: 38px;
+  font-size: 14px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
 .modal-header {
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);

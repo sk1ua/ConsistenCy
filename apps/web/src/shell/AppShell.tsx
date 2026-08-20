@@ -58,6 +58,7 @@ import type { ThemePreference } from "../theme";
 import { nextTabId } from "../utils/tabNavigation";
 import { useWorkbenchLayout, WORKBENCH_BOUNDS } from "./useWorkbenchLayout";
 import { AgentInspectorContent } from "../components/runtime/RuntimePanel";
+import { desktopBridge } from "../desktop";
 
 export type DataNotice = {
   id: string;
@@ -522,6 +523,7 @@ function ContextInspectorDock({
   onClose: () => void;
 }) {
   const scope = useId();
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const report = context?.report;
   const job = context?.job;
   const agent = context?.agent;
@@ -546,7 +548,11 @@ function ContextInspectorDock({
     if (!next) return;
     event.preventDefault();
     onTab(next);
-    window.requestAnimationFrame(() => document.getElementById(`${scope}-inspector-tab-${next}`)?.focus());
+    tabRefs.current[next]?.focus();
+    window.requestAnimationFrame(() => {
+      tabRefs.current[next]?.focus();
+      document.getElementById(`${scope}-inspector-tab-${next}`)?.focus();
+    });
   }
 
   return (
@@ -568,6 +574,7 @@ function ContextInspectorDock({
               <button
                 id={`${scope}-inspector-tab-${id}`}
                 key={id}
+                ref={el => { tabRefs.current[id] = el; }}
                 type="button"
                 role="tab"
                 aria-selected={activeTab === id}
@@ -617,9 +624,15 @@ function ContextInspectorDock({
               </div>
             ) : (
               <div className="inspector-decision">
-                <strong>{report ? `${copy.legacyDecisionSignal} · ${report.score}/100` : copy.notRecorded}</strong>
-                {report && <p>{report.summary}</p>}
-                <small>{copy.humanDecisionPending}</small>
+                {report ? (
+                  <>
+                    <strong>{`${copy.legacyDecisionSignal} · ${report.score}/100`}</strong>
+                    <p>{report.summary}</p>
+                    <small>{copy.humanDecisionPending}</small>
+                  </>
+                ) : (
+                  <small>{copy.humanDecisionPending}</small>
+                )}
               </div>
             )}
           </div>
@@ -639,6 +652,19 @@ function StatusBar({ health, healthUnavailable, pulse, selectedRepository, jobs,
 }) {
   const activeJobs = jobs.filter(j => j.status === "running" || j.status === "queued");
   const apiLabel = healthUnavailable ? copy.unavailable : health ? copy.connected : copy.checking;
+  const [buildProvenance, setBuildProvenance] = useState<string | null>(null);
+
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (bridge?.buildInfo) {
+      bridge.buildInfo().then(info => {
+        if (info && info.version) {
+          const sha = info.commitSha && info.commitSha !== "unknown" ? ` · build ${info.commitSha.slice(0, 7)}` : "";
+          setBuildProvenance(`ConsistenCy ${info.version}${sha}`);
+        }
+      }).catch(() => {});
+    }
+  }, []);
 
   return (
     <footer className="audit-status-bar">
@@ -655,6 +681,7 @@ function StatusBar({ health, healthUnavailable, pulse, selectedRepository, jobs,
           : copy.noActiveRuns}
       </Link>
       <span className="status-spacer" />
+      {buildProvenance && <span title={buildProvenance}><Sparkles size={11} />{buildProvenance}</span>}
       <span><ShieldCheck size={11} />{copy.localFirst}</span>
     </footer>
   );
@@ -847,6 +874,28 @@ export function AppShell({
     }
   }, [path, repositories]);
 
+  const hasInspectableSelection = Boolean(
+    inspectorContext?.runId ||
+    inspectorContext?.agent ||
+    inspectorContext?.finding
+  );
+
+  useEffect(() => {
+    if (!hasInspectableSelection && layout.inspectorOpen) {
+      setInspectorOpen(false);
+    }
+  }, [hasInspectableSelection, layout.inspectorOpen, setInspectorOpen]);
+
+  const prevSelectionKey = useRef<string | undefined>(inspectorContext?.agent?.agentId ?? inspectorContext?.finding?.id);
+  useEffect(() => {
+    const currentKey = inspectorContext?.agent?.agentId ?? inspectorContext?.finding?.id;
+    if (currentKey && currentKey !== prevSelectionKey.current) {
+      setInspectorOpen(true);
+    }
+    prevSelectionKey.current = currentKey;
+  }, [inspectorContext?.agent?.agentId, inspectorContext?.finding?.id, setInspectorOpen]);
+
+  const isInspectorVisible = layout.inspectorOpen && hasInspectableSelection;
   const explorerHidden = compactExplorer ? !explorerOpen : layout.explorerCollapsed;
   const shellStyle = {
     "--explorer-width": `${layout.explorerWidth}px`,
@@ -1058,9 +1107,11 @@ export function AppShell({
             </button>
             <button
               type="button"
-              className={layout.inspectorOpen ? "shell-icon-button active" : "shell-icon-button"}
+              className={isInspectorVisible ? "shell-icon-button active" : "shell-icon-button"}
               aria-label={copy.inspector}
-              aria-expanded={layout.inspectorOpen}
+              aria-expanded={isInspectorVisible}
+              disabled={!hasInspectableSelection}
+              title={hasInspectableSelection ? copy.inspector : (zh ? "无选中的检查上下文" : "No inspectable context selected")}
               onClick={() => setInspectorOpen(!layout.inspectorOpen)}
             >
               <PanelRight size={16} />
@@ -1069,7 +1120,7 @@ export function AppShell({
         </header>
 
         {/* 3. Main Workspace + Single Adaptive Context Inspector */}
-        <div className={`workbench-frame${layout.inspectorOpen ? " inspector-open" : ""}`}>
+        <div className={`workbench-frame${isInspectorVisible ? " inspector-open" : ""}`}>
           <main className="audit-workbench">
             <div className="audit-route-scroll" role="region" aria-label={meta.title} tabIndex={0}>
               <div className="app-content audit-route-content">
@@ -1088,7 +1139,7 @@ export function AppShell({
             </div>
           </main>
           <ContextInspectorDock
-            open={layout.inspectorOpen}
+            open={isInspectorVisible}
             width={layout.inspectorWidth}
             onResize={setInspectorWidth}
             copy={copy}

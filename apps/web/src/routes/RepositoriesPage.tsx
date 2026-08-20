@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, type KeyboardEvent } from "react";
 import type { HeartbeatPulse, Repository, ReviewJob } from "@consistency/schema";
 import {
   Activity,
@@ -64,6 +64,38 @@ export function RepositoriesPage({
   const [filterQuery, setFilterQuery] = useState("");
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [publicRepoInput, setPublicRepoInput] = useState("");
+  const connectButtonRef = useRef<HTMLButtonElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (connectModalOpen) {
+      firstInputRef.current?.focus();
+    }
+  }, [connectModalOpen]);
+
+  function closeConnectModal() {
+    setConnectModalOpen(false);
+    window.requestAnimationFrame(() => connectButtonRef.current?.focus());
+  }
+
+  function handleModalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeConnectModal();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...(modalRef.current?.querySelectorAll<HTMLElement>("input, button:not([disabled]), [tabindex='0']") ?? [])]
+      .filter(el => !el.hasAttribute("disabled") && el.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+    const nextIndex = event.shiftKey
+      ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+      : (currentIndex >= focusable.length - 1 ? 0 : currentIndex + 1);
+    event.preventDefault();
+    focusable[nextIndex]?.focus();
+  }
 
   const sources = useMemo(() => {
     const byName = new Map<string, { name: string; jobs: ReviewJob[] }>();
@@ -133,8 +165,11 @@ export function RepositoriesPage({
 
         <div className="hub-intro-actions">
           <button
+            ref={connectButtonRef}
             type="button"
             className="primary-button connect-btn-main"
+            aria-haspopup="dialog"
+            aria-expanded={connectModalOpen}
             onClick={() => setConnectModalOpen(true)}
           >
             <FolderPlus size={14} /> {zh ? "连接仓库" : "Connect repository"}
@@ -239,28 +274,35 @@ export function RepositoriesPage({
 
       {/* Connect Repository Modal */}
       {connectModalOpen && (
-        <div className="modal-backdrop" onClick={() => setConnectModalOpen(false)}>
-          <div className="modal-card connect-repo-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) closeConnectModal(); }}>
+          <div
+            ref={modalRef}
+            className="modal-card connect-repo-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="connect-repo-modal-title"
+            onKeyDown={handleModalKeyDown}
+          >
             <div className="modal-header">
               <div>
                 <span className="panel-kicker">{zh ? "接入代码" : "Repository Workspace"}</span>
-                <h3>{zh ? "连接代码仓库" : "Connect Repository"}</h3>
+                <h3 id="connect-repo-modal-title">{zh ? "连接代码仓库" : "Connect Repository"}</h3>
               </div>
-              <button type="button" className="drawer-close-btn" onClick={() => setConnectModalOpen(false)}><X size={16} /></button>
+              <button type="button" className="drawer-close-btn" aria-label={zh ? "关闭" : "Close"} onClick={closeConnectModal}><X size={16} /></button>
             </div>
             <div className="modal-body">
               {/* Option 1: Local */}
               {canSelectRepository && (
                 <div className="connect-option-block">
                   <div className="option-head">
-                    <FolderGit2 size={18} />
+                    <FolderGit2 size={20} />
                     <div>
                       <strong>{zh ? "本地 Git 仓库" : "Local Git Repository"}</strong>
                       <p>{zh ? "通过受保护的系统目录选择器打开本地工作树，路径安全隔离" : "Select a local worktree via privileged desktop dialog"}</p>
                     </div>
                   </div>
-                  <button type="button" className="primary-button btn-small" onClick={() => { setConnectModalOpen(false); onAddRepository?.(); }}>
-                    <FolderPlus size={14} /> {zh ? "选择本地文件夹" : "Select local folder"}
+                  <button type="button" className="primary-button connect-action-btn" onClick={() => { closeConnectModal(); onAddRepository?.(); }}>
+                    <FolderPlus size={15} /> {zh ? "选择本地文件夹" : "Select local folder"}
                   </button>
                 </div>
               )}
@@ -268,7 +310,7 @@ export function RepositoriesPage({
               {/* Option 2: Public GitHub */}
               <form onSubmit={handleConnectPublic} className="connect-option-block">
                 <div className="option-head">
-                  <Github size={18} />
+                  <Github size={20} />
                   <div>
                     <strong>{zh ? "公开 GitHub 仓库" : "Public GitHub Repository"}</strong>
                     <p>{zh ? "输入 owner/repo 或 GitHub URL，直接浏览 PR 与代码并启动只读审查" : "Enter owner/repo or URL to inspect PRs and launch read-only review"}</p>
@@ -276,12 +318,14 @@ export function RepositoriesPage({
                 </div>
                 <div className="public-connect-input-group">
                   <input
+                    ref={firstInputRef}
                     type="text"
+                    aria-label={zh ? "公开 GitHub 仓库地址" : "Public GitHub repository URL"}
                     placeholder="e.g. openai/codex or github.com/owner/repo"
                     value={publicRepoInput}
                     onChange={e => setPublicRepoInput(e.target.value)}
                   />
-                  <button type="submit" className="primary-button btn-small" disabled={!publicRepoInput.trim()}>
+                  <button type="submit" className="primary-button connect-action-btn" disabled={!publicRepoInput.trim()}>
                     {zh ? "连接" : "Connect"}
                   </button>
                 </div>
