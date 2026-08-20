@@ -329,7 +329,8 @@ export const api = {
     }));
   },
   async triggerLocalReview(input: {
-    repoPath: string;
+    repositoryId?: string;
+    repoPath?: string;
     baseRef?: string;
     headRef?: string;
     model?: ReviewModelOverride;

@@ -2,7 +2,7 @@ import { request } from "node:http";
 import { createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
@@ -748,5 +748,71 @@ describe("createApiServer", () => {
       })
     });
     expect(mockRes.status).toBe(400);
+  });
+
+  it("admits local review via registered repositoryId resolving canonical path without exposing paths to renderer", async () => {
+    const jobs = new InMemoryJobQueue();
+    let invokedRepoPath: string | undefined;
+    const server = createApiServer({
+      jobs,
+      auditStore: {
+        getLocalRepositoryPath: (id: string) => id === "repo_registered_123" ? "D:/canonical/repo-path" : undefined,
+        listRepositories: () => [{
+          id: "repo_registered_123",
+          displayName: "My Registered Repo",
+          source: "local_git",
+          monitoringEnabled: true,
+          createdAt: "2026-08-14T00:00:00.000Z",
+          updatedAt: "2026-08-14T00:00:00.000Z"
+        }]
+      } as any,
+      localReview: async input => {
+        invokedRepoPath = input.repoPath;
+        const job = jobs.enqueue({
+          kind: "pull_request",
+          repository: "My Registered Repo",
+          repoPath: input.repoPath,
+          accessMode: "local_git",
+          publicationPolicy: "disabled",
+          baseSha: "base123",
+          headSha: "head123",
+          action: "local_trigger"
+        });
+        return { jobId: job.id };
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const res = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repositoryId: "repo_registered_123",
+        baseRef: "main",
+        headRef: "v3-pr2"
+      })
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json() as any;
+    expect(body.jobId).toBeTruthy();
+    expect(body.status).toBe("queued");
+    expect(invokedRepoPath).toBe(resolve("D:/canonical/repo-path"));
+
+    const unknownRes = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repositoryId: "repo_unknown_999"
+      })
+    });
+    expect(unknownRes.status).toBe(404);
+
+    const emptyRes = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    });
+    expect(emptyRes.status).toBe(400);
   });
 });

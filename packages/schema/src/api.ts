@@ -44,12 +44,21 @@ export const publicPrRequestSchema = z.object({
 }).strict();
 
 export const localReviewRequestSchema = z.object({
-  repoPath: z.string().trim().min(1).max(4_096),
+  repositoryId: z.string().trim().min(1).max(255).optional(),
+  repoPath: z.string().trim().min(1).max(4_096).optional(),
   baseRef: z.string().trim().min(1).max(255).optional(),
   headRef: z.string().trim().min(1).max(255).optional(),
   model: reviewModelOverrideSchema.optional(),
   llm: reviewModelOverrideSchema.optional()
-}).strict();
+}).strict().superRefine((data, ctx) => {
+  if (!data.repositoryId && !data.repoPath) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Either repositoryId or repoPath is required",
+      path: ["repositoryId"]
+    });
+  }
+});
 
 export const localReviewResponseSchema = z.object({
   jobId: z.string().trim().min(1),

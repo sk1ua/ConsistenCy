@@ -1,4 +1,5 @@
 import { createApiServer } from "./http";
+import { findProjectRoot } from "./config/settings";
 import { loadRuntimeConfig } from "./config/runtime";
 import { logger } from "./config/logger";
 import { openDatabase } from "./db/connection";
@@ -263,7 +264,12 @@ export const server = createApiServer({
     if (heartbeatRoot && heartbeatRoot !== "unknown") {
       registeredLocalRoots.push(heartbeatRoot);
     }
-    const combinedRoots = [...config.localReviewRoots, ...registeredLocalRoots];
+    const projectRoot = findProjectRoot();
+    const combinedRoots = [
+      ...config.localReviewRoots,
+      ...registeredLocalRoots,
+      ...(projectRoot ? [projectRoot] : [])
+    ];
 
     return triggerLocalReview(jobs, input, {
       allowedRoots: combinedRoots

@@ -140,7 +140,7 @@ async function selectAndRegisterRepository({ showOpenDialog, parentWindow, regis
       monitoringEnabled: true
     });
     const repository = toRendererSafeRepository(response && response.repository ? response.repository : response);
-    if (repository.source !== "local_git" || repository.trustLevel !== "untrusted_readonly") {
+    if (repository.source !== "local_git" || !["untrusted_readonly", "trusted_local"].includes(repository.trustLevel)) {
       throw new TypeError("Invalid local repository response");
     }
     return Object.freeze({ canceled: false, repository });

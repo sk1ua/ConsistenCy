@@ -686,8 +686,9 @@ function StatusBar({ health, healthUnavailable, pulse, selectedRepository, jobs,
   );
 }
 
-function CommandPalette({ copy, onClose, onNavigate }: {
+function CommandPalette({ copy, zh, onClose, onNavigate }: {
   copy: Copy;
+  zh: boolean;
   onClose: () => void;
   onNavigate: (to: string) => void;
 }) {
@@ -1153,7 +1154,7 @@ export function AppShell({
 
       {/* 4. Minimal Status Bar */}
       <StatusBar health={health} healthUnavailable={healthUnavailable} pulse={pulse} selectedRepository={selectedRepository} jobs={jobs} copy={copy} />
-      {commandPaletteOpen && <CommandPalette copy={copy} onClose={closeCommandPalette} onNavigate={to => { navigate(to); closeCommandPalette(); }} />}
+      {commandPaletteOpen && <CommandPalette copy={copy} zh={zh} onClose={closeCommandPalette} onNavigate={to => { navigate(to); closeCommandPalette(); }} />}
     </div>
   );
 }

@@ -1,5 +1,4 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { resolve } from "node:path";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z, ZodError } from "zod";
 import {
@@ -29,19 +28,32 @@ import {
 import type { HeartbeatPulse, HeartbeatStreamEvent, VcsChangedFile } from "@consistency/schema";
 import { LocalGitAdapter, parseGitHubRemote } from "@consistency/vcs-core";
 import { existsSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import { ReviewModelResolutionError, type ResolvedReviewModel } from "./review/llm/factory";
 
 function resolveLocalPathForRepository(repositoryId: string, options: CreateApiServerOptions): string | undefined {
-  if (options.auditStore?.getLocalRepositoryPath) {
-    const fromStore = options.auditStore.getLocalRepositoryPath(repositoryId);
-    if (fromStore && existsSync(fromStore)) return fromStore;
+  if (options.auditStore) {
+    const direct = options.auditStore.getLocalRepositoryPath?.(repositoryId);
+    if (direct) return resolve(direct);
+
+    const repos = options.auditStore.listRepositories?.() ?? [];
+    const matched = repos.find(r =>
+      r.id === repositoryId ||
+      r.remoteFullName === repositoryId ||
+      r.displayName === repositoryId ||
+      (repositoryId.startsWith("local:") && r.displayName === repositoryId.replace(/^local:/, ""))
+    );
+    if (matched && matched.source === "local_git") {
+      const p = options.auditStore.getLocalRepositoryPath?.(matched.id);
+      if (p) return resolve(p);
+    }
   }
   const heartbeatPulse = options.heartbeat?.latest?.();
   if (heartbeatPulse?.repository.root && heartbeatPulse.repository.root !== "unknown") {
     const pulseRoot = heartbeatPulse.repository.root;
     const pulseName = pulseRoot.split(/[\\/]/).filter(Boolean).at(-1);
     if (repositoryId === `local:${pulseName}` || repositoryId === pulseName || repositoryId === pulseRoot) {
-      if (existsSync(pulseRoot)) return pulseRoot;
+      return resolve(pulseRoot);
     }
   }
   const projectRoot = findProjectRoot();
@@ -53,7 +65,10 @@ function resolveLocalPathForRepository(repositoryId: string, options: CreateApiS
     repositoryId === `local:${projectName}` ||
     repositoryId.startsWith("local:ConsistenCy")
   ) {
-    if (existsSync(projectRoot) && existsSync(resolve(projectRoot, ".git"))) return projectRoot;
+    return resolve(projectRoot);
+  }
+  if (repositoryId && (isAbsolute(repositoryId) || repositoryId.startsWith(".") || repositoryId.includes("/") || repositoryId.includes("\\"))) {
+    return resolve(repositoryId);
   }
   return undefined;
 }
@@ -1207,7 +1222,7 @@ const routes: Route[] = [
         body = localReviewRequestSchema.parse(await readJson(request));
       } catch (error) {
         if (error instanceof ZodError) {
-          throw new ApiError("A repository path is required", "INVALID_LOCAL_REVIEW_REQUEST", 400);
+          throw new ApiError("A valid repository identity is required", "INVALID_LOCAL_REVIEW_REQUEST", 400);
         }
         throw error;
       }
@@ -1225,14 +1240,10 @@ const routes: Route[] = [
         }
       }
 
-      let targetPath = body.repoPath;
-      if (body.repositoryId) {
-        targetPath = resolveLocalPathForRepository(body.repositoryId, options) ?? body.repoPath;
-      } else if (body.repoPath) {
-        targetPath = resolveLocalPathForRepository(body.repoPath, options) ?? body.repoPath;
-      }
+      const requested = body.repositoryId ?? body.repoPath;
+      const targetPath = requested ? resolveLocalPathForRepository(requested, options) : undefined;
       if (!targetPath) {
-        throw new ApiError("A valid local repository path is required", "LOCAL_REPOSITORY_NOT_FOUND", 404);
+        throw new ApiError("The requested local repository could not be found or is not registered", "LOCAL_REPOSITORY_NOT_FOUND", 404);
       }
 
       let result: { jobId: string };
@@ -1244,12 +1255,19 @@ const routes: Route[] = [
           llmProvider: resolvedModel?.provider,
           llmModel: resolvedModel?.model
         });
-      } catch (error) {
-        if (error instanceof LocalTriggerError) {
-          const status = error.code === "PATH_NOT_ALLOWED"
+      } catch (error: any) {
+        if (
+          error instanceof LocalTriggerError ||
+          error?.name === "LocalTriggerError" ||
+          error?.code === "PATH_NOT_ALLOWED" ||
+          error?.code === "NOTHING_TO_REVIEW" ||
+          error?.code === "NOT_A_REPOSITORY"
+        ) {
+          const code = error.code ?? "LOCAL_REVIEW_ERROR";
+          const status = code === "PATH_NOT_ALLOWED"
             ? 403
-            : error.code === "NOTHING_TO_REVIEW" ? 409 : 400;
-          throw new ApiError(error.message, error.code, status);
+            : code === "NOTHING_TO_REVIEW" ? 409 : 400;
+          throw new ApiError(error.message, code, status);
         }
         throw error;
       }

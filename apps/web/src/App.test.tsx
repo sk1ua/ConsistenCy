@@ -35,7 +35,7 @@ describe("App", () => {
     expect(html).toContain("Repositories");
     expect(html).toContain("Runs");
     expect(html).toContain("Findings");
-    expect(html).toContain("Automations");
+    expect(html).toContain("Workflows");
     expect(html).toContain("Settings");
   });
 
@@ -70,7 +70,7 @@ describe("App", () => {
 
     expect(html).toContain("收件箱");
     expect(html).toContain("仓库");
-    expect(html).toContain("自动化");
+    expect(html).toContain("工作流");
     expect(html).toContain("中文");
   });
 });

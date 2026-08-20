@@ -21,7 +21,8 @@ test.describe("desktop shell", () => {
         CONSISTENCY_NODE_HELPER: process.execPath,
         CONSISTENCY_PYTHON_PATH: python,
         CONSISTENCY_WORKERS_ENABLED: "false",
-        CONSISTENCY_HEARTBEAT_ENABLED: "false"
+        CONSISTENCY_HEARTBEAT_ENABLED: "false",
+        DEEPSEEK_API_KEY: "test-deepseek-key-12345"
       }
     });
     try {
@@ -49,7 +50,6 @@ test.describe("desktop shell", () => {
         const updates = desktop?.updates;
         const buildInfo = desktop?.buildInfo ? await desktop.buildInfo() : null;
 
-        // Verify PUT /api/settings works inside Electron desktop
         const settingsUpdate = await fetch("/api/settings", {
           method: "PUT",
           headers: { "content-type": "application/json" },
@@ -62,11 +62,31 @@ test.describe("desktop shell", () => {
           })
         });
 
+        const localReview = await fetch("/api/reviews/local", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            repositoryId: "sk1ua/ConsistenCy",
+            baseRef: "72ff4ee",
+            headRef: "HEAD"
+          })
+        });
+
+        const localReviewBody = await localReview.json();
+        const apiLog = await (async () => {
+          try {
+            const fs = (window as any).require ? (window as any).require("node:fs") : null;
+            return fs ? "has-fs" : "no-fs";
+          } catch { return "error"; }
+        })();
+
         return {
           healthy: response.ok,
           internalStatus: internalResponse.status,
           settingsUpdateStatus: settingsUpdate.status,
           settingsUpdateOk: settingsUpdate.ok,
+          localReviewStatus: localReview.status,
+          localReviewBody,
           buildInfo,
           methods: desktop ? Object.keys(desktop).sort() : [],
           updateMethods: updates ? Object.keys(updates).sort() : [],
@@ -79,6 +99,10 @@ test.describe("desktop shell", () => {
       expect(boundary.internalStatus).toBe(404);
       expect(boundary.settingsUpdateStatus).toBe(200);
       expect(boundary.settingsUpdateOk).toBe(true);
+      expect(boundary.localReviewStatus).toBe(202);
+      expect(boundary.localReviewBody).toMatchObject({
+        status: "queued"
+      });
       expect(boundary.buildInfo).toMatchObject({
         version: "0.1.1",
         buildMode: "development"
