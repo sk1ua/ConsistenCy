@@ -131,4 +131,11 @@ describe("triggerLocalReview", () => {
     await expect(triggerLocalReview(jobs, { repoPath: REPO, headRef: "feature" }, deps()))
       .rejects.toMatchObject({ code: "NOTHING_TO_REVIEW" });
   });
+
+  it("handles case-insensitive canonical path equivalence on Windows", async () => {
+    const jobs = new InMemoryJobQueue();
+    const alternateCasePath = REPO.toLowerCase();
+    await expect(triggerLocalReview(jobs, { repoPath: alternateCasePath }, deps()))
+      .resolves.toMatchObject({ jobId: expect.stringContaining("job_") });
+  });
 });

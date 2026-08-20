@@ -1225,10 +1225,20 @@ const routes: Route[] = [
         }
       }
 
+      let targetPath = body.repoPath;
+      if (body.repositoryId) {
+        targetPath = resolveLocalPathForRepository(body.repositoryId, options) ?? body.repoPath;
+      } else if (body.repoPath) {
+        targetPath = resolveLocalPathForRepository(body.repoPath, options) ?? body.repoPath;
+      }
+      if (!targetPath) {
+        throw new ApiError("A valid local repository path is required", "LOCAL_REPOSITORY_NOT_FOUND", 404);
+      }
+
       let result: { jobId: string };
       try {
         result = await options.localReview({
-          repoPath: body.repoPath,
+          repoPath: targetPath,
           baseRef: body.baseRef,
           headRef: body.headRef,
           llmProvider: resolvedModel?.provider,

@@ -249,9 +249,26 @@ export const server = createApiServer({
     llmModel: modelOverride?.model
   }),
   llmProviderConfigured: Boolean(provider),
-  localReview: input => triggerLocalReview(jobs, input, {
-    allowedRoots: config.localReviewRoots
-  }),
+  localReview: input => {
+    const registeredLocalRoots: string[] = [];
+    if (auditStore) {
+      for (const repo of auditStore.listRepositories()) {
+        if (repo.source === "local_git") {
+          const p = auditStore.getLocalRepositoryPath(repo.id);
+          if (p) registeredLocalRoots.push(p);
+        }
+      }
+    }
+    const heartbeatRoot = heartbeat.latest()?.repository.root;
+    if (heartbeatRoot && heartbeatRoot !== "unknown") {
+      registeredLocalRoots.push(heartbeatRoot);
+    }
+    const combinedRoots = [...config.localReviewRoots, ...registeredLocalRoots];
+
+    return triggerLocalReview(jobs, input, {
+      allowedRoots: combinedRoots
+    });
+  },
   auditStore,
   auditPlanner: auditRunPlanner,
   automationScheduler,

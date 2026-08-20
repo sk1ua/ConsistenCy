@@ -30,16 +30,20 @@ export class LocalTriggerError extends Error {
   }
 }
 
+function canonicalizePath(p: string): string {
+  const resolved = resolve(p);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
 function assertInsideAllowedRoot(repoPath: string, allowedRoots: string[]): void {
   if (allowedRoots.length === 0) {
     throw new LocalTriggerError("No local review roots are configured", "PATH_NOT_ALLOWED");
   }
+  const canonicalTarget = canonicalizePath(repoPath);
   const permitted = allowedRoots.some((root) => {
-    const resolvedRoot = resolve(root);
-    if (repoPath === resolvedRoot) return true;
-    const rel = relative(resolvedRoot, repoPath);
-    // `relative` yields a `..` segment when the target escapes the root, and an
-    // absolute path when the two are on different Windows drives.
+    const canonicalRoot = canonicalizePath(root);
+    if (canonicalTarget === canonicalRoot) return true;
+    const rel = relative(canonicalRoot, canonicalTarget);
     return rel.length > 0 && !rel.startsWith("..") && !rel.startsWith(`.${sep}.`) && !/^[A-Za-z]:/.test(rel);
   });
   if (!permitted) {

@@ -47,6 +47,24 @@ function localRepositoryName(pulse: HeartbeatPulse): string {
 
 type RepositoryView = "overview" | "changes" | "history" | "pull-requests" | "runs" | "evolution" | "findings" | "automations" | "audit-log";
 
+function formatReviewLaunchError(error: unknown, zh: boolean): string {
+  if (!error) return "";
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.includes("PATH_NOT_ALLOWED") || raw.includes("outside the configured review roots") || raw.includes("No local review roots")) {
+    return zh ? "当前仓库尚未获得本地审查授权。请尝试重新连接本地仓库。" : "This repository is not authorized for local review. Try reconnecting the repository.";
+  }
+  if (raw.includes("NOTHING_TO_REVIEW") || raw.includes("The working tree is clean") || raw.includes("no changes")) {
+    return zh ? "工作区未发现可审查的代码变更。" : "No reviewable changes found.";
+  }
+  if (raw.includes("NOT_A_REPOSITORY")) {
+    return zh ? "所选路径不是有效的 Git 仓库。" : "The selected path is not a valid Git repository.";
+  }
+  if (raw.includes("LLM_NOT_CONFIGURED") || raw.includes("LLM_PROVIDER_NOT_CONFIGURED")) {
+    return zh ? "尚未配置大语言模型，请前往设置页配置。" : "LLM not configured; configure in settings first.";
+  }
+  return safeRequestError(error, zh ? "发起审查失败" : "Could not launch review");
+}
+
 function CommitDetailModal({
   commit,
   zh,
@@ -404,11 +422,14 @@ export function RepositoryDetailPage({
       headRef?: string;
       modelOverride?: { provider: "deepseek" | "openai"; model: string };
     }) => {
-      let targetPath = registered?.source === "local_git" ? registered.displayName : (pulse?.repository.root ?? "");
+      let targetPath: string | undefined = undefined;
       if (repositoryId.startsWith("local:")) {
         targetPath = repositoryId.replace(/^local:/, "");
+      } else if (!registered && pulse?.repository.root && pulse.repository.root !== "unknown") {
+        targetPath = pulse.repository.root;
       }
       return api.triggerLocalReview({
+        repositoryId: repositoryId,
         repoPath: targetPath,
         ...(options.source === "branch" ? { baseRef: options.baseRef ?? registered?.defaultBranch ?? "main", headRef: branch } : {}),
         ...(options.modelOverride ? { model: { provider: options.modelOverride.provider, model: options.modelOverride.model } } : {})
@@ -468,7 +489,7 @@ export function RepositoryDetailPage({
     { id: "history", label: zh ? "提交历史" : "Git History", count: commits.length || undefined },
     { id: "pull-requests", label: zh ? "拉取请求" : "Pull Requests", count: prsData?.pullRequests.length || undefined },
     { id: "runs", label: zh ? "审查" : "Reviews", count: sourceJobs.length || undefined },
-    { id: "automations", label: zh ? "自动化" : "Automations", count: repositoryAutomations.length || undefined },
+    { id: "automations", label: zh ? "工作流" : "Workflows", count: repositoryAutomations.length || undefined },
   ];
 
   const selectedPr = useMemo(() => {
@@ -1003,13 +1024,13 @@ export function RepositoryDetailPage({
         <section className="section-block repo-automations-panel">
           <div className="panel-title">
             <div>
-              <span className="panel-kicker">{zh ? "持续策略绑定" : "Policy Bindings"}</span>
-              <h2>{zh ? "仓库自动化" : "Repository Automations"}</h2>
+              <span className="panel-kicker">{zh ? "工作流触发器" : "Workflow Triggers"}</span>
+              <h2>{zh ? "仓库工作流策略" : "Repository Workflow Policies"}</h2>
             </div>
-            <Link to="/automations" className="text-link">{zh ? "打开控制面" : "Open Control Plane"} →</Link>
+            <Link to="/workflows?tab=triggers" className="text-link">{zh ? "工作流控制面" : "Workflow Control Plane"} →</Link>
           </div>
           {repositoryAutomations.length === 0 ? (
-            <div className="empty-inline-compact">{zh ? "暂无绑定的自动化计划。" : "No automations bound to this repository."}</div>
+            <div className="empty-inline-compact">{zh ? "暂无绑定的工作流策略。" : "No workflow policies bound to this repository."}</div>
           ) : (
             <div className="automation-list">
               {repositoryAutomations.map(automation => (
@@ -1041,7 +1062,7 @@ export function RepositoryDetailPage({
           dirtyCount={(gitStatus?.dirtyFileCount ?? 0) + (gitStatus?.untrackedFileCount ?? 0)}
           health={health}
           submitting={startLocalReview.isPending}
-          error={startLocalReview.error ? safeRequestError(startLocalReview.error) : undefined}
+          error={startLocalReview.error ? formatReviewLaunchError(startLocalReview.error, zh) : undefined}
           zh={zh}
           onClose={() => setComposerOpen(false)}
           onStartReview={options => startLocalReview.mutate(options)}
