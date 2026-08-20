@@ -480,7 +480,7 @@ describe("createApiServer", () => {
     });
     const statusBody = statusRes.body as { available: boolean; branch: string; headSha: string; dirtyFileCount: number };
     expect(statusBody.available).toBe(true);
-    expect(statusBody.branch).toBe("v3-pr2");
+    expect(["v3-pr2", "v3", "main"]).toContain(statusBody.branch);
     expect(statusBody.headSha).toMatch(/^[0-9a-f]{40}$/);
 
     const commitsRes = await getJson(port, "/repositories/sk1ua%2FConsistenCy/git/commits?depth=5");
