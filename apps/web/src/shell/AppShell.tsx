@@ -1,3 +1,24 @@
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  FolderGit2,
+  PlayCircle,
+  ShieldAlert,
+  GitFork,
+  Settings,
+  Plus,
+  RefreshCw,
+  Sun,
+  Moon,
+  Search,
+  Activity,
+  GitBranch,
+  Cpu,
+  Layers,
+  ChevronDown,
+  CheckCircle2,
+  AlertCircle
+} from "lucide-react";
+import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import type {
   AgentRuntimeSnapshot,
   HeartbeatPulse,
@@ -6,59 +27,18 @@ import type {
   ReviewJob,
   ReviewReport
 } from "@consistency/schema";
-import {
-  Activity,
-  ArrowRight,
-  CalendarClock,
-  CheckCircle2,
-  FileCode2,
-  FileSearch2,
-  FlaskConical,
-  FolderGit2,
-  FolderPlus,
-  GitBranch,
-  GitCommit,
-  GitPullRequest,
-  Globe2,
-  Inbox,
-  Layers,
-  Menu,
-  Monitor,
-  Moon,
-  PanelRight,
-  Plus,
-  Radio,
-  RefreshCw,
-  ScanSearch,
-  Search,
-  Settings,
-  ShieldAlert,
-  ShieldCheck,
-  Sparkles,
-  Sun,
-  Terminal,
-  Workflow,
-  X
-} from "lucide-react";
-import {
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent,
-  type ReactNode
-} from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
 import type { HealthResponse } from "../api/client";
 import type { Locale } from "../i18n";
 import type { RouteMeta } from "../routes/meta";
 import type { ThemePreference } from "../theme";
-import { nextTabId } from "../utils/tabNavigation";
-import { useWorkbenchLayout, WORKBENCH_BOUNDS } from "./useWorkbenchLayout";
-import { AgentInspectorContent } from "../components/runtime/RuntimePanel";
-import { desktopBridge } from "../desktop";
+import { Button } from "../design-system/Button";
+import { IconButton } from "../design-system/IconButton";
+import { Badge } from "../design-system/Badge";
+import { Breadcrumb, type BreadcrumbItem } from "../design-system/Breadcrumb";
+import { CommandPalette } from "../design-system/CommandPalette";
+import { Inspector } from "../design-system/Inspector";
+import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
+import { desktopBridge, type DesktopBuildInfo } from "../desktop";
 
 export type DataNotice = {
   id: string;
@@ -66,776 +46,21 @@ export type DataNotice = {
   message: string;
 };
 
-type Copy = {
-  primaryNavigation: string;
-  workbenchTabs: string;
-  workspace: string;
-  inbox: string;
-  repositories: string;
-  reviews: string;
-  runs: string;
-  findings: string;
-  automations: string;
-  workflows: string;
-  settings: string;
-  monitoredRepositories: string;
-  reviewSources: string;
-  noMonitor: string;
-  noSources: string;
-  openRepositoryView: string;
-  inspector: string;
-  evidence: string;
-  agent: string;
-  decision: string;
-  inspectorEmpty: string;
-  inspectorHint: string;
-  evidenceStages: string[];
-  notRecorded: string;
-  runLedger: string;
-  noActiveRuns: string;
-  activeRuns: string;
-  queued: string;
-  refresh: string;
-  retry: string;
-  theme: string;
-  language: string;
-  openNavigation: string;
-  closeNavigation: string;
-  resizeExplorer: string;
-  resizeInspector: string;
-  source: string;
-  connected: string;
-  unavailable: string;
-  checking: string;
-  worker: string;
-  model: string;
-  localHarness: string;
-  selectedRun: string;
-  findingsRecorded: string;
-  evidenceItems: string;
-  legacyDecisionSignal: string;
-  humanDecisionPending: string;
-  noAgentRuns: string;
-  publicReadTrigger: string;
-  githubTrigger: string;
-  localTrigger: string;
-  branch: string;
-  trust: string;
-  engine: string;
-  lastScan: string;
-  noScan: string;
-  localFirst: string;
-  commandPalette: string;
-  commandPlaceholder: string;
-  noCommands: string;
-};
-
-const copyByLocale: Record<Locale, Copy> = {
-  "en-US": {
-    primaryNavigation: "Primary navigation",
-    workbenchTabs: "Open workbench tabs",
-    workspace: "Workspace",
-    inbox: "Inbox",
-    repositories: "Repositories",
-    reviews: "Reviews",
-    runs: "Runs",
-    findings: "Findings",
-    automations: "Automations",
-    workflows: "Workflows",
-    settings: "Settings",
-    monitoredRepositories: "Monitored repositories",
-    reviewSources: "Review sources",
-    noMonitor: "No live monitor connected",
-    noSources: "No review sources yet",
-    openRepositoryView: "Open repository hub",
-    inspector: "Context Inspector",
-    evidence: "Evidence",
-    agent: "Agent",
-    decision: "Decision",
-    inspectorEmpty: "Nothing selected",
-    inspectorHint: "Select an agent, finding, evidence, or commit to inspect details.",
-    evidenceStages: ["Trigger", "Snapshot SHA", "Deterministic signal", "Evidence pack", "LLM explanation", "Human decision"],
-    notRecorded: "Not recorded",
-    runLedger: "Run ledger",
-    noActiveRuns: "No active runs",
-    activeRuns: "active",
-    queued: "queued",
-    refresh: "Refresh workspace",
-    retry: "Retry failed sources",
-    theme: "Theme",
-    language: "Language",
-    openNavigation: "Open workspace explorer",
-    closeNavigation: "Close workspace explorer",
-    resizeExplorer: "Resize workspace explorer",
-    resizeInspector: "Resize context inspector",
-    source: "Source",
-    connected: "API connected",
-    unavailable: "API unavailable",
-    checking: "Checking API",
-    worker: "Worker",
-    model: "Model",
-    localHarness: "Local audit harness",
-    selectedRun: "Selected run",
-    findingsRecorded: "findings recorded",
-    evidenceItems: "evidence items",
-    legacyDecisionSignal: "Legacy quality signal",
-    humanDecisionPending: "No human disposition has been recorded.",
-    noAgentRuns: "No agent runs were recorded.",
-    publicReadTrigger: "Public PR · read-only",
-    githubTrigger: "GitHub App PR",
-    localTrigger: "Local manual review",
-    branch: "Branch",
-    trust: "Trust",
-    engine: "Engine",
-    lastScan: "Last scan",
-    noScan: "not recorded",
-    localFirst: "Local-first",
-    commandPalette: "Command palette",
-    commandPlaceholder: "Go to a workspace…",
-    noCommands: "No matching workspace"
-  },
-  "zh-CN": {
-    primaryNavigation: "主导航",
-    workbenchTabs: "已打开的工作台标签",
-    workspace: "工作区",
-    inbox: "收件箱",
-    repositories: "仓库",
-    reviews: "审查",
-    runs: "运行",
-    findings: "发现",
-    automations: "自动化",
-    workflows: "工作流",
-    settings: "设置",
-    monitoredRepositories: "监控仓库",
-    reviewSources: "审查来源",
-    noMonitor: "尚未连接实时监控",
-    noSources: "尚无审查来源",
-    openRepositoryView: "打开仓库视图",
-    inspector: "上下文检查器",
-    evidence: "证据",
-    agent: "智能体",
-    decision: "决策",
-    inspectorEmpty: "尚未选择内容",
-    inspectorHint: "在工作台中选择智能体、发现、证据或提交以查看详情。",
-    evidenceStages: ["触发", "快照 SHA", "确定性信号", "证据包", "LLM 解释", "人工决策"],
-    notRecorded: "未记录",
-    runLedger: "运行账本",
-    noActiveRuns: "没有活跃运行",
-    activeRuns: "运行中",
-    queued: "排队中",
-    refresh: "刷新工作区",
-    retry: "重试失败来源",
-    theme: "主题",
-    language: "语言",
-    openNavigation: "打开工作区浏览器",
-    closeNavigation: "关闭工作区浏览器",
-    resizeExplorer: "调整工作区浏览器宽度",
-    resizeInspector: "调整上下文检查器宽度",
-    source: "来源",
-    connected: "API 已连接",
-    unavailable: "API 不可用",
-    checking: "正在检查 API",
-    worker: "工作进程",
-    model: "模型",
-    localHarness: "本地审计 Harness",
-    selectedRun: "当前运行",
-    findingsRecorded: "项发现已记录",
-    evidenceItems: "条证据",
-    legacyDecisionSignal: "旧版质量信号",
-    humanDecisionPending: "尚未记录人工处置。",
-    noAgentRuns: "尚未记录智能体运行。",
-    publicReadTrigger: "公开 PR · 只读",
-    githubTrigger: "GitHub App PR",
-    localTrigger: "本地手动审查",
-    branch: "分支",
-    trust: "信任",
-    engine: "引擎",
-    lastScan: "最近扫描",
-    noScan: "未记录",
-    localFirst: "本地优先",
-    commandPalette: "命令面板",
-    commandPlaceholder: "转到工作区…",
-    noCommands: "没有匹配的工作区"
-  }
-};
-
-export type InspectorContext = {
+export interface InspectorContext {
   runId?: string;
   job?: ReviewJob;
   report?: ReviewReport;
   agent?: AgentRuntimeSnapshot;
   finding?: ReviewFinding;
-};
-
-export type WorkbenchTabId = "inbox" | "current";
-
-export function nextWorkbenchTabId(tabs: readonly WorkbenchTabId[], current: WorkbenchTabId, key: string): WorkbenchTabId | undefined {
-  if (!(["ArrowLeft", "ArrowRight", "Home", "End"] as const).includes(key as "ArrowLeft" | "ArrowRight" | "Home" | "End")) {
-    return undefined;
-  }
-  return nextTabId(tabs, current, key);
+  commit?: any;
+  customTitle?: string;
+  customContent?: React.ReactNode;
 }
 
-export function isCommandPaletteShortcut(event: Pick<globalThis.KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): boolean {
-  const key = event.key.toLowerCase();
-  return !event.altKey && !event.shiftKey && (event.ctrlKey || event.metaKey) && (key === "k" || key === "p");
-}
-
-function repositoryName(pulse: HeartbeatPulse): string {
-  if (pulse.repository.root === "unknown") return "Local repository";
-  return pulse.repository.root.split(/[\\/]/).filter(Boolean).at(-1) ?? "Local repository";
-}
-
-function ResizeHandle({ value, min, max, direction, label, onChange }: {
-  value: number;
-  min: number;
-  max: number;
-  direction: 1 | -1;
-  label: string;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div
-      className="workbench-resize-handle"
-      role="separator"
-      aria-label={label}
-      aria-orientation="vertical"
-      aria-valuemin={min}
-      aria-valuemax={max}
-      aria-valuenow={value}
-      tabIndex={0}
-      onKeyDown={event => {
-        if (event.key === "Home") onChange(min);
-        else if (event.key === "End") onChange(max);
-        else if (event.key === "ArrowLeft") onChange(value - 12 * direction);
-        else if (event.key === "ArrowRight") onChange(value + 12 * direction);
-        else return;
-        event.preventDefault();
-      }}
-      onPointerDown={event => {
-        event.preventDefault();
-        const originX = event.clientX;
-        const originValue = value;
-        const pointerId = event.pointerId;
-        event.currentTarget.setPointerCapture(pointerId);
-        const move = (moveEvent: PointerEvent) => onChange(originValue + (moveEvent.clientX - originX) * direction);
-        const stop = () => {
-          window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", stop);
-          window.removeEventListener("pointercancel", stop);
-        };
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", stop, { once: true });
-        window.addEventListener("pointercancel", stop, { once: true });
-      }}
-    />
-  );
-}
-
-function RepositorySidebar({
-  open,
-  hidden,
-  jobs,
-  repositories,
-  pulse,
-  copy,
-  currentPath,
-  zh,
-  onNavigate,
-  onClose
-}: {
-  open: boolean;
-  hidden: boolean;
-  jobs: ReviewJob[];
-  repositories: Repository[];
-  pulse: HeartbeatPulse | null;
-  copy: Copy;
-  currentPath: string;
-  zh: boolean;
-  onNavigate: () => void;
-  onClose: () => void;
-}) {
-  const registeredRemoteNames = useMemo(() => new Set(repositories.map(r => r.remoteFullName).filter(Boolean)), [repositories]);
-  const hasLocalPulse = Boolean(pulse);
-  const historyRepoNames = useMemo(() => {
-    return [...new Set(jobs.map(job => job.repositoryFullName).filter(name => {
-      if (registeredRemoteNames.has(name)) return false;
-      // If local repository is active, unify sk1ua/ConsistenCy with the local entry
-      if (hasLocalPulse && (name === "sk1ua/ConsistenCy" || name === "ConsistenCy")) return false;
-      return true;
-    }))];
-  }, [jobs, registeredRemoteNames, hasLocalPulse]);
-  const recentRuns = useMemo(() => jobs.slice(0, 4), [jobs]);
-
-  return (
-    <aside className={`context-explorer repo-first-sidebar${open ? " open" : ""}`} aria-label={copy.workspace} aria-hidden={hidden || undefined} inert={hidden || undefined}>
-      <div className="context-explorer-head">
-        <NavLink to="/repositories" className="sidebar-brand-link" onClick={onNavigate}>
-          <img src="/consistency-logo.png" alt="" className="brand-icon-small" />
-          <div>
-            <strong>ConsistenCy</strong>
-            <span>{copy.localHarness}</span>
-          </div>
-        </NavLink>
-        <button type="button" onClick={onClose} aria-label={copy.closeNavigation}>×</button>
-      </div>
-
-      <div className="context-explorer-scroll">
-        {/* Repositories Section */}
-        <section className="explorer-section">
-          <div className="explorer-section-title">
-            <span>{copy.repositories}</span>
-            <NavLink to="/repositories" onClick={onNavigate} title={zh ? "连接代码仓库" : "Connect repository"} className="sidebar-connect-link">
-              <Plus size={13} /> {zh ? "连接" : "Connect"}
-            </NavLink>
-          </div>
-
-          <div className="sidebar-repo-list">
-            {/* Unified Local Pulse Repository (Model A) */}
-            {pulse && (
-              <NavLink
-                to={`/repositories/${encodeURIComponent("sk1ua/ConsistenCy")}`}
-                className={`sidebar-repo-item ${currentPath.includes("ConsistenCy") || currentPath.includes("sk1ua%2FConsistenCy") ? "active" : ""}`}
-                onClick={onNavigate}
-              >
-                <span className="repo-dot monitored" />
-                <FolderGit2 size={14} className="repo-icon" />
-                <div className="repo-text-group">
-                  <strong>ConsistenCy</strong>
-                  <small>{zh ? "本地 Git · GitHub 公开" : "local · GitHub public"} · {pulse.repository.branch ?? "v3-pr2"}</small>
-                </div>
-              </NavLink>
-            )}
-
-            {/* Registered Repositories (non-local pulse) */}
-            {repositories.filter(r => !pulse || (r.displayName !== repositoryName(pulse) && r.remoteFullName !== "sk1ua/ConsistenCy")).map(repo => {
-              const active = currentPath.startsWith(`/repositories/${encodeURIComponent(repo.id)}`) || currentPath.startsWith(`/repositories/${encodeURIComponent(repo.remoteFullName ?? "")}`);
-              return (
-                <NavLink
-                  key={repo.id}
-                  to={`/repositories/${encodeURIComponent(repo.id)}`}
-                  className={`sidebar-repo-item ${active ? "active" : ""}`}
-                  onClick={onNavigate}
-                >
-                  <span className={`repo-dot ${repo.monitoringEnabled ? "monitored" : ""}`} />
-                  <FolderGit2 size={14} className="repo-icon" />
-                  <div className="repo-text-group">
-                    <strong>{repo.displayName}</strong>
-                    <small>{repo.source === "local_git" ? (zh ? "本地 Git" : "local") : (zh ? "GitHub 远端" : "GitHub")} · {repo.defaultBranch ?? "main"}</small>
-                  </div>
-                </NavLink>
-              );
-            })}
-
-            {/* History Review Repositories */}
-            {historyRepoNames.map(name => {
-              const active = currentPath.startsWith(`/repositories/${encodeURIComponent(name)}`);
-              return (
-                <NavLink
-                  key={name}
-                  to={`/repositories/${encodeURIComponent(name)}`}
-                  className={`sidebar-repo-item ${active ? "active" : ""}`}
-                  onClick={onNavigate}
-                >
-                  <span className="repo-dot" />
-                  <FolderGit2 size={14} className="repo-icon" />
-                  <div className="repo-text-group">
-                    <strong>{name}</strong>
-                    <small>{zh ? "GitHub · 公开" : "GitHub · public"}</small>
-                  </div>
-                </NavLink>
-              );
-            })}
-
-            {repositories.length === 0 && !pulse && historyRepoNames.length === 0 && (
-              <div className="explorer-empty">
-                <FolderPlus size={14} />
-                <span>{copy.noSources}</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Recent Review Runs */}
-        <section className="explorer-section">
-          <div className="explorer-section-title">
-            <span>{copy.reviews}</span>
-            <NavLink to="/runs" onClick={onNavigate}>{zh ? "全部" : "All"}</NavLink>
-          </div>
-
-          <div className="sidebar-recent-runs">
-            {recentRuns.length > 0 ? (
-              recentRuns.map(job => {
-                return (
-                  <NavLink
-                    key={job.id}
-                    to={`/runs/${encodeURIComponent(job.id)}/overview`}
-                    className={`sidebar-run-item ${currentPath.includes(job.id) ? "active" : ""}`}
-                    onClick={onNavigate}
-                  >
-                    <span className={`ledger-state ${job.status}`} />
-                    <div className="run-text-group">
-                      <strong>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : job.id.slice(0, 8)}</strong>
-                      <small>{job.repositoryFullName}</small>
-                    </div>
-                  </NavLink>
-                );
-              })
-            ) : (
-              <div className="explorer-empty">{copy.noActiveRuns}</div>
-            )}
-          </div>
-        </section>
-      </div>
-
-      {/* Fixed Bottom Navigation (No implementation labels) */}
-      <nav className="sidebar-bottom-nav" aria-label={copy.primaryNavigation}>
-        <NavLink to="/runs" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><ScanSearch size={14} /><span>{copy.runs}</span></NavLink>
-        <NavLink to="/inbox" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Inbox size={14} /><span>{copy.inbox}</span></NavLink>
-        <NavLink to="/findings" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><FileSearch2 size={14} /><span>{copy.findings}</span></NavLink>
-        <NavLink to="/workflows" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Workflow size={14} /><span>{copy.workflows}</span></NavLink>
-        <NavLink to="/settings" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Settings size={14} /><span>{copy.settings}</span></NavLink>
-      </nav>
-    </aside>
-  );
-}
-
-function ContextInspectorDock({
-  open,
-  width,
-  copy,
-  context,
-  activeTab,
-  zh,
-  onTab,
-  onResize,
-  onClose
-}: {
-  open: boolean;
-  width: number;
-  copy: Copy;
-  context?: InspectorContext;
-  activeTab: "evidence" | "agent" | "decision";
-  zh: boolean;
-  onTab: (tab: "evidence" | "agent" | "decision") => void;
-  onResize: (value: number) => void;
-  onClose: () => void;
-}) {
-  const scope = useId();
-  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const report = context?.report;
-  const job = context?.job;
-  const agent = context?.agent;
-
-  const stages = useMemo(() => [
-    job ? (job.accessMode === "public_read" ? copy.publicReadTrigger : job.accessMode === "local_git" ? copy.localTrigger : copy.githubTrigger) : undefined,
-    job?.headSha,
-    report ? `${report.findings.length} ${copy.findingsRecorded}` : undefined,
-    report?.retrieval ? `${report.retrieval.packs.length} packs · ${report.retrieval.summary.total_selected_evidence} ${copy.evidenceItems}` : undefined,
-    report?.summary,
-    undefined
-  ], [copy, job, report]);
-
-  const tabs: Array<{ id: "evidence" | "agent" | "decision"; label: string; icon: typeof FileSearch2 }> = [
-    { id: "evidence", label: copy.evidence, icon: FileSearch2 },
-    { id: "agent", label: copy.agent, icon: Terminal },
-    { id: "decision", label: copy.decision, icon: Activity }
-  ];
-
-  function handleTabKey(event: KeyboardEvent<HTMLButtonElement>, current: "evidence" | "agent" | "decision") {
-    const next = nextTabId(tabs.map(t => t.id), current, event.key);
-    if (!next) return;
-    event.preventDefault();
-    onTab(next);
-    tabRefs.current[next]?.focus();
-    window.requestAnimationFrame(() => {
-      tabRefs.current[next]?.focus();
-      document.getElementById(`${scope}-inspector-tab-${next}`)?.focus();
-    });
-  }
-
-  return (
-    <aside className={`inspector-dock ${open ? "open" : ""}`} aria-label={copy.inspector}>
-      <ResizeHandle value={width} min={WORKBENCH_BOUNDS.inspector.min} max={WORKBENCH_BOUNDS.inspector.max} direction={-1} label={copy.resizeInspector} onChange={onResize} />
-      <div className="inspector-head">
-        <strong>{copy.inspector}</strong>
-        <button type="button" onClick={onClose} aria-label="Close inspector">×</button>
-      </div>
-
-      {agent ? (
-        <div className="inspector-scroll-body">
-          <AgentInspectorContent agent={agent} zh={zh} />
-        </div>
-      ) : (
-        <>
-          <div className="inspector-tabs" role="tablist" aria-label={copy.inspector}>
-            {tabs.map(({ id, label, icon: Icon }) => (
-              <button
-                id={`${scope}-inspector-tab-${id}`}
-                key={id}
-                ref={el => { tabRefs.current[id] = el; }}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === id}
-                aria-controls={`${scope}-inspector-panel`}
-                tabIndex={activeTab === id ? 0 : -1}
-                className={activeTab === id ? "active" : ""}
-                onKeyDown={event => handleTabKey(event, id)}
-                onClick={() => onTab(id)}
-              >
-                <Icon aria-hidden="true" size={14} />
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <div id={`${scope}-inspector-panel`} className="inspector-empty" role="tabpanel" aria-labelledby={`${scope}-inspector-tab-${activeTab}`} tabIndex={0}>
-            <strong>{context?.runId ? `${copy.selectedRun} · ${context.runId}` : copy.inspectorEmpty}</strong>
-            {!context?.runId && <p>{copy.inspectorHint}</p>}
-            {activeTab === "evidence" ? (
-              <ol className="evidence-spine" aria-label={copy.evidence}>
-                {copy.evidenceStages.map((stage, index) => (
-                  <li className={stages[index] ? "recorded" : "missing"} key={stage}>
-                    <i aria-hidden="true" />
-                    <span>
-                      <strong>{stage}</strong>
-                      <small>{stages[index] ?? copy.notRecorded}</small>
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            ) : activeTab === "agent" ? (
-              <div className="inspector-agent-list">
-                {report?.agentRuns.length ? (
-                  report.agentRuns.map(run => (
-                    <article key={run.id}>
-                      <span className={`ledger-state ${run.status}`} />
-                      <div>
-                        <strong>{run.agentName}</strong>
-                        <small>{run.provider ? `${run.provider}${run.model ? ` / ${run.model}` : ""}` : copy.notRecorded}</small>
-                      </div>
-                      <code>{run.status}</code>
-                    </article>
-                  ))
-                ) : (
-                  <p>{copy.noAgentRuns}</p>
-                )}
-              </div>
-            ) : (
-              <div className="inspector-decision">
-                {report ? (
-                  <>
-                    <strong>{`${copy.legacyDecisionSignal} · ${report.score}/100`}</strong>
-                    <p>{report.summary}</p>
-                    <small>{copy.humanDecisionPending}</small>
-                  </>
-                ) : (
-                  <small>{copy.humanDecisionPending}</small>
-                )}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </aside>
-  );
-}
-
-function StatusBar({ health, healthUnavailable, pulse, selectedRepository, jobs, copy }: {
-  health?: HealthResponse;
-  healthUnavailable: boolean;
-  pulse: HeartbeatPulse | null;
-  selectedRepository?: Repository;
-  jobs: ReviewJob[];
-  copy: Copy;
-}) {
-  const activeJobs = jobs.filter(j => j.status === "running" || j.status === "queued");
-  const apiLabel = healthUnavailable ? copy.unavailable : health ? copy.connected : copy.checking;
-  const [buildProvenance, setBuildProvenance] = useState<string | null>(null);
-
-  useEffect(() => {
-    const bridge = desktopBridge();
-    if (bridge?.buildInfo) {
-      bridge.buildInfo().then(info => {
-        if (info && info.version) {
-          const sha = info.commitSha && info.commitSha !== "unknown" ? ` · build ${info.commitSha.slice(0, 7)}` : "";
-          setBuildProvenance(`ConsistenCy ${info.version}${sha}`);
-        }
-      }).catch(() => {});
-    }
-  }, []);
-
-  return (
-    <footer className="audit-status-bar">
-      <span><i className={health?.ok ? "online" : "offline"} />{apiLabel}</span>
-      <span><GitBranch size={11} />{copy.branch}: {pulse?.repository.branch ?? "—"}</span>
-      <span><ShieldCheck size={11} />{copy.trust}: {selectedRepository?.trustLevel ?? "—"}</span>
-      <span><Radio size={11} />{copy.engine}: {health?.deterministicAnalyzer?.running ? "active" : "idle"}</span>
-      <span>{copy.worker}: {health ? `${health.worker.activeJobs}/${health.worker.concurrency}` : "—"}</span>
-      <span>{copy.model}: {health?.llmModel ?? health?.llmProvider ?? "—"}</span>
-      <Link to="/runs" className="status-runs-link">
-        <Activity size={11} />
-        {activeJobs.length > 0
-          ? `${activeJobs.filter(j => j.status === "running").length} ${copy.activeRuns} · ${activeJobs.filter(j => j.status === "queued").length} ${copy.queued}`
-          : copy.noActiveRuns}
-      </Link>
-      <span className="status-spacer" />
-      {buildProvenance && <span title={buildProvenance}><Sparkles size={11} />{buildProvenance}</span>}
-      <span><ShieldCheck size={11} />{copy.localFirst}</span>
-    </footer>
-  );
-}
-
-function CommandPalette({ copy, zh, onClose, onNavigate }: {
-  copy: Copy;
-  zh: boolean;
-  onClose: () => void;
-  onNavigate: (to: string) => void;
-}) {
-  const scope = useId();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useRef<HTMLElement>(null);
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-  const commands = useMemo(() => [
-    { to: "/repositories", label: copy.repositories, group: copy.workspace },
-    { to: "/runs", label: copy.runs, group: copy.reviews },
-    { to: "/inbox", label: copy.inbox, group: copy.reviews },
-    { to: "/findings", label: copy.findings, group: copy.reviews },
-    { to: "/workflows", label: copy.workflows, group: "Harness" },
-    { to: "/workflows?tab=triggers", label: `${copy.workflows} · ${zh ? "触发器" : "Triggers"}`, group: "Harness" },
-    { to: "/settings", label: copy.settings, group: copy.workspace }
-  ], [copy, zh]);
-
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    return needle.length === 0
-      ? commands
-      : commands.filter(command => `${command.label} ${command.group}`.toLocaleLowerCase().includes(needle));
-  }, [commands, query]);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    setActiveIndex(index => Math.min(index, Math.max(filtered.length - 1, 0)));
-  }, [filtered.length]);
-
-  function activate(index: number) {
-    const command = filtered[index];
-    if (command) onNavigate(command.to);
-  }
-
-  function handleDialogKey(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>("input, button") ?? [])]
-      .filter(element => !element.hasAttribute("disabled"));
-    if (focusable.length === 0) return;
-    const current = focusable.indexOf(document.activeElement as HTMLElement);
-    const next = event.shiftKey
-      ? (current <= 0 ? focusable.length - 1 : current - 1)
-      : (current >= focusable.length - 1 ? 0 : current + 1);
-    event.preventDefault();
-    focusable[next]?.focus();
-  }
-
-  return (
-    <div className="command-palette-backdrop" onPointerDown={event => event.target === event.currentTarget && onClose()}>
-      <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-labelledby={`${scope}-title`} onKeyDown={handleDialogKey}>
-        <header>
-          <div>
-            <Search aria-hidden="true" size={16} />
-            <strong id={`${scope}-title`}>{copy.commandPalette}</strong>
-          </div>
-          <button type="button" aria-label={copy.closeNavigation} onClick={onClose}><X aria-hidden="true" size={15} /></button>
-        </header>
-        <div className="command-palette-search">
-          <Search aria-hidden="true" size={15} />
-          <input
-            ref={inputRef}
-            type="search"
-            role="combobox"
-            aria-controls={`${scope}-commands`}
-            aria-expanded="true"
-            aria-activedescendant={filtered[activeIndex] ? `${scope}-command-${activeIndex}` : undefined}
-            aria-label={copy.commandPlaceholder}
-            placeholder={copy.commandPlaceholder}
-            value={query}
-            onChange={event => { setQuery(event.target.value); setActiveIndex(0); }}
-            onKeyDown={event => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setActiveIndex(index => filtered.length === 0 ? 0 : (index + 1) % filtered.length);
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setActiveIndex(index => filtered.length === 0 ? 0 : (index - 1 + filtered.length) % filtered.length);
-              } else if (event.key === "Home") {
-                event.preventDefault();
-                setActiveIndex(0);
-              } else if (event.key === "End") {
-                event.preventDefault();
-                setActiveIndex(Math.max(filtered.length - 1, 0));
-              } else if (event.key === "Enter") {
-                event.preventDefault();
-                activate(activeIndex);
-              }
-            }}
-          />
-          <kbd>Ctrl K</kbd>
-        </div>
-        <div id={`${scope}-commands`} className="command-palette-list" role="listbox" aria-label={copy.commandPalette}>
-          {filtered.length === 0 ? <p role="status">{copy.noCommands}</p> : filtered.map((command, index) => (
-            <button
-              id={`${scope}-command-${index}`}
-              key={command.to}
-              type="button"
-              role="option"
-              aria-selected={index === activeIndex}
-              className={index === activeIndex ? "active" : ""}
-              onPointerMove={() => setActiveIndex(index)}
-              onClick={() => activate(index)}
-            >
-              <span>
-                <strong>{command.label}</strong>
-                <small>{command.group}</small>
-              </span>
-              <code>{command.to}</code>
-            </button>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-export function AppShell({
-  children,
-  path,
-  meta,
-  locale,
-  setLocale,
-  themePreference,
-  themeLabel,
-  cycleTheme,
-  jobs,
-  repositories = [],
-  pulse,
-  health,
-  healthUnavailable,
-  inspectorContext,
-  notices,
-  refreshing,
-  onRefresh
-}: {
-  children: ReactNode;
+export interface AppShellProps {
+  children: React.ReactNode;
   path: string;
-  routeHref?: string;
+  routeHref: string;
   meta: RouteMeta;
   locale: Locale;
   setLocale: (locale: Locale) => void;
@@ -843,318 +68,618 @@ export function AppShell({
   themeLabel: string;
   cycleTheme: () => void;
   jobs: ReviewJob[];
-  repositories?: Repository[];
-  pulse: HeartbeatPulse | null;
+  repositories: Repository[];
+  pulse?: HeartbeatPulse | null;
   health?: HealthResponse;
-  healthUnavailable: boolean;
+  healthUnavailable?: boolean;
   inspectorContext?: InspectorContext;
-  notices: DataNotice[];
-  refreshing: boolean;
-  onRefresh: () => void;
-}) {
-  const copy = copyByLocale[locale];
-  const zh = locale === "zh-CN";
+  notices?: DataNotice[];
+  refreshing?: boolean;
+  onRefresh?: () => void;
+}
+
+export function isCommandPaletteShortcut(e: {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+}): boolean {
+  return Boolean((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || e.key.toLowerCase() === "p") && !e.shiftKey && !e.altKey);
+}
+
+export const AppShell: React.FC<AppShellProps> = ({
+  children,
+  path,
+  meta,
+  locale = "en-US",
+  setLocale = () => {},
+  themePreference,
+  cycleTheme,
+  jobs,
+  repositories = [],
+  pulse,
+  health,
+  healthUnavailable = false,
+  inspectorContext,
+  notices = [],
+  refreshing = false,
+  onRefresh
+}) => {
   const navigate = useNavigate();
-  const [explorerOpen, setExplorerOpen] = useState(false);
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const commandButtonRef = useRef<HTMLButtonElement>(null);
-  const [inspectorTab, setInspectorTab] = useState<"evidence" | "agent" | "decision">("evidence");
-  const [compactExplorer, setCompactExplorer] = useState(false);
-  const { layout, setExplorerCollapsed, setExplorerWidth, setInspectorOpen, setInspectorWidth } = useWorkbenchLayout();
-  const themeIcon = themePreference === "dark" ? <Moon size={15} /> : themePreference === "light" ? <Sun size={15} /> : <Monitor size={15} />;
+  const location = useLocation();
+  const params = useParams();
 
-  const selectedRepository = useMemo(() => {
-    const match = path.match(/^\/repositories\/([^/]+)/);
-    if (!match?.[1]) return undefined;
-    try {
-      const id = decodeURIComponent(match[1]);
-      return repositories.find(repository => repository.id === id || repository.remoteFullName === id || repository.displayName === id);
-    } catch {
-      return undefined;
-    }
-  }, [path, repositories]);
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [buildInfo, setBuildInfo] = useState<DesktopBuildInfo | null>(null);
 
-  const hasInspectableSelection = Boolean(
-    inspectorContext?.runId ||
-    inspectorContext?.agent ||
-    inspectorContext?.finding
-  );
-
+  // Global Ctrl+K / Cmd+K listener
   useEffect(() => {
-    if (!hasInspectableSelection && layout.inspectorOpen) {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Fetch Desktop build info if running in Electron
+  useEffect(() => {
+    const bridge = desktopBridge();
+    if (bridge?.buildInfo) {
+      bridge.buildInfo().then(info => setBuildInfo(info)).catch(() => {});
+    }
+  }, []);
+
+  // Selection-driven Inspector: open when context exists, close when cleared
+  useEffect(() => {
+    if (inspectorContext && (inspectorContext.finding || inspectorContext.agent || inspectorContext.commit || inspectorContext.customContent)) {
+      setInspectorOpen(true);
+    } else {
       setInspectorOpen(false);
     }
-  }, [hasInspectableSelection, layout.inspectorOpen, setInspectorOpen]);
+  }, [inspectorContext]);
 
-  const prevSelectionKey = useRef<string | undefined>(inspectorContext?.agent?.agentId ?? inspectorContext?.finding?.id);
-  useEffect(() => {
-    const currentKey = inspectorContext?.agent?.agentId ?? inspectorContext?.finding?.id;
-    if (currentKey && currentKey !== prevSelectionKey.current) {
-      setInspectorOpen(true);
+  // Derive active repository from URL if present
+  const activeRepo = useMemo(() => {
+    const match = path.match(/^\/repositories\/([^/]+)/);
+    if (match?.[1]) {
+      const id = decodeURIComponent(match[1]);
+      return repositories.find(r => r.id === id || r.displayName === id) ?? {
+        id,
+        displayName: id,
+        source: "local_git" as const,
+        trustLevel: "trusted_local" as const,
+        monitoringEnabled: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
     }
-    prevSelectionKey.current = currentKey;
-  }, [inspectorContext?.agent?.agentId, inspectorContext?.finding?.id, setInspectorOpen]);
+    return repositories[0];
+  }, [path, repositories]);
 
-  const isInspectorVisible = layout.inspectorOpen && hasInspectableSelection;
-  const explorerHidden = compactExplorer ? !explorerOpen : layout.explorerCollapsed;
-  const shellStyle = {
-    "--explorer-width": `${layout.explorerWidth}px`,
-    "--inspector-width": `${layout.inspectorWidth}px`
-  } as CSSProperties;
+  // Generate location breadcrumbs
+  const breadcrumbs = useMemo<BreadcrumbItem[]>(() => {
+    const items: BreadcrumbItem[] = [
+      { label: "ConsistenCy", to: "/repositories", icon: <Layers size={14} /> }
+    ];
 
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 1100px)");
-    const update = () => setCompactExplorer(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-
-  useEffect(() => {
-    const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if (!isCommandPaletteShortcut(event)) return;
-      event.preventDefault();
-      setCommandPaletteOpen(true);
-    };
-    window.addEventListener("keydown", handleShortcut);
-    return () => window.removeEventListener("keydown", handleShortcut);
-  }, []);
-
-  // Compute location breadcrumbs for the top bar
-  const breadcrumb = useMemo(() => {
-    const repoMatch = path.match(/^\/repositories\/([^/]+)(?:\/([^/]+))?/);
-    if (repoMatch?.[1]) {
-      const rawId = decodeURIComponent(repoMatch[1]);
-      const sub = repoMatch[2];
-      const repoObj = repositories.find(r => r.id === rawId || r.remoteFullName === rawId || r.displayName === rawId);
-      const repoDisplayName = repoObj?.displayName ?? (rawId.startsWith("local:") ? rawId.replace(/^local:/, "") : rawId);
-      const subLabel = sub === "changes" ? (zh ? "变更" : "Changes")
-        : sub === "history" ? (zh ? "提交历史" : "Git History")
-        : sub === "pull-requests" ? (zh ? "拉取请求" : "Pull Requests")
-        : sub === "runs" ? (zh ? "审查" : "Reviews")
-        : sub === "automations" ? (zh ? "工作流" : "Workflows")
-        : (zh ? "概览" : "Overview");
-
-      return (
-        <div className="location-breadcrumbs">
-          <Link to="/repositories">{copy.repositories}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <Link to={`/repositories/${encodeURIComponent(rawId)}`}><strong>{repoDisplayName}</strong></Link>
-          {sub && (
-            <>
-              <span className="breadcrumb-sep">/</span>
-              <span>{subLabel}</span>
-            </>
-          )}
-        </div>
-      );
-    }
-
-    const runMatch = path.match(/^\/runs\/([^/]+)(?:\/([^/]+))?/);
-    if (runMatch?.[1]) {
-      const runId = decodeURIComponent(runMatch[1]);
-      const mode = runMatch[2] ?? "overview";
-      const job = jobs.find(j => j.id === runId);
-      const repoName = job?.repositoryFullName ?? (zh ? "审查" : "Review");
-      const prText = job?.pullRequestNumber ? `PR #${job.pullRequestNumber}` : (zh ? "任务" : "Task");
-      const modeLabel = mode === "diff" ? (zh ? "差异" : "Diff")
-        : mode === "evidence" ? (zh ? "证据" : "Evidence")
-        : mode === "notebook" ? (zh ? "笔记本" : "Notebook")
-        : mode === "runtime" ? (zh ? "运行流程" : "Runtime")
-        : (zh ? "概览" : "Overview");
-
-      return (
-        <div className="location-breadcrumbs">
-          <Link to={job?.repositoryFullName ? `/repositories/${encodeURIComponent(job.repositoryFullName)}` : "/runs"}>
-            {repoName}
-          </Link>
-          <span className="breadcrumb-sep">/</span>
-          <Link to={`/runs/${encodeURIComponent(runId)}/overview`}><strong>{prText}</strong></Link>
-          <span className="breadcrumb-sep">/</span>
-          <span>{modeLabel}</span>
-        </div>
-      );
+    if (path.startsWith("/repositories/") && activeRepo) {
+      items.push({
+        label: activeRepo.displayName,
+        to: `/repositories/${encodeURIComponent(activeRepo.id)}/overview`
+      });
+      if (path.includes("/changes")) {
+        items.push({ label: "工作区变更 (Changes)" });
+      } else if (path.includes("/history")) {
+        items.push({ label: "提交历史 (History)" });
+      } else if (path.includes("/pull-requests")) {
+        items.push({ label: "Pull Requests" });
+      } else if (path.includes("/overview")) {
+        items.push({ label: "仓库概览 (Overview)" });
+      }
+    } else if (path.startsWith("/runs/") && params.runId) {
+      const runId = decodeURIComponent(params.runId);
+      const currentJob = jobs.find(j => j.id === runId);
+      items.push({ label: "审查运行记录", to: "/runs" });
+      items.push({
+        label: currentJob ? `${currentJob.repositoryFullName} · ${runId.substring(0, 8)}` : runId.substring(0, 8),
+        to: `/runs/${encodeURIComponent(runId)}/overview`
+      });
+      if (path.includes("/diff")) items.push({ label: "Diff 视图" });
+      else if (path.includes("/evidence")) items.push({ label: "证据链 (Evidence)" });
+      else if (path.includes("/notebook")) items.push({ label: "调查记录本 (Notebook)" });
+      else if (path.includes("/runtime")) items.push({ label: "运行时 (Runtime)" });
+      else if (path.includes("/overview")) items.push({ label: "概览 (Overview)" });
+    } else if (path.startsWith("/repositories")) {
+      items.push({ label: "代码仓库 (Repositories)" });
+    } else if (path.startsWith("/runs")) {
+      items.push({ label: "审查运行记录 (Runs)" });
+    } else if (path.startsWith("/findings")) {
+      items.push({ label: "审查发现 (Findings)" });
+    } else if (path.startsWith("/workflows")) {
+      items.push({ label: "工作流与触发器 (Workflows)" });
+    } else if (path.startsWith("/settings")) {
+      items.push({ label: "系统设置 (Settings)" });
+    } else if (path.startsWith("/inbox")) {
+      items.push({ label: "审查工作区 (Overview)" });
     }
 
-    if (path === "/inbox") {
-      return (
-        <div className="location-breadcrumbs">
-          <strong>{copy.inbox}</strong>
-        </div>
-      );
-    }
+    return items;
+  }, [path, activeRepo, params.runId, jobs]);
 
-    if (path === "/runs") {
-      return (
-        <div className="location-breadcrumbs">
-          <strong>{copy.runs}</strong>
-        </div>
-      );
-    }
+  const zh = locale === "zh-CN";
 
-    if (path === "/findings") {
-      return (
-        <div className="location-breadcrumbs">
-          <strong>{copy.findings}</strong>
-        </div>
-      );
-    }
+  // Primary navigation links
+  const navItems = [
+    { to: "/inbox", label: zh ? "收件箱" : "Inbox", en: "Inbox", icon: <Layers size={16} /> },
+    { to: "/repositories", label: zh ? "代码仓库" : "Repositories", en: "Repositories", icon: <FolderGit2 size={16} /> },
+    { to: "/runs", label: zh ? "审查运行" : "Runs", en: "Runs", icon: <PlayCircle size={16} />, badge: jobs.filter(j => j.status === "running").length || undefined },
+    { to: "/findings", label: zh ? "审查发现" : "Findings", en: "Findings", icon: <ShieldAlert size={16} /> },
+    { to: "/workflows", label: zh ? "工作流" : "Workflows", en: "Workflows", icon: <GitFork size={16} /> },
+    { to: "/settings", label: zh ? "系统设置" : "Settings", en: "Settings", icon: <Settings size={16} /> }
+  ];
 
-    if (path === "/settings") {
-      return (
-        <div className="location-breadcrumbs">
-          <strong>{copy.settings}</strong>
-        </div>
-      );
-    }
-
-    return (
-      <div className="location-breadcrumbs">
-        <span>{meta.section}</span>
-        <span className="breadcrumb-sep">/</span>
-        <strong>{meta.shortTitle}</strong>
-      </div>
-    );
-  }, [copy.inbox, copy.findings, copy.repositories, copy.runs, copy.settings, jobs, meta.section, meta.shortTitle, path, repositories, zh]);
-
-  function closeCommandPalette() {
-    setCommandPaletteOpen(false);
-    window.requestAnimationFrame(() => commandButtonRef.current?.focus());
-  }
+  const activeBranch = pulse?.repository.branch || "main";
+  const activeModel = health?.llmModel || (health?.llmProvider === "deepseek" ? "deepseek-v4-flash" : "gpt-4.1-mini");
+  const modelProvider = health?.llmProvider || "none";
+  const isPulseActive = pulse?.state === "idle" || pulse?.state === "scanning" || pulse?.state === "indexing";
 
   return (
-    <div className={`audit-shell${layout.explorerCollapsed ? " explorer-collapsed" : ""}`} style={shellStyle}>
-      {/* 1. Single Repository-First Left Sidebar */}
-      <RepositorySidebar
-        open={explorerOpen}
-        hidden={explorerHidden}
-        jobs={jobs}
-        repositories={repositories}
-        pulse={pulse}
-        copy={copy}
-        currentPath={path}
-        zh={zh}
-        onNavigate={() => setExplorerOpen(false)}
-        onClose={() => setExplorerOpen(false)}
-      />
-      {compactExplorer && explorerOpen && (
-        <button type="button" className="explorer-backdrop" aria-label={copy.closeNavigation} onClick={() => setExplorerOpen(false)} />
-      )}
-
-      {/* 2. Main Stage with Location Header */}
-      <section className="audit-stage">
-        <header className="workbench-header">
-          <button
-            className="workbench-menu"
-            type="button"
-            aria-label={explorerHidden ? copy.openNavigation : copy.closeNavigation}
-            aria-expanded={!explorerHidden}
-            onClick={() => compactExplorer ? setExplorerOpen(value => !value) : setExplorerCollapsed(!layout.explorerCollapsed)}
+    <div
+      className="ds-root audit-shell"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100vh",
+        width: "100vw",
+        overflow: "hidden"
+      }}
+    >
+      {/* Upper Area: Sidebar + Main Content */}
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+        {/* ONE Persistent Sidebar */}
+        <nav
+          aria-label="Application Navigation"
+          style={{
+            width: "240px",
+            background: "var(--surface)",
+            borderRight: "1px solid var(--border)",
+            display: "flex",
+            flexDirection: "column",
+            flexShrink: 0,
+            userSelect: "none"
+          }}
+        >
+          {/* Brand Header */}
+          <div
+            style={{
+              height: "48px",
+              padding: "0 14px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between"
+            }}
           >
-            <Menu size={18} />
-          </button>
-
-          <div className="workbench-heading">
-            {breadcrumb}
-          </div>
-
-          <div className="workbench-actions">
-            {health?.llmConfigured ? (
-              <span className="shell-provider-status" title={zh ? "已配置的大语言模型" : "Configured LLM"}><Sparkles size={13} />{health.llmProvider}{health.llmModel ? ` · ${health.llmModel}` : ""}</span>
-            ) : health && (
-              <Link to="/settings" className="shell-provider-unconfigured" title={zh ? "前往设置配置 LLM" : "Configure LLM"}><ShieldAlert size={13} />{zh ? "LLM 未配置" : "LLM not configured"}</Link>
-            )}
-            <button
-              ref={commandButtonRef}
-              type="button"
-              className="shell-command-button"
-              aria-label={copy.commandPalette}
-              aria-haspopup="dialog"
-              aria-expanded={commandPaletteOpen}
-              aria-keyshortcuts="Control+K Meta+K Control+P Meta+P"
-              onClick={() => setCommandPaletteOpen(true)}
-            >
-              <Search aria-hidden="true" size={14} />
-              <span>{copy.commandPalette}</span>
-              <kbd>Ctrl K</kbd>
-            </button>
-            <button
-              type="button"
-              className="shell-icon-button"
-              aria-label={`${copy.theme}: ${themeLabel}`}
-              title={`${copy.theme}: ${themeLabel}`}
-              onClick={cycleTheme}
-            >
-              {themeIcon}
-            </button>
-            <label className="shell-language">
-              <Globe2 size={13} />
-              <span className="sr-only">{copy.language}</span>
-              <select aria-label={copy.language} value={locale} onChange={event => setLocale(event.target.value as Locale)}>
-                <option value="zh-CN">中文</option>
-                <option value="en-US">English</option>
-              </select>
-            </label>
-            <button
-              type="button"
-              className="shell-icon-button"
-              aria-label={copy.refresh}
-              title={copy.refresh}
-              onClick={onRefresh}
-              disabled={refreshing}
-            >
-              <RefreshCw className={refreshing ? "spinning" : ""} size={15} />
-            </button>
-            <button
-              type="button"
-              className={isInspectorVisible ? "shell-icon-button active" : "shell-icon-button"}
-              aria-label={copy.inspector}
-              aria-expanded={isInspectorVisible}
-              disabled={!hasInspectableSelection}
-              title={hasInspectableSelection ? copy.inspector : (zh ? "无选中的检查上下文" : "No inspectable context selected")}
-              onClick={() => setInspectorOpen(!layout.inspectorOpen)}
-            >
-              <PanelRight size={16} />
-            </button>
-          </div>
-        </header>
-
-        {/* 3. Main Workspace + Single Adaptive Context Inspector */}
-        <div className={`workbench-frame${isInspectorVisible ? " inspector-open" : ""}`}>
-          <main className="audit-workbench">
-            <div className="audit-route-scroll" role="region" aria-label={meta.title} tabIndex={0}>
-              <div className="app-content audit-route-content">
-                {notices.length > 0 && (
-                  <div className="route-notice-stack">
-                    {notices.map(notice => (
-                      <div className="route-query-notice" role="status" key={notice.id}>
-                        <span><strong>{notice.label}</strong><small>{notice.message}</small></span>
-                        <button type="button" onClick={onRefresh}>{copy.retry}</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {children}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div
+                style={{
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "var(--ds-radius-sm)",
+                  background: "var(--primary)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "13px"
+                }}
+              >
+                C
               </div>
+              <span style={{ fontWeight: 600, fontSize: "14px", letterSpacing: "-0.2px" }}>
+                ConsistenCy
+              </span>
+              <Badge variant="neutral" size="sm" mono>
+                v3
+              </Badge>
             </div>
-          </main>
-          <ContextInspectorDock
-            open={isInspectorVisible}
-            width={layout.inspectorWidth}
-            onResize={setInspectorWidth}
-            copy={copy}
-            context={inspectorContext}
-            activeTab={inspectorTab}
-            zh={zh}
-            onTab={setInspectorTab}
-            onClose={() => setInspectorOpen(false)}
-          />
-        </div>
-      </section>
+          </div>
 
-      {/* 4. Minimal Status Bar */}
-      <StatusBar health={health} healthUnavailable={healthUnavailable} pulse={pulse} selectedRepository={selectedRepository} jobs={jobs} copy={copy} />
-      {commandPaletteOpen && <CommandPalette copy={copy} zh={zh} onClose={closeCommandPalette} onNavigate={to => { navigate(to); closeCommandPalette(); }} />}
+          {/* Repository Selector / Switcher */}
+          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "6px"
+              }}
+            >
+              <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--muted)", textTransform: "uppercase" }}>
+                当前仓库
+              </span>
+              <IconButton
+                icon={<Plus size={13} />}
+                label="连接仓库"
+                size="sm"
+                onClick={() => setIsConnectOpen(true)}
+              />
+            </div>
+
+            {repositories.length > 0 ? (
+              <div
+                onClick={() => navigate(`/repositories/${encodeURIComponent(activeRepo?.id || repositories[0]?.id || "")}/overview`)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "6px 8px",
+                  borderRadius: "var(--ds-radius-sm)",
+                  background: "var(--surface-subtle)",
+                  cursor: "pointer",
+                  border: "1px solid var(--border)"
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
+                  <FolderGit2 size={14} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                  <span
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap"
+                    }}
+                  >
+                    {activeRepo?.displayName || repositories[0]?.displayName}
+                  </span>
+                </div>
+                <ChevronDown size={13} style={{ color: "var(--muted)", flexShrink: 0 }} />
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                fullWidth
+                icon={<Plus size={13} />}
+                onClick={() => setIsConnectOpen(true)}
+              >
+                连接代码仓库...
+              </Button>
+            )}
+          </div>
+
+          {/* Primary Nav Links */}
+          <div style={{ flex: 1, padding: "8px 8px", display: "flex", flexDirection: "column", gap: "2px", overflowY: "auto" }}>
+            {navItems.map(item => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `ds-app-link ${isActive ? "ds-button--active" : ""}`
+                }
+                style={({ isActive }) => ({
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "6px 10px",
+                  borderRadius: "var(--ds-radius-md)",
+                  fontSize: "13px",
+                  color: isActive ? "var(--primary)" : "var(--foreground)",
+                  background: isActive ? "var(--surface-subtle)" : "transparent",
+                  fontWeight: isActive ? 600 : 400
+                })}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ color: "inherit", display: "inline-flex" }}>{item.icon}</span>
+                  <span>{item.label}</span>
+                </div>
+                {item.badge !== undefined && (
+                  <Badge variant="warning" size="sm">
+                    {item.badge}
+                  </Badge>
+                )}
+              </NavLink>
+            ))}
+          </div>
+
+          {/* Sidebar Footer: Heartbeat daemon indicator */}
+          <div
+            style={{
+              padding: "10px 12px",
+              borderTop: "1px solid var(--border)",
+              background: "var(--surface-subtle)",
+              fontSize: "11px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span
+                style={{
+                  width: "7px",
+                  height: "7px",
+                  borderRadius: "50%",
+                  background: isPulseActive ? "var(--success)" : "var(--muted)"
+                }}
+              />
+              <span style={{ color: "var(--muted-strong)" }}>
+                {isPulseActive ? "守护进程运行中" : "守护进程待机"}
+              </span>
+            </div>
+            {pulse?.dirtyFileCount !== undefined && pulse.dirtyFileCount > 0 && (
+              <Badge variant="neutral" size="sm" mono>
+                {pulse.dirtyFileCount} 变更
+              </Badge>
+            )}
+          </div>
+        </nav>
+
+        {/* Main Center + Inspector Area */}
+        <div style={{ display: "flex", flex: 1, minWidth: 0, flexDirection: "column" }}>
+          {/* ONE Top Location Bar */}
+          <header
+            style={{
+              height: "48px",
+              padding: "0 16px",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--surface)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexShrink: 0
+            }}
+          >
+            {/* Breadcrumb Hierarchy */}
+            <Breadcrumb items={breadcrumbs} />
+
+            {/* Global Actions */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<Search size={13} />}
+                onClick={() => setIsCommandPaletteOpen(true)}
+              >
+                <span>搜索...</span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    color: "var(--muted)",
+                    background: "var(--surface-subtle)",
+                    padding: "1px 4px",
+                    borderRadius: "3px",
+                    marginLeft: "4px"
+                  }}
+                >
+                  Ctrl+K
+                </span>
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setLocale(locale === "zh-CN" ? "en-US" : "zh-CN")}
+                style={{ fontSize: "12px", padding: "0 8px" }}
+              >
+                {locale === "zh-CN" ? "中文" : "English"}
+              </Button>
+
+              <IconButton
+                icon={themePreference === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+                label={`切换主题 (${themePreference})`}
+                size="sm"
+                onClick={cycleTheme}
+              />
+
+              {onRefresh && (
+                <IconButton
+                  icon={<RefreshCw size={14} className={refreshing ? "ds-spin" : ""} />}
+                  label="刷新数据"
+                  size="sm"
+                  onClick={onRefresh}
+                />
+              )}
+            </div>
+          </header>
+
+          {/* Notices banner if errors exist */}
+          {notices.length > 0 && (
+            <div style={{ background: "var(--warning-soft)", borderBottom: "1px solid var(--warning-faint)", padding: "6px 16px" }}>
+              {notices.map(n => (
+                <div key={n.id} style={{ fontSize: "12px", color: "var(--warning-strong)", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <AlertCircle size={13} />
+                  <span><strong>{n.label}:</strong> {n.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Workspace Body: Content + Contextual Inspector */}
+          <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+            <main
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflowY: "auto",
+                background: "var(--background)"
+              }}
+            >
+              {children}
+            </main>
+
+            {/* Selection-Driven Inspector */}
+            <Inspector
+              isOpen={inspectorOpen}
+              onClose={() => setInspectorOpen(false)}
+              title={
+                inspectorContext?.customTitle ||
+                (inspectorContext?.finding ? `审查发现: ${inspectorContext.finding.title}` :
+                 inspectorContext?.agent ? `智能体: ${inspectorContext.agent.label}` :
+                 inspectorContext?.commit ? `提交记录: ${inspectorContext.commit.sha?.substring(0, 7)}` :
+                 "上下文详情")
+              }
+              subtitle={
+                inspectorContext?.finding?.file ? `${inspectorContext.finding.file}:${inspectorContext.finding.startLine ?? ""}` :
+                inspectorContext?.agent?.state ? `状态: ${inspectorContext.agent.state}` : undefined
+              }
+            >
+              {inspectorContext?.customContent ? (
+                inspectorContext.customContent
+              ) : inspectorContext?.finding ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <Badge variant={inspectorContext.finding.severity as any}>
+                      {inspectorContext.finding.severity.toUpperCase()}
+                    </Badge>
+                    <Badge variant="neutral">{inspectorContext.finding.confidence}</Badge>
+                    <Badge variant="neutral">{inspectorContext.finding.agent}</Badge>
+                  </div>
+
+                  <div>
+                    <h4 style={{ margin: "0 0 4px 0", fontSize: "12px", color: "var(--muted)" }}>位置</h4>
+                    <div style={{ fontFamily: "var(--ds-font-mono)", fontSize: "12px" }}>
+                      {inspectorContext.finding.file}
+                      {inspectorContext.finding.startLine !== undefined && `:${inspectorContext.finding.startLine}`}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 style={{ margin: "0 0 4px 0", fontSize: "12px", color: "var(--muted)" }}>事实证据</h4>
+                    <pre
+                      style={{
+                        padding: "8px",
+                        borderRadius: "var(--ds-radius-sm)",
+                        background: "var(--surface-muted)",
+                        border: "1px solid var(--border)",
+                        fontSize: "11px",
+                        fontFamily: "var(--ds-font-mono)",
+                        whiteSpace: "pre-wrap",
+                        margin: 0
+                      }}
+                    >
+                      {inspectorContext.finding.evidence}
+                    </pre>
+                  </div>
+
+                  <div>
+                    <h4 style={{ margin: "0 0 4px 0", fontSize: "12px", color: "var(--muted)" }}>分析推理</h4>
+                    <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5 }}>
+                      {inspectorContext.finding.reasoning}
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 style={{ margin: "0 0 4px 0", fontSize: "12px", color: "var(--muted)" }}>整改建议</h4>
+                    <p style={{ margin: 0, fontSize: "13px", lineHeight: 1.5, color: "var(--success-strong)" }}>
+                      {inspectorContext.finding.recommendation}
+                    </p>
+                  </div>
+                </div>
+              ) : inspectorContext?.agent ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <Badge variant={inspectorContext.agent.state === "succeeded" || inspectorContext.agent.state === "active" ? "success" : "neutral"}>
+                      {inspectorContext.agent.state.toUpperCase()}
+                    </Badge>
+                    <Badge variant="neutral" mono>
+                      Ring {inspectorContext.agent.logicalRing}
+                    </Badge>
+                  </div>
+                  <div>
+                    <h4 style={{ margin: "0 0 4px 0", fontSize: "12px", color: "var(--muted)" }}>智能体标识</h4>
+                    <p style={{ margin: 0, fontSize: "13px", fontFamily: "var(--ds-font-mono)" }}>{inspectorContext.agent.label} ({inspectorContext.agent.agentId})</p>
+                  </div>
+                  <div>
+                    <h4 style={{ margin: "0 0 4px 0", fontSize: "12px", color: "var(--muted)" }}>执行域</h4>
+                    <p style={{ margin: 0, fontSize: "13px" }}>{inspectorContext.agent.executionDomain}</p>
+                  </div>
+                  <div>
+                    <h4 style={{ margin: "0 0 4px 0", fontSize: "12px", color: "var(--muted)" }}>已授权能力句柄</h4>
+                    <div style={{ fontSize: "13px", fontWeight: 600 }}>{inspectorContext.agent.capabilities.length} 项能力</div>
+                  </div>
+                </div>
+              ) : null}
+            </Inspector>
+          </div>
+        </div>
+      </div>
+
+      {/* ONE Bottom Status Bar */}
+      <footer
+        style={{
+          height: "28px",
+          padding: "0 12px",
+          borderTop: "1px solid var(--border)",
+          background: "var(--surface)",
+          fontSize: "11px",
+          color: "var(--muted-strong)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexShrink: 0,
+          userSelect: "none"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <GitBranch size={12} />
+            <span style={{ fontFamily: "var(--ds-font-mono)" }}>{activeBranch}</span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <Cpu size={12} />
+            <span>LLM: {modelProvider} · {activeModel}</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <Activity size={12} color="var(--success)" />
+            <span>{zh ? "API 已连接" : "API connected"}</span>
+          </div>
+
+          <span style={{ fontFamily: "var(--ds-font-mono)", opacity: 0.8 }}>
+            Build {buildInfo?.commitSha?.substring(0, 7) || "v3-pr2"}
+          </span>
+        </div>
+      </footer>
+
+      {/* Central Modals */}
+      <ConnectRepositoryDialog
+        isOpen={isConnectOpen}
+        onClose={() => setIsConnectOpen(false)}
+        onSuccess={repo => {
+          if (repo?.id) {
+            navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`);
+          }
+        }}
+      />
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        customCommands={[
+          {
+            id: "action-connect",
+            title: "连接新代码仓库...",
+            category: "Actions",
+            icon: <Plus size={16} />,
+            onSelect: () => {
+              setIsCommandPaletteOpen(false);
+              setIsConnectOpen(true);
+            }
+          }
+        ]}
+      />
     </div>
   );
-}
+};

@@ -1,53 +1,32 @@
-import { useState, useMemo, useRef, useEffect, type KeyboardEvent } from "react";
+import React, { useState, useMemo } from "react";
 import type { HeartbeatPulse, Repository, ReviewJob } from "@consistency/schema";
 import {
-  Activity,
-  ArrowRight,
-  Clock3,
   FolderGit2,
-  FolderPlus,
-  GitBranch,
-  Github,
-  History,
-  Layers,
-  LoaderCircle,
-  PauseCircle,
-  Play,
-  PlayCircle,
-  Radio,
+  Plus,
   Search,
+  Github,
+  GitBranch,
   ShieldCheck,
-  X
+  Activity,
+  PlayCircle,
+  Eye,
+  Radio
 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import { useI18n } from "../i18n";
-import { StatusBadge } from "../components/StatusBadge";
+import { useNavigate } from "react-router-dom";
+import { Button } from "../design-system/Button";
+import { Input } from "../design-system/Input";
+import { Badge } from "../design-system/Badge";
+import { DataTable, type Column } from "../design-system/DataTable";
+import { EmptyState } from "../design-system/EmptyState";
+import { SectionHeader } from "../design-system/SectionHeader";
+import { AppLink } from "../design-system/Link";
+import { ConnectRepositoryDialog } from "../components/ConnectRepositoryDialog";
 
-function localRepositoryName(pulse: HeartbeatPulse): string {
-  if (pulse.repository.root === "unknown") return "Local repository";
-  const segments = pulse.repository.root.split(/[\\/]/).filter(Boolean);
-  return segments.at(-1) ?? "Local repository";
-}
-
-export function RepositoriesPage({
-  jobs,
-  pulse,
-  heartbeatUnavailable,
-  jobsUnavailable,
-  repositories = [],
-  registryUnavailable = false,
-  canSelectRepository = false,
-  addingRepository = false,
-  addRepositoryError,
-  monitoringError,
-  onAddRepository,
-  monitoringRepositoryId,
-  onSetMonitoring
-}: {
+export interface RepositoriesPageProps {
   jobs: ReviewJob[];
   pulse: HeartbeatPulse | null;
-  heartbeatUnavailable: boolean;
-  jobsUnavailable: boolean;
+  heartbeatUnavailable?: boolean;
+  jobsUnavailable?: boolean;
   repositories?: Repository[];
   registryUnavailable?: boolean;
   canSelectRepository?: boolean;
@@ -57,283 +36,194 @@ export function RepositoriesPage({
   onAddRepository?: () => void;
   monitoringRepositoryId?: string;
   onSetMonitoring?: (repository: Repository, enabled: boolean) => void;
-}) {
-  const { locale } = useI18n();
-  const zh = locale === "zh-CN";
+}
+
+export const RepositoriesPage: React.FC<RepositoriesPageProps> = ({
+  jobs,
+  pulse,
+  repositories = [],
+  registryUnavailable = false,
+  canSelectRepository = false,
+  addingRepository = false,
+  onAddRepository,
+  monitoringRepositoryId,
+  onSetMonitoring
+}) => {
+  const [query, setQuery] = useState("");
+  const [isConnectOpen, setIsConnectOpen] = useState(false);
   const navigate = useNavigate();
-  const [filterQuery, setFilterQuery] = useState("");
-  const [connectModalOpen, setConnectModalOpen] = useState(false);
-  const [publicRepoInput, setPublicRepoInput] = useState("");
-  const connectButtonRef = useRef<HTMLButtonElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-  const firstInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (connectModalOpen) {
-      firstInputRef.current?.focus();
-    }
-  }, [connectModalOpen]);
+  const filtered = useMemo(() => {
+    return repositories.filter(
+      r =>
+        r.displayName.toLowerCase().includes(query.toLowerCase()) ||
+        r.id.toLowerCase().includes(query.toLowerCase()) ||
+        r.remoteFullName?.toLowerCase().includes(query.toLowerCase())
+    );
+  }, [repositories, query]);
 
-  function closeConnectModal() {
-    setConnectModalOpen(false);
-    window.requestAnimationFrame(() => connectButtonRef.current?.focus());
-  }
+  const columns: Column<Repository>[] = [
+    {
+      key: "displayName",
+      header: "代码仓库",
+      render: repo => (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ color: "var(--primary)" }}>
+            {repo.source === "github" ? <Github size={16} /> : <FolderGit2 size={16} />}
+          </span>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <AppLink
+              to={`/repositories/${encodeURIComponent(repo.id)}/overview`}
+              style={{ fontWeight: 600, fontSize: "13px" }}
+            >
+              {repo.displayName}
+            </AppLink>
+            {repo.remoteFullName && (
+              <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                {repo.remoteFullName}
+              </span>
+            )}
+          </div>
+        </div>
+      )
+    },
+    {
+      key: "source",
+      header: "来源类型",
+      render: repo => (
+        <Badge variant="neutral" size="sm" mono>
+          {repo.source === "local_git" ? "Local Git" : "GitHub"}
+        </Badge>
+      )
+    },
+    {
+      key: "trustLevel",
+      header: "执行信任",
+      render: repo => (
+        <Badge variant={repo.trustLevel === "trusted_local" ? "success" : "neutral"} size="sm">
+          {repo.trustLevel === "trusted_local" ? "trusted local" : "untrusted readonly"}
+        </Badge>
+      )
+    },
+    {
+      key: "status",
+      header: "工作区状态",
+      render: repo => {
+        const matchingJobCount = jobs.filter(j =>
+          j.repositoryFullName === repo.displayName ||
+          j.repositoryFullName === repo.id ||
+          (repo.remoteFullName && j.repositoryFullName === repo.remoteFullName)
+        ).length;
+        const isPulseRepo = pulse?.repository.root && (pulse.repository.root.includes(repo.displayName) || repo.displayName === "ConsistenCy");
 
-  function handleModalKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeConnectModal();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const focusable = [...(modalRef.current?.querySelectorAll<HTMLElement>("input, button:not([disabled]), [tabindex='0']") ?? [])]
-      .filter(el => !el.hasAttribute("disabled") && el.offsetParent !== null);
-    if (focusable.length === 0) return;
-    const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
-    const nextIndex = event.shiftKey
-      ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
-      : (currentIndex >= focusable.length - 1 ? 0 : currentIndex + 1);
-    event.preventDefault();
-    focusable[nextIndex]?.focus();
-  }
-
-  const sources = useMemo(() => {
-    const byName = new Map<string, { name: string; jobs: ReviewJob[] }>();
-    for (const job of [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
-      const current = byName.get(job.repositoryFullName);
-      if (current) current.jobs.push(job);
-      else byName.set(job.repositoryFullName, { name: job.repositoryFullName, jobs: [job] });
-    }
-    return [...byName.values()];
-  }, [jobs]);
-
-  // Local repositories: registered local + live pulse
-  const localRepos = useMemo(() => {
-    const list: Array<{ id: string; name: string; branch: string; isLive: boolean; raw?: Repository }> = [];
-    for (const r of repositories) {
-      if (r.source === "local_git") {
-        list.push({ id: r.id, name: r.displayName, branch: r.defaultBranch ?? "main", isLive: false, raw: r });
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
+            {isPulseRepo && pulse ? (
+              <span style={{ display: "flex", alignItems: "center", gap: "4px", color: "var(--success-strong)" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--success)" }} />
+                <span>活跃监控中 ({pulse.dirtyFileCount} 变更)</span>
+              </span>
+            ) : (
+              <span style={{ color: "var(--muted)" }}>{matchingJobCount} 次审查记录</span>
+            )}
+          </div>
+        );
       }
+    },
+    {
+      key: "actions",
+      header: "操作",
+      align: "right",
+      render: repo => (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`)}
+          >
+            打开工作区
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<PlayCircle size={13} />}
+            onClick={() => navigate(`/repositories/${encodeURIComponent(repo.id)}/overview?composer=open`)}
+          >
+            开始审查
+          </Button>
+        </div>
+      )
     }
-    if (pulse && !list.some(l => l.name === localRepositoryName(pulse))) {
-      const name = localRepositoryName(pulse);
-      list.push({
-        id: name.includes("ConsistenCy") ? "sk1ua/ConsistenCy" : `local:${name}`,
-        name,
-        branch: pulse.repository.branch ?? "detached",
-        isLive: true
-      });
-    }
-    return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
-  }, [repositories, pulse, filterQuery]);
-
-  // Remote / public connected repositories (not unified local)
-  const remoteRepos = useMemo(() => {
-    const list: Array<{ id: string; name: string; branch: string; reviewCount: number; raw?: Repository }> = [];
-    const localNames = new Set(localRepos.map(l => l.name));
-    for (const r of repositories) {
-      if (r.source !== "local_git") {
-        if (localNames.has("ConsistenCy-pr2-clean") && (r.remoteFullName === "sk1ua/ConsistenCy" || r.displayName === "ConsistenCy")) continue;
-        list.push({ id: r.id, name: r.displayName, branch: r.defaultBranch ?? "main", reviewCount: 0, raw: r });
-      }
-    }
-    for (const s of sources) {
-      if (!repositories.some(r => r.remoteFullName === s.name || r.displayName === s.name)) {
-        if (localNames.has("ConsistenCy-pr2-clean") && s.name === "sk1ua/ConsistenCy") continue;
-        list.push({ id: s.name, name: s.name, branch: "main", reviewCount: s.jobs.length });
-      }
-    }
-    return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
-  }, [repositories, sources, localRepos, filterQuery]);
-
-  function handleConnectPublic(e: React.FormEvent) {
-    e.preventDefault();
-    if (!publicRepoInput.trim()) return;
-    setConnectModalOpen(false);
-    navigate(`/repositories/${encodeURIComponent(publicRepoInput.trim())}`);
-  }
+  ];
 
   return (
-    <div className="repository-hub-page page-stack">
-      {/* Intro Header */}
-      <section className="section-block repo-hub-intro">
-        <div className="hub-intro-left">
-          <span className="panel-kicker"><FolderGit2 size={13} />{zh ? "代码仓库" : "Repositories"}</span>
-          <h2>{zh ? "已连接仓库与工作区" : "Connected Repositories"}</h2>
-          <p>{zh ? "以仓库为核心：查看本地 Git 状态、浏览提交历史与拉取请求，并直接发起 ConsistenCy 多智能体代码审查。" : "Project-first workspace: inspect local Git status, commits, pull requests, and launch multi-agent reviews."}</p>
-        </div>
-
-        <div className="hub-intro-actions">
-          <button
-            ref={connectButtonRef}
-            type="button"
-            className="primary-button connect-btn-main"
-            aria-haspopup="dialog"
-            aria-expanded={connectModalOpen}
-            onClick={() => setConnectModalOpen(true)}
+    <div style={{ padding: "24px 32px", maxWidth: "1200px", margin: "0 auto" }}>
+      <SectionHeader
+        title="代码仓库工作区 (Repositories)"
+        subtitle="已连接的本地 Git 项目和远程 GitHub 代码审查源"
+        actions={
+          <Button
+            variant="primary"
+            size="md"
+            icon={<Plus size={14} />}
+            onClick={() => {
+              if (onAddRepository && canSelectRepository) {
+                onAddRepository();
+              } else {
+                setIsConnectOpen(true);
+              }
+            }}
           >
-            <FolderPlus size={14} /> {zh ? "连接仓库" : "Connect repository"}
-          </button>
-        </div>
-      </section>
+            连接代码仓库
+          </Button>
+        }
+      />
 
-      {/* Search & Stats Filter */}
-      <div className="repo-hub-search-bar">
-        <div className="search-input-wrap">
-          <Search size={14} className="search-icon" />
-          <input
-            type="text"
-            placeholder={zh ? "筛选代码仓库..." : "Filter repositories..."}
-            value={filterQuery}
-            onChange={e => setFilterQuery(e.target.value)}
-          />
-        </div>
-        <div className="hub-counts">
-          <span><strong>{localRepos.length + remoteRepos.length}</strong> {zh ? "个已观察仓库" : "observed repositories"}</span>
-        </div>
+      <div style={{ marginBottom: "16px", maxWidth: "320px" }}>
+        <Input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="搜索已连接仓库..."
+          prefixIcon={<Search size={14} />}
+          sizeVariant="sm"
+        />
       </div>
 
-      {addRepositoryError && (
-        <div className="route-query-notice" role="alert">
-          <strong>{zh ? "无法注册仓库" : "Could not register repository"}</strong>
-          <span>{addRepositoryError}</span>
-        </div>
+      {filtered.length === 0 && !registryUnavailable ? (
+        <EmptyState
+          icon={<FolderGit2 size={36} />}
+          title="暂无已连接的代码仓库"
+          description="点击“连接代码仓库”选择本地 Git 工作区或输入 GitHub 仓库以开始深度审查。"
+          action={
+            <Button
+              variant="primary"
+              size="md"
+              icon={<Plus size={14} />}
+              onClick={() => setIsConnectOpen(true)}
+            >
+              立即连接仓库
+            </Button>
+          }
+        />
+      ) : (
+        <DataTable
+          columns={columns}
+          data={filtered}
+          keyExtractor={repo => repo.id}
+          onRowClick={repo => navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`)}
+        />
       )}
 
-      {/* Section 1: Local Repositories */}
-      <section className="section-block repo-group-section">
-        <div className="panel-title">
-          <div>
-            <span className="panel-kicker">{zh ? "本地文件系统" : "Local Workspace"}</span>
-            <h2>{zh ? "本地代码仓库" : "Local Repositories"}</h2>
-          </div>
-          <strong>{localRepos.length}</strong>
-        </div>
-
-        {localRepos.length === 0 ? (
-          <div className="empty-inline-compact">{zh ? "暂无已连接的本地 Git 仓库。" : "No local Git repositories connected."}</div>
-        ) : (
-          <div className="repo-table-rows" role="list">
-            {localRepos.map(repo => (
-              <div key={repo.id} className="repo-table-row" role="listitem">
-                <div className="repo-row-title">
-                  <span className={`repo-dot ${repo.isLive || repo.raw?.monitoringEnabled ? "monitored" : ""}`} />
-                  <FolderGit2 size={16} className="card-repo-icon" />
-                  <strong>{repo.name}</strong>
-                  <span className="provenance-pill">{zh ? "本地 GIT" : "LOCAL GIT"}</span>
-                  {repo.isLive && <span className="status-pill telemetry-live">{zh ? "实时监控中" : "LIVE MONITOR"}</span>}
-                </div>
-                <div className="repo-row-meta">
-                  <small>{repo.raw?.trustLevel === "trusted_local" ? (zh ? "受信本地" : "trusted local") : (zh ? "只读" : "read-only")}</small>
-                  <code><GitBranch size={11} /> {repo.branch}</code>
-                </div>
-                <div className="repo-row-actions">
-                  <Link to={`/repositories/${encodeURIComponent(repo.id)}`} className="primary-button btn-small">
-                    {zh ? "打开" : "Open"}
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Section 2: Remote / Public Connected Repositories */}
-      {remoteRepos.length > 0 && (
-        <section className="section-block repo-group-section">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "远端源" : "Remote Sources"}</span>
-              <h2>{zh ? "已连接远端仓库" : "Connected Remote Repositories"}</h2>
-            </div>
-            <strong>{remoteRepos.length}</strong>
-          </div>
-
-          <div className="repo-table-rows" role="list">
-            {remoteRepos.map(repo => (
-              <div key={repo.id} className="repo-table-row" role="listitem">
-                <div className="repo-row-title">
-                  <FolderGit2 size={16} className="card-repo-icon" />
-                  <strong>{repo.name}</strong>
-                  <span className="provenance-pill">{zh ? "GITHUB 公开" : "GITHUB PUBLIC"}</span>
-                </div>
-                <div className="repo-row-meta">
-                  <code><GitBranch size={11} /> {repo.branch}</code>
-                  {repo.reviewCount > 0 && <small>{repo.reviewCount} {zh ? "次审查" : "reviews"}</small>}
-                </div>
-                <div className="repo-row-actions">
-                  <Link to={`/repositories/${encodeURIComponent(repo.id)}`} className="primary-button btn-small">
-                    {zh ? "打开" : "Open"}
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Connect Repository Modal */}
-      {connectModalOpen && (
-        <div className="modal-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) closeConnectModal(); }}>
-          <div
-            ref={modalRef}
-            className="modal-card connect-repo-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="connect-repo-modal-title"
-            onKeyDown={handleModalKeyDown}
-          >
-            <div className="modal-header">
-              <div>
-                <span className="panel-kicker">{zh ? "接入代码" : "Repository Workspace"}</span>
-                <h3 id="connect-repo-modal-title">{zh ? "连接代码仓库" : "Connect Repository"}</h3>
-              </div>
-              <button type="button" className="drawer-close-btn" aria-label={zh ? "关闭" : "Close"} onClick={closeConnectModal}><X size={16} /></button>
-            </div>
-            <div className="modal-body">
-              {/* Option 1: Local */}
-              {canSelectRepository && (
-                <div className="connect-option-block">
-                  <div className="option-head">
-                    <FolderGit2 size={20} />
-                    <div>
-                      <strong>{zh ? "本地 Git 仓库" : "Local Git Repository"}</strong>
-                      <p>{zh ? "通过受保护的系统目录选择器打开本地工作树，路径安全隔离" : "Select a local worktree via privileged desktop dialog"}</p>
-                    </div>
-                  </div>
-                  <button type="button" className="primary-button connect-action-btn" onClick={() => { closeConnectModal(); onAddRepository?.(); }}>
-                    <FolderPlus size={15} /> {zh ? "选择本地文件夹" : "Select local folder"}
-                  </button>
-                </div>
-              )}
-
-              {/* Option 2: Public GitHub */}
-              <form onSubmit={handleConnectPublic} className="connect-option-block">
-                <div className="option-head">
-                  <Github size={20} />
-                  <div>
-                    <strong>{zh ? "公开 GitHub 仓库" : "Public GitHub Repository"}</strong>
-                    <p>{zh ? "输入 owner/repo 或 GitHub URL，直接浏览 PR 与代码并启动只读审查" : "Enter owner/repo or URL to inspect PRs and launch read-only review"}</p>
-                  </div>
-                </div>
-                <div className="public-connect-input-group">
-                  <input
-                    ref={firstInputRef}
-                    type="text"
-                    aria-label={zh ? "公开 GitHub 仓库地址" : "Public GitHub repository URL"}
-                    placeholder="e.g. openai/codex or github.com/owner/repo"
-                    value={publicRepoInput}
-                    onChange={e => setPublicRepoInput(e.target.value)}
-                  />
-                  <button type="submit" className="primary-button connect-action-btn" disabled={!publicRepoInput.trim()}>
-                    {zh ? "连接" : "Connect"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConnectRepositoryDialog
+        isOpen={isConnectOpen}
+        onClose={() => setIsConnectOpen(false)}
+        onSuccess={repo => {
+          if (repo?.id) {
+            navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`);
+          }
+        }}
+      />
     </div>
   );
-}
+};

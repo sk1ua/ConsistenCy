@@ -1,1073 +1,802 @@
-import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import type {
   Automation,
   HeartbeatPulse,
-  PullRequestSummary,
   Repository,
   ReviewJob,
-  VcsCommitSummary
+  VcsCommitSummary,
+  PullRequestSummary
 } from "@consistency/schema";
 import {
-  Activity,
-  AlertCircle,
-  ArrowLeft,
-  CalendarClock,
-  CheckCircle2,
-  Clock3,
-  FileCode2,
-  FileSearch2,
   FolderGit2,
   GitBranch,
   GitCommit,
   GitPullRequest,
+  PlayCircle,
+  FileCode2,
   History,
-  Layers,
-  LoaderCircle,
-  Play,
-  Radio,
-  RefreshCw,
-  Search,
+  ShieldAlert,
   ShieldCheck,
+  Activity,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  Plus,
+  Clock,
   Sparkles,
-  TrendingUp,
-  X
+  FileDiff
 } from "lucide-react";
-import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, type HealthResponse } from "../api/client";
-import { useI18n } from "../i18n";
 import { workspaceQueryKeys } from "../query/client";
-import { safeRequestError } from "../query/safeRequestError";
-import { StatusBadge } from "../components/StatusBadge";
+import { Button } from "../design-system/Button";
+import { Badge } from "../design-system/Badge";
+import { Tabs } from "../design-system/Tabs";
+import { DataTable, type Column } from "../design-system/DataTable";
+import { EmptyState } from "../design-system/EmptyState";
+import { SectionHeader } from "../design-system/SectionHeader";
+import { AppLink } from "../design-system/Link";
+import { ReviewComposerDialog } from "../components/ReviewComposerDialog";
 
-function localRepositoryName(pulse: HeartbeatPulse): string {
-  if (pulse.repository.root === "unknown") return "Local repository";
-  return pulse.repository.root.split(/[\\/]/).filter(Boolean).at(-1) ?? "Local repository";
-}
-
-type RepositoryView = "overview" | "changes" | "history" | "pull-requests" | "runs" | "evolution" | "findings" | "automations" | "audit-log";
-
-function formatReviewLaunchError(error: unknown, zh: boolean): string {
-  if (!error) return "";
-  const raw = error instanceof Error ? error.message : String(error);
-  if (raw.includes("PATH_NOT_ALLOWED") || raw.includes("outside the configured review roots") || raw.includes("No local review roots")) {
-    return zh ? "当前仓库尚未获得本地审查授权。请尝试重新连接本地仓库。" : "This repository is not authorized for local review. Try reconnecting the repository.";
-  }
-  if (raw.includes("NOTHING_TO_REVIEW") || raw.includes("The working tree is clean") || raw.includes("no changes")) {
-    return zh ? "工作区未发现可审查的代码变更。" : "No reviewable changes found.";
-  }
-  if (raw.includes("NOT_A_REPOSITORY")) {
-    return zh ? "所选路径不是有效的 Git 仓库。" : "The selected path is not a valid Git repository.";
-  }
-  if (raw.includes("LLM_NOT_CONFIGURED") || raw.includes("LLM_PROVIDER_NOT_CONFIGURED")) {
-    return zh ? "尚未配置大语言模型，请前往设置页配置。" : "LLM not configured; configure in settings first.";
-  }
-  return safeRequestError(error, zh ? "发起审查失败" : "Could not launch review");
-}
-
-function CommitDetailModal({
-  commit,
-  zh,
-  onClose
-}: {
-  commit: VcsCommitSummary;
-  zh: boolean;
-  onClose: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card commit-detail-modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <span className="panel-kicker">{zh ? "提交详情" : "Commit Details"}</span>
-            <h3><code>{commit.sha.slice(0, 10)}</code></h3>
-          </div>
-          <button type="button" className="drawer-close-btn" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="modal-body">
-          <p className="commit-full-message">{commit.message}</p>
-          <div className="kv-grid">
-            <div>
-              <strong>{zh ? "作者" : "Author"}</strong>
-              <span>{commit.author.name} {commit.author.email ? `<${commit.author.email}>` : ""}</span>
-            </div>
-            <div>
-              <strong>{zh ? "提交时间" : "Authored"}</strong>
-              <span>{new Date(commit.authoredAt).toLocaleString()}</span>
-            </div>
-            <div>
-              <strong>{zh ? "父提交" : "Parents"}</strong>
-              <div className="parent-shas-list">
-                {commit.parentShas.length === 0 ? <span>{zh ? "无 (根提交)" : "None (Root)"}</span>
-                  : commit.parentShas.map(p => <code key={p}>{p.slice(0, 8)}</code>)}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReviewComposerModal({
-  displayName,
-  branch,
-  defaultBranch,
-  headSha,
-  dirtyCount,
-  health,
-  submitting = false,
-  error,
-  zh,
-  onClose,
-  onStartReview
-}: {
-  displayName: string;
-  branch?: string | null;
-  defaultBranch?: string | null;
-  headSha?: string | null;
-  dirtyCount: number;
+export interface RepositoryDetailPageProps {
+  jobs: ReviewJob[];
+  repositories: Repository[];
+  automations?: Automation[];
+  pulse?: HeartbeatPulse | null;
   health?: HealthResponse;
-  submitting?: boolean;
-  error?: string;
-  zh: boolean;
-  onClose: () => void;
-  onStartReview: (options: {
-    source: "working_tree" | "branch";
-    baseRef?: string;
-    headRef?: string;
-    modelOverride?: { provider: "deepseek" | "openai"; model: string };
-  }) => void;
-}) {
-  const hasWorkingTreeChanges = dirtyCount > 0;
-  const [source, setSource] = useState<"working_tree" | "branch">(hasWorkingTreeChanges ? "working_tree" : "branch");
-
-  const defaultProvider = (health?.llmProvider && health.llmProvider !== "none")
-    ? (health.llmProvider as "deepseek" | "openai")
-    : (health?.llmCapabilities?.deepseek?.configured ? "deepseek" : health?.llmCapabilities?.openai?.configured ? "openai" : "none");
-
-  const defaultModel = health?.llmModel || (
-    defaultProvider === "deepseek"
-      ? (health?.llmCapabilities?.deepseek?.defaultModel || "deepseek-v4-flash")
-      : defaultProvider === "openai"
-      ? (health?.llmCapabilities?.openai?.defaultModel || "gpt-4.1-mini")
-      : ""
-  );
-
-  const [isCustomModel, setIsCustomModel] = useState(false);
-  const [overrideProvider, setOverrideProvider] = useState<"deepseek" | "openai">(defaultProvider === "openai" ? "openai" : "deepseek");
-  const [overrideModel, setOverrideModel] = useState("");
-
-  const deepseekConfigured = Boolean(health?.llmCapabilities?.deepseek?.configured ?? (health?.llmProvider === "deepseek"));
-  const openaiConfigured = Boolean(health?.llmCapabilities?.openai?.configured ?? (health?.llmProvider === "openai"));
-
-  const targetModelName = isCustomModel
-    ? (overrideModel.trim() || (overrideProvider === "deepseek" ? "deepseek-v4-flash" : "gpt-4.1-mini"))
-    : defaultModel;
-
-  const resolvedProvider = isCustomModel ? overrideProvider : (defaultProvider !== "none" ? defaultProvider : undefined);
-
-  const canStart = Boolean(
-    (source === "branch" || hasWorkingTreeChanges) &&
-    resolvedProvider &&
-    targetModelName &&
-    !submitting
-  );
-
-  const validationHint = !hasWorkingTreeChanges && source === "working_tree"
-    ? (zh ? "当前工作区没有未提交变更，请选择当前分支变更" : "Clean working tree; select current branch changes")
-    : !resolvedProvider
-    ? (zh ? "尚未配置大语言模型，请前往设置页配置" : "LLM not configured; configure in settings first")
-    : isCustomModel && !overrideModel.trim() && !targetModelName
-    ? (zh ? "请输入模型名称" : "Enter model name")
-    : undefined;
-
-  const targetBranchText = defaultBranch
-    ? `${branch ?? "HEAD"} → ${defaultBranch}`
-    : `${branch ?? "HEAD"} (${zh ? "默认分支未知" : "default branch unknown"})`;
-
-  function handleSubmit() {
-    if (!canStart || !resolvedProvider) return;
-    onStartReview({
-      source,
-      baseRef: defaultBranch ?? "main",
-      headRef: branch ?? "HEAD",
-      modelOverride: isCustomModel ? { provider: overrideProvider, model: targetModelName } : undefined
-    });
-  }
-
-  return (
-    <div className="modal-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div
-        className="modal-card review-composer-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="review-composer-title"
-        onKeyDown={e => { if (e.key === "Escape") onClose(); }}
-      >
-        <div className="modal-header">
-          <div>
-            <span className="panel-kicker">{zh ? "发起代码审查" : "Launch Review"}</span>
-            <h3 id="review-composer-title">{displayName}</h3>
-          </div>
-          <button type="button" className="drawer-close-btn" aria-label={zh ? "关闭" : "Close"} onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="modal-body">
-          {error && (
-            <div className="route-query-notice" role="alert">
-              <strong>{zh ? "发起审查失败" : "Could not launch review"}</strong>
-              <span>{error}</span>
-            </div>
-          )}
-
-          <div className="composer-field">
-            <label><strong>{zh ? "审查范围" : "Review Source"}</strong></label>
-            <div className="source-option-list">
-              <label className={`source-option-card ${source === "working_tree" ? "selected" : ""} ${!hasWorkingTreeChanges ? "disabled" : ""}`}>
-                <input
-                  type="radio"
-                  name="reviewSource"
-                  value="working_tree"
-                  checked={source === "working_tree"}
-                  disabled={!hasWorkingTreeChanges}
-                  onChange={() => setSource("working_tree")}
-                />
-                <div>
-                  <strong>{zh ? "工作区未提交变更 (Working Tree)" : "Working Tree Changes"}</strong>
-                  <small>
-                    {hasWorkingTreeChanges
-                      ? (zh ? `比对未提交修改 (${dirtyCount} 个修改文件)` : `Diff uncommitted modifications (${dirtyCount} changed files)`)
-                      : (zh ? "当前工作区没有未提交变更 (0 个修改文件)" : "Clean working tree (0 changed files)")}
-                  </small>
-                </div>
-              </label>
-              <label className={`source-option-card ${source === "branch" ? "selected" : ""}`}>
-                <input
-                  type="radio"
-                  name="reviewSource"
-                  value="branch"
-                  checked={source === "branch"}
-                  onChange={() => setSource("branch")}
-                />
-                <div>
-                  <strong>{zh ? `当前分支变更 (${targetBranchText})` : `Current Branch (${targetBranchText})`}</strong>
-                  <small>{zh ? "比对分支相对于主干的基础变更" : "Diff branch merge base against default branch"}</small>
-                </div>
-              </label>
-            </div>
-          </div>
-
-          <div className="composer-field composer-model-section">
-            <div className="composer-field-header">
-              <label><strong>{zh ? "审查模型" : "Review Model"}</strong></label>
-              <button
-                type="button"
-                className="text-link-button"
-                onClick={() => {
-                  if (!isCustomModel) {
-                    setOverrideModel(defaultModel);
-                  }
-                  setIsCustomModel(prev => !prev);
-                }}
-              >
-                {isCustomModel ? (zh ? "使用全局默认" : "Use default") : (zh ? "更改模型" : "Change model")}
-              </button>
-            </div>
-
-            {!isCustomModel ? (
-              <div className="model-default-display">
-                <div className="model-default-pill">
-                  <Sparkles size={14} className="model-sparkle" />
-                  <strong>
-                    {defaultProvider !== "none"
-                      ? `${defaultProvider === "deepseek" ? "DeepSeek" : "OpenAI"} · ${defaultModel}`
-                      : (zh ? "未配置 LLM" : "LLM not configured")}
-                  </strong>
-                  <span className="model-default-tag">{zh ? "全局默认" : "Global default"}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="custom-model-editor">
-                <div className="custom-model-row">
-                  <div className="custom-model-input-group">
-                    <label htmlFor="composer-override-provider"><small>{zh ? "提供商" : "Provider"}</small></label>
-                    <select
-                      id="composer-override-provider"
-                      value={overrideProvider}
-                      onChange={e => {
-                        const next = e.target.value as "deepseek" | "openai";
-                        setOverrideProvider(next);
-                        if (!overrideModel.trim() || overrideModel === "deepseek-v4-flash" || overrideModel === "gpt-4.1-mini") {
-                          setOverrideModel(next === "deepseek" ? (health?.llmCapabilities?.deepseek?.defaultModel || "deepseek-v4-flash") : (health?.llmCapabilities?.openai?.defaultModel || "gpt-4.1-mini"));
-                        }
-                      }}
-                    >
-                      <option value="deepseek" disabled={!deepseekConfigured}>
-                        DeepSeek {!deepseekConfigured ? (zh ? "(未配置密钥)" : "(unconfigured)") : ""}
-                      </option>
-                      <option value="openai" disabled={!openaiConfigured}>
-                        OpenAI {!openaiConfigured ? (zh ? "(未配置密钥)" : "(unconfigured)") : ""}
-                      </option>
-                    </select>
-                  </div>
-
-                  <div className="custom-model-input-group flex-1">
-                    <label htmlFor="composer-override-model"><small>{zh ? "模型名称" : "Model"}</small></label>
-                    <input
-                      id="composer-override-model"
-                      type="text"
-                      placeholder={overrideProvider === "deepseek" ? "deepseek-v4-flash" : "gpt-4.1-mini"}
-                      value={overrideModel}
-                      onChange={e => setOverrideModel(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <small className="custom-model-hint">
-                  {zh ? "仅对本次审查生效，不修改全局设置" : "Applies to this review only; does not mutate global settings"}
-                </small>
-              </div>
-            )}
-          </div>
-
-          <div className="composer-meta-summary">
-            <div><span>{zh ? "目标分支" : "Branch"}:</span> <code>{branch ?? "HEAD"}</code></div>
-            <div><span>{zh ? "提交基线" : "HEAD SHA"}:</span> <code>{headSha?.slice(0, 10) ?? "latest"}</code></div>
-            <div>
-              <span>{zh ? "执行模型" : "Execution"}:</span>
-              <code>{resolvedProvider ? `${resolvedProvider === "deepseek" ? "DeepSeek" : "OpenAI"} · ${targetModelName}` : (zh ? "未配置" : "None")}</code>
-            </div>
-          </div>
-
-          {validationHint && (
-            <div className="composer-validation-warning">
-              <AlertCircle size={13} />
-              <span>{validationHint}</span>
-            </div>
-          )}
-
-          <div className="composer-actions">
-            <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>
-              {zh ? "取消" : "Cancel"}
-            </button>
-            <button
-              type="button"
-              className="primary-button"
-              disabled={!canStart}
-              onClick={handleSubmit}
-            >
-              {submitting ? <LoaderCircle className="spinning" size={14} /> : <Play size={14} />}
-              {zh ? (submitting ? "正在发起..." : "开始审查") : (submitting ? "Launching..." : "Start Review")}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
-export function RepositoryDetailPage({
+export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
   jobs,
-  repositories = [],
-  automations = [],
+  repositories,
   pulse,
   health
-}: {
-  jobs: ReviewJob[];
-  repositories?: Repository[];
-  automations?: Automation[];
-  pulse: HeartbeatPulse | null;
-  health?: HealthResponse;
-}) {
+}) => {
   const { repositoryId = "" } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { locale } = useI18n();
-  const zh = locale === "zh-CN";
+  const location = useLocation();
 
+  const [isComposerOpen, setIsComposerOpen] = useState(() => {
+    return new URLSearchParams(location.search).get("composer") === "open";
+  });
   const [selectedCommit, setSelectedCommit] = useState<VcsCommitSummary | null>(null);
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [prFilter, setPrFilter] = useState<"all" | "open" | "merged" | "closed">("all");
 
-  const localId = pulse ? `local:${localRepositoryName(pulse)}` : "";
-  const isLocalMonitor = Boolean(pulse && repositoryId === localId);
-  const registered = repositories.find(repository => repository.id === repositoryId || repository.remoteFullName === repositoryId);
-  const sourceJobs = jobs.filter(job =>
-    job.repositoryFullName === (registered?.remoteFullName ?? repositoryId) ||
-    repositoryId.includes(job.repositoryFullName) ||
-    (isLocalMonitor && job.accessMode === "local_git")
-  );
-  const title = registered?.displayName ?? (isLocalMonitor ? localRepositoryName(pulse!) : (repositoryId === "sk1ua/ConsistenCy" && pulse ? localRepositoryName(pulse) : repositoryId));
+  // Derive active tab from URL path
+  const activeTab = useMemo(() => {
+    if (location.pathname.includes("/changes")) return "changes";
+    if (location.pathname.includes("/history")) return "history";
+    if (location.pathname.includes("/pull-requests")) return "pull-requests";
+    if (location.pathname.includes("/reviews")) return "reviews";
+    if (location.pathname.includes("/workflows")) return "workflows";
+    return "overview";
+  }, [location.pathname]);
 
+  const handleTabChange = (tabId: string) => {
+    navigate(`/repositories/${encodeURIComponent(repositoryId)}/${tabId}`);
+  };
+
+  // Queries for repository git status, commits, PRs, review preparation
   const gitStatusQuery = useQuery({
-    queryKey: workspaceQueryKeys.repositoryGitStatus(repositoryId),
-    queryFn: ({ signal }) => api.repositoryGitStatus(repositoryId, signal),
-    staleTime: 10_000
+    queryKey: ["repository-git-status", repositoryId],
+    queryFn: () => api.repositoryGitStatus(repositoryId),
+    refetchInterval: 10_000
   });
-
-  const gitStatus = gitStatusQuery.data;
-
-  const isLocal = Boolean(
-    registered?.source === "local_git" ||
-    isLocalMonitor ||
-    gitStatus?.available ||
-    Boolean(gitStatus?.branch) ||
-    (pulse && (repositoryId === "sk1ua/ConsistenCy" || repositoryId === "ConsistenCy" || repositoryId.includes("ConsistenCy")))
-  );
-
-  const startLocalReview = useMutation({
-    mutationFn: async (options: {
-      source: "working_tree" | "branch";
-      baseRef?: string;
-      headRef?: string;
-      modelOverride?: { provider: "deepseek" | "openai"; model: string };
-    }) => {
-      let targetPath: string | undefined = undefined;
-      if (repositoryId.startsWith("local:")) {
-        targetPath = repositoryId.replace(/^local:/, "");
-      } else if (!registered && pulse?.repository.root && pulse.repository.root !== "unknown") {
-        targetPath = pulse.repository.root;
-      }
-      return api.triggerLocalReview({
-        repositoryId: repositoryId,
-        repoPath: targetPath,
-        ...(options.source === "branch" ? { baseRef: options.baseRef ?? registered?.defaultBranch ?? "main", headRef: branch } : {}),
-        ...(options.modelOverride ? { model: { provider: options.modelOverride.provider, model: options.modelOverride.model } } : {})
-      });
-    },
-    onSuccess: async res => {
-      setComposerOpen(false);
-      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
-      navigate(`/runs/${encodeURIComponent(res.jobId)}/overview`);
-    }
-  });
-
-  // Parse path segments to determine active view and optional sub-parameter (like PR number)
-  const segments = location.pathname.split("/").filter(Boolean);
-  const repoIdx = segments.indexOf("repositories");
-  const subSegment = repoIdx >= 0 ? segments[repoIdx + 2] : undefined;
-  const paramSegment = repoIdx >= 0 ? segments[repoIdx + 3] : undefined;
-
-  const view: RepositoryView =
-    subSegment === "changes" ? "changes"
-    : subSegment === "history" ? "history"
-    : subSegment === "pull-requests" ? "pull-requests"
-    : subSegment === "runs" ? "runs"
-    : subSegment === "automations" ? "automations"
-    : "overview";
-
-  const selectedPrNumber = subSegment === "pull-requests" && paramSegment ? Number(paramSegment) : undefined;
 
   const commitsQuery = useQuery({
-    queryKey: workspaceQueryKeys.repositoryCommits(repositoryId),
-    queryFn: ({ signal }) => api.repositoryCommits(repositoryId, 30, signal),
-    staleTime: 15_000
+    queryKey: ["repository-commits", repositoryId],
+    queryFn: () => api.repositoryCommits(repositoryId, 30)
   });
 
-  const pullRequestsQuery = useQuery({
-    queryKey: workspaceQueryKeys.repositoryPullRequests(repositoryId),
-    queryFn: ({ signal }) => api.repositoryPullRequests(repositoryId, signal),
-    staleTime: 15_000
+  const prsQuery = useQuery({
+    queryKey: ["repository-prs", repositoryId],
+    queryFn: () => api.repositoryPullRequests(repositoryId)
   });
 
-  const repositoryAutomations = automations.filter(automation => automation.repositoryId === repositoryId);
+  const prepQuery = useQuery({
+    queryKey: ["review-preparation", repositoryId],
+    queryFn: () => api.reviewPreparation(repositoryId),
+    refetchInterval: 15_000
+  });
 
-  const commits = commitsQuery.data?.commits ?? [];
-  const prsData = pullRequestsQuery.data;
-  const filteredPrs = useMemo(() => {
-    if (!prsData?.pullRequests) return [];
-    if (prFilter === "all") return prsData.pullRequests;
-    return prsData.pullRequests.filter(p => p.state === prFilter);
-  }, [prsData?.pullRequests, prFilter]);
+  // Find repository model
+  const repo = useMemo(() => {
+    return (
+      repositories.find(r => r.id === repositoryId || r.displayName === repositoryId) ?? {
+        id: repositoryId,
+        displayName: repositoryId.replace(/^local:/, ""),
+        source: "local_git" as const,
+        trustLevel: "trusted_local" as const,
+        monitoringEnabled: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    );
+  }, [repositories, repositoryId]);
 
-  const latestJob = sourceJobs[0];
-  const branch = gitStatus?.branch ?? pulse?.repository.branch ?? "main";
-  const headSha = gitStatus?.headSha ?? pulse?.repository.headSha ?? latestJob?.headSha;
-  const tabs: Array<{ id: RepositoryView; label: string; count?: number }> = [
-    { id: "overview", label: zh ? "概览" : "Overview" },
-    ...(isLocal ? [{ id: "changes" as const, label: zh ? "变更" : "Changes", count: gitStatus?.dirtyFileCount || undefined }] : []),
-    { id: "history", label: zh ? "提交历史" : "Git History", count: commits.length || undefined },
-    { id: "pull-requests", label: zh ? "拉取请求" : "Pull Requests", count: prsData?.pullRequests.length || undefined },
-    { id: "runs", label: zh ? "审查" : "Reviews", count: sourceJobs.length || undefined },
-    { id: "automations", label: zh ? "工作流" : "Workflows", count: repositoryAutomations.length || undefined },
+  // Repository-specific review jobs
+  const repoJobs = useMemo(() => {
+    return jobs.filter(
+      j =>
+        j.repositoryFullName === repositoryId ||
+        j.repositoryFullName === repo.displayName ||
+        (repo.remoteFullName && j.repositoryFullName === repo.remoteFullName) ||
+        repositoryId.includes(j.repositoryFullName) ||
+        j.repositoryFullName.includes(repo.displayName)
+    );
+  }, [jobs, repositoryId, repo.displayName, repo.remoteFullName]);
+
+  const displayPRs = useMemo<PullRequestSummary[]>(() => {
+    const apiPrs = prsQuery.data?.pullRequests ?? [];
+    if (apiPrs.length > 0) return apiPrs;
+
+    return repoJobs
+      .filter(j => j.pullRequestNumber !== undefined)
+      .map(j => ({
+        number: j.pullRequestNumber!,
+        title: `PR #${j.pullRequestNumber}`,
+        state: "open" as const,
+        author: "contributor",
+        baseRef: "main",
+        headRef: `pr-${j.pullRequestNumber}`,
+        baseSha: j.baseSha,
+        headSha: j.headSha,
+        createdAt: j.createdAt,
+        updatedAt: j.createdAt,
+        score: j.report?.score,
+        riskLevel: j.report?.riskLevel,
+        jobId: j.id
+      }));
+  }, [prsQuery.data?.pullRequests, repoJobs]);
+
+  const [prFilter, setPrFilter] = useState<"all" | "open" | "merged" | "closed">("all");
+
+  const filteredPRs = useMemo(() => {
+    if (prFilter === "all") return displayPRs;
+    return displayPRs.filter(pr => pr.state === prFilter);
+  }, [displayPRs, prFilter]);
+
+  const tabs = [
+    { id: "overview", label: "概览" },
+    {
+      id: "changes",
+      label: "变更",
+      count: gitStatusQuery.data?.dirtyFileCount || undefined
+    },
+    { id: "history", label: "提交历史" },
+    {
+      id: "pull-requests",
+      label: "拉取请求",
+      count: displayPRs.length || undefined
+    },
+    { id: "reviews", label: "审查", count: repoJobs.length || undefined },
+    { id: "workflows", label: "工作流" }
   ];
 
-  const selectedPr = useMemo(() => {
-    if (selectedPrNumber === undefined || !prsData?.pullRequests) return undefined;
-    return prsData.pullRequests.find(p => p.number === selectedPrNumber);
-  }, [prsData?.pullRequests, selectedPrNumber]);
+  // Commit columns
+  const commitColumns: Column<VcsCommitSummary>[] = [
+    {
+      key: "sha",
+      header: "SHA",
+      width: 100,
+      render: c => (
+        <Badge variant="neutral" size="sm" mono>
+          {c.sha.substring(0, 7)}
+        </Badge>
+      )
+    },
+    {
+      key: "message",
+      header: "提交说明",
+      render: c => (
+        <span style={{ fontWeight: 500, fontSize: "13px" }}>{c.message}</span>
+      )
+    },
+    {
+      key: "author",
+      header: "作者",
+      width: 160,
+      render: c => (
+        <span style={{ color: "var(--muted-strong)", fontSize: "12px" }}>{c.author.name}</span>
+      )
+    },
+    {
+      key: "authoredAt",
+      header: "提交时间",
+      width: 160,
+      render: c => (
+        <span style={{ color: "var(--muted)", fontSize: "12px" }}>
+          {new Date(c.authoredAt).toLocaleString()}
+        </span>
+      )
+    }
+  ];
+
+  // PR columns
+  const prColumns: Column<PullRequestSummary>[] = [
+    {
+      key: "number",
+      header: "#",
+      width: 60,
+      render: pr => (
+        <span style={{ fontFamily: "var(--ds-font-mono)", fontWeight: 600 }}>#{pr.number}</span>
+      )
+    },
+    {
+      key: "title",
+      header: "PR 标题",
+      render: pr => (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontWeight: 600 }}>{pr.title}</span>
+          <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+            {pr.headRef} → {pr.baseRef} · 由 {pr.author} 提交
+          </span>
+        </div>
+      )
+    },
+    {
+      key: "state",
+      header: "状态",
+      width: 90,
+      render: pr => (
+        <Badge variant={pr.state === "open" ? "success" : "neutral"} size="sm">
+          {pr.state.toUpperCase()}
+        </Badge>
+      )
+    },
+    {
+      key: "reviewStatus",
+      header: "审查结果",
+      width: 120,
+      render: pr => {
+        if (pr.score !== undefined) {
+          return (
+            <Badge variant={pr.riskLevel === "critical" || pr.riskLevel === "high" ? "danger" : "success"} size="sm">
+              得分 {pr.score}
+            </Badge>
+          );
+        }
+        return <span style={{ color: "var(--muted)", fontSize: "12px" }}>未审查</span>;
+      }
+    },
+    {
+      key: "actions",
+      header: "操作",
+      align: "right",
+      width: 120,
+      render: pr => (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            if (pr.jobId) {
+              navigate(`/runs/${encodeURIComponent(pr.jobId)}/overview`);
+            } else {
+              setIsComposerOpen(true);
+            }
+          }}
+        >
+          {pr.jobId ? "查看报告" : "发起审查"}
+        </Button>
+      )
+    }
+  ];
+
+  // Review Job columns
+  const reviewColumns: Column<ReviewJob>[] = [
+    {
+      key: "id",
+      header: "审查 ID",
+      width: 110,
+      render: job => (
+        <AppLink to={`/runs/${encodeURIComponent(job.id)}/overview`} style={{ fontFamily: "var(--ds-font-mono)", fontWeight: 600 }}>
+          {job.id.substring(0, 8)}
+        </AppLink>
+      )
+    },
+    {
+      key: "target",
+      header: "审查目标",
+      render: job => (
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : "工作区变更"}</span>
+          <Badge variant="neutral" size="sm" mono>
+            {job.headSha.substring(0, 7)}
+          </Badge>
+        </div>
+      )
+    },
+    {
+      key: "model",
+      header: "执行模型",
+      width: 180,
+      render: job => (
+        <span style={{ fontSize: "12px", fontFamily: "var(--ds-font-mono)" }}>
+          {job.llmProvider || "deepseek"} · {job.llmModel || "deepseek-v4-flash"}
+        </span>
+      )
+    },
+    {
+      key: "status",
+      header: "状态 / 评分",
+      width: 140,
+      render: job => {
+        if (job.status === "succeeded" && job.report) {
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <Badge variant="success" size="sm">
+                成功
+              </Badge>
+              <Badge variant={job.report.riskLevel === "critical" || job.report.riskLevel === "high" ? "danger" : "primary"} size="sm">
+                {job.report.score} 分
+              </Badge>
+            </div>
+          );
+        }
+        if (job.status === "running") {
+          return <Badge variant="warning" size="sm" dot>执行中</Badge>;
+        }
+        if (job.status === "failed") {
+          return <Badge variant="danger" size="sm">失败</Badge>;
+        }
+        return <Badge variant="neutral" size="sm">已排队</Badge>;
+      }
+    },
+    {
+      key: "createdAt",
+      header: "时间",
+      width: 150,
+      render: job => (
+        <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+          {new Date(job.createdAt).toLocaleString()}
+        </span>
+      )
+    }
+  ];
+
+  const gitStatus = gitStatusQuery.data;
+  const prep = prepQuery.data;
 
   return (
-    <div className="repository-workspace-page page-stack">
-      {/* Hero Workspace Header */}
-      <section className="section-block repo-workspace-hero">
-        <div className="repo-hero-main">
-          <div className="repo-hero-title-group">
-            <FolderGit2 size={24} className="repo-hero-icon" />
-            <div>
-              <div className="repo-hero-tags">
-                <span className="provenance-pill">
-                  {isLocal ? (zh ? "本地 Git · GitHub 公开" : "LOCAL GIT · GITHUB PUBLIC") : (zh ? "GitHub · 公开" : "GITHUB PUBLIC")}
-                </span>
-              </div>
-              <h2>{title}</h2>
-            </div>
+    <div style={{ padding: "20px 28px", maxWidth: "1280px", margin: "0 auto" }}>
+      {/* Workspace Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "16px",
+          paddingBottom: "16px",
+          borderBottom: "1px solid var(--border)"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div
+            style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "var(--ds-radius-md)",
+              background: "var(--primary-soft)",
+              color: "var(--primary-strong)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}
+          >
+            <FolderGit2 size={20} />
           </div>
 
-          <div className="repo-hero-actions">
-            <button
-              type="button"
-              className="primary-button review-launch-button"
-              onClick={() => setComposerOpen(true)}
-            >
-              <Play size={14} /> {zh ? "审查代码" : "Review code"}
-            </button>
-          </div>
-        </div>
-
-        {/* Deterministic Git Status Line */}
-        {isLocal ? (
-          <div className="git-status-strip">
-            <div className="status-item">
-              <span className="status-label">{zh ? "当前分支" : "Branch"}</span>
-              <div className="status-val">
-                <GitBranch size={13} />
-                <strong>{branch ?? (zh ? "分离头指针" : "detached")}</strong>
-              </div>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <h1 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>{repo.displayName}</h1>
+              <Badge variant="neutral" size="sm" mono>
+                {repo.source === "local_git" ? "本地 Git" : "GitHub"}
+              </Badge>
+              <Badge variant={repo.trustLevel === "trusted_local" ? "success" : "neutral"} size="sm">
+                {repo.trustLevel === "trusted_local" ? "Trusted Local" : "Read-only"}
+              </Badge>
             </div>
-            <div className="status-item">
-              <span className="status-label">{zh ? "HEAD 提交" : "HEAD SHA"}</span>
-              <code>{headSha ? headSha.slice(0, 10) : "working tree"}</code>
-            </div>
-            <div className="status-item">
-              <span className="status-label">{zh ? "工作区状态" : "Working Tree"}</span>
-              <span className={gitStatus?.available === false ? "status-dim" : gitStatus && gitStatus.dirtyFileCount > 0 ? "dirty-tag" : "clean-tag"}>
-                {gitStatus?.available === false
-                  ? (zh ? "本地路径不可用" : "Local path unavailable")
-                  : gitStatus && gitStatus.dirtyFileCount > 0
-                  ? `${gitStatus.dirtyFileCount} ${zh ? "项工作区变更" : "changed files"}`
-                  : (zh ? "工作区干净" : "Clean working tree")}
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", fontSize: "12px", color: "var(--muted)", marginTop: "2px" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <GitBranch size={12} />
+                <span>{gitStatus?.branch || "main"}</span>
               </span>
-            </div>
-            {gitStatus?.primaryRemote && (
-              <div className="status-item">
-                <span className="status-label">{zh ? "Git 远端" : "Remote"}</span>
-                <code title={gitStatus.primaryRemote.url}>{gitStatus.primaryRemote.name} · {gitStatus.primaryRemote.githubFullName ?? gitStatus.primaryRemote.url}</code>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="git-status-strip">
-            <div className="status-item">
-              <span className="status-label">{zh ? "默认分支" : "Default Branch"}</span>
-              <div className="status-val">
-                <GitBranch size={13} />
-                <strong>{registered?.defaultBranch ?? "main"}</strong>
-              </div>
-            </div>
-            <div className="status-item">
-              <span className="status-label">{zh ? "最新审查 SHA" : "Reviewed SHA"}</span>
-              <code>{latestJob?.headSha ? latestJob.headSha.slice(0, 10) : "—"}</code>
-            </div>
-            <div className="status-item">
-              <span className="status-label">{zh ? "历史审查" : "Reviews"}</span>
-              <strong>{sourceJobs.length} {zh ? "次" : "runs"}</strong>
-            </div>
-            <div className="status-item">
-              <span className="status-label">{zh ? "数据来源" : "Provenance"}</span>
-              <span>{isLocal ? (zh ? "本地 Git" : "Local Git") : (zh ? "GitHub 只读" : "GitHub read-only")}</span>
+              {gitStatus?.headSha && (
+                <span style={{ display: "flex", alignItems: "center", gap: "4px", fontFamily: "var(--ds-font-mono)" }}>
+                  <GitCommit size={12} />
+                  <span>{gitStatus.headSha.substring(0, 7)}</span>
+                </span>
+              )}
             </div>
           </div>
-        )}
-      </section>
+        </div>
 
-      {/* Sub-Navigation Tabs */}
-      <nav className="repo-workspace-tabs" role="tablist" aria-label={zh ? "仓库视图" : "Repository views"}>
-        {tabs.map(tab => {
-          const active = view === tab.id;
-          const targetUrl = `/repositories/${encodeURIComponent(repositoryId)}${tab.id === "overview" ? "" : `/${tab.id}`}`;
-          return (
-            <NavLink
-              key={tab.id}
-              role="tab"
-              aria-selected={active}
-              className={`repo-tab ${active ? "active" : ""}`}
-              to={targetUrl}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Button
+            variant="primary"
+            size="md"
+            icon={<PlayCircle size={15} />}
+            onClick={() => setIsComposerOpen(true)}
+          >
+            审查代码
+          </Button>
+        </div>
+      </div>
+
+      {/* Workspace Tabs Navigation */}
+      <div style={{ marginBottom: "20px" }}>
+        <Tabs tabs={tabs} activeId={activeTab} onChange={handleTabChange} />
+      </div>
+
+      {/* Tab View 1: Overview */}
+      {activeTab === "overview" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* Review Readiness Banner */}
+          <div
+            style={{
+              padding: "16px 20px",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--ds-radius-lg)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <div
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "50%",
+                  background: prep?.canStartReview ? "var(--success-soft)" : "var(--warning-soft)",
+                  color: prep?.canStartReview ? "var(--success-strong)" : "var(--warning-strong)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}
+              >
+                {prep?.canStartReview ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: "14px" }}>
+                  {prep?.canStartReview ? "审查就绪 (Ready for Review)" : "当前审查不可用"}
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--muted)", marginTop: "2px" }}>
+                  {prep?.sources.workingTree.available
+                    ? `检测到工作区有 ${prep.sources.workingTree.changedFileCount} 个未提交变更文件，可立即执行审查。`
+                    : prep?.sources.branch.available
+                    ? `检测到分支 ${prep.sources.branch.head} 与基准分支差异，可执行分支对比审查。`
+                    : "工作区当前干净，无未提交变更。"}
+                </div>
+              </div>
+            </div>
+
+            <Button
+              variant={prep?.canStartReview ? "primary" : "outline"}
+              size="sm"
+              icon={<PlayCircle size={14} />}
+              onClick={() => setIsComposerOpen(true)}
             >
-              <span>{tab.label}</span>
-              {tab.count !== undefined && <span className="tab-count-badge">{tab.count}</span>}
-            </NavLink>
-          );
-        })}
-      </nav>
+              配置并审查
+            </Button>
+          </div>
 
-      {/* VIEW: OVERVIEW */}
-      {view === "overview" && (
-        <div className="repo-view-stack">
-          {/* Section 1: Working Tree Status (Local repositories only) */}
-          {isLocal && (
-            <section className="section-block repo-overview-card">
-              <div className="panel-title">
-                <div>
-                  <span className="panel-kicker">{zh ? "本地工作区" : "Local Working Tree"}</span>
-                  <h2>{zh ? "工作区状态" : "Working Tree Status"}</h2>
-                </div>
-                <Link to={`/repositories/${encodeURIComponent(repositoryId)}/changes`} className="text-link">
-                  {zh ? "查看变更详情" : "View changes"} →
-                </Link>
-              </div>
-              <div className="card-body-compact">
-                {gitStatus && (gitStatus.dirtyFileCount > 0 || gitStatus.untrackedFileCount > 0) ? (
-                  <div className="dirty-files-summary-row">
-                    <div>
-                      <span className="dirty-tag">{gitStatus.dirtyFileCount} {zh ? "个已修改文件" : "modified files"}</span>
-                      {gitStatus.untrackedFileCount > 0 && <span> · {gitStatus.untrackedFileCount} {zh ? "个未跟踪文件" : "untracked files"}</span>}
-                    </div>
-                    <div className="dirty-files-mini-list">
-                      {gitStatus.changedFiles.slice(0, 3).map(file => (
-                        <div key={file.path} className="dirty-mini-item">
-                          <span className={`diff-status diff-status-${file.status}`}>{file.status.slice(0, 1).toUpperCase()}</span>
-                          <code>{file.path}</code>
-                          <small>+{file.additions} -{file.deletions}</small>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="clean-inline-status">
-                    <CheckCircle2 size={16} className="icon-success" />
-                    <span>{zh ? "工作区干净，无未提交修改" : "Working tree clean, no uncommitted changes"}</span>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Section 2: Latest Review */}
-          <section className="section-block repo-overview-card">
-            <div className="panel-title">
-              <div>
-                <span className="panel-kicker">{zh ? "审查记录" : "Reviews"}</span>
-                <h2>{zh ? "最新审查运行" : "Latest Review Run"}</h2>
-              </div>
-              <Link to={`/repositories/${encodeURIComponent(repositoryId)}/runs`} className="text-link">
-                {zh ? "查看全部审查" : "View all reviews"} →
-              </Link>
-            </div>
-            <div className="card-body-compact">
-              {latestJob ? (
-                <div className="latest-review-summary">
-                  <div className="review-hero-row">
-                    <div>
-                      <strong>{latestJob.pullRequestNumber ? `PR #${latestJob.pullRequestNumber}` : latestJob.id}</strong>
-                      <p>{latestJob.report?.summary ?? (zh ? "审查任务已记录" : "Review task recorded")}</p>
-                    </div>
-                    {latestJob.report && (
-                      <div className="review-score-pill">
-                        <strong>{latestJob.report.score}</strong>
-                        <StatusBadge value={latestJob.report.riskLevel} />
+          {/* Two-column layout for Recent Reviews and Recent Commits */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            {/* Recent Reviews Summary */}
+            <div
+              style={{
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--ds-radius-md)",
+                padding: "16px"
+              }}
+            >
+              <SectionHeader
+                title="最近审查记录"
+                actions={
+                  repoJobs.length > 0 && (
+                    <Button variant="ghost" size="sm" onClick={() => handleTabChange("reviews")}>
+                      查看全部 →
+                    </Button>
+                  )
+                }
+              />
+              {repoJobs.length === 0 ? (
+                <EmptyState
+                  compact
+                  title="暂无审查记录"
+                  description="点击“开始审查”按钮发起首次代码质量与安全性审查。"
+                />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {repoJobs.slice(0, 4).map(job => (
+                    <div
+                      key={job.id}
+                      onClick={() => navigate(`/runs/${encodeURIComponent(job.id)}/overview`)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "8px 10px",
+                        borderRadius: "var(--ds-radius-sm)",
+                        background: "var(--surface-subtle)",
+                        cursor: "pointer",
+                        border: "1px solid var(--border-subtle)"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <Badge variant="neutral" size="sm" mono>
+                          {job.id.substring(0, 8)}
+                        </Badge>
+                        <span style={{ fontSize: "13px", fontWeight: 500 }}>
+                          {job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : "工作区审查"}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                  <div className="review-meta-row">
-                    <StatusBadge value={latestJob.status} />
-                    <small>{new Date(latestJob.createdAt).toLocaleString(locale)}</small>
-                    <Link className="primary-button btn-small" to={`/runs/${encodeURIComponent(latestJob.id)}/overview`}>
-                      {zh ? "打开审查报告" : "Open Review"}
-                    </Link>
-                  </div>
+                      {job.report?.score !== undefined && (
+                        <Badge variant={job.report.riskLevel === "critical" || job.report.riskLevel === "high" ? "danger" : "success"} size="sm">
+                          {job.report.score} 分
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <div className="empty-inline-compact">{zh ? "暂无历史审查运行。" : "No historical review runs yet."}</div>
               )}
             </div>
-          </section>
 
-          {/* Section 3: Recent Commits */}
-          <section className="section-block repo-overview-card">
-            <div className="panel-title">
-              <div>
-                <span className="panel-kicker">{zh ? "提交日志" : "Git Commits"}</span>
-                <h2>{zh ? "最近提交" : "Recent Commits"}</h2>
-              </div>
-              <Link to={`/repositories/${encodeURIComponent(repositoryId)}/history`} className="text-link">
-                {zh ? "查看全部" : "View all"} →
-              </Link>
-            </div>
-            <div className="commit-preview-list">
-              {commits.length === 0 ? (
-                <div className="empty-inline-compact">{zh ? "暂无最近提交记录。" : "No recent commits."}</div>
+            {/* Recent Commits Summary */}
+            <div
+              style={{
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--ds-radius-md)",
+                padding: "16px"
+              }}
+            >
+              <SectionHeader
+                title="最近代码提交"
+                actions={
+                  (commitsQuery.data?.commits.length || 0) > 0 && (
+                    <Button variant="ghost" size="sm" onClick={() => handleTabChange("history")}>
+                      查看全部 →
+                    </Button>
+                  )
+                }
+              />
+              {commitsQuery.isLoading ? (
+                <div style={{ padding: "20px", textAlign: "center", color: "var(--muted)" }}>
+                  正在读取 Git 提交历史...
+                </div>
+              ) : (commitsQuery.data?.commits.length || 0) === 0 ? (
+                <EmptyState compact title="暂无提交历史" description="本地 Git 历史为空或不可读。" />
               ) : (
-                commits.slice(0, 4).map(commit => (
-                  <div key={commit.sha} className="commit-preview-row" onClick={() => setSelectedCommit(commit)}>
-                    <code>{commit.sha.slice(0, 8)}</code>
-                    <span className="commit-preview-msg">{commit.message.split("\n")[0]}</span>
-                    <small>{new Date(commit.authoredAt).toLocaleDateString()}</small>
-                  </div>
-                ))
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {commitsQuery.data!.commits.slice(0, 4).map(c => (
+                    <div
+                      key={c.sha}
+                      onClick={() => handleTabChange("history")}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "8px 10px",
+                        borderRadius: "var(--ds-radius-sm)",
+                        background: "var(--surface-subtle)",
+                        cursor: "pointer",
+                        border: "1px solid var(--border-subtle)"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                        <Badge variant="neutral" size="sm" mono>
+                          {c.sha.substring(0, 7)}
+                        </Badge>
+                        <span style={{ fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {c.message}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: "11px", color: "var(--muted)", flexShrink: 0 }}>
+                        {c.author.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-          </section>
-
-          {/* Section 4: Open Pull Requests */}
-          <section className="section-block repo-overview-card">
-            <div className="panel-title">
-              <div>
-                <span className="panel-kicker">{zh ? "协同审查" : "Collaboration"}</span>
-                <h2>{zh ? "开放拉取请求" : "Open Pull Requests"}</h2>
-              </div>
-              <Link to={`/repositories/${encodeURIComponent(repositoryId)}/pull-requests`} className="text-link">
-                {zh ? "查看全部" : "View all"} →
-              </Link>
-            </div>
-            <div className="pr-preview-list">
-              {prsData?.available === false ? (
-                <div className="empty-inline-compact">{zh ? "未连接 GitHub 远端或 PR 历史不可用。" : "No GitHub remote or PR history unavailable."}</div>
-              ) : prsData?.pullRequests.filter(p => p.state === "open").length === 0 ? (
-                <div className="empty-inline-compact">{zh ? "当前无开放拉取请求。" : "No open pull requests."}</div>
-              ) : (
-                prsData?.pullRequests.filter(p => p.state === "open").slice(0, 4).map(pr => (
-                  <div key={pr.number} className="pr-preview-row">
-                    <span className="pr-number">#{pr.number}</span>
-                    <strong className="pr-title">{pr.title}</strong>
-                    {pr.jobId && (
-                      <Link to={`/runs/${encodeURIComponent(pr.jobId)}/overview`} className="badge badge-succeeded">
-                        {zh ? "查看报告" : "Report"}
-                      </Link>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
+          </div>
         </div>
       )}
 
-      {/* VIEW: CHANGES (WORKING TREE) */}
-      {view === "changes" && (
-        <section className="section-block repo-changes-panel">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "工作区改动 (HEAD → Working Copy)" : "Working Tree (HEAD → Working Copy)"}</span>
-              <h2>{zh ? "本地未提交文件变更" : "Uncommitted Working Tree Changes"}</h2>
-            </div>
-            <button
-              type="button"
-              className="primary-button btn-small"
-              onClick={() => setComposerOpen(true)}
-            >
-              <Play size={13} /> {zh ? "审查这些变更" : "Review these changes"}
-            </button>
-          </div>
+      {/* Tab View 2: Changes */}
+      {activeTab === "changes" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <SectionHeader
+            title="工作区代码变更 (Working Tree Changes)"
+            subtitle={`当前检测到 ${gitStatus?.dirtyFileCount || 0} 个未提交变更文件`}
+            actions={
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<PlayCircle size={14} />}
+                disabled={!gitStatus?.dirtyFileCount}
+                onClick={() => setIsComposerOpen(true)}
+              >
+                审查工作区变更
+              </Button>
+            }
+          />
 
-          {gitStatus && (gitStatus.dirtyFileCount > 0 || gitStatus.untrackedFileCount > 0) ? (
-            <div className="changes-content-layout">
-              <div className="changes-summary-bar">
-                <span><strong>{gitStatus.dirtyFileCount}</strong> {zh ? "个已修改文件" : "modified files"}</span>
-                <span><strong>{gitStatus.untrackedFileCount}</strong> {zh ? "个未跟踪文件" : "untracked files"}</span>
-                <code>HEAD: {headSha ? headSha.slice(0, 10) : "working tree"}</code>
-              </div>
-
-              <div className="changes-file-list">
-                {gitStatus.changedFiles.map(file => (
-                  <div key={file.path} className="changes-file-card">
-                    <div className="changes-file-head">
-                      <span className={`diff-status diff-status-${file.status}`}>{file.status.slice(0, 1).toUpperCase()}</span>
-                      <strong className="changes-file-path">{file.path}</strong>
-                      <span className="changes-file-stats">+{file.additions} -{file.deletions}</span>
-                    </div>
-                    {file.hunks.length > 0 && (
-                      <pre className="changes-diff-preview">
-                        {file.hunks.map(h => h.content).join("\n")}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-
-                {gitStatus.untrackedFiles.map(filePath => (
-                  <div key={filePath} className="changes-file-card untracked">
-                    <div className="changes-file-head">
-                      <span className="diff-status diff-status-untracked">U</span>
-                      <strong className="changes-file-path">{filePath}</strong>
-                      <small className="muted-text">{zh ? "未跟踪新文件" : "untracked"}</small>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          {!gitStatus?.dirtyFileCount ? (
+            <EmptyState
+              icon={<CheckCircle2 size={36} color="var(--success)" />}
+              title="工作区干净，无未提交变更"
+              description="所有代码均已提交到本地 Git 仓库。您可以切换到“提交历史”或“Pull Requests”进行审查。"
+            />
           ) : (
-            <div className="clean-tree-box">
-              <CheckCircle2 size={32} className="icon-success" />
-              <strong>{zh ? "工作区干净，无未提交修改" : "Working tree clean, no uncommitted changes"}</strong>
-              <p>{zh ? "没有需要审查的本地改动。可切换至提交历史或拉取请求标签页审查历史提交。" : "No local changes to review. Switch to Git History or Pull Requests to review commits."}</p>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* VIEW: GIT HISTORY */}
-      {view === "history" && (
-        <section className="section-block git-history-panel">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "确定性提交日志" : "Deterministic Git Log"}</span>
-              <h2>{zh ? "Git 提交历史" : "Git History"}</h2>
-            </div>
-            <GitCommit size={18} className="panel-icon" />
-          </div>
-
-          <div className="git-commit-list">
-            {commits.map(commit => {
-              const firstLine = commit.message.split("\n")[0];
-              return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {gitStatus.changedFiles.map(f => (
                 <div
-                  key={commit.sha}
-                  className="git-commit-item"
-                  onClick={() => setSelectedCommit(commit)}
+                  key={f.path}
+                  style={{
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--ds-radius-md)",
+                    padding: "12px 16px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between"
+                  }}
                 >
-                  <div className="commit-header-row">
-                    <div className="commit-sha-group">
-                      <code>{commit.sha.slice(0, 8)}</code>
-                      <strong className="commit-title">{firstLine}</strong>
-                    </div>
-                    <time dateTime={commit.authoredAt}>{new Date(commit.authoredAt).toLocaleString()}</time>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <FileDiff size={16} style={{ color: "var(--primary)" }} />
+                    <span style={{ fontFamily: "var(--ds-font-mono)", fontSize: "13px", fontWeight: 500 }}>
+                      {f.path}
+                    </span>
+                    <Badge variant={f.status === "added" ? "success" : f.status === "deleted" ? "danger" : "warning"} size="sm">
+                      {f.status.toUpperCase()}
+                    </Badge>
                   </div>
-                  <div className="commit-sub-row">
-                    <span className="commit-author">{commit.author.name}</span>
-                    {commit.parentShas.length > 0 && (
-                      <span className="parent-indicator">{commit.parentShas.length} {zh ? "个父提交" : "parents"}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* VIEW: PULL REQUEST DETAIL */}
-      {view === "pull-requests" && selectedPr && (
-        <section className="section-block pr-detail-panel">
-          <div className="panel-title">
-            <div>
-              <Link to={`/repositories/${encodeURIComponent(repositoryId)}/pull-requests`} className="text-link">
-                ← {zh ? "返回拉取请求列表" : "Back to Pull Requests"}
-              </Link>
-              <h2>#{selectedPr.number} · {selectedPr.title}</h2>
-            </div>
-            <span className={`pr-badge pr-${selectedPr.state}`}>{selectedPr.state.toUpperCase()}</span>
-          </div>
-
-          <div className="pr-detail-meta-box">
-            <div className="pr-detail-grid">
-              <div>
-                <span>{zh ? "分支方向" : "Branch Range"}:</span>
-                <strong>{selectedPr.baseRef} ← {selectedPr.headRef}</strong>
-              </div>
-              <div>
-                <span>{zh ? "作者" : "Author"}:</span>
-                <strong>{selectedPr.author}</strong>
-              </div>
-              <div>
-                <span>{zh ? "创建时间" : "Created"}:</span>
-                <time dateTime={selectedPr.createdAt}>{new Date(selectedPr.createdAt).toLocaleString()}</time>
-              </div>
-              <div>
-                <span>{zh ? "HEAD 提交" : "HEAD SHA"}:</span>
-                <code>{selectedPr.headSha.slice(0, 10)}</code>
-              </div>
-            </div>
-
-            <div className="pr-detail-actions">
-              {selectedPr.jobId ? (
-                <Link to={`/runs/${encodeURIComponent(selectedPr.jobId)}/overview`} className="primary-button">
-                  {zh ? "查看已有审查报告" : "View Existing Review"} {selectedPr.score !== undefined ? `(${selectedPr.score})` : ""}
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => setComposerOpen(true)}
-                >
-                  <Play size={14} /> {zh ? "使用 ConsistenCy 审查此 PR" : "Review with ConsistenCy"}
-                </button>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* VIEW: PULL REQUESTS LIST */}
-      {view === "pull-requests" && !selectedPr && (
-        <section className="section-block pr-history-panel">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "GitHub 协同历史" : "GitHub Pull Requests"}</span>
-              <h2>{zh ? "拉取请求列表" : "Pull Requests"}</h2>
-            </div>
-            <div className="pr-filter-buttons" role="group">
-              {(["all", "open", "merged", "closed"] as const).map(filter => (
-                <button
-                  key={filter}
-                  type="button"
-                  className={`segmented-btn ${prFilter === filter ? "active" : ""}`}
-                  onClick={() => setPrFilter(filter)}
-                >
-                  {zh ? (filter === "all" ? "全部" : filter === "open" ? "开启中" : filter === "merged" ? "已合并" : "已关闭") : filter.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {prsData?.available === false ? (
-            <div className="honest-fallback-box">
-              <AlertCircle size={20} className="icon-warning" />
-              <div>
-                <strong>{zh ? "拉取请求历史不可用" : "Pull Request History Unavailable"}</strong>
-                <p>{prsData.reason ?? (zh ? "此仓库为本地独立仓库或尚未绑定 GitHub 远端；不会从 Git 提交日志猜测假 PR。" : "This repository is local-only or has no authoritative GitHub remote; PR history is never fabricated.")}</p>
-              </div>
-            </div>
-          ) : filteredPrs.length === 0 ? (
-            <div className="empty-inline-compact">{zh ? "无匹配拉取请求。" : "No matching pull requests found."}</div>
-          ) : (
-            <div className="pull-request-table-list">
-              {filteredPrs.map(pr => (
-                <div key={pr.number} className="pr-item-card">
-                  <div className="pr-main-info">
-                    <div className="pr-title-row">
-                      <span className={`pr-badge pr-${pr.state}`}>{pr.state.toUpperCase()}</span>
-                      <Link
-                        to={`/repositories/${encodeURIComponent(repositoryId)}/pull-requests/${pr.number}`}
-                        className="pr-title-text"
-                      >
-                        #{pr.number} · {pr.title}
-                      </Link>
-                    </div>
-                    <div className="pr-meta-row">
-                      <span>{pr.baseRef} ← {pr.headRef}</span>
-                      <span>·</span>
-                      <span>{pr.author}</span>
-                      <span>·</span>
-                      <time dateTime={pr.createdAt}>{new Date(pr.createdAt).toLocaleDateString()}</time>
-                    </div>
-                  </div>
-
-                  <div className="pr-review-actions">
-                    {pr.jobId ? (
-                      <Link to={`/runs/${encodeURIComponent(pr.jobId)}/overview`} className="primary-button btn-small">
-                        {zh ? "查看审查报告" : "View Review"} {pr.score !== undefined ? `(${pr.score})` : ""}
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        className="secondary-button btn-small"
-                        onClick={() => setComposerOpen(true)}
-                      >
-                        <Play size={12} /> {zh ? "审查此 PR" : "Review PR"}
-                      </button>
-                    )}
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", fontFamily: "var(--ds-font-mono)" }}>
+                    <span style={{ color: "var(--success-strong)" }}>+{f.additions}</span>
+                    <span style={{ color: "var(--danger-strong)" }}>-{f.deletions}</span>
                   </div>
                 </div>
               ))}
             </div>
           )}
-        </section>
+        </div>
       )}
 
-      {/* VIEW: REVIEW RUNS */}
-      {view === "runs" && (
-        <section className="section-block repo-runs-panel">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "ConsistenCy 审查记录" : "Review Executions"}</span>
-              <h2>{zh ? "关联审查运行" : "Related Review Runs"}</h2>
-            </div>
-            <strong>{sourceJobs.length} {zh ? "项" : "runs"}</strong>
-          </div>
+      {/* Tab View 3: History */}
+      {activeTab === "history" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <SectionHeader
+            title="Git 提交历史"
+            subtitle="确定性提交日志与本地仓库最近变更记录"
+          />
 
-          {sourceJobs.length === 0 ? (
-            <div className="empty-inline-compact">{zh ? "该仓库暂无审查记录。" : "No review runs recorded for this repository."}</div>
+          {commitsQuery.isLoading ? (
+            <div style={{ padding: "32px", textAlign: "center", color: "var(--muted)" }}>
+              正在加载提交记录...
+            </div>
           ) : (
-            <div className="repo-runs-list" role="list">
-              {sourceJobs.map(job => {
-                const isJobDemo = job.id.startsWith("job_demo");
-                return (
-                  <div key={job.id} className="repo-run-row" role="listitem" onClick={() => navigate(`/runs/${encodeURIComponent(job.id)}/overview`)}>
-                    <div className="run-identity">
-                      <StatusBadge value={job.status} />
-                      <strong>{job.pullRequestNumber ? `PR #${job.pullRequestNumber}` : job.id.slice(0, 8)}</strong>
-                      <span className="run-summary-text">{job.report?.summary ?? (zh ? "审查任务已记录" : "Review task")}</span>
-                      {isJobDemo && <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>}
-                    </div>
-                    <div className="run-metrics">
-                      {job.report && (
-                        <div className="score-mini-pill">
-                          <strong>{job.report.score}</strong>
-                          <StatusBadge value={job.report.riskLevel} />
-                        </div>
-                      )}
-                      <time dateTime={job.createdAt}>{new Date(job.createdAt).toLocaleString(locale)}</time>
-                      <Link to={`/runs/${encodeURIComponent(job.id)}/overview`} className="primary-button btn-small" onClick={e => e.stopPropagation()}>
-                        {zh ? "打开审查报告" : "Open Report"}
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <DataTable
+              columns={commitColumns}
+              data={commitsQuery.data?.commits || []}
+              keyExtractor={c => c.sha}
+              onRowClick={c => setSelectedCommit(c)}
+            />
           )}
-        </section>
+        </div>
       )}
 
-      {/* VIEW: AUTOMATIONS */}
-      {view === "automations" && (
-        <section className="section-block repo-automations-panel">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "工作流触发器" : "Workflow Triggers"}</span>
-              <h2>{zh ? "仓库工作流策略" : "Repository Workflow Policies"}</h2>
+      {/* Tab View 4: Pull Requests */}
+      {activeTab === "pull-requests" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <SectionHeader
+            title="拉取请求列表"
+            subtitle="关联的 GitHub Pull Request 及其审查记录"
+            actions={
+              <div style={{ display: "flex", gap: "4px" }}>
+                <Button variant={prFilter === "all" ? "primary" : "secondary"} size="sm" onClick={() => setPrFilter("all")}>
+                  全部
+                </Button>
+                <Button variant={prFilter === "open" ? "primary" : "secondary"} size="sm" onClick={() => setPrFilter("open")}>
+                  开启中
+                </Button>
+                <Button variant={prFilter === "merged" ? "primary" : "secondary"} size="sm" onClick={() => setPrFilter("merged")}>
+                  已合并
+                </Button>
+                <Button variant={prFilter === "closed" ? "primary" : "secondary"} size="sm" onClick={() => setPrFilter("closed")}>
+                  已关闭
+                </Button>
+              </div>
+            }
+          />
+
+          {prsQuery.isLoading ? (
+            <div style={{ padding: "32px", textAlign: "center", color: "var(--muted)" }}>
+              正在拉取 Pull Request 列表...
             </div>
-            <Link to="/workflows?tab=triggers" className="text-link">{zh ? "工作流控制面" : "Workflow Control Plane"} →</Link>
-          </div>
-          {repositoryAutomations.length === 0 ? (
-            <div className="empty-inline-compact">{zh ? "暂无绑定的工作流策略。" : "No workflow policies bound to this repository."}</div>
+          ) : filteredPRs.length === 0 ? (
+            <EmptyState
+              icon={<GitPullRequest size={36} />}
+              title="暂无 Pull Request 记录"
+              description="该仓库未检测到公开 Pull Request 历史。您可以通过输入 GitHub PR 链接开始审查。"
+            />
           ) : (
-            <div className="automation-list">
-              {repositoryAutomations.map(automation => (
-                <div key={automation.id} className="automation-row">
-                  <span className={automation.enabled ? "automation-state enabled" : "automation-state"}><i />{automation.enabled ? (zh ? "启用" : "Enabled") : (zh ? "暂停" : "Paused")}</span>
-                  <div>
-                    <strong>{automation.name}</strong>
-                    <small>{automation.trigger.type} · {automation.executionProfile}</small>
-                  </div>
-                  <code>{automation.workflowRevisionId.slice(0, 10)}</code>
-                </div>
-              ))}
-            </div>
+            <DataTable
+              columns={prColumns}
+              data={filteredPRs}
+              keyExtractor={pr => String(pr.number)}
+              onRowClick={pr => {
+                if (pr.jobId) navigate(`/runs/${encodeURIComponent(pr.jobId)}/overview`);
+              }}
+            />
           )}
-        </section>
+        </div>
       )}
 
-      {/* Modals */}
-      {selectedCommit && (
-        <CommitDetailModal commit={selectedCommit} zh={zh} onClose={() => setSelectedCommit(null)} />
+      {/* Tab View 5: Reviews */}
+      {activeTab === "reviews" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <SectionHeader
+            title="审查记录 (Review Runs)"
+            subtitle="该代码仓库执行的所有代码质量与安全审查"
+            actions={
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<PlayCircle size={14} />}
+                onClick={() => setIsComposerOpen(true)}
+              >
+                发起新审查
+              </Button>
+            }
+          />
+
+          {repoJobs.length === 0 ? (
+            <EmptyState
+              icon={<PlayCircle size={36} />}
+              title="暂无历史审查记录"
+              description="点击“发起新审查”为该仓库执行证据驱动的 AI 审查。"
+              action={
+                <Button variant="primary" size="md" icon={<PlayCircle size={14} />} onClick={() => setIsComposerOpen(true)}>
+                  发起首次审查
+                </Button>
+              }
+            />
+          ) : (
+            <DataTable
+              columns={reviewColumns}
+              data={repoJobs}
+              keyExtractor={job => job.id}
+              onRowClick={job => navigate(`/runs/${encodeURIComponent(job.id)}/overview`)}
+            />
+          )}
+        </div>
       )}
 
-      {composerOpen && (
-        <ReviewComposerModal
-          displayName={title}
-          branch={branch}
-          defaultBranch={registered?.defaultBranch ?? "main"}
-          headSha={headSha}
-          dirtyCount={(gitStatus?.dirtyFileCount ?? 0) + (gitStatus?.untrackedFileCount ?? 0)}
-          health={health}
-          submitting={startLocalReview.isPending}
-          error={startLocalReview.error ? formatReviewLaunchError(startLocalReview.error, zh) : undefined}
-          zh={zh}
-          onClose={() => setComposerOpen(false)}
-          onStartReview={options => startLocalReview.mutate(options)}
-        />
+      {/* Tab View 6: Workflows */}
+      {activeTab === "workflows" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <SectionHeader
+            title="工作流与触发策略"
+            subtitle="该代码仓库绑定的代码审查工作流与自动化规则"
+          />
+          <EmptyState
+            title="工作流拓扑就绪"
+            description="当前代码仓库已绑定默认 PR 安全与代码质量审查工作流。"
+          />
+        </div>
       )}
+
+      {/* Review Composer Dialog */}
+      <ReviewComposerDialog
+        isOpen={isComposerOpen}
+        onClose={() => setIsComposerOpen(false)}
+        repositoryId={repo.id}
+      />
     </div>
   );
-}
+};
