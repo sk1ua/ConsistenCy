@@ -842,6 +842,40 @@
   cursor: pointer;
 }
 
+.workflow-sub-nav {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.workflow-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.workflow-tab:hover {
+  color: var(--text-primary);
+  background: var(--surface-subtle);
+}
+
+.workflow-tab.active {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary-wash);
+}
+
 .source-option-card.selected {
   border-color: var(--primary);
   background: var(--primary-soft);

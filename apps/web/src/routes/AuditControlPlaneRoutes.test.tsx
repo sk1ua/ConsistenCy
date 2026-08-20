@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { AuditCapabilities, Automation, Repository } from "@consistency/schema";
 import { I18nProvider } from "../i18n";
-import { AutomationsPage } from "./AutomationsPage";
+import { WorkflowPage } from "../pages/WorkflowPage";
 import { RepositoriesPage } from "./RepositoriesPage";
 
 const repository: Repository = {
@@ -67,8 +67,14 @@ describe("audit control-plane routes", () => {
     expect(html).not.toContain("file://");
   });
 
-  it("shows persisted automation definitions without pretending scheduling or execution is available", () => {
-    const html = render(<AutomationsPage automations={[automation]} repositories={[repository]} capabilities={capabilities} />);
+  it("shows persisted automation trigger definitions under workflow triggers without pretending scheduling is available", () => {
+    const html = renderToString(
+      <I18nProvider initialLocale="en-US">
+        <MemoryRouter initialEntries={["/workflows?tab=triggers"]}>
+          <WorkflowPage automations={[automation]} repositories={[repository]} capabilities={capabilities} />
+        </MemoryRouter>
+      </I18nProvider>
+    );
 
     expect(html).toContain("PR safety gate");
     expect(html).toContain("Definitions only");

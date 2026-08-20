@@ -1,6 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GitBranch, LoaderCircle, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
-import { collectWorkflowGraphIssues, workflowSpecSchema, type WorkflowSource, type WorkflowSpec, type WorkflowSummary } from "@consistency/schema";
+import { useSearchParams } from "react-router-dom";
+import {
+  CalendarClock,
+  CheckCircle2,
+  GitBranch,
+  LoaderCircle,
+  PauseCircle,
+  PlayCircle,
+  Plus,
+  Radio,
+  RotateCcw,
+  Save,
+  ShieldCheck,
+  Trash2,
+  Workflow
+} from "lucide-react";
+import {
+  collectWorkflowGraphIssues,
+  workflowSpecSchema,
+  type AuditCapabilities,
+  type Automation,
+  type Repository,
+  type WorkflowSource,
+  type WorkflowSpec,
+  type WorkflowSummary
+} from "@consistency/schema";
 import { api } from "../api/client";
 import { WorkflowGraph } from "../components/WorkflowGraph";
 import { useI18n } from "../i18n";
@@ -40,8 +64,133 @@ function findStep(spec: WorkflowSpec, id: string): { step: AnyStep; role: StepRo
   return stepsOf(spec).find(item => item.step.id === id);
 }
 
-export function WorkflowPage() {
-  const { t } = useI18n();
+function triggerLabel(automation: Automation, zh: boolean): string {
+  if (automation.trigger.type === "manual") return zh ? "手动触发" : "Manual";
+  if (automation.trigger.type === "schedule") return `${automation.trigger.cron} · ${automation.trigger.timezone}`;
+  return automation.trigger.eventTypes.join(" · ");
+}
+
+function WorkflowTriggersView({
+  automations = [],
+  repositories = [],
+  capabilities,
+  actionError,
+  changingAutomationId,
+  onSetEnabled,
+  zh
+}: {
+  automations?: Automation[];
+  repositories?: Repository[];
+  capabilities?: AuditCapabilities;
+  actionError?: string;
+  changingAutomationId?: string;
+  onSetEnabled?: (automation: Automation, enabled: boolean) => void;
+  zh: boolean;
+}) {
+  return (
+    <div className="workflow-triggers-view page-stack">
+      <section className="section-block automation-compact-empty">
+        <div className="compact-empty-head">
+          <CalendarClock size={20} className="empty-icon" />
+          <div>
+            <h3>{zh ? "触发器能力与策略" : "Trigger Capabilities & Policies"}</h3>
+            <p>{zh ? "控制工作流何时以及如何自动或手动启动审查。" : "Control when and how workflows execute automatically or manually."}</p>
+          </div>
+        </div>
+
+        <div className="automation-triggers-summary">
+          <div className="trigger-status-item">
+            <CheckCircle2 size={14} className="icon-success" />
+            <span>{zh ? "手动与公开 PR 审查 (可用)" : "Manual & Public PR Reviews (Available)"}</span>
+          </div>
+          <div className="trigger-status-item">
+            <CheckCircle2 size={14} className="icon-success" />
+            <span>{zh ? "GitHub Webhook 触发 (可用)" : "GitHub Webhooks (Available)"}</span>
+          </div>
+          <div className="trigger-status-item muted">
+            <Radio size={14} />
+            <span>{zh ? "定时计划（后续里程碑）" : "Scheduled Cron (Roadmap)"}</span>
+          </div>
+        </div>
+      </section>
+
+      {actionError && (
+        <div className="route-query-notice" role="alert">
+          <strong>{zh ? "无法更新自动化策略" : "Could not update automation policy"}</strong>
+          <span>{actionError}</span>
+        </div>
+      )}
+
+      <section className="section-block automation-registry">
+        <div className="panel-title">
+          <div>
+            <span className="panel-kicker">{zh ? "策略绑定" : "Policy Bindings"}</span>
+            <h2>{zh ? "已配置触发策略" : "Configured Trigger Bindings"}</h2>
+          </div>
+          <span className={capabilities?.automationScheduling ? "capability-state ready" : "capability-state pending"}>
+            {capabilities?.automationScheduling ? (zh ? "调度就绪" : "Scheduler ready") : (zh ? "仅保存定义" : "Definitions only")}
+          </span>
+        </div>
+
+        {automations.length > 0 ? (
+          <div className="automation-list" role="list">
+            {automations.map(automation => {
+              const repository = repositories.find(candidate => candidate.id === automation.repositoryId);
+              return (
+                <article className="automation-row" role="listitem" key={automation.id}>
+                  <span className={automation.enabled ? "automation-state enabled" : "automation-state"}>
+                    <i />{automation.enabled ? (zh ? "已启用" : "Enabled") : (zh ? "已暂停" : "Paused")}
+                  </span>
+                  <div>
+                    <strong>{automation.name}</strong>
+                    <small>{repository?.displayName ?? automation.repositoryId}</small>
+                  </div>
+                  <span><CalendarClock size={14} />{triggerLabel(automation, zh)}</span>
+                  <span><ShieldCheck size={14} />{automation.executionProfile === "static_readonly" ? (zh ? "静态只读" : "Static read-only") : (zh ? "受信沙箱" : "Trusted sandbox")}</span>
+                  {onSetEnabled && (
+                    <button
+                      type="button"
+                      disabled={changingAutomationId === automation.id}
+                      onClick={() => onSetEnabled(automation, !automation.enabled)}
+                      className="secondary-button btn-small"
+                    >
+                      {automation.enabled ? <PauseCircle size={13} /> : <PlayCircle size={13} />}
+                      {automation.enabled ? (zh ? "暂停" : "Pause") : (zh ? "恢复" : "Resume")}
+                    </button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="empty-inline-compact">
+            {zh ? "暂无绑定的仓库触发策略。通过 GitHub App Webhook 或手动审查执行工作流。" : "No repository trigger bindings configured yet. Workflows execute on GitHub webhooks or manual review."}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+export function WorkflowPage({
+  automations = [],
+  repositories = [],
+  capabilities,
+  actionError,
+  changingAutomationId,
+  onSetEnabled
+}: {
+  automations?: Automation[];
+  repositories?: Repository[];
+  capabilities?: AuditCapabilities;
+  actionError?: string;
+  changingAutomationId?: string;
+  onSetEnabled?: (automation: Automation, enabled: boolean) => void;
+} = {}) {
+  const { locale, t } = useI18n();
+  const zh = locale === "zh-CN";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") === "triggers" ? "triggers" : "definition";
   const [summaries, setSummaries] = useState<WorkflowSummary[]>([]);
   const [current, setCurrent] = useState<{ spec: WorkflowSpec; source: WorkflowSource } | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
@@ -227,52 +376,90 @@ export function WorkflowPage() {
   const issues = useMemo(validationIssues, [current]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <div className="page-stack workflows-page">
-    <div className="workflows-toolbar">
-      <div className="workflows-title">
-        <span className="panel-kicker"><GitBranch size={14} />{t("Workflow builder")}</span>
-        {current && <>
-          <input className="workflow-name-input" aria-label={t("Name")} value={current.spec.name} onChange={event => patchSpec(spec => ({ ...spec, name: event.target.value }))} />
-          <span className={`workflow-source-badge workflow-source-${current.source}`}>{current.source === "draft" ? t("Draft") : t("Builtin")}</span>
-        </>}
-      </div>
-      <div className="workflows-actions">
-        <button className="secondary-button" type="button" onClick={() => void newDraft()}><Plus size={15} />{t("New draft")}</button>
-        <button className="secondary-button" type="button" onClick={() => void resetToBuiltin()} disabled={!current}><RotateCcw size={15} />{t("Reset to builtin")}</button>
-        {current?.source === "draft" && <button className="secondary-button danger" type="button" onClick={() => void deleteDraft()}><Trash2 size={15} />{t("Delete draft")}</button>}
-        <button className="primary-button" type="button" onClick={() => void saveDraft()} disabled={!current || saving}>{saving ? t("Saving…") : t("Save draft")}<Save size={15} /></button>
-      </div>
+    <div className="workflow-sub-nav" role="tablist" aria-label={t("Workflow views")}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "definition"}
+        className={`workflow-tab ${activeTab === "definition" ? "active" : ""}`}
+        onClick={() => setSearchParams({})}
+      >
+        <Workflow size={14} />
+        {zh ? "工作流定义" : "Definitions"}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "triggers"}
+        className={`workflow-tab ${activeTab === "triggers" ? "active" : ""}`}
+        onClick={() => setSearchParams({ tab: "triggers" })}
+      >
+        <CalendarClock size={14} />
+        {zh ? "触发器与策略" : "Triggers"}
+        {automations.length > 0 && <span className="tab-count">({automations.length})</span>}
+      </button>
     </div>
-    {notice && <div className="workflow-notice">{notice}</div>}
-    {saveError && <div className="workflow-error">{saveError}</div>}
-    {issues.length > 0 && <div className="workflow-error">{t("Validation issues")}: {issues.join("; ")}</div>}
-    {error && <div className="workflow-error">{error}</div>}
-    {loading ? <div className="loading-state"><LoaderCircle className="spinning" size={22} /><span>{t("Loading workflow")}</span></div> :
-      current ? <div className="workflows-layout">
-        <aside className="workflow-list" aria-label={t("Workflows")}>
-          <h3>{t("Workflows")}</h3>
-          {summaries.map(item => <button key={`${item.source}-${item.name}`} type="button" className={current.spec.name === item.name ? "active" : ""} onClick={() => void openWorkflow(item.name)}>
-            <strong>{item.name}</strong>
-            <span className={`workflow-source-badge workflow-source-${item.source}`}>{item.source === "draft" ? t("Draft") : t("Builtin")}</span>
-            <small>{item.description ?? `${item.nodeCount} ${t("nodes")} · ${item.verifierCount} ${t("verifiers")}`}</small>
-          </button>)}
-          <button className="workflow-add" type="button" onClick={() => void newDraft()}><Plus size={15} />{t("New draft")}</button>
-        </aside>
-        <main className="workflow-canvas"><WorkflowGraph spec={current.spec} selectedId={selectedId} onSelect={setSelectedId} onConnectSteps={connectSteps} /></main>
-        <aside className="workflow-inspector">
-          {!selected ? <div className="empty-inline">{t("Select a step to edit it.")}</div> : <WorkflowStepInspector
-            key={selected.step.id}
-            step={selected.step}
-            role={selected.role}
-            allSteps={stepsOf(current.spec)}
-            onChange={updateStep}
-            onRemove={selected.role === "synthesizer" ? undefined : removeStep}
-            withJsonError={withJsonError}
-            setWithJsonError={setWithJsonError}
-          />}
-          {selected && selected.role !== "synthesizer" && <button className="secondary-button workflow-add-step" type="button" onClick={addNode}><Plus size={15} />{t("Add analyzer node")}</button>}
-        </aside>
-      </div> : <div className="empty-state">{t("No workflows available.")}</div>}
-    <p className="workflow-hint">{t("Custom workflows are saved locally under .consistency/workflows and never modify builtin YAML.")}</p>
+
+    {activeTab === "triggers" ? (
+      <WorkflowTriggersView
+        automations={automations}
+        repositories={repositories}
+        capabilities={capabilities}
+        actionError={actionError}
+        changingAutomationId={changingAutomationId}
+        onSetEnabled={onSetEnabled}
+        zh={zh}
+      />
+    ) : (
+      <>
+        <div className="workflows-toolbar">
+          <div className="workflows-title">
+            <span className="panel-kicker"><GitBranch size={14} />{t("Workflow builder")}</span>
+            {current && <>
+              <input className="workflow-name-input" aria-label={t("Name")} value={current.spec.name} onChange={event => patchSpec(spec => ({ ...spec, name: event.target.value }))} />
+              <span className={`workflow-source-badge workflow-source-${current.source}`}>{current.source === "draft" ? t("Draft") : t("Builtin")}</span>
+            </>}
+          </div>
+          <div className="workflows-actions">
+            <button className="secondary-button" type="button" onClick={() => void newDraft()}><Plus size={15} />{t("New draft")}</button>
+            <button className="secondary-button" type="button" onClick={() => void resetToBuiltin()} disabled={!current}><RotateCcw size={15} />{t("Reset to builtin")}</button>
+            {current?.source === "draft" && <button className="secondary-button danger" type="button" onClick={() => void deleteDraft()}><Trash2 size={15} />{t("Delete draft")}</button>}
+            <button className="primary-button" type="button" onClick={() => void saveDraft()} disabled={!current || saving}>{saving ? t("Saving…") : t("Save draft")}<Save size={15} /></button>
+          </div>
+        </div>
+        {notice && <div className="workflow-notice">{notice}</div>}
+        {saveError && <div className="workflow-error">{saveError}</div>}
+        {issues.length > 0 && <div className="workflow-error">{t("Validation issues")}: {issues.join("; ")}</div>}
+        {error && <div className="workflow-error">{error}</div>}
+        {loading ? <div className="loading-state"><LoaderCircle className="spinning" size={22} /><span>{t("Loading workflow")}</span></div> :
+          current ? <div className="workflows-layout">
+            <aside className="workflow-list" aria-label={t("Workflows")}>
+              <h3>{t("Workflows")}</h3>
+              {summaries.map(item => <button key={`${item.source}-${item.name}`} type="button" className={current.spec.name === item.name ? "active" : ""} onClick={() => void openWorkflow(item.name)}>
+                <strong>{item.name}</strong>
+                <span className={`workflow-source-badge workflow-source-${item.source}`}>{item.source === "draft" ? t("Draft") : t("Builtin")}</span>
+                <small>{item.description ?? `${item.nodeCount} ${t("nodes")} · ${item.verifierCount} ${t("verifiers")}`}</small>
+              </button>)}
+              <button className="workflow-add" type="button" onClick={() => void newDraft()}><Plus size={15} />{t("New draft")}</button>
+            </aside>
+            <main className="workflow-canvas"><WorkflowGraph spec={current.spec} selectedId={selectedId} onSelect={setSelectedId} onConnectSteps={connectSteps} /></main>
+            <aside className="workflow-inspector">
+              {!selected ? <div className="empty-inline">{t("Select a step to edit it.")}</div> : <WorkflowStepInspector
+                key={selected.step.id}
+                step={selected.step}
+                role={selected.role}
+                allSteps={stepsOf(current.spec)}
+                onChange={updateStep}
+                onRemove={selected.role === "synthesizer" ? undefined : removeStep}
+                withJsonError={withJsonError}
+                setWithJsonError={setWithJsonError}
+              />}
+              {selected && selected.role !== "synthesizer" && <button className="secondary-button workflow-add-step" type="button" onClick={addNode}><Plus size={15} />{t("Add analyzer node")}</button>}
+            </aside>
+          </div> : <div className="empty-state">{t("No workflows available.")}</div>}
+        <p className="workflow-hint">{t("Custom workflows are saved locally under .consistency/workflows and never modify builtin YAML.")}</p>
+      </>
+    )}
   </div>;
 }
 

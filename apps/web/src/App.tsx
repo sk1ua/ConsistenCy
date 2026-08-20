@@ -19,7 +19,6 @@ const JobsPage = lazy(() => import("./pages/JobsPage").then(module => ({ default
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then(module => ({ default: module.SettingsPage })));
 const WorkflowPage = lazy(() => import("./pages/WorkflowPage").then(module => ({ default: module.WorkflowPage })));
 const RepositoriesPage = lazy(() => import("./routes/RepositoriesPage").then(module => ({ default: module.RepositoriesPage })));
-const AutomationsPage = lazy(() => import("./routes/AutomationsPage").then(module => ({ default: module.AutomationsPage })));
 const ReportRoute = lazy(() => import("./routes/ReportRoute").then(module => ({ default: module.ReportRoute })));
 const FindingsPage = lazy(() => import("./routes/FindingsPage").then(module => ({ default: module.FindingsPage })));
 const RepositoryDetailPage = lazy(() => import("./routes/RepositoryDetailPage").then(module => ({ default: module.RepositoryDetailPage })));
@@ -218,16 +217,15 @@ export function App() {
         <Route path="/jobs" element={<Navigate replace to="/runs" />} />
         <Route path="/reports" element={queries.jobs.isPending || queries.reports.isPending ? <RouteLoading label={zh ? "正在加载审查报告" : "Loading review reports"} /> : <ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/reports/:jobId" element={<LegacyReportRedirect />} />
-        <Route path="/automations" element={<AutomationsPage
+        <Route path="/automations" element={<Navigate replace to="/workflows?tab=triggers" />} />
+        <Route path="/workflows" element={<WorkflowPage
           automations={automations}
           repositories={repositories}
           capabilities={queries.auditCapabilities.data}
-          unavailable={queries.automations.isError || queries.auditCapabilities.isError}
           actionError={setAutomationEnabled.error ? safeRequestError(setAutomationEnabled.error) : undefined}
           changingAutomationId={setAutomationEnabled.variables?.automationId}
           onSetEnabled={(automation, enabled) => setAutomationEnabled.mutate({ automationId: automation.id, enabled })}
         />} />
-        <Route path="/workflows" element={<WorkflowPage />} />
         <Route path="/settings" element={<SettingsPage health={health} />} />
         <Route path="*" element={<Navigate replace to="/inbox" />} />
       </Routes>

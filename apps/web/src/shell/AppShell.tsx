@@ -493,7 +493,6 @@ function RepositorySidebar({
         <NavLink to="/runs" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><ScanSearch size={14} /><span>{copy.runs}</span></NavLink>
         <NavLink to="/inbox" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Inbox size={14} /><span>{copy.inbox}</span></NavLink>
         <NavLink to="/findings" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><FileSearch2 size={14} /><span>{copy.findings}</span></NavLink>
-        <NavLink to="/automations" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><CalendarClock size={14} /><span>{copy.automations}</span></NavLink>
         <NavLink to="/workflows" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Workflow size={14} /><span>{copy.workflows}</span></NavLink>
         <NavLink to="/settings" onClick={onNavigate} className={({ isActive }) => isActive ? "active" : ""}><Settings size={14} /><span>{copy.settings}</span></NavLink>
       </nav>
@@ -702,10 +701,10 @@ function CommandPalette({ copy, onClose, onNavigate }: {
     { to: "/runs", label: copy.runs, group: copy.reviews },
     { to: "/inbox", label: copy.inbox, group: copy.reviews },
     { to: "/findings", label: copy.findings, group: copy.reviews },
-    { to: "/automations", label: copy.automations, group: "Harness" },
     { to: "/workflows", label: copy.workflows, group: "Harness" },
+    { to: "/workflows?tab=triggers", label: `${copy.workflows} · ${zh ? "触发器" : "Triggers"}`, group: "Harness" },
     { to: "/settings", label: copy.settings, group: copy.workspace }
-  ], [copy]);
+  ], [copy, zh]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -932,7 +931,7 @@ export function AppShell({
         : sub === "history" ? (zh ? "提交历史" : "Git History")
         : sub === "pull-requests" ? (zh ? "拉取请求" : "Pull Requests")
         : sub === "runs" ? (zh ? "审查" : "Reviews")
-        : sub === "automations" ? (zh ? "自动化" : "Automations")
+        : sub === "automations" ? (zh ? "工作流" : "Workflows")
         : (zh ? "概览" : "Overview");
 
       return (

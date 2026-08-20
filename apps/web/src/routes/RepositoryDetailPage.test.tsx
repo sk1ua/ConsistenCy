@@ -124,6 +124,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
     expect(html).toContain("提交历史");
     expect(html).toContain("拉取请求");
     expect(html).toContain("审查");
+    expect(html).toContain("工作流");
   });
 
   it("AC-UX-REPO-4: Repository detail links to related review runs", () => {
