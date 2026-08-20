@@ -4,8 +4,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
-if (Number(process.versions.node.split(".")[0]) !== 22) {
-  throw new Error(`API bundle smoke requires Node 22.x; received ${process.version}`);
+if (Number(process.versions.node.split(".")[0]) < 22) {
+  throw new Error(`API bundle smoke requires Node >= 22.x; received ${process.version}`);
 }
 
 const root = resolve(import.meta.dirname, "..");
@@ -44,8 +44,7 @@ const child = spawn(process.execPath, [join(root, "apps", "api", "dist", "server
     CONSISTENCY_API_TOKEN: token,
     CONSISTENCY_LOAD_ENV_FILE: "false",
     CONSISTENCY_WORKERS_ENABLED: "false",
-    CONSISTENCY_HEARTBEAT_ENABLED: "false",
-    LLM_PROVIDER: "mock"
+    CONSISTENCY_HEARTBEAT_ENABLED: "false"
   }
 });
 

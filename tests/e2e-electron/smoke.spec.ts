@@ -21,8 +21,7 @@ test.describe("desktop shell", () => {
         CONSISTENCY_NODE_HELPER: process.execPath,
         CONSISTENCY_PYTHON_PATH: python,
         CONSISTENCY_WORKERS_ENABLED: "false",
-        CONSISTENCY_HEARTBEAT_ENABLED: "false",
-        LLM_PROVIDER: "mock"
+        CONSISTENCY_HEARTBEAT_ENABLED: "false"
       }
     });
     try {
@@ -64,6 +63,7 @@ test.describe("desktop shell", () => {
       expect(boundary.methods).toEqual([
         "appVersion",
         "credentialStatus",
+        "restartRuntime",
         "selectRepository",
         "setCredential",
         "showFromTray",

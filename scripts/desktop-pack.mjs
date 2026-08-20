@@ -30,8 +30,8 @@ const {
   updateEligibleArtifact
 } = resolveDesktopReleasePolicy(process.env, desktopManifest.version);
 
-if (Number(process.versions.node.split(".")[0]) !== 22) {
-  throw new Error(`Desktop packaging requires Node 22.x; received ${process.version}`);
+if (Number(process.versions.node.split(".")[0]) < 22) {
+  throw new Error(`Desktop packaging requires Node >= 22.x; received ${process.version}`);
 }
 if (!npmCli || !existsSync(npmCli)) {
   throw new Error("Desktop packaging must be started through npm so the pinned npm CLI is known");
@@ -71,11 +71,6 @@ writeFileSync(join(staged, "package.json"), JSON.stringify({
 }, null, 2));
 cpSync(join(root, "apps", "web", "dist"), join(staged, "apps", "web", "dist"), { recursive: true });
 cpSync(join(root, "apps", "api", "dist"), join(staged, "apps", "api", "dist"), { recursive: true });
-cpSync(
-  join(root, "apps", "api", "src", "notebook", "demo-snapshot"),
-  join(staged, "apps", "api", "dist", "notebook", "demo-snapshot"),
-  { recursive: true }
-);
 cpSync(join(root, "engine"), join(staged, "engine"), {
   recursive: true,
   filter: source => !source.includes("__pycache__") && !source.includes("node_modules")

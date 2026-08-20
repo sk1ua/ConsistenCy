@@ -30,7 +30,9 @@ const LEGACY_PATTERNS = [
 const GENERATED_CONTENT_DIRS = [
   resolve(ROOT, "evaluation/repos"),
   resolve(ROOT, "evaluation/results"),
-  resolve(ROOT, "evaluation/data")
+  resolve(ROOT, "evaluation/data"),
+  resolve(ROOT, "apps/desktop/release"),
+  resolve(ROOT, "apps/desktop/staged")
 ];
 
 function isInsideGeneratedContent(path: string): boolean {

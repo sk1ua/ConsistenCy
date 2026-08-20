@@ -106,7 +106,10 @@ test.describe("desktop repository security boundary", () => {
     expect(main).toContain("headers.delete(DESKTOP_CONTROL_HEADER)");
     expect(main).toContain("isBlockedRendererApiPath(url.pathname)");
     expect(main.match(/randomBytes\(32\)\.toString\("base64url"\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(main).toContain('ipcMain.handle("runtime:restart"');
+    expect(main).toContain("async function restartApi()");
     expect(preload).toContain('selectRepository: () => ipcRenderer.invoke("repositories:select")');
+    expect(preload).toContain('restartRuntime: () => ipcRenderer.invoke("runtime:restart")');
     expect(preload).not.toContain("desktopControlToken");
     expect(preload).not.toContain("apiToken");
     expect(preload).not.toContain("apiPort");

@@ -103,7 +103,8 @@ function resolveNode22() {
   const candidates = app.isPackaged ? [packaged] : [configured, inherited, "node"];
   for (const candidate of candidates) {
     if (!candidate) continue;
-    if (/^v22\./.test(executableVersion(candidate))) return candidate;
+    const version = executableVersion(candidate);
+    if (/^v(22|23|24|25)\./.test(version)) return candidate;
   }
   return undefined;
 }
@@ -306,7 +307,7 @@ function startApi(nodeHelper, python) {
     CONSISTENCY_LOAD_ENV_FILE: "false",
     CONSISTENCY_WORKERS_ENABLED: process.env.CONSISTENCY_WORKERS_ENABLED ?? "true",
     CONSISTENCY_HEARTBEAT_ENABLED: process.env.CONSISTENCY_HEARTBEAT_ENABLED ?? "false",
-    LLM_PROVIDER: process.env.LLM_PROVIDER ?? "mock"
+    ...(process.env.LLM_PROVIDER ? { LLM_PROVIDER: process.env.LLM_PROVIDER } : {})
   };
 
   let logFd;
@@ -371,6 +372,38 @@ async function waitForHealth(timeoutMs) {
     await new Promise(resolve => setTimeout(resolve, 300));
   }
   return false;
+}
+
+async function restartApi() {
+  if (quitting) return { ok: false, error: "Application is shutting down" };
+  log("main: runtime restart requested");
+  if (apiProcess) {
+    try {
+      apiProcess.removeAllListeners("exit");
+      apiProcess.removeAllListeners("error");
+      apiProcess.kill();
+    } catch {
+      // already stopped
+    }
+    apiProcess = null;
+  }
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const nodeHelper = resolveNode22();
+  const python = resolvePython312();
+  if (!nodeHelper || !python) {
+    throw new Error("Required Node.js 22 or Python 3.12 runtime is unavailable");
+  }
+  apiPort = DEV_URL
+    ? Number(process.env.CONSISTENCY_DESKTOP_PORT ?? 8787)
+    : await reserveLoopbackPort();
+  apiToken = randomBytes(32).toString("base64url");
+  desktopControlToken = randomBytes(32).toString("base64url");
+  startApi(nodeHelper, python);
+  if (!await waitForHealth(30_000)) {
+    throw new Error("The audit service did not become healthy after restart within 30 seconds");
+  }
+  log(`main: API helper restarted (port=${apiPort})`);
+  return { ok: true };
 }
 
 function safeAssetPath(url) {
@@ -478,6 +511,10 @@ function registerIpc() {
     assertTrustedSender(event);
     showWindow();
     return { visible: true };
+  });
+  ipcMain.handle("runtime:restart", async event => {
+    assertTrustedSender(event);
+    return restartApi();
   });
   ipcMain.handle("updates:get-state", event => {
     assertTrustedSender(event);

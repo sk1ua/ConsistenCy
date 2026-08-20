@@ -91,6 +91,8 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
   const [clearSecrets, setClearSecrets] = useState<ClearSecrets>(keepSecrets);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartNeeded, setRestartNeeded] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string }>();
 
   useEffect(() => {
@@ -184,11 +186,36 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       setDraft(updated);
       setSecrets(emptySecrets);
       setClearSecrets(keepSecrets);
+      setRestartNeeded(true);
       setMessage({ tone: "success", text: t("Settings saved. Restart the API to apply the new runtime configuration.") });
     } catch (error) {
       setMessage({ tone: "error", text: error instanceof Error ? error.message : t("Could not save settings") });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRestartRuntime() {
+    const bridge = desktopBridge();
+    if (!bridge?.restartRuntime) return;
+    setRestarting(true);
+    try {
+      const result = await bridge.restartRuntime();
+      if (result && !result.ok && result.error) {
+        setMessage({ tone: "error", text: result.error });
+      } else {
+        setMessage({ tone: "success", text: t("ConsistenCy runtime restarted successfully.") });
+        setRestartNeeded(false);
+        const snapshot = await api.settings();
+        const status = await bridge.credentialStatus().catch(() => undefined);
+        const loaded = status ? withDesktopCredentialStatus(snapshot, status) : snapshot;
+        setSettings(loaded);
+        setDraft(loaded);
+      }
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : t("Could not restart runtime") });
+    } finally {
+      setRestarting(false);
     }
   }
 
@@ -207,7 +234,23 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       </div>
     </section>
 
-    {message && <div className={`settings-message ${message.tone}`} role="status">{message.text}</div>}
+    {message && (
+      <div className={`settings-message ${message.tone}`} role="status">
+        <span>{message.text}</span>
+        {desktopBridge()?.restartRuntime && restartNeeded && (
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ marginLeft: "1rem", padding: "3px 8px", fontSize: "12px", height: "auto", display: "inline-flex", alignItems: "center", gap: "6px" }}
+            disabled={restarting}
+            onClick={() => void handleRestartRuntime()}
+          >
+            {restarting ? <LoaderCircle className="spinning" size={13} /> : <RotateCcw size={13} />}
+            {t(restarting ? "Restarting runtime..." : "Restart ConsistenCy Runtime")}
+          </button>
+        )}
+      </div>
+    )}
     {draft.overriddenByEnvironment.length > 0 && <div className="settings-message warning">{t("Environment variables override: {keys}", { keys: draft.overriddenByEnvironment.join(", ") })}</div>}
 
     <section className="settings-group section-block">

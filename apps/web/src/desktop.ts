@@ -21,6 +21,7 @@ export type ConsistencyDesktopBridge = {
   credentialStatus: () => Promise<DesktopCredentialStatus>;
   setCredential: (key: DesktopCredentialKey, value: string | null) => Promise<DesktopCredentialStatus>;
   showFromTray: () => Promise<{ visible: boolean }>;
+  restartRuntime?: () => Promise<{ ok: boolean; error?: string }>;
 };
 
 declare global {
