@@ -285,6 +285,7 @@ export type CreateApiServerOptions = {
   allowedOrigins?: string[];
   healthDetails?: () => ApiHealthDetails;
   workspaceRoot?: string;
+  settingsWritable?: boolean;
   settings?: {
     get: () => SettingsSnapshot;
     update: (patch: unknown) => SettingsSnapshot;
@@ -1446,7 +1447,8 @@ const routes: Route[] = [
     path: "/settings",
     auth: true,
     handler: async ({ request, response, allowedOrigins, options, nodeEnv }) => {
-      if (!options.settings || nodeEnv === "production") {
+      const settingsWritable = options.settingsWritable ?? (nodeEnv !== "production");
+      if (!options.settings || !settingsWritable) {
         throw new ApiError("Settings updates are disabled", "SETTINGS_READ_ONLY", 404);
       }
       const patch = settingsPatchSchema.parse(await readJson(request));

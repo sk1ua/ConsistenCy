@@ -55,9 +55,21 @@ function verifyPython312(executable) {
   }
 }
 
-console.log("Building same-origin renderer and bundled API ...");
+let gitCommitSha = "";
+try {
+  const gitOutput = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
+  if (gitOutput.status === 0 && gitOutput.stdout) {
+    gitCommitSha = gitOutput.stdout.trim();
+  }
+} catch {
+  gitCommitSha = "unknown";
+}
+
+console.log(`Building same-origin renderer and bundled API (version=${desktopManifest.version}, sha=${gitCommitSha}) ...`);
 runNpm(["run", "build", "-w", "@consistency/web", "--", "--base=/"], root, {
-  VITE_API_BASE_URL: "/api"
+  VITE_API_BASE_URL: "/api",
+  VITE_APP_VERSION: desktopManifest.version,
+  VITE_GIT_COMMIT: gitCommitSha
 });
 runNpm(["run", "build", "-w", "@consistency/api"]);
 
@@ -68,6 +80,11 @@ writeFileSync(join(staged, "package.json"), JSON.stringify({
   name: "consistency-workspace",
   private: true,
   type: "commonjs"
+}, null, 2));
+writeFileSync(join(staged, "build-info.json"), JSON.stringify({
+  version: desktopManifest.version,
+  commitSha: gitCommitSha,
+  buildMode: releaseMode ? "release" : "manual"
 }, null, 2));
 cpSync(join(root, "apps", "web", "dist"), join(staged, "apps", "web", "dist"), { recursive: true });
 cpSync(join(root, "apps", "api", "dist"), join(staged, "apps", "api", "dist"), { recursive: true });

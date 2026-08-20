@@ -229,6 +229,7 @@ export const server = createApiServer({
   nodeEnv: config.NODE_ENV,
   allowedOrigins: config.allowedOrigins,
   workspaceRoot: config.workspaceRoot,
+  settingsWritable: config.settingsWritable,
   settings: {
     get: () => settingsStore.snapshot(process.env),
     update: patch => settingsStore.update(patch)

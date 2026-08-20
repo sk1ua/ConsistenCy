@@ -14,6 +14,7 @@ const {
   protocol,
   safeStorage,
   session,
+  shell,
   Tray
 } = require("electron");
 const { randomBytes } = require("node:crypto");
@@ -25,6 +26,7 @@ const { pathToFileURL } = require("node:url");
 const {
   DESKTOP_CONTROL_HEADER,
   isBlockedRendererApiPath,
+  isSafeExternalUrl,
   selectAndRegisterRepository
 } = require("./security-boundary.cjs");
 const {
@@ -305,6 +307,7 @@ function startApi(nodeHelper, python) {
     CONSISTENCY_API_TOKEN: apiToken,
     CONSISTENCY_DESKTOP_CONTROL_TOKEN: desktopControlToken,
     CONSISTENCY_LOAD_ENV_FILE: "false",
+    CONSISTENCY_SETTINGS_WRITABLE: "true",
     CONSISTENCY_WORKERS_ENABLED: process.env.CONSISTENCY_WORKERS_ENABLED ?? "true",
     CONSISTENCY_HEARTBEAT_ENABLED: process.env.CONSISTENCY_HEARTBEAT_ENABLED ?? "false",
     ...(process.env.LLM_PROVIDER ? { LLM_PROVIDER: process.env.LLM_PROVIDER } : {})
@@ -476,6 +479,30 @@ function isTrustedRendererUrl(value) {
   }
 }
 
+function readBuildInfo() {
+  try {
+    const stagedInfo = path.join(stagedRoot(), "build-info.json");
+    if (fs.existsSync(stagedInfo)) {
+      const parsed = JSON.parse(fs.readFileSync(stagedInfo, "utf8"));
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch {
+    // fallback
+  }
+  let commitSha = "";
+  try {
+    const gitOutput = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", windowsHide: true });
+    if (gitOutput.status === 0 && gitOutput.stdout) commitSha = gitOutput.stdout.trim();
+  } catch {
+    commitSha = "";
+  }
+  return {
+    version: app.getVersion(),
+    commitSha: commitSha || "unknown",
+    buildMode: app.isPackaged ? "packaged" : "development"
+  };
+}
+
 function assertTrustedSender(event) {
   const senderUrl = event.senderFrame && event.senderFrame.url
     ? event.senderFrame.url
@@ -489,6 +516,10 @@ function registerIpc() {
   ipcMain.handle("app:version", event => {
     assertTrustedSender(event);
     return app.getVersion();
+  });
+  ipcMain.handle("app:build-info", event => {
+    assertTrustedSender(event);
+    return readBuildInfo();
   });
   ipcMain.handle("repositories:select", async event => {
     assertTrustedSender(event);
@@ -592,10 +623,20 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs")
     }
   });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.setWindowOpenHandler(details => {
+    if (isSafeExternalUrl(details.url)) {
+      void shell.openExternal(details.url).catch(() => {});
+    }
+    return { action: "deny" };
+  });
   window.webContents.on("will-attach-webview", event => event.preventDefault());
   window.webContents.on("will-navigate", (event, url) => {
-    if (!isTrustedRendererUrl(url)) event.preventDefault();
+    if (!isTrustedRendererUrl(url)) {
+      event.preventDefault();
+      if (isSafeExternalUrl(url)) {
+        void shell.openExternal(url).catch(() => {});
+      }
+    }
   });
   window.on("close", event => {
     if (quitting) return;

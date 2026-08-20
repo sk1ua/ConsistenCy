@@ -60,6 +60,7 @@ export const envSchema = z.object({
   CONSISTENCY_WEB_URL: z.string().url().default("http://127.0.0.1:5173"),
   CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED: z.enum(["true", "false"]).default("true"),
   CONSISTENCY_REPORT_LANGUAGE: z.enum(["zh-CN", "en-US"]).default("zh-CN"),
+  CONSISTENCY_SETTINGS_WRITABLE: z.enum(["true", "false"]).optional(),
   CONSISTENCY_NOTEBOOK_ENABLED: z.enum(["true", "false"]).default("true"),
   CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(32).default(8),
   CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS: z.coerce.number().int().min(1_000).max(64_000).default(16_000),
@@ -86,6 +87,7 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   allowedOrigins: string[];
   LLM_PROVIDER?: "deepseek" | "openai";
   publicPrAnalysisEnabled: boolean;
+  settingsWritable: boolean;
   reportLanguage: "zh-CN" | "en-US";
   notebookEnabled: boolean;
   heartbeatEnabled: boolean;
@@ -141,6 +143,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   const notebookEnabled = parsed.NODE_ENV === "production"
     ? input.CONSISTENCY_NOTEBOOK_ENABLED === "true"
     : parsed.CONSISTENCY_NOTEBOOK_ENABLED === "true";
+  const settingsWritable = input.CONSISTENCY_SETTINGS_WRITABLE !== undefined
+    ? parsed.CONSISTENCY_SETTINGS_WRITABLE === "true"
+    : parsed.NODE_ENV !== "production";
   // Development defaults to enabled so the live dashboard works out of the box;
   // production requires an explicit opt-in because the daemon reads a working tree.
   const heartbeatEnabled = input.CONSISTENCY_HEARTBEAT_ENABLED !== undefined
@@ -156,6 +161,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     localReviewRootsAreDefaulted,
     allowedOrigins,
     publicPrAnalysisEnabled,
+    settingsWritable,
     reportLanguage: parsed.CONSISTENCY_REPORT_LANGUAGE,
     notebookEnabled,
     heartbeatEnabled,

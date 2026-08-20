@@ -18,6 +18,7 @@ const updates = Object.freeze({
 
 contextBridge.exposeInMainWorld("consistencyDesktop", Object.freeze({
   appVersion: () => ipcRenderer.invoke("app:version"),
+  buildInfo: () => ipcRenderer.invoke("app:build-info"),
   selectRepository: () => ipcRenderer.invoke("repositories:select"),
   credentialStatus: () => ipcRenderer.invoke("credentials:status"),
   setCredential: (key, value) => ipcRenderer.invoke("credentials:set", { key, value }),

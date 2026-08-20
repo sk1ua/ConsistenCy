@@ -51,6 +51,16 @@ function looksLikeAbsolutePath(value) {
   return /^(?:[a-z]:[\\/]|[\\/]{1,2}|file:)/i.test(value);
 }
 
+function isSafeExternalUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Copy only the public Repository contract. Never return the API response
  * object itself: internal fields can be added server-side without widening
@@ -142,6 +152,7 @@ async function selectAndRegisterRepository({ showOpenDialog, parentWindow, regis
 module.exports = Object.freeze({
   DESKTOP_CONTROL_HEADER,
   isBlockedRendererApiPath,
+  isSafeExternalUrl,
   sanitizedRegistrationError,
   selectAndRegisterRepository,
   toRendererSafeRepository

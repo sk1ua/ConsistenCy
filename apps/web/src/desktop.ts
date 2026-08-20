@@ -15,8 +15,15 @@ export type DesktopRepositorySelection =
   | { readonly canceled: false; readonly repository: Readonly<Repository> }
   | { readonly canceled: false; readonly error: string };
 
+export type DesktopBuildInfo = {
+  version: string;
+  commitSha: string;
+  buildMode: "packaged" | "development" | "manual" | "release";
+};
+
 export type ConsistencyDesktopBridge = {
   appVersion: () => Promise<string>;
+  buildInfo?: () => Promise<DesktopBuildInfo>;
   selectRepository: () => Promise<DesktopRepositorySelection>;
   credentialStatus: () => Promise<DesktopCredentialStatus>;
   setCredential: (key: DesktopCredentialKey, value: string | null) => Promise<DesktopCredentialStatus>;
