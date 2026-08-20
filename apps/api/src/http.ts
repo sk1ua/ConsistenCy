@@ -749,6 +749,169 @@ const routes: Route[] = [
     }
   },
   {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/review-preparation$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      let repo = options.auditStore?.getRepository(repositoryId);
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+
+      if (!repo) {
+        if (options.auditStore) {
+          const repos = options.auditStore.listRepositories?.() ?? [];
+          repo = repos.find(r =>
+            r.id === repositoryId ||
+            r.remoteFullName === repositoryId ||
+            r.displayName === repositoryId ||
+            (repositoryId.startsWith("local:") && r.displayName === repositoryId.replace(/^local:/, ""))
+          );
+        }
+      }
+
+      if (!repo && !localPath) {
+        throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      }
+
+      const id = repo?.id ?? repositoryId;
+      const displayName = repo?.displayName ?? (localPath ? filesystemDisplayLabel(localPath) : repositoryId);
+      const sourceKind = repo?.source ?? "local_git";
+      const trust = repo?.trustLevel ?? "trusted_local";
+
+      let workingTree = {
+        available: false,
+        reason: undefined as string | undefined,
+        changedFileCount: 0
+      };
+      let branchSource = {
+        available: false,
+        base: undefined as string | undefined,
+        head: undefined as string | undefined,
+        reason: undefined as string | undefined
+      };
+
+      if (localPath) {
+        try {
+          const vcs = new LocalGitAdapter({ root: localPath });
+          const [branch, headSha, diff] = await Promise.all([
+            vcs.getCurrentBranch().catch(() => undefined),
+            vcs.getHeadSha().catch(() => undefined),
+            vcs.getWorkingDiff().catch(() => [])
+          ]);
+          const dirtyCount = diff.length;
+          workingTree = {
+            available: dirtyCount > 0,
+            reason: dirtyCount === 0 ? "工作区无未提交变更" : undefined,
+            changedFileCount: dirtyCount
+          };
+          const isMainBranch = branch === "main" || branch === "master";
+          branchSource = {
+            available: Boolean(branch && !isMainBranch),
+            base: isMainBranch ? undefined : "main",
+            head: branch ?? undefined,
+            reason: isMainBranch ? "当前处于主分支，无法自动对比分支差异" : (!branch ? "未检测到有效分支" : undefined)
+          };
+        } catch {
+          workingTree = {
+            available: false,
+            reason: "无法读取本地 Git 状态",
+            changedFileCount: 0
+          };
+          branchSource = {
+            available: false,
+            base: undefined,
+            head: undefined,
+            reason: "无法读取本地 Git 分支"
+          };
+        }
+      } else {
+        workingTree = {
+          available: false,
+          reason: "远程仓库不支持工作区变更审查",
+          changedFileCount: 0
+        };
+        branchSource = {
+          available: false,
+          base: undefined,
+          head: undefined,
+          reason: "远程仓库请使用 Pull Request 审查"
+        };
+      }
+
+      const allJobs = options.jobs?.list() ?? [];
+      const prJobs = allJobs.filter(job =>
+        job.repository === repositoryId ||
+        repositoryId.includes(job.repository) ||
+        (repositoryId.startsWith("local:") && job.accessMode === "local_git")
+      );
+      const prSource = {
+        available: prJobs.length > 0 || sourceKind === "github",
+        pullRequestCount: prJobs.length,
+        reason: (prJobs.length === 0 && sourceKind !== "github") ? "未检测到 Pull Request" : undefined
+      };
+
+      const health = options.healthDetails?.();
+      const settings = options.settings?.get();
+      const deepseekConfigured = Boolean(health?.llmCapabilities?.deepseek?.configured ?? settings?.llm?.deepseekApiKeyConfigured ?? options.llmProviderConfigured);
+      const openaiConfigured = Boolean(health?.llmCapabilities?.openai?.configured ?? settings?.llm?.openaiApiKeyConfigured);
+
+      const defaultProviderName = settings?.llm?.provider === "openai" ? "openai" : "deepseek";
+      const defaultModelName = defaultProviderName === "openai"
+        ? (settings?.llm?.openaiModel || health?.llmCapabilities?.openai?.defaultModel || "gpt-4.1-mini")
+        : (settings?.llm?.deepseekModel || health?.llmCapabilities?.deepseek?.defaultModel || "deepseek-v4-flash");
+
+      const hasConfiguredLlm = (defaultProviderName === "openai" && openaiConfigured) ||
+        (defaultProviderName === "deepseek" && deepseekConfigured) ||
+        deepseekConfigured ||
+        openaiConfigured ||
+        options.llmProviderConfigured === true;
+
+      const blockingReasons: string[] = [];
+      if (!hasConfiguredLlm) {
+        blockingReasons.push("尚未配置大语言模型 (DeepSeek 或 OpenAI)。请前往设置页配置。");
+      }
+      if (!workingTree.available && !branchSource.available && !prSource.available) {
+        blockingReasons.push("当前无可用的审查来源 (工作区无变更且未检测到分支差异)");
+      }
+
+      const canStartReview = blockingReasons.length === 0;
+
+      const payload = {
+        repository: {
+          id,
+          displayName,
+          sourceKind,
+          trust
+        },
+        sources: {
+          workingTree,
+          branch: branchSource,
+          pullRequest: prSource
+        },
+        model: {
+          default: {
+            provider: hasConfiguredLlm ? defaultProviderName : ("none" as const),
+            model: defaultModelName
+          },
+          providers: {
+            deepseek: {
+              configured: deepseekConfigured,
+              defaultModel: health?.llmCapabilities?.deepseek?.defaultModel ?? "deepseek-v4-flash"
+            },
+            openai: {
+              configured: openaiConfigured,
+              defaultModel: health?.llmCapabilities?.openai?.defaultModel ?? "gpt-4.1-mini"
+            }
+          }
+        },
+        canStartReview,
+        blockingReasons
+      };
+
+      sendJson(request, response, 200, payload, allowedOrigins);
+    }
+  },
+  {
     method: "POST",
     path: /^\/repositories\/([^/]+)\/actions\/set-monitoring$/,
     auth: true,

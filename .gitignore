@@ -90,3 +90,4 @@ data/cache/*.json
 
 # WorkBuddy agent workspace
 .workbuddy/
+.omo/

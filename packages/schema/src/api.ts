@@ -169,11 +169,66 @@ export const repositoryPullRequestsResponseSchema = z.object({
   pullRequests: z.array(pullRequestSummarySchema)
 }).strict();
 
+export const reviewPreparationSourceWorkingTreeSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().optional(),
+  changedFileCount: z.number().int().nonnegative()
+}).strict();
+
+export const reviewPreparationSourceBranchSchema = z.object({
+  available: z.boolean(),
+  base: z.string().optional(),
+  head: z.string().optional(),
+  reason: z.string().optional()
+}).strict();
+
+export const reviewPreparationSourcePullRequestSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().optional(),
+  pullRequestCount: z.number().int().nonnegative().optional()
+}).strict();
+
+export const reviewPreparationModelProviderSchema = z.object({
+  configured: z.boolean(),
+  defaultModel: z.string().optional()
+}).strict();
+
+export const reviewPreparationModelSchema = z.object({
+  default: z.object({
+    provider: z.enum(["deepseek", "openai", "none"]),
+    model: z.string()
+  }).strict(),
+  providers: z.object({
+    deepseek: reviewPreparationModelProviderSchema,
+    openai: reviewPreparationModelProviderSchema
+  }).strict()
+}).strict();
+
+export const reviewPreparationRepositorySchema = z.object({
+  id: z.string().trim().min(1),
+  displayName: z.string().trim().min(1),
+  sourceKind: z.enum(["local_git", "github", "gitlab"]),
+  trust: z.enum(["trusted_local", "untrusted_readonly"])
+}).strict();
+
+export const reviewPreparationResponseSchema = z.object({
+  repository: reviewPreparationRepositorySchema,
+  sources: z.object({
+    workingTree: reviewPreparationSourceWorkingTreeSchema,
+    branch: reviewPreparationSourceBranchSchema,
+    pullRequest: reviewPreparationSourcePullRequestSchema.optional()
+  }).strict(),
+  model: reviewPreparationModelSchema,
+  canStartReview: z.boolean(),
+  blockingReasons: z.array(z.string())
+}).strict();
+
 export type GitRemoteInfo = z.infer<typeof gitRemoteInfoSchema>;
 export type RepositoryGitStatusResponse = z.infer<typeof repositoryGitStatusResponseSchema>;
 export type RepositoryCommitsResponse = z.infer<typeof repositoryCommitsResponseSchema>;
 export type PullRequestSummary = z.infer<typeof pullRequestSummarySchema>;
 export type RepositoryPullRequestsResponse = z.infer<typeof repositoryPullRequestsResponseSchema>;
+export type ReviewPreparationResponse = z.infer<typeof reviewPreparationResponseSchema>;
 
 export type JobListResponse = z.infer<typeof jobListResponseSchema>;
 export type JobDetailResponse = z.infer<typeof jobDetailResponseSchema>;
