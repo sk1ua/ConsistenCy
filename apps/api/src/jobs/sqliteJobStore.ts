@@ -41,8 +41,8 @@ export class SQLiteJobStore implements ReviewJobStore {
       INSERT INTO jobs (
         id, type, status, repository_full_name, pull_request_number, repo_path,
         installation_id, access_mode, base_sha, head_sha, delivery_id, sender_login,
-        action, publication_policy, created_at, updated_at
-      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        action, publication_policy, llm_provider, llm_model, created_at, updated_at
+      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.repository,
@@ -56,6 +56,8 @@ export class SQLiteJobStore implements ReviewJobStore {
       input.senderLogin ?? null,
       input.action ?? null,
       publicationPolicy,
+      input.llmProvider ?? null,
+      input.llmModel ?? null,
       now,
       now
     );
@@ -597,6 +599,8 @@ export class SQLiteJobStore implements ReviewJobStore {
       baseSha: row.base_sha,
       headSha: row.head_sha,
       publicationPolicy: row.publication_policy === "disabled" ? "disabled" : "github_comment",
+      llmProvider: (row.llm_provider as "deepseek" | "openai" | undefined) ?? (report?.llmProvider as "deepseek" | "openai" | undefined) ?? undefined,
+      llmModel: (row.llm_model as string | undefined) ?? report?.llmModel ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       startedAt: row.started_at ?? undefined,

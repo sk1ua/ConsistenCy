@@ -251,7 +251,7 @@ export function NotebookPanel({ notebookId }: { notebookId?: string }) {
             <i />{notebook?.sources.some(s => s.indexStatus === "ready") ? (zh ? "已索引" : "Indexed") : (zh ? "准备中" : "Preparing")}
           </span>
           {latestRun && (
-            <small>{latestRun.provider === "mock" ? (zh ? "Mock 模型" : "Mock model") : latestRun.provider} · {usageLabel}</small>
+            <small>{latestRun.provider} · {usageLabel}</small>
           )}
         </div>
       </div>

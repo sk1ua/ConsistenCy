@@ -962,6 +962,15 @@ export const migrations: readonly Migration[] = [
         throw new Error(`Foreign key integrity check failed after migration 0015_remove_demo_data: ${JSON.stringify(violations)}`);
       }
     }
+  },
+  {
+    id: "0016_job_llm_model",
+    up(database) {
+      database.exec(`
+        ALTER TABLE jobs ADD COLUMN llm_provider TEXT;
+        ALTER TABLE jobs ADD COLUMN llm_model TEXT;
+      `);
+    }
   }
 ];
 

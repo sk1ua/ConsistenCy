@@ -76,10 +76,16 @@ export class ReviewWorker {
   async execute(job: ReviewJob): Promise<void> {
     this.activeJobs += 1;
     try {
-      // PR-5A: apps/api is now the HOST — review execution runs on the
-      // workload-review runtime (Kernel Run / ACBs / Scheduler / Context VM).
+      let jobProvider = this.options.workflow.provider;
+      if (this.options.workflow.providerFactory && (job.llmProvider || job.llmModel)) {
+        jobProvider = this.options.workflow.providerFactory({
+          provider: job.llmProvider,
+          model: job.llmModel
+        }) ?? jobProvider;
+      }
       const runtime = createReviewRuntime({
         ...this.options.workflow,
+        provider: jobProvider,
         jobStore: this.options.jobStore
       });
       await runtime.run({ ...workflowInput(job), publicationPolicy: job.publicationPolicy });

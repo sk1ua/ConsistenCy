@@ -169,6 +169,8 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         baseSha: options.baseSha,
         headSha: options.headSha,
         summary,
+        llmProvider: providerName,
+        llmModel: model,
         agentRuns: [...options.agentRuns, run],
         findings,
         score,

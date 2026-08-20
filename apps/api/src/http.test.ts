@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createApiServer } from "./http";
+import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
 import prReportFixture from "../../../tests/fixtures/pr_report_minimal.json";
 
@@ -679,5 +679,74 @@ describe("createApiServer", () => {
     expect(updateRes.status).toBe(200);
     const successBody = await updateRes.json() as any;
     expect(successBody.settings.llm.provider).toBe("openai");
+  });
+
+  it("supports per-review model override on local review and rejects unconfigured or mock providers", async () => {
+    const jobs = new InMemoryJobQueue();
+    const server = createApiServer({
+      jobs,
+      localReview: async input => {
+        const job = jobs.enqueue({
+          kind: "pull_request",
+          repository: "test-repo",
+          repoPath: input.repoPath,
+          accessMode: "local_git",
+          publicationPolicy: "disabled",
+          baseSha: "base123",
+          headSha: "head123",
+          llmProvider: input.llmProvider,
+          llmModel: input.llmModel,
+          action: "local_trigger"
+        });
+        return { jobId: job.id };
+      },
+      resolveReviewModel: override => {
+        if ((override as any)?.provider === "mock") {
+          throw new ApiError("Unsupported provider: mock", "INVALID_REVIEW_MODEL", 400);
+        }
+        if (override?.provider === "openai") {
+          return { provider: "openai", model: override.model ?? override.name ?? "gpt-4.1-mini" };
+        }
+        if (override?.provider === "deepseek") {
+          return { provider: "deepseek", model: override.model ?? override.name ?? "deepseek-v4-flash" };
+        }
+        return { provider: "deepseek", model: "deepseek-v4-flash" };
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const overrideRes = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repoPath: "D:/test-repo",
+        model: { provider: "openai", model: "gpt-4.1-mini" }
+      })
+    });
+    expect(overrideRes.status).toBe(202);
+    const overrideBody = await overrideRes.json() as any;
+    expect(overrideBody.llmProvider).toBe("openai");
+    expect(overrideBody.llmModel).toBe("gpt-4.1-mini");
+
+    const defaultRes = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repoPath: "D:/test-repo" })
+    });
+    expect(defaultRes.status).toBe(202);
+    const defaultBody = await defaultRes.json() as any;
+    expect(defaultBody.llmProvider).toBe("deepseek");
+    expect(defaultBody.llmModel).toBe("deepseek-v4-flash");
+
+    const mockRes = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repoPath: "D:/test-repo",
+        model: { provider: "mock", model: "mock" }
+      })
+    });
+    expect(mockRes.status).toBe(400);
   });
 });

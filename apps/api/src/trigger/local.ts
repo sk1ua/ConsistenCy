@@ -9,6 +9,8 @@ export type LocalTriggerInput = {
   /** Supply both to review a committed range; omit both for the working tree. */
   baseRef?: string;
   headRef?: string;
+  llmProvider?: "deepseek" | "openai";
+  llmModel?: string;
 };
 
 export type LocalTriggerDependencies = {
@@ -103,6 +105,8 @@ export async function triggerLocalReview(
     publicationPolicy: "disabled",
     baseSha,
     headSha,
+    llmProvider: input.llmProvider,
+    llmModel: input.llmModel,
     action: "local_trigger"
   });
 

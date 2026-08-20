@@ -4,7 +4,6 @@ import {
   recentReportsResponseSchema,
   reportResponseSchema,
   statsResponseSchema,
-  publicPrResponseSchema,
   notebookResponseSchema,
   notebookSourcesResponseSchema,
   workflowListResponseSchema,
@@ -25,6 +24,9 @@ import {
   repositoryPullRequestsResponseSchema,
   runRuntimeSnapshotSchema,
   runtimeRunsResponseSchema,
+  localReviewResponseSchema,
+  publicPrResponseSchema,
+  type ReviewModelOverride,
   type JobStatus,
   type Notebook,
   type NotebookCardKind,
@@ -69,6 +71,10 @@ export type HealthResponse = {
   llmConfigured?: boolean;
   llmProvider: string;
   llmModel?: string;
+  llmCapabilities?: {
+    deepseek?: { configured: boolean; defaultModel: string };
+    openai?: { configured: boolean; defaultModel: string };
+  };
   publicPrAnalysis?: boolean;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
   notebook?: boolean;
@@ -316,8 +322,23 @@ export const api = {
   async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
     return (await request("/settings", { method: "PUT", body: JSON.stringify(patch) }) as { settings: SettingsSnapshot }).settings;
   },
-  async analyzePublicPr(url: string) {
-    return publicPrResponseSchema.parse(await request("/reviews/public-pr", { method: "POST", body: JSON.stringify({ url }) }));
+  async analyzePublicPr(url: string, model?: ReviewModelOverride) {
+    return publicPrResponseSchema.parse(await request("/reviews/public-pr", {
+      method: "POST",
+      body: JSON.stringify({ url, ...(model ? { model } : {}) })
+    }));
+  },
+  async triggerLocalReview(input: {
+    repoPath: string;
+    baseRef?: string;
+    headRef?: string;
+    model?: ReviewModelOverride;
+    llm?: ReviewModelOverride;
+  }) {
+    return localReviewResponseSchema.parse(await request("/reviews/local", {
+      method: "POST",
+      body: JSON.stringify(input)
+    }));
   },
   async notebook(id: string, signal?: AbortSignal): Promise<Notebook> {
     return notebookResponseSchema.parse(await request(`/notebooks/${encodeURIComponent(id)}`, { signal })).notebook;

@@ -23,11 +23,13 @@ import {
   riskScoreSchema,
   saveWorkflowRequestSchema,
   stepIdSchema,
-  workflowSpecSchema
+  workflowSpecSchema,
+  type ReviewModelOverride
 } from "@consistency/schema";
 import type { HeartbeatPulse, HeartbeatStreamEvent, VcsChangedFile } from "@consistency/schema";
 import { LocalGitAdapter, parseGitHubRemote } from "@consistency/vcs-core";
 import { existsSync } from "node:fs";
+import { ReviewModelResolutionError, type ResolvedReviewModel } from "./review/llm/factory";
 
 function resolveLocalPathForRepository(repositoryId: string, options: CreateApiServerOptions): string | undefined {
   if (options.auditStore?.getLocalRepositoryPath) {
@@ -76,8 +78,8 @@ import { RuntimeRegistry } from "./review/runtimeRegistry";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 
-class ApiError extends Error {
-  constructor(message: string, public readonly code: string, public readonly statusCode: number, public readonly details?: Record<string, unknown>) {
+export class ApiError extends Error {
+  constructor(message: string, readonly code: string, readonly statusCode = 500, readonly details?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
   }
@@ -262,6 +264,10 @@ export type ApiHealthDetails = {
   llmConfigured?: boolean;
   llmProvider: string;
   llmModel?: string;
+  llmCapabilities?: {
+    deepseek?: { configured: boolean; defaultModel: string };
+    openai?: { configured: boolean; defaultModel: string };
+  };
   publicPrAnalysis?: boolean;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
   notebook?: boolean;
@@ -291,10 +297,11 @@ export type CreateApiServerOptions = {
     update: (patch: unknown) => SettingsSnapshot;
   };
   realData?: () => RealDataSnapshot | undefined;
-  publicPr?: (url: string) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
+  resolveReviewModel?: (override?: ReviewModelOverride) => ResolvedReviewModel;
+  publicPr?: (url: string, modelOverride?: ResolvedReviewModel) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
   publicPrAnalysisEnabled?: boolean;
   llmProviderConfigured?: boolean;
-  localReview?: (input: { repoPath: string; baseRef?: string; headRef?: string }) => Promise<{ jobId: string }>;
+  localReview?: (input: { repoPath: string; baseRef?: string; headRef?: string; llmProvider?: "deepseek" | "openai"; llmModel?: string }) => Promise<{ jobId: string }>;
   auditStore?: AuditDomainStore;
   auditPlanner?: AuditRunPlanner;
   automationScheduler?: { available: boolean };
@@ -1109,7 +1116,19 @@ const routes: Route[] = [
         if (error instanceof ZodError) throw new ApiError("A GitHub pull request URL is required", "INVALID_PUBLIC_PR_REQUEST", 400);
         throw error;
       }
-      const result = await options.publicPr(body.url);
+      const modelOverride = body.model ?? body.llm;
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel(modelOverride);
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, 400);
+          }
+          throw error;
+        }
+      }
+      const result = await options.publicPr(body.url, resolvedModel);
       const ensured = options.notebookStore.ensureForJob(result.job);
       sendJson(request, response, 202, {
         jobId: result.job.id,
@@ -1119,6 +1138,8 @@ const routes: Route[] = [
         baseSha: result.job.baseSha,
         headSha: result.job.headSha,
         publicationPolicy: "disabled",
+        llmProvider: result.job.llmProvider,
+        llmModel: result.job.llmModel,
         status: "queued"
       }, allowedOrigins);
     }
@@ -1191,9 +1212,28 @@ const routes: Route[] = [
         throw error;
       }
 
+      const modelOverride = body.model ?? body.llm;
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel(modelOverride);
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, 400);
+          }
+          throw error;
+        }
+      }
+
       let result: { jobId: string };
       try {
-        result = await options.localReview(body);
+        result = await options.localReview({
+          repoPath: body.repoPath,
+          baseRef: body.baseRef,
+          headRef: body.headRef,
+          llmProvider: resolvedModel?.provider,
+          llmModel: resolvedModel?.model
+        });
       } catch (error) {
         if (error instanceof LocalTriggerError) {
           const status = error.code === "PATH_NOT_ALLOWED"
@@ -1212,6 +1252,8 @@ const routes: Route[] = [
         baseSha: job.baseSha,
         headSha: job.headSha,
         publicationPolicy: "disabled",
+        llmProvider: job.llmProvider,
+        llmModel: job.llmModel,
         status: "queued"
       }, allowedOrigins);
     }

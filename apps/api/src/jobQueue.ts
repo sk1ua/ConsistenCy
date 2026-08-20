@@ -37,6 +37,8 @@ export type ReviewJob = {
   headSha?: string;
   ref?: string;
   publicationPolicy: PublicationPolicy;
+  llmProvider?: "deepseek" | "openai";
+  llmModel?: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;

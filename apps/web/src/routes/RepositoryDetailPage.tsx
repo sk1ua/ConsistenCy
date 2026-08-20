@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   Automation,
   HeartbeatPulse,
@@ -29,11 +29,12 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
   TrendingUp,
   X
 } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, type HealthResponse } from "../api/client";
 import { useI18n } from "../i18n";
 import { workspaceQueryKeys } from "../query/client";
 import { safeRequestError } from "../query/safeRequestError";
@@ -93,61 +94,251 @@ function CommitDetailModal({
 function ReviewComposerModal({
   displayName,
   branch,
+  defaultBranch,
   headSha,
+  dirtyCount,
+  health,
+  submitting = false,
+  error,
   zh,
   onClose,
   onStartReview
 }: {
   displayName: string;
   branch?: string | null;
+  defaultBranch?: string | null;
   headSha?: string | null;
+  dirtyCount: number;
+  health?: HealthResponse;
+  submitting?: boolean;
+  error?: string;
   zh: boolean;
   onClose: () => void;
-  onStartReview: (source: "working_tree" | "branch" | "pr") => void;
+  onStartReview: (options: {
+    source: "working_tree" | "branch";
+    baseRef?: string;
+    headRef?: string;
+    modelOverride?: { provider: "deepseek" | "openai"; model: string };
+  }) => void;
 }) {
-  const [source, setSource] = useState<"working_tree" | "branch" | "pr">("working_tree");
+  const hasWorkingTreeChanges = dirtyCount > 0;
+  const [source, setSource] = useState<"working_tree" | "branch">(hasWorkingTreeChanges ? "working_tree" : "branch");
+
+  const defaultProvider = (health?.llmProvider && health.llmProvider !== "none")
+    ? (health.llmProvider as "deepseek" | "openai")
+    : (health?.llmCapabilities?.deepseek?.configured ? "deepseek" : health?.llmCapabilities?.openai?.configured ? "openai" : "none");
+
+  const defaultModel = health?.llmModel || (
+    defaultProvider === "deepseek"
+      ? (health?.llmCapabilities?.deepseek?.defaultModel || "deepseek-v4-flash")
+      : defaultProvider === "openai"
+      ? (health?.llmCapabilities?.openai?.defaultModel || "gpt-4.1-mini")
+      : ""
+  );
+
+  const [isCustomModel, setIsCustomModel] = useState(false);
+  const [overrideProvider, setOverrideProvider] = useState<"deepseek" | "openai">(defaultProvider === "openai" ? "openai" : "deepseek");
+  const [overrideModel, setOverrideModel] = useState("");
+
+  const deepseekConfigured = Boolean(health?.llmCapabilities?.deepseek?.configured ?? (health?.llmProvider === "deepseek"));
+  const openaiConfigured = Boolean(health?.llmCapabilities?.openai?.configured ?? (health?.llmProvider === "openai"));
+
+  const targetModelName = isCustomModel
+    ? (overrideModel.trim() || (overrideProvider === "deepseek" ? "deepseek-v4-flash" : "gpt-4.1-mini"))
+    : defaultModel;
+
+  const resolvedProvider = isCustomModel ? overrideProvider : (defaultProvider !== "none" ? defaultProvider : undefined);
+
+  const canStart = Boolean(
+    (source === "branch" || hasWorkingTreeChanges) &&
+    resolvedProvider &&
+    targetModelName &&
+    !submitting
+  );
+
+  const validationHint = !hasWorkingTreeChanges && source === "working_tree"
+    ? (zh ? "当前工作区没有未提交变更，请选择当前分支变更" : "Clean working tree; select current branch changes")
+    : !resolvedProvider
+    ? (zh ? "尚未配置大语言模型，请前往设置页配置" : "LLM not configured; configure in settings first")
+    : isCustomModel && !overrideModel.trim() && !targetModelName
+    ? (zh ? "请输入模型名称" : "Enter model name")
+    : undefined;
+
+  const targetBranchText = defaultBranch
+    ? `${branch ?? "HEAD"} → ${defaultBranch}`
+    : `${branch ?? "HEAD"} (${zh ? "默认分支未知" : "default branch unknown"})`;
+
+  function handleSubmit() {
+    if (!canStart || !resolvedProvider) return;
+    onStartReview({
+      source,
+      baseRef: defaultBranch ?? "main",
+      headRef: branch ?? "HEAD",
+      modelOverride: isCustomModel ? { provider: overrideProvider, model: targetModelName } : undefined
+    });
+  }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card review-composer-modal" onClick={e => e.stopPropagation()}>
+    <div className="modal-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div
+        className="modal-card review-composer-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="review-composer-title"
+        onKeyDown={e => { if (e.key === "Escape") onClose(); }}
+      >
         <div className="modal-header">
           <div>
             <span className="panel-kicker">{zh ? "发起代码审查" : "Launch Review"}</span>
-            <h3>{displayName}</h3>
+            <h3 id="review-composer-title">{displayName}</h3>
           </div>
-          <button type="button" className="drawer-close-btn" onClick={onClose}><X size={16} /></button>
+          <button type="button" className="drawer-close-btn" aria-label={zh ? "关闭" : "Close"} onClick={onClose}><X size={16} /></button>
         </div>
         <div className="modal-body">
+          {error && (
+            <div className="route-query-notice" role="alert">
+              <strong>{zh ? "发起审查失败" : "Could not launch review"}</strong>
+              <span>{error}</span>
+            </div>
+          )}
+
           <div className="composer-field">
-            <label><strong>{zh ? "审查范围 / Source" : "Review Source"}</strong></label>
+            <label><strong>{zh ? "审查范围" : "Review Source"}</strong></label>
             <div className="source-option-list">
-              <label className={`source-option-card ${source === "working_tree" ? "selected" : ""}`}>
-                <input type="radio" name="reviewSource" value="working_tree" checked={source === "working_tree"} onChange={() => setSource("working_tree")} />
+              <label className={`source-option-card ${source === "working_tree" ? "selected" : ""} ${!hasWorkingTreeChanges ? "disabled" : ""}`}>
+                <input
+                  type="radio"
+                  name="reviewSource"
+                  value="working_tree"
+                  checked={source === "working_tree"}
+                  disabled={!hasWorkingTreeChanges}
+                  onChange={() => setSource("working_tree")}
+                />
                 <div>
                   <strong>{zh ? "工作区未提交变更 (Working Tree)" : "Working Tree Changes"}</strong>
-                  <small>{zh ? "比对 HEAD 与未提交修改，进行即时本地审查" : "Diff HEAD against uncommitted changes for local audit"}</small>
+                  <small>
+                    {hasWorkingTreeChanges
+                      ? (zh ? `比对未提交修改 (${dirtyCount} 个修改文件)` : `Diff uncommitted modifications (${dirtyCount} changed files)`)
+                      : (zh ? "当前工作区没有未提交变更 (0 个修改文件)" : "Clean working tree (0 changed files)")}
+                  </small>
                 </div>
               </label>
               <label className={`source-option-card ${source === "branch" ? "selected" : ""}`}>
-                <input type="radio" name="reviewSource" value="branch" checked={source === "branch"} onChange={() => setSource("branch")} />
+                <input
+                  type="radio"
+                  name="reviewSource"
+                  value="branch"
+                  checked={source === "branch"}
+                  onChange={() => setSource("branch")}
+                />
                 <div>
-                  <strong>{zh ? `当前分支变更 (${branch ?? "current"} vs default)` : `Current Branch (${branch ?? "current"} vs default)`}</strong>
-                  <small>{zh ? "比对分支相对于主干的基础变更" : "Diff branch merge base against HEAD"}</small>
+                  <strong>{zh ? `当前分支变更 (${targetBranchText})` : `Current Branch (${targetBranchText})`}</strong>
+                  <small>{zh ? "比对分支相对于主干的基础变更" : "Diff branch merge base against default branch"}</small>
                 </div>
               </label>
             </div>
           </div>
 
+          <div className="composer-field composer-model-section">
+            <div className="composer-field-header">
+              <label><strong>{zh ? "审查模型" : "Review Model"}</strong></label>
+              <button
+                type="button"
+                className="text-link-button"
+                onClick={() => {
+                  if (!isCustomModel) {
+                    setOverrideModel(defaultModel);
+                  }
+                  setIsCustomModel(prev => !prev);
+                }}
+              >
+                {isCustomModel ? (zh ? "使用全局默认" : "Use default") : (zh ? "更改模型" : "Change model")}
+              </button>
+            </div>
+
+            {!isCustomModel ? (
+              <div className="model-default-display">
+                <div className="model-default-pill">
+                  <Sparkles size={14} className="model-sparkle" />
+                  <strong>
+                    {defaultProvider !== "none"
+                      ? `${defaultProvider === "deepseek" ? "DeepSeek" : "OpenAI"} · ${defaultModel}`
+                      : (zh ? "未配置 LLM" : "LLM not configured")}
+                  </strong>
+                  <span className="model-default-tag">{zh ? "全局默认" : "Global default"}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="custom-model-editor">
+                <div className="custom-model-row">
+                  <div className="custom-model-input-group">
+                    <label htmlFor="composer-override-provider"><small>{zh ? "提供商" : "Provider"}</small></label>
+                    <select
+                      id="composer-override-provider"
+                      value={overrideProvider}
+                      onChange={e => {
+                        const next = e.target.value as "deepseek" | "openai";
+                        setOverrideProvider(next);
+                        if (!overrideModel.trim() || overrideModel === "deepseek-v4-flash" || overrideModel === "gpt-4.1-mini") {
+                          setOverrideModel(next === "deepseek" ? (health?.llmCapabilities?.deepseek?.defaultModel || "deepseek-v4-flash") : (health?.llmCapabilities?.openai?.defaultModel || "gpt-4.1-mini"));
+                        }
+                      }}
+                    >
+                      <option value="deepseek" disabled={!deepseekConfigured}>
+                        DeepSeek {!deepseekConfigured ? (zh ? "(未配置密钥)" : "(unconfigured)") : ""}
+                      </option>
+                      <option value="openai" disabled={!openaiConfigured}>
+                        OpenAI {!openaiConfigured ? (zh ? "(未配置密钥)" : "(unconfigured)") : ""}
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="custom-model-input-group flex-1">
+                    <label htmlFor="composer-override-model"><small>{zh ? "模型名称" : "Model"}</small></label>
+                    <input
+                      id="composer-override-model"
+                      type="text"
+                      placeholder={overrideProvider === "deepseek" ? "deepseek-v4-flash" : "gpt-4.1-mini"}
+                      value={overrideModel}
+                      onChange={e => setOverrideModel(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <small className="custom-model-hint">
+                  {zh ? "仅对本次审查生效，不修改全局设置" : "Applies to this review only; does not mutate global settings"}
+                </small>
+              </div>
+            )}
+          </div>
+
           <div className="composer-meta-summary">
             <div><span>{zh ? "目标分支" : "Branch"}:</span> <code>{branch ?? "HEAD"}</code></div>
             <div><span>{zh ? "提交基线" : "HEAD SHA"}:</span> <code>{headSha?.slice(0, 10) ?? "latest"}</code></div>
-            <div><span>{zh ? "模型模式" : "Model"}:</span> <span className="badge badge-queued">{zh ? "Mock 模型" : "Mock model"}</span></div>
+            <div>
+              <span>{zh ? "执行模型" : "Execution"}:</span>
+              <code>{resolvedProvider ? `${resolvedProvider === "deepseek" ? "DeepSeek" : "OpenAI"} · ${targetModelName}` : (zh ? "未配置" : "None")}</code>
+            </div>
           </div>
 
+          {validationHint && (
+            <div className="composer-validation-warning">
+              <AlertCircle size={13} />
+              <span>{validationHint}</span>
+            </div>
+          )}
+
           <div className="composer-actions">
-            <button type="button" className="secondary-button" onClick={onClose}>{zh ? "取消" : "Cancel"}</button>
-            <button type="button" className="primary-button" onClick={() => onStartReview(source)}>
-              <Play size={14} /> {zh ? "开始审查" : "Start Review"}
+            <button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>
+              {zh ? "取消" : "Cancel"}
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!canStart}
+              onClick={handleSubmit}
+            >
+              {submitting ? <LoaderCircle className="spinning" size={14} /> : <Play size={14} />}
+              {zh ? (submitting ? "正在发起..." : "开始审查") : (submitting ? "Launching..." : "Start Review")}
             </button>
           </div>
         </div>
@@ -160,16 +351,19 @@ export function RepositoryDetailPage({
   jobs,
   repositories = [],
   automations = [],
-  pulse
+  pulse,
+  health
 }: {
   jobs: ReviewJob[];
   repositories?: Repository[];
   automations?: Automation[];
   pulse: HeartbeatPulse | null;
+  health?: HealthResponse;
 }) {
   const { repositoryId = "" } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { locale } = useI18n();
   const zh = locale === "zh-CN";
 
@@ -202,11 +396,30 @@ export function RepositoryDetailPage({
     Boolean(gitStatus?.branch) ||
     (pulse && (repositoryId === "sk1ua/ConsistenCy" || repositoryId === "ConsistenCy" || repositoryId.includes("ConsistenCy")))
   );
-  const isFixture = Boolean(
-    repositoryId.startsWith("acme/") ||
-    repositoryId.startsWith("studio/") ||
-    (sourceJobs.length > 0 && sourceJobs.every(j => j.id.startsWith("job_demo")))
-  );
+
+  const startLocalReview = useMutation({
+    mutationFn: async (options: {
+      source: "working_tree" | "branch";
+      baseRef?: string;
+      headRef?: string;
+      modelOverride?: { provider: "deepseek" | "openai"; model: string };
+    }) => {
+      let targetPath = registered?.source === "local_git" ? registered.displayName : (pulse?.repository.root ?? "");
+      if (repositoryId.startsWith("local:")) {
+        targetPath = repositoryId.replace(/^local:/, "");
+      }
+      return api.triggerLocalReview({
+        repoPath: targetPath,
+        ...(options.source === "branch" ? { baseRef: options.baseRef ?? registered?.defaultBranch ?? "main", headRef: branch } : {}),
+        ...(options.modelOverride ? { model: { provider: options.modelOverride.provider, model: options.modelOverride.model } } : {})
+      });
+    },
+    onSuccess: async res => {
+      setComposerOpen(false);
+      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
+      navigate(`/runs/${encodeURIComponent(res.jobId)}/overview`);
+    }
+  });
 
   // Parse path segments to determine active view and optional sub-parameter (like PR number)
   const segments = location.pathname.split("/").filter(Boolean);
@@ -249,8 +462,6 @@ export function RepositoryDetailPage({
   const latestJob = sourceJobs[0];
   const branch = gitStatus?.branch ?? pulse?.repository.branch ?? "main";
   const headSha = gitStatus?.headSha ?? pulse?.repository.headSha ?? latestJob?.headSha;
-  const isDemo = sourceJobs.some(j => j.id.startsWith("job_demo"));
-
   const tabs: Array<{ id: RepositoryView; label: string; count?: number }> = [
     { id: "overview", label: zh ? "概览" : "Overview" },
     ...(isLocal ? [{ id: "changes" as const, label: zh ? "变更" : "Changes", count: gitStatus?.dirtyFileCount || undefined }] : []),
@@ -265,15 +476,6 @@ export function RepositoryDetailPage({
     return prsData.pullRequests.find(p => p.number === selectedPrNumber);
   }, [prsData?.pullRequests, selectedPrNumber]);
 
-  function handleStartReview(_reviewSource: "working_tree" | "branch" | "pr") {
-    setComposerOpen(false);
-    if (latestJob) {
-      navigate(`/runs/${encodeURIComponent(latestJob.id)}/overview`);
-    } else {
-      navigate("/runs");
-    }
-  }
-
   return (
     <div className="repository-workspace-page page-stack">
       {/* Hero Workspace Header */}
@@ -284,11 +486,8 @@ export function RepositoryDetailPage({
             <div>
               <div className="repo-hero-tags">
                 <span className="provenance-pill">
-                  {isLocal ? (zh ? "本地 Git · GitHub 公开" : "LOCAL GIT · GITHUB PUBLIC") : isFixture ? (zh ? "演示数据 · FIXTURE" : "FIXTURE") : (zh ? "GitHub · 公开" : "GITHUB PUBLIC")}
+                  {isLocal ? (zh ? "本地 Git · GitHub 公开" : "LOCAL GIT · GITHUB PUBLIC") : (zh ? "GitHub · 公开" : "GITHUB PUBLIC")}
                 </span>
-                {isFixture && (
-                  <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>
-                )}
               </div>
               <h2>{title}</h2>
             </div>
@@ -355,7 +554,7 @@ export function RepositoryDetailPage({
             </div>
             <div className="status-item">
               <span className="status-label">{zh ? "数据来源" : "Provenance"}</span>
-              <span>{isFixture ? (zh ? "演示样例数据" : "Demo fixture") : (zh ? "GitHub 只读" : "GitHub read-only")}</span>
+              <span>{isLocal ? (zh ? "本地 Git" : "Local Git") : (zh ? "GitHub 只读" : "GitHub read-only")}</span>
             </div>
           </div>
         )}
@@ -837,10 +1036,15 @@ export function RepositoryDetailPage({
         <ReviewComposerModal
           displayName={title}
           branch={branch}
+          defaultBranch={registered?.defaultBranch ?? "main"}
           headSha={headSha}
+          dirtyCount={(gitStatus?.dirtyFileCount ?? 0) + (gitStatus?.untrackedFileCount ?? 0)}
+          health={health}
+          submitting={startLocalReview.isPending}
+          error={startLocalReview.error ? safeRequestError(startLocalReview.error) : undefined}
           zh={zh}
           onClose={() => setComposerOpen(false)}
-          onStartReview={handleStartReview}
+          onStartReview={options => startLocalReview.mutate(options)}
         />
       )}
     </div>

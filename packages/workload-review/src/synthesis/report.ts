@@ -43,6 +43,8 @@ export function buildReviewReport(input: {
   baseSha: string;
   headSha: string;
   summary: string;
+  llmProvider?: string;
+  llmModel?: string;
   agentRuns: AgentRun[];
   findings: ReviewFinding[];
   score: number;
@@ -61,6 +63,8 @@ export function buildReviewReport(input: {
     summary: input.summary,
     score: input.score,
     riskLevel: input.riskLevel,
+    llmProvider: input.llmProvider,
+    llmModel: input.llmModel,
     agentRuns: input.agentRuns,
     findings,
     retrieval: input.retrieval,

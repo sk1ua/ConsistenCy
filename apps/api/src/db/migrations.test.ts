@@ -24,7 +24,8 @@ describe("SQLite foundation", () => {
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
         "0014_automation_scheduler",
-        "0015_remove_demo_data"
+        "0015_remove_demo_data",
+        "0016_job_llm_model"
       ]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
@@ -87,7 +88,8 @@ describe("SQLite foundation", () => {
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
         "0014_automation_scheduler",
-        "0015_remove_demo_data"
+        "0015_remove_demo_data",
+        "0016_job_llm_model"
       ]);
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
@@ -137,7 +139,8 @@ describe("SQLite foundation", () => {
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
         "0014_automation_scheduler",
-        "0015_remove_demo_data"
+        "0015_remove_demo_data",
+        "0016_job_llm_model"
       ]);
 
       // Assert data preserved
@@ -244,7 +247,8 @@ describe("0009_local_git_jobs", () => {
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
         "0014_automation_scheduler",
-        "0015_remove_demo_data"
+        "0015_remove_demo_data",
+        "0016_job_llm_model"
       ]);
 
       const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_kept'").get() as any;
@@ -470,7 +474,7 @@ describe("0014_automation_scheduler", () => {
         ) VALUES ('receipt_legacy', ?, ?, ?, ?, 'manual', NULL, 'audit_run_legacy', 'created', ?)
       `).run("a".repeat(64), repository.id, automation.id, workflow.digest, "2026-08-14T00:00:00.000Z");
 
-      expect(runMigrations(database, migrations)).toEqual(["0014_automation_scheduler", "0015_remove_demo_data"]);
+      expect(runMigrations(database, migrations)).toEqual(["0014_automation_scheduler", "0015_remove_demo_data", "0016_job_llm_model"]);
       expect(database.prepare("SELECT scheduled_for FROM audit_runs WHERE id = 'audit_run_legacy'").get())
         .toEqual({ scheduled_for: null });
       expect(database.prepare("SELECT scheduled_for FROM audit_run_planning_receipts WHERE id = 'receipt_legacy'").get())

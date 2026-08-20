@@ -72,6 +72,7 @@ export type ContextBuilder = (input: ReviewWorkflowInput) => Promise<PRReviewCon
 export type ReviewWorkflowDependencies = {
   contextBuilder: ContextBuilder;
   provider?: LLMProvider;
+  providerFactory?: (override?: { provider?: "deepseek" | "openai"; model?: string }) => LLMProvider | undefined;
   jobStore: ReviewJobStore;
   deterministicAnalyzer: DeterministicAnalyzer;
   reportLanguage?: "zh-CN" | "en-US";

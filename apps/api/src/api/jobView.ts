@@ -14,6 +14,8 @@ export function toApiJob(job: ReviewJob): ApiReviewJob {
     baseSha: job.baseSha!,
     headSha: job.headSha!,
     publicationPolicy: job.publicationPolicy,
+    llmProvider: job.llmProvider,
+    llmModel: job.llmModel,
     createdAt: job.createdAt,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,

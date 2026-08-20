@@ -38,6 +38,8 @@ export const reviewJobSchema = z.object({
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: publicationPolicySchema.default("github_comment"),
+  llmProvider: z.enum(["deepseek", "openai"]).optional(),
+  llmModel: z.string().trim().min(1).optional(),
   createdAt: z.string().datetime(),
   startedAt: z.string().datetime().optional(),
   finishedAt: z.string().datetime().optional(),

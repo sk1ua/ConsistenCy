@@ -29,12 +29,26 @@ export const errorResponseSchema = z.object({
   }).strict()
 }).strict();
 
-export const publicPrRequestSchema = z.object({ url: z.string().trim().min(1).max(2_048) }).strict();
+export const reviewModelOverrideSchema = z.object({
+  provider: z.enum(["deepseek", "openai"]).optional(),
+  name: z.string().trim().min(1).max(100).optional(),
+  model: z.string().trim().min(1).max(100).optional()
+}).strict();
+
+export type ReviewModelOverride = z.infer<typeof reviewModelOverrideSchema>;
+
+export const publicPrRequestSchema = z.object({
+  url: z.string().trim().min(1).max(2_048),
+  model: reviewModelOverrideSchema.optional(),
+  llm: reviewModelOverrideSchema.optional()
+}).strict();
 
 export const localReviewRequestSchema = z.object({
   repoPath: z.string().trim().min(1).max(4_096),
   baseRef: z.string().trim().min(1).max(255).optional(),
-  headRef: z.string().trim().min(1).max(255).optional()
+  headRef: z.string().trim().min(1).max(255).optional(),
+  model: reviewModelOverrideSchema.optional(),
+  llm: reviewModelOverrideSchema.optional()
 }).strict();
 
 export const localReviewResponseSchema = z.object({
@@ -43,6 +57,8 @@ export const localReviewResponseSchema = z.object({
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: z.literal("disabled"),
+  llmProvider: z.enum(["deepseek", "openai"]).optional(),
+  llmModel: z.string().trim().min(1).optional(),
   status: z.literal("queued")
 }).strict();
 export const publicPrResponseSchema = z.object({
@@ -53,6 +69,8 @@ export const publicPrResponseSchema = z.object({
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: z.literal("disabled"),
+  llmProvider: z.enum(["deepseek", "openai"]).optional(),
+  llmModel: z.string().trim().min(1).optional(),
   status: z.literal("queued")
 }).strict();
 

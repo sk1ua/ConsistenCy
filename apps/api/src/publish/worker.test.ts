@@ -59,7 +59,8 @@ describe("PublishWorker & Outbox Pipeline Test Suite", () => {
         "0012_repository_pulses",
         "0013_audit_run_planning_receipts",
         "0014_automation_scheduler",
-        "0015_remove_demo_data"
+        "0015_remove_demo_data",
+        "0016_job_llm_model"
       ]);
     } finally {
       database.close();

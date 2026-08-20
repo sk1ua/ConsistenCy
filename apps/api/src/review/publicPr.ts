@@ -59,6 +59,8 @@ export async function enqueuePublicPrReview(options: {
   url: string;
   jobs: ReviewJobStore;
   publicReadToken?: string;
+  llmProvider?: "deepseek" | "openai";
+  llmModel?: string;
   clientFactory?: (token?: string) => PullRequestClient;
 }): Promise<{ coordinates: PublicPrCoordinates; job: ReviewJob }> {
   const coordinates = parsePublicPrUrl(options.url);
@@ -84,7 +86,9 @@ export async function enqueuePublicPrReview(options: {
     senderLogin: "webui",
     action: "public_url",
     accessMode: "public_read",
-    publicationPolicy: "disabled"
+    publicationPolicy: "disabled",
+    llmProvider: options.llmProvider,
+    llmModel: options.llmModel
   };
 
   return { coordinates, job: options.jobs.enqueue(input) };

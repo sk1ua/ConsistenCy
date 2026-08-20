@@ -101,6 +101,8 @@ export const reviewReportSchema = z.object({
   summary: z.string().trim().min(1),
   score: z.number().int().min(0).max(100),
   riskLevel: riskLevelSchema,
+  llmProvider: z.string().trim().min(1).optional(),
+  llmModel: z.string().trim().min(1).optional(),
   agentRuns: z.array(agentRunSchema),
   findings: z.array(reviewFindingSchema),
   retrieval: retrievalTraceSchema.optional(),

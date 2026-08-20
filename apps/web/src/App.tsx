@@ -205,7 +205,7 @@ export function App() {
           monitoringRepositoryId={setRepositoryMonitoring.variables?.repositoryId}
           onSetMonitoring={(repository, enabled) => setRepositoryMonitoring.mutate({ repositoryId: repository.id, enabled })}
         />} />
-        <Route path="/repositories/:repositoryId/*" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository source"} /> : <RepositoryDetailPage jobs={jobs} repositories={repositories} automations={automations} pulse={heartbeatPulse} />} />
+        <Route path="/repositories/:repositoryId/*" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository source"} /> : <RepositoryDetailPage jobs={jobs} repositories={repositories} automations={automations} pulse={heartbeatPulse} health={health} />} />
         <Route path="/runs" element={queries.jobs.isPending ? <RouteLoading label={zh ? "正在加载审查队列" : "Loading review queue"} /> : <JobsPage jobs={jobs} onOpenJob={openJob} />} />
         <Route path="/runs/:runId" element={<RunIndexRedirect />} />
         <Route path="/runs/:runId/overview" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />

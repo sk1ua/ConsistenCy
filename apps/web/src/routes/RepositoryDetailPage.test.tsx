@@ -170,4 +170,39 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
     expect(html).toContain("Git 提交历史");
     expect(html).toContain("确定性提交日志");
   });
+
+  it("AC-UX-REPO-7: never renders Mock 模型 in review modal or detail view", () => {
+    const html = renderWithProviders(
+      <RepositoryDetailPage
+        jobs={mockJobs}
+        repositories={mockRepositories}
+        pulse={null}
+        health={{
+          ok: true,
+          service: "consistency-api",
+          database: { ok: true },
+          worker: { running: true, activeJobs: 0, concurrency: 1 },
+          llmConfigured: true,
+          llmProvider: "deepseek",
+          llmModel: "deepseek-v4-flash",
+          llmCapabilities: {
+            deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
+            openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+          },
+          configuration: {
+            githubAppConfigured: false,
+            webhookSecretConfigured: false,
+            publicReadTokenConfigured: false,
+            storage: { kind: "file", configured: true },
+            workerConcurrency: 1
+          }
+        }}
+      />,
+      "/repositories/repo_test_1"
+    );
+
+    expect(html).not.toContain("Mock 模型");
+    expect(html).not.toContain("Mock model");
+    expect(html).not.toContain("演示样例数据");
+  });
 });

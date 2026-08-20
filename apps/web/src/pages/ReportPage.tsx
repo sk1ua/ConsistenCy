@@ -49,6 +49,11 @@ export function ReportPage({
   const boundReport = binding.status === "bound" ? binding.report : undefined;
 
   const provenance = job ? formatReviewSource(job, zh) : { sourceText: "—", publicationText: "—", isFixture: false };
+  const resolvedProvider = boundReport?.llmProvider ?? job?.llmProvider ?? llmProvider;
+  const resolvedModel = boundReport?.llmModel ?? job?.llmModel ?? llmModel;
+  const modelDisplay = resolvedProvider && resolvedProvider !== "none"
+    ? `${resolvedProvider}${resolvedModel ? ` · ${resolvedModel}` : ""}`
+    : t("unavailable");
 
   const groups = useMemo(() => {
     if (!boundReport) return [];
@@ -111,7 +116,7 @@ export function ReportPage({
           </div>
           <div className="meta-item">
             <span className="meta-lbl">{zh ? "模型" : "Model"}</span>
-            <code>{llmProvider === "mock" ? (zh ? "Mock 模型" : "Mock model") : (llmProvider ?? t("unavailable"))}{llmModel ? ` · ${llmModel}` : ""}</code>
+            <code>{modelDisplay}</code>
           </div>
           <div className="meta-item">
             <span className="meta-lbl">{zh ? "来源" : "Source"}</span>

@@ -14,7 +14,7 @@ import { triggerLocalReview } from "./trigger/local";
 import { HeartbeatDaemon } from "./heartbeat/daemon";
 import { RepositorySupervisor } from "./heartbeat/repositorySupervisor";
 import { LocalGitAdapter } from "@consistency/vcs-core";
-import { createLLMProvider } from "./review/llm/factory";
+import { createLLMProvider, createReviewLLMProvider, resolveReviewModel } from "./review/llm/factory";
 import { redactSensitiveText, sanitizePublicError, sanitizePublishFailure } from "./security/redact";
 import { loadRealData } from "./data/realData";
 import { DeterministicAnalyzer } from "./review/deterministic";
@@ -79,6 +79,7 @@ export const worker = new ReviewWorker({
   pollIntervalMs: config.CONSISTENCY_WORKER_POLL_INTERVAL_MS,
   workflow: {
     provider,
+    providerFactory: override => createReviewLLMProvider(config, override),
     deterministicAnalyzer,
     reportLanguage: config.reportLanguage,
     reviewWorkflow: config.reviewWorkflow,
@@ -239,10 +240,13 @@ export const server = createApiServer({
   notebookEnabled: config.notebookEnabled,
   notebookStore,
   notebookGraph,
-  publicPr: url => enqueuePublicPrReview({
+  resolveReviewModel: override => resolveReviewModel({ config, override }),
+  publicPr: (url, modelOverride) => enqueuePublicPrReview({
     url,
     jobs,
-    publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN
+    publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
+    llmProvider: modelOverride?.provider,
+    llmModel: modelOverride?.model
   }),
   llmProviderConfigured: Boolean(provider),
   localReview: input => triggerLocalReview(jobs, input, {
@@ -269,6 +273,16 @@ export const server = createApiServer({
     llmConfigured: Boolean(provider),
     llmProvider: provider?.name ?? "none",
     llmModel: provider?.model ?? undefined,
+    llmCapabilities: {
+      deepseek: {
+        configured: Boolean(config.DEEPSEEK_API_KEY),
+        defaultModel: config.DEEPSEEK_MODEL
+      },
+      openai: {
+        configured: Boolean(config.OPENAI_API_KEY),
+        defaultModel: config.OPENAI_MODEL
+      }
+    },
     publicPrAnalysis: config.publicPrAnalysisEnabled,
     publicPrAccessMode: config.publicPrAnalysisEnabled
       ? config.GITHUB_PUBLIC_READ_TOKEN ? "pat" : "anonymous"
