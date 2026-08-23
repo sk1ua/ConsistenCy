@@ -60,6 +60,58 @@
   font-variant-numeric: tabular-nums;
 }
 
+.count-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  font-family: var(--font-ui) !important;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 1px var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.count-badge-label {
+  color: var(--muted);
+  font-family: var(--font-ui);
+}
+
+.count-badge strong {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.count-badge-value {
+  color: inherit;
+}
+
+.count-badge-total {
+  background: var(--surface-subtle);
+  color: var(--foreground);
+}
+
+.count-badge-tracked {
+  background: var(--primary-soft);
+  border-color: var(--primary-faint);
+  color: var(--primary-strong);
+}
+
+.count-badge-untracked {
+  background: var(--success-soft);
+  border-color: var(--success-faint);
+  color: var(--success-strong);
+}
+
 .diff-tree,
 .diff-tree-findings {
   margin: 0;

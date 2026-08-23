@@ -168,6 +168,7 @@ export class SettingsStore {
   readonly publicPath: string;
   readonly secretsPath: string;
   readonly keyPath: string;
+  private restartRequired = false;
 
   constructor(rootDirectory = findProjectRoot()) {
     this.rootDirectory = resolve(rootDirectory);
@@ -234,6 +235,8 @@ export class SettingsStore {
     const patch = settingsPatchSchema.parse(input);
     const publicSettings = this.readPublic();
     const secretSettings = this.readSecrets();
+    const previousPublicSettings = JSON.stringify(publicSettings);
+    const previousSecretSettings = JSON.stringify(secretSettings);
     const setPublic = (key: keyof PublicSettings, value: string | number | null | undefined) => {
       if (value === undefined) return;
       if (value === null) delete publicSettings[key];
@@ -265,12 +268,20 @@ export class SettingsStore {
     setPublic("CONSISTENCY_WEB_URL", patch.runtime?.webUrl);
     setSecret("CONSISTENCY_API_TOKEN", patch.runtime?.apiToken);
 
-    writeJsonAtomic(this.publicPath, publicSettingsSchema.parse(publicSettings));
-    this.writeSecrets(secretSettingsSchema.parse(secretSettings));
-    return this.snapshot(process.env, true);
+    const persistedPublicSettings = publicSettingsSchema.parse(publicSettings);
+    const persistedSecretSettings = secretSettingsSchema.parse(secretSettings);
+    const settingsChanged = previousPublicSettings !== JSON.stringify(persistedPublicSettings)
+      || previousSecretSettings !== JSON.stringify(persistedSecretSettings);
+
+    if (settingsChanged) {
+      writeJsonAtomic(this.publicPath, persistedPublicSettings);
+      this.writeSecrets(persistedSecretSettings);
+      this.restartRequired = true;
+    }
+    return this.snapshot(process.env);
   }
 
-  snapshot(environment: NodeJS.ProcessEnv = process.env, restartRequired = false): SettingsSnapshot {
+  snapshot(environment: NodeJS.ProcessEnv = process.env): SettingsSnapshot {
     const saved = this.savedEnvironment();
     const effective = this.effectiveEnvironment(environment);
     const overriddenByEnvironment = Object.keys(saved)
@@ -304,7 +315,7 @@ export class SettingsStore {
         apiTokenConfigured: Boolean(effective.CONSISTENCY_API_TOKEN)
       },
       overriddenByEnvironment,
-      restartRequired
+      restartRequired: this.restartRequired
     };
   }
 }

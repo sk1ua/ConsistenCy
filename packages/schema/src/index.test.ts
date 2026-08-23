@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   agentRunSchema,
   errorResponseSchema,
+  gitRemoteInfoSchema,
+  localReviewRequestSchema,
   prReviewContextSchema,
+  repositoryCommitsResponseSchema,
+  repositoryPullRequestsResponseSchema,
   reviewFindingSchema,
   reviewPlanSchema,
   reviewReportSchema,
@@ -111,6 +115,172 @@ describe("@consistency/schema", () => {
     expect(agentRunSchema.parse(sampleReport.agentRuns[0]).status).toBe("succeeded");
     expect(reviewReportSchema.parse(sampleReport).score).toBe(74);
     expect(errorResponseSchema.parse({ error: { code: "NOT_FOUND", message: "Missing" } }).error.code).toBe("NOT_FOUND");
+  });
+
+  it("requires exclusive repository commit availability states", () => {
+    const commit = {
+      sha: "a".repeat(40),
+      parentShas: [],
+      author: { name: "Test Runner" },
+      authoredAt: "2026-08-22T00:00:00.000Z",
+      message: "initial commit"
+    };
+
+    expect(repositoryCommitsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      commits: [commit]
+    }).available).toBe(true);
+    expect(() => repositoryCommitsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      reason: "must not accompany available history",
+      commits: []
+    })).toThrow();
+    expect(() => repositoryCommitsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: false,
+      commits: []
+    })).toThrow();
+    expect(() => repositoryCommitsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: false,
+      reason: "history unavailable",
+      commits: [commit]
+    })).toThrow();
+  });
+
+  it("requires provider-owned pull request rows and exclusive availability states", () => {
+    const pullRequest = {
+      provider: "github",
+      number: 42,
+      title: "Provider title",
+      state: "open",
+      author: null,
+      baseRef: "main",
+      headRef: "feature/provider",
+      baseSha: "base-123",
+      headSha: "head-456",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+      mergedAt: null,
+      htmlUrl: "https://github.com/octo/repository/pull/42"
+    };
+
+    expect(repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      pullRequests: [pullRequest]
+    }).available).toBe(true);
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: false,
+      pullRequests: []
+    })).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: false,
+      reason: "provider unavailable",
+      pullRequests: [pullRequest]
+    })).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      pullRequests: [{
+        number: pullRequest.number,
+        title: pullRequest.title,
+        state: pullRequest.state,
+        author: pullRequest.author,
+        baseRef: pullRequest.baseRef,
+        headRef: pullRequest.headRef,
+        baseSha: pullRequest.baseSha,
+        headSha: pullRequest.headSha,
+        createdAt: pullRequest.createdAt,
+        updatedAt: pullRequest.updatedAt,
+        htmlUrl: pullRequest.htmlUrl
+      }]
+    })).toThrow();
+  });
+
+  it("accepts provider pull request lifecycle rows with explicit merge timestamps", () => {
+    const pullRequest = {
+      provider: "github",
+      number: 42,
+      title: "Provider title",
+      author: null,
+      baseRef: "main",
+      headRef: "feature/provider",
+      baseSha: "base-123",
+      headSha: "head-456",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+      htmlUrl: "https://github.com/octo/repository/pull/42"
+    };
+
+    expect(repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      pullRequests: [{ ...pullRequest, state: "open", mergedAt: null }]
+    }).pullRequests[0]?.mergedAt).toBeNull();
+    expect(repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      pullRequests: [{ ...pullRequest, state: "closed", mergedAt: null }]
+    }).pullRequests[0]?.mergedAt).toBeNull();
+    expect(repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      pullRequests: [{ ...pullRequest, state: "closed", mergedAt: "2026-08-03T00:00:00.000Z" }]
+    }).pullRequests[0]?.mergedAt).toBe("2026-08-03T00:00:00.000Z");
+  });
+
+  it("rejects synthetic and incomplete provider pull request lifecycle rows", () => {
+    const pullRequest = {
+      provider: "github",
+      number: 42,
+      title: "Provider title",
+      author: null,
+      baseRef: "main",
+      headRef: "feature/provider",
+      baseSha: "base-123",
+      headSha: "head-456",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+      htmlUrl: "https://github.com/octo/repository/pull/42"
+    };
+
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      pullRequests: [{ ...pullRequest, state: "merged", mergedAt: "2026-08-03T00:00:00.000Z" }]
+    })).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: true,
+      pullRequests: [{ ...pullRequest, state: "closed" }]
+    })).toThrow();
+  });
+
+  it("accepts renderer-safe git remotes and rejects exposed URLs", () => {
+    expect(gitRemoteInfoSchema.parse({ name: "origin" }).name).toBe("origin");
+    expect(gitRemoteInfoSchema.parse({
+      name: "upstream",
+      githubFullName: "octo/repository"
+    }).githubFullName).toBe("octo/repository");
+    expect(() => gitRemoteInfoSchema.parse({
+      name: "origin",
+      url: "https://github.com/octo/repository.git"
+    })).toThrow();
+    expect(() => gitRemoteInfoSchema.parse({
+      name: "origin",
+      url: "https://token@github.com/octo/repository.git"
+    })).toThrow();
+  });
+
+  it("requires a repository identifier for local reviews and rejects paths", () => {
+    expect(localReviewRequestSchema.parse({ repositoryId: "repository-1" }).repositoryId).toBe("repository-1");
+    expect(() => localReviewRequestSchema.parse({})).toThrow();
+    expect(() => localReviewRequestSchema.parse({ repoPath: "C:/worktree" })).toThrow();
   });
 
   it("maps quality scores to risk levels", () => {

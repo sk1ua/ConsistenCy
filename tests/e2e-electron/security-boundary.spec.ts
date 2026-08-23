@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const boundary = require(resolve(repositoryRoot, "apps", "desktop", "src", "security-boundary.cjs")) as {
   isBlockedRendererApiPath: (pathname: string) => boolean;
-  isSafeExternalUrl: (url: string) => boolean;
+  isSafeExternalUrl: (url: unknown) => boolean;
   selectAndRegisterRepository: (options: {
     showOpenDialog: (_parent: unknown, options: unknown) => Promise<{ canceled: boolean; filePaths: string[] }>;
     parentWindow: unknown;
@@ -136,7 +136,43 @@ test.describe("desktop repository security boundary", () => {
     expect(boundary.isSafeExternalUrl("vbscript:msgbox")).toBe(false);
     expect(boundary.isSafeExternalUrl("custom-protocol://test")).toBe(false);
     expect(boundary.isSafeExternalUrl("")).toBe(false);
-    expect(boundary.isSafeExternalUrl(null as any)).toBe(false);
+    expect(boundary.isSafeExternalUrl(undefined)).toBe(false);
+  });
+
+  test("wires secure external navigation using setWindowOpenHandler and will-navigate", () => {
+    const main = readFileSync(resolve(repositoryRoot, "apps", "desktop", "src", "main.cjs"), "utf8");
+
+    const windowOpenHandler = main.match(
+      /window\.webContents\.setWindowOpenHandler\(details => \{([\s\S]*?)\n\s*\}\);/
+    )?.[1];
+    expect(windowOpenHandler).toBeDefined();
+    expect(windowOpenHandler).toContain("isSafeExternalUrl(details.url)");
+    expect(windowOpenHandler).toContain("shell.openExternal(details.url)");
+    expect(windowOpenHandler).toContain('return { action: "deny" };');
+    expect(windowOpenHandler).not.toContain('return { action: "allow" };');
+
+    const navigationHandler = main.match(
+      /window\.webContents\.on\("will-navigate", \(event, url\) => \{([\s\S]*?)\n\s*\}\);/
+    )?.[1];
+    expect(navigationHandler).toBeDefined();
+    expect(navigationHandler).toContain("isTrustedRendererUrl(url)");
+    expect(navigationHandler).toContain("event.preventDefault()");
+    expect(navigationHandler).toContain("isSafeExternalUrl(url)");
+    expect(navigationHandler).toContain("shell.openExternal(url)");
+    expect(navigationHandler).not.toContain('return { action: "allow" };');
+
+    const unsafeUrls: readonly unknown[] = [
+      "http://github.com/org/repo/pull/1",
+      "javascript:alert(1)",
+      "file:///C:/passwords.txt",
+      "data:text/html,<h1>evil</h1>",
+      "not-a-url",
+      undefined
+    ];
+    for (const url of unsafeUrls) {
+      expect(boundary.isSafeExternalUrl(url), String(url)).toBe(false);
+    }
+    expect(boundary.isSafeExternalUrl("https://github.com/org/repo/pull/1")).toBe(true);
   });
 
   test("rejects an absolute path smuggled into the public display name", () => {

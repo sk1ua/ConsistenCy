@@ -1,12 +1,17 @@
-import { request } from "node:http";
+import { request, ServerResponse } from "node:http";
+import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, type Repository } from "@consistency/schema";
+import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
-import prReportFixture from "../../../tests/fixtures/pr_report_minimal.json";
+import type { SettingsSnapshot } from "./config/settings";
+import type { RepositoryPullRequestRequest } from "./github/pullRequestReader";
+import type { AuditDomainStore } from "./audit/store";
 
 const validAnalysisResult = {
   risk_score: 0.1,
@@ -124,6 +129,97 @@ function enqueuePullRequestJob(jobs: InMemoryJobQueue) {
     headSha: "1234567",
     installationId: 123
   });
+}
+
+class TestAuditStore implements AuditDomainStore {
+  private readonly repositories = new Map<string, Repository>();
+  private readonly localRepositoryPaths = new Map<string, string>();
+  private repositoryCount = 0;
+
+  registerLocal(displayName: string, serverLocator: string): Repository {
+    return this.register({ displayName, source: "local_git" }, serverLocator);
+  }
+
+  registerRemote(displayName: string, remoteFullName: string): Repository {
+    return this.register({ displayName, source: "github", remoteFullName });
+  }
+
+  listRepositories(): Repository[] {
+    return [...this.repositories.values()];
+  }
+
+  getRepository(id: string): Repository | undefined {
+    return this.repositories.get(id);
+  }
+
+  getLocalRepositoryPath(id: string): string | undefined {
+    return this.localRepositoryPaths.get(id);
+  }
+
+  createRepository(): never { throw new Error("Not implemented in HTTP route tests"); }
+  setRepositoryMonitoring(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listLocalRepositorySupervisionTargets(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listRepositoryEvents(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getRepositoryEvent(): never { throw new Error("Not implemented in HTTP route tests"); }
+  saveRepositoryEvent(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listRepositoryPulses(): never { throw new Error("Not implemented in HTTP route tests"); }
+  saveRepositoryPulse(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listWorkflowRevisions(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getWorkflowRevision(): never { throw new Error("Not implemented in HTTP route tests"); }
+  createWorkflowRevision(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listPolicyRevisions(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getPolicyRevision(): never { throw new Error("Not implemented in HTTP route tests"); }
+  createPolicyRevision(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listAutomations(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getAutomation(): never { throw new Error("Not implemented in HTTP route tests"); }
+  createAutomation(): never { throw new Error("Not implemented in HTTP route tests"); }
+  setAutomationEnabled(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listAuditRuns(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getAuditRun(): never { throw new Error("Not implemented in HTTP route tests"); }
+  createAuditRunDraft(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listAuditRunPlanningReceipts(): never { throw new Error("Not implemented in HTTP route tests"); }
+  planAuditRunDraft(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getAutomationScheduleState(): never { throw new Error("Not implemented in HTTP route tests"); }
+  ensureAutomationScheduleState(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listAutomationScheduleWindows(): never { throw new Error("Not implemented in HTTP route tests"); }
+  completeAutomationScheduleWindow(): never { throw new Error("Not implemented in HTTP route tests"); }
+  cancelAuditRun(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listRunStepArtifacts(): never { throw new Error("Not implemented in HTTP route tests"); }
+  saveRunStepArtifact(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listIssues(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getIssue(): never { throw new Error("Not implemented in HTTP route tests"); }
+  createIssue(): never { throw new Error("Not implemented in HTTP route tests"); }
+  applyIssueAction(): never { throw new Error("Not implemented in HTTP route tests"); }
+  saveFindingOccurrence(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listEvolutionSnapshots(): never { throw new Error("Not implemented in HTTP route tests"); }
+  saveEvolutionSnapshot(): never { throw new Error("Not implemented in HTTP route tests"); }
+  getAuditReport(): never { throw new Error("Not implemented in HTTP route tests"); }
+  saveAuditReport(): never { throw new Error("Not implemented in HTTP route tests"); }
+
+  private register(
+    input: { readonly displayName: string; readonly source: "local_git" | "github"; readonly remoteFullName?: string },
+    serverLocator?: string
+  ): Repository {
+    this.repositoryCount += 1;
+    const createdAt = "2026-08-23T00:00:00.000Z";
+    const repository: Repository = {
+      id: `repo_registered_${this.repositoryCount}`,
+      displayName: input.displayName,
+      source: input.source,
+      ...(input.remoteFullName === undefined ? {} : { remoteFullName: input.remoteFullName }),
+      trustLevel: input.source === "local_git" ? "trusted_local" : "untrusted_readonly",
+      monitoringEnabled: true,
+      createdAt,
+      updatedAt: createdAt
+    };
+    this.repositories.set(repository.id, repository);
+    if (serverLocator !== undefined) this.localRepositoryPaths.set(repository.id, serverLocator);
+    return repository;
+  }
+}
+
+function createAuditStore(): TestAuditStore {
+  return new TestAuditStore();
 }
 
 describe("createApiServer", () => {
@@ -467,29 +563,313 @@ describe("createApiServer", () => {
     });
   });
 
-  it("reports real git status and commits for the connected project root repository", async () => {
-    const server = createApiServer({});
+  it("reports a registered non-Git repository status as unavailable without leaking its path", async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), "consistency-http-non-git-repository-"));
+    tempDirectories.push(repositoryPath);
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Unreadable repository", repositoryPath);
+    const server = createApiServer({ auditStore });
     servers.push(server);
     const port = await listen(server);
 
-    const statusRes = await getJson(port, "/repositories/sk1ua%2FConsistenCy/git/status");
-    expect(statusRes.status).toBe(200);
-    expect(statusRes.body).toMatchObject({
-      repositoryId: "sk1ua/ConsistenCy",
-      available: true
-    });
-    const statusBody = statusRes.body as { available: boolean; branch: string; headSha: string; dirtyFileCount: number };
-    expect(statusBody.available).toBe(true);
-    expect(["v3-pr2", "v3", "main"]).toContain(statusBody.branch);
-    expect(statusBody.headSha).toMatch(/^[0-9a-f]{40}$/);
+    const response = await getJson(port, `/repositories/${repository.id}/git/status`);
+    const status = repositoryGitStatusResponseSchema.parse(response.body);
 
-    const commitsRes = await getJson(port, "/repositories/sk1ua%2FConsistenCy/git/commits?depth=5");
+    expect(response.status).toBe(200);
+    expect(status).toEqual({
+      repositoryId: repository.id,
+      available: false,
+      reason: "failed to execute git status",
+      branch: null,
+      headSha: null,
+      dirtyFileCount: 0,
+      untrackedFileCount: 0,
+      changedFiles: [],
+      untrackedFiles: [],
+      remotes: []
+    });
+    expect(JSON.stringify(status)).not.toContain(repositoryPath);
+  });
+
+  it("waits for a pending untracked read before returning a required diff failure", async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), "consistency-http-status-settlement-"));
+    tempDirectories.push(repositoryPath);
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Settling repository", repositoryPath);
+    const server = createApiServer({ auditStore });
+    servers.push(server);
+    const port = await listen(server);
+    let releaseUntracked: (() => void) | undefined;
+    let markUntrackedStarted: (() => void) | undefined;
+    const untrackedReadStarted = new Promise<void>(resolve => {
+      markUntrackedStarted = () => resolve();
+    });
+    const pendingUntrackedRead = new Promise<void>(resolve => {
+      releaseUntracked = () => resolve();
+    });
+    const workingDiffRead = vi.spyOn(LocalGitAdapter.prototype, "getWorkingDiff").mockRejectedValue(new Error("working diff failure"));
+    const untrackedRead = vi.spyOn(LocalGitAdapter.prototype, "getUntrackedFiles").mockImplementation(async () => {
+      markUntrackedStarted?.();
+      await pendingUntrackedRead;
+      return [];
+    });
+    const responseEnd = vi.spyOn(ServerResponse.prototype, "end");
+
+    try {
+      const responsePromise = getJson(port, `/repositories/${repository.id}/git/status`);
+      await untrackedReadStarted;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(responseEnd).not.toHaveBeenCalled();
+
+      if (releaseUntracked === undefined) throw new Error("Expected untracked read release");
+      releaseUntracked();
+      const response = await responsePromise;
+      const status = repositoryGitStatusResponseSchema.parse(response.body);
+
+      expect(untrackedRead).toHaveBeenCalledOnce();
+      expect(responseEnd).toHaveBeenCalledOnce();
+      expect(status).toMatchObject({
+        repositoryId: repository.id,
+        available: false,
+        reason: "failed to execute git status",
+        changedFiles: [],
+        untrackedFiles: []
+      });
+    } finally {
+      releaseUntracked?.();
+      responseEnd.mockRestore();
+      untrackedRead.mockRestore();
+      workingDiffRead.mockRestore();
+    }
+  });
+
+  it("uses only an exact registered ID for local Git status and commits", async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), "consistency-http-local-repository-"));
+    tempDirectories.push(repositoryPath);
+    execFileSync("git", ["init", "--quiet"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "audit@example.com"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Auditor"], { cwd: repositoryPath, stdio: "ignore" });
+    writeFileSync(join(repositoryPath, "README.md"), "local repository\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["commit", "--quiet", "-m", "Initial repository"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/private.git"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "upstream", "https://username:very-secret-token@example.test/private.git"], { cwd: repositoryPath, stdio: "ignore" });
+
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Friendly checkout", repositoryPath);
+    const server = createApiServer({ auditStore });
+    servers.push(server);
+    const port = await listen(server);
+
+    const statusRes = await getJson(port, `/repositories/${repository.id}/git/status`);
+    const status = repositoryGitStatusResponseSchema.parse(statusRes.body);
+    expect(statusRes.status).toBe(200);
+    expect(status).toMatchObject({
+      repositoryId: repository.id,
+      available: true,
+      remotes: [
+        { name: "origin", githubFullName: "acme/private" },
+        { name: "upstream" }
+      ],
+      primaryRemote: { name: "origin", githubFullName: "acme/private" }
+    });
+    expect(JSON.stringify(status)).not.toContain("very-secret-token");
+    expect(JSON.stringify(status)).not.toContain("username@");
+
+    const commitsRes = await getJson(port, `/repositories/${repository.id}/git/commits?depth=5`);
     expect(commitsRes.status).toBe(200);
     const commitsBody = commitsRes.body as { repositoryId: string; commits: Array<{ sha: string; message: string }> };
-    expect(commitsBody.repositoryId).toBe("sk1ua/ConsistenCy");
-    expect(commitsBody.commits.length).toBeGreaterThanOrEqual(1);
+    expect(commitsBody.repositoryId).toBe(repository.id);
+    expect(commitsBody.commits).toHaveLength(1);
     expect(commitsBody.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
-    expect(commitsBody.commits[0]?.message).toBeTruthy();
+    expect(commitsBody.commits[0]?.message).toBe("Initial repository");
+
+    for (const selector of [
+      "Friendly checkout",
+      "origin",
+      "acme/private",
+      "local:Friendly checkout",
+      repositoryPath,
+      ".",
+      "repo_unknown_999"
+    ]) {
+      const response = await getJson(port, `/repositories/${encodeURIComponent(selector)}/git/status`);
+      if (response.status === 200) {
+        expect(repositoryGitStatusResponseSchema.parse(response.body)).toMatchObject({
+          repositoryId: selector,
+          available: false,
+          reason: "local repository path unavailable",
+          remotes: []
+        });
+      } else {
+        expect(response.status).toBe(404);
+      }
+    }
+  });
+
+  it("advertises the branch-diff source only against a verified trunk ref", async () => {
+    const masterRepo = mkdtempSync(join(tmpdir(), "consistency-preparation-master-"));
+    const onTrunkRepo = mkdtempSync(join(tmpdir(), "consistency-preparation-on-trunk-"));
+    tempDirectories.push(masterRepo, onTrunkRepo);
+    for (const repoPath of [masterRepo, onTrunkRepo]) {
+      execFileSync("git", ["init", "--quiet", "--initial-branch=master"], { cwd: repoPath, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "audit@example.com"], { cwd: repoPath, stdio: "ignore" });
+      execFileSync("git", ["config", "user.name", "Auditor"], { cwd: repoPath, stdio: "ignore" });
+      writeFileSync(join(repoPath, "README.md"), "trunk repository\n", "utf8");
+      execFileSync("git", ["add", "README.md"], { cwd: repoPath, stdio: "ignore" });
+      execFileSync("git", ["commit", "--quiet", "-m", "Initial repository"], { cwd: repoPath, stdio: "ignore" });
+    }
+    writeFileSync(join(masterRepo, "evidence.md"), "branch change\n", "utf8");
+    execFileSync("git", ["checkout", "--quiet", "-b", "feature/evidence"], { cwd: masterRepo, stdio: "ignore" });
+    execFileSync("git", ["add", "evidence.md"], { cwd: masterRepo, stdio: "ignore" });
+    execFileSync("git", ["commit", "--quiet", "-m", "Branch change"], { cwd: masterRepo, stdio: "ignore" });
+
+    const auditStore = createAuditStore();
+    const masterRepository = auditStore.registerLocal("Master trunk checkout", masterRepo);
+    const onTrunkRepository = auditStore.registerLocal("On trunk checkout", onTrunkRepo);
+    const server = createApiServer({ auditStore });
+    servers.push(server);
+    const port = await listen(server);
+
+    const branchResponse = await getJson(port, `/repositories/${masterRepository.id}/review-preparation`);
+    expect(branchResponse.status).toBe(200);
+    const branchPreparation = reviewPreparationResponseSchema.parse(branchResponse.body);
+    expect(branchPreparation.sources.branch).toEqual({
+      available: true,
+      base: "master",
+      head: "feature/evidence"
+    });
+
+    const onTrunkResponse = await getJson(port, `/repositories/${onTrunkRepository.id}/review-preparation`);
+    expect(onTrunkResponse.status).toBe(200);
+    const onTrunkPreparation = reviewPreparationResponseSchema.parse(onTrunkResponse.body);
+    expect(onTrunkPreparation.sources.branch).toEqual({
+      available: false,
+      head: "master",
+      reason: "当前处于主分支，无法自动对比分支差异"
+    });
+  });
+
+  it("reports readable empty history only for an exact registered local repository", async () => {
+    const unbornRepository = mkdtempSync(join(tmpdir(), "consistency-history-unborn-"));
+    tempDirectories.push(unbornRepository);
+    execFileSync("git", ["init", "--quiet"], { cwd: unbornRepository, stdio: "ignore" });
+
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Unborn repository", unbornRepository);
+    const server = createApiServer({ auditStore });
+    servers.push(server);
+    const port = await listen(server);
+
+    const readableResponse = await getJson(
+      port,
+      `/repositories/${repository.id}/git/commits?depth=99`
+    );
+    const readable = repositoryCommitsResponseSchema.parse(readableResponse.body);
+    expect(readableResponse.status).toBe(200);
+    expect(readable).toEqual({
+      repositoryId: repository.id,
+      available: true,
+      commits: []
+    });
+
+    const unavailableResponse = await getJson(
+      port,
+      `/repositories/${encodeURIComponent(unbornRepository)}/git/commits`
+    );
+    const unavailable = repositoryCommitsResponseSchema.parse(unavailableResponse.body);
+    expect(unavailableResponse.status).toBe(200);
+    expect(unavailable).toEqual({
+      repositoryId: unbornRepository,
+      available: false,
+      reason: "local repository path unavailable",
+      commits: []
+    });
+    if (unavailable.available) throw new Error("Expected unavailable commit history");
+    expect(unavailable.reason).not.toContain(unbornRepository);
+  });
+
+  it("marks pull requests unavailable when a repository has no GitHub identity", async () => {
+    let pullRequestServiceCalled = false;
+    const server = createApiServer({
+      pullRequestService: {
+        list: async input => {
+          pullRequestServiceCalled = true;
+          return {
+            repositoryId: input.repositoryId,
+            available: false,
+            reason: "GitHub repository remote unavailable",
+            pullRequests: []
+          };
+        }
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, "/repositories/repository-without-a-github-remote/pull-requests");
+    const payload = repositoryPullRequestsResponseSchema.parse(response.body);
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      repositoryId: "repository-without-a-github-remote",
+      available: false,
+      reason: "GitHub repository remote unavailable",
+      pullRequests: []
+    });
+    expect(pullRequestServiceCalled).toBe(false);
+  });
+
+  it("serves provider summaries through the injected pull request service", async () => {
+    const requests: RepositoryPullRequestRequest[] = [];
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerRemote("Provider repository", "Octo/Repository");
+    const server = createApiServer({
+      auditStore,
+      pullRequestService: {
+        list: async input => {
+          requests.push(input);
+          return {
+            repositoryId: input.repositoryId,
+            available: true,
+            pullRequests: [{
+              provider: "github",
+              number: 42,
+              title: "Provider title",
+              state: "open",
+              author: "octocat",
+              baseRef: "main",
+              headRef: "feature/provider",
+              baseSha: "base-123",
+              headSha: "head-456",
+              createdAt: "2026-08-01T00:00:00.000Z",
+              updatedAt: "2026-08-02T00:00:00.000Z",
+              mergedAt: null,
+              htmlUrl: "https://github.com/octo/repository/pull/42"
+            }]
+          };
+        }
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, `/repositories/${repository.id}/pull-requests`);
+    const payload = repositoryPullRequestsResponseSchema.parse(response.body);
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      repositoryId: repository.id,
+      available: true,
+      pullRequests: [{ provider: "github", number: 42, title: "Provider title" }]
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      repositoryId: repository.id,
+      registeredRemoteFullName: "Octo/Repository",
+      registeredSource: "github"
+    });
+    expect(requests[0]).not.toHaveProperty("localPath");
   });
 
   it("rejects /demo/seed as route not found", async () => {
@@ -504,15 +884,18 @@ describe("createApiServer", () => {
 
   it("rejects review start when LLM provider is not configured", async () => {
     const jobs = new InMemoryJobQueue();
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("LLM test repository", "D:/workspace");
     const server = createApiServer({
       jobs,
+      auditStore,
       localReview: async () => ({ jobId: "job_1" }),
       llmProviderConfigured: false
     });
     servers.push(server);
     const port = await listen(server);
 
-    const res = await postJson(port, "/reviews/local", { repoPath: "D:/workspace" });
+    const res = await postJson(port, "/reviews/local", { repositoryId: repository.id });
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({
       error: { code: "LLM_NOT_CONFIGURED" }
@@ -683,8 +1066,11 @@ describe("createApiServer", () => {
 
   it("supports per-review model override on local review and rejects unconfigured or mock providers", async () => {
     const jobs = new InMemoryJobQueue();
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Model override repository", "D:/test-repo");
     const server = createApiServer({
       jobs,
+      auditStore,
       localReview: async input => {
         const job = jobs.enqueue({
           kind: "pull_request",
@@ -720,7 +1106,7 @@ describe("createApiServer", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        repoPath: "D:/test-repo",
+        repositoryId: repository.id,
         model: { provider: "openai", model: "gpt-4.1-mini" }
       })
     });
@@ -732,7 +1118,7 @@ describe("createApiServer", () => {
     const defaultRes = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ repoPath: "D:/test-repo" })
+      body: JSON.stringify({ repositoryId: repository.id })
     });
     expect(defaultRes.status).toBe(202);
     const defaultBody = await defaultRes.json() as any;
@@ -743,7 +1129,7 @@ describe("createApiServer", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        repoPath: "D:/test-repo",
+        repositoryId: repository.id,
         model: { provider: "mock", model: "mock" }
       })
     });
@@ -753,19 +1139,11 @@ describe("createApiServer", () => {
   it("admits local review via registered repositoryId resolving canonical path without exposing paths to renderer", async () => {
     const jobs = new InMemoryJobQueue();
     let invokedRepoPath: string | undefined;
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("My Registered Repo", "D:/canonical/repo-path");
     const server = createApiServer({
       jobs,
-      auditStore: {
-        getLocalRepositoryPath: (id: string) => id === "repo_registered_123" ? "D:/canonical/repo-path" : undefined,
-        listRepositories: () => [{
-          id: "repo_registered_123",
-          displayName: "My Registered Repo",
-          source: "local_git",
-          monitoringEnabled: true,
-          createdAt: "2026-08-14T00:00:00.000Z",
-          updatedAt: "2026-08-14T00:00:00.000Z"
-        }]
-      } as any,
+      auditStore,
       localReview: async input => {
         invokedRepoPath = input.repoPath;
         const job = jobs.enqueue({
@@ -788,7 +1166,7 @@ describe("createApiServer", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        repositoryId: "repo_registered_123",
+        repositoryId: repository.id,
         baseRef: "main",
         headRef: "v3-pr2"
       })
@@ -797,14 +1175,22 @@ describe("createApiServer", () => {
     const body = await res.json() as any;
     expect(body.jobId).toBeTruthy();
     expect(body.status).toBe("queued");
-    expect(invokedRepoPath).toBe(resolve("D:/canonical/repo-path"));
+    expect(invokedRepoPath).toBe("D:/canonical/repo-path");
+
+    const repoPathRejected = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repositoryId: repository.id, repoPath: "D:/private/checkout" })
+    });
+    expect(repoPathRejected.status).toBe(400);
+    expect(await repoPathRejected.json()).toMatchObject({
+      error: { code: "INVALID_LOCAL_REVIEW_REQUEST" }
+    });
 
     const unknownRes = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        repositoryId: "repo_unknown_999"
-      })
+      body: JSON.stringify({ repositoryId: "repo_unknown_999" })
     });
     expect(unknownRes.status).toBe(404);
 
@@ -814,5 +1200,141 @@ describe("createApiServer", () => {
       body: JSON.stringify({})
     });
     expect(emptyRes.status).toBe(400);
+  });
+
+  it("reports saved DeepSeek as pending restart while runtime remains unconfigured", async () => {
+    const savedSettings: SettingsSnapshot = {
+      llm: {
+        provider: "deepseek",
+        deepseekBaseUrl: "https://api.deepseek.com",
+        deepseekModel: "deepseek-v4-flash",
+        openaiModel: "gpt-4.1-mini",
+        deepseekApiKeyConfigured: true,
+        openaiApiKeyConfigured: false
+      },
+      github: {
+        appId: "",
+        privateKeyConfigured: false,
+        webhookSecretConfigured: false,
+        publicReadTokenConfigured: false
+      },
+      runtime: {
+        databasePath: ":memory:",
+        workspaceRoot: "workspaces",
+        localReviewRoots: "",
+        workerConcurrency: 1,
+        workerPollIntervalMs: 1_000,
+        webUrl: "http://127.0.0.1:5173",
+        apiTokenConfigured: false
+      },
+      overriddenByEnvironment: [],
+      restartRequired: true
+    };
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerRemote("Pending restart repository", "acme/pending-restart");
+    const server = createApiServer({
+      auditStore,
+      settings: { get: () => savedSettings, update: () => savedSettings },
+      healthDetails: () => ({
+        database: { ok: true },
+        worker: { running: true, activeJobs: 0, concurrency: 1 },
+        llmConfigured: false,
+        llmProvider: "none",
+        llmCapabilities: {
+          deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
+          openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+        },
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory", configured: true },
+          workerConcurrency: 1
+        }
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, `/repositories/${repository.id}/review-preparation`);
+    const preparation = reviewPreparationResponseSchema.parse(response.body);
+
+    expect(response.status).toBe(200);
+    expect(preparation.model.default).toEqual({ provider: "none", model: "" });
+    expect(preparation.model.providers.deepseek.configured).toBe(false);
+    expect(preparation.model.pendingRestart).toEqual({
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      credentialConfigured: true
+    });
+    expect(preparation.canStartReview).toBe(false);
+    expect(preparation.blockingReasons).toContain("已保存 DeepSeek 配置，重启 API 后生效。");
+  });
+
+  it("continues to report the active provider from health rather than saved settings", async () => {
+    const savedSettings: SettingsSnapshot = {
+      llm: {
+        provider: "openai",
+        deepseekBaseUrl: "https://api.deepseek.com",
+        deepseekModel: "deepseek-v4-flash",
+        openaiModel: "gpt-4.1-mini",
+        deepseekApiKeyConfigured: false,
+        openaiApiKeyConfigured: true
+      },
+      github: {
+        appId: "",
+        privateKeyConfigured: false,
+        webhookSecretConfigured: false,
+        publicReadTokenConfigured: false
+      },
+      runtime: {
+        databasePath: ":memory:",
+        workspaceRoot: "workspaces",
+        localReviewRoots: "",
+        workerConcurrency: 1,
+        workerPollIntervalMs: 1_000,
+        webUrl: "http://127.0.0.1:5173",
+        apiTokenConfigured: false
+      },
+      overriddenByEnvironment: [],
+      restartRequired: false
+    };
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerRemote("Active provider repository", "acme/active-provider");
+    const server = createApiServer({
+      auditStore,
+      settings: { get: () => savedSettings, update: () => savedSettings },
+      healthDetails: () => ({
+        database: { ok: true },
+        worker: { running: true, activeJobs: 0, concurrency: 1 },
+        llmConfigured: true,
+        llmProvider: "deepseek",
+        llmModel: "deepseek-v4-flash",
+        llmCapabilities: {
+          deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
+          openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+        },
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory", configured: true },
+          workerConcurrency: 1
+        }
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, `/repositories/${repository.id}/review-preparation`);
+    const preparation = reviewPreparationResponseSchema.parse(response.body);
+
+    expect(response.status).toBe(200);
+    expect(preparation.model.default).toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
+    expect(preparation.model.providers).toEqual({
+      deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
+      openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+    });
+    expect(preparation.model.pendingRestart).toBeNull();
   });
 });

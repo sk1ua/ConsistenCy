@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createE2eGitFixture } from "./fixture";
+import { createE2eLocalReview, e2eApiHeaders } from "./fixture";
 
 test.describe("ConsistenCy Full-Stack Integration E2E Suite", () => {
   test("executes the deterministic review workbench flow without external requests", async ({ page, request }) => {
@@ -27,7 +27,7 @@ test.describe("ConsistenCy Full-Stack Integration E2E Suite", () => {
     });
 
     // 1. Verify health endpoint reports real service status
-    const healthResponse = await request.get("http://127.0.0.1:3001/health");
+    const healthResponse = await request.get("http://127.0.0.1:3001/health", { headers: e2eApiHeaders });
     expect(healthResponse.ok()).toBe(true);
     const health = await healthResponse.json();
     expect(health.ok).toBe(true);
@@ -37,12 +37,7 @@ test.describe("ConsistenCy Full-Stack Integration E2E Suite", () => {
     expect(health.configuration.githubAppConfigured).toBe(false);
 
     // 2. Create a local review job with real Git workspace
-    const repoPath = createE2eGitFixture("full-stack-repo");
-    const createdResponse = await request.post("http://127.0.0.1:3001/reviews/local", {
-      data: { repoPath }
-    });
-    expect(createdResponse.ok()).toBe(true);
-    const { jobId } = await createdResponse.json() as { jobId: string };
+    const { jobId } = await createE2eLocalReview(request, "full-stack-repo");
     expect(jobId).toBeTruthy();
 
     // 3. Open runs queue

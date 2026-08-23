@@ -91,3 +91,8 @@ data/cache/*.json
 # WorkBuddy agent workspace
 .workbuddy/
 .omo/
+
+# Mimosa security-scanner working artifacts (never repository content)
+.mimosa/
+apps/web/.mimosa/
+apps/api/.mimosa/

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useId, type KeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, NavLink, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { ReviewJob, ReviewReport } from "@consistency/schema";
+import type { ReviewJob, ReviewReport, Repository } from "@consistency/schema";
 import { DiffViewer } from "../components/DiffViewer";
 import { EvidencePanel } from "../components/EvidencePanel";
 import { FindingItem } from "../components/FindingItem";
@@ -72,9 +72,19 @@ function EvidenceMode({ report, zh }: { report?: ReviewReport; zh: boolean }) {
   return <div className="run-evidence-mode page-stack"><EvidencePanel retrieval={report.retrieval} /><section className="section-block run-evidence-findings"><div className="panel-title"><div><span className="panel-kicker">{zh ? "已记录的报告输出" : "Recorded report output"}</span><h2>{zh ? "报告发现" : "Report findings"}</h2></div><strong>{report.findings.length}</strong></div>{report.findings.length === 0 ? <div className="empty-inline">{zh ? "报告没有发现。" : "No findings were reported."}</div> : report.findings.map(finding => <FindingItem key={finding.id} finding={finding} />)}</section></div>;
 }
 
-export function ReportRoute({ jobs, reports, health, jobsUnavailable, reportsUnavailable, onSelectAgent, selectedAgentId }: {
+export function matchJobRepositoryId(job: ReviewJob | undefined, repositories: Repository[]): string | undefined {
+  if (!job) return undefined;
+  const match = repositories.find(r =>
+    r.id === job.repositoryFullName ||
+    r.remoteFullName === job.repositoryFullName
+  );
+  return match?.id;
+}
+
+export function ReportRoute({ jobs, reports, repositories = [], health, jobsUnavailable, reportsUnavailable, onSelectAgent, selectedAgentId }: {
   jobs: ReviewJob[];
   reports: ReviewReport[];
+  repositories?: Repository[];
   health?: HealthResponse;
   jobsUnavailable: boolean;
   reportsUnavailable: boolean;
@@ -135,7 +145,10 @@ export function ReportRoute({ jobs, reports, health, jobsUnavailable, reportsUna
         notebookId={notebookId}
         llmProvider={health?.llmProvider}
         llmModel={health?.llmModel}
-        onBack={() => navigate(job?.repositoryFullName ? `/repositories/${encodeURIComponent(job.repositoryFullName)}` : "/runs")}
+        onBack={() => {
+          const matchedId = matchJobRepositoryId(job, repositories);
+          navigate(matchedId ? `/repositories/${encodeURIComponent(matchedId)}` : "/runs");
+        }}
       /> : <div className="run-mode-route">
         {mode === "diff" ? <DiffMode job={job} report={verifiedReport} zh={zh} />
           : mode === "evidence" ? <EvidenceMode report={verifiedReport} zh={zh} />

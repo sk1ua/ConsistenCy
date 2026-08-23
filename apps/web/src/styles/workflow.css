@@ -65,10 +65,10 @@
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border: 1px solid var(--primary);
+  border: 1px solid var(--button-primary-bg);
   border-radius: var(--radius-md);
-  background: var(--primary);
-  color: var(--surface);
+  background: var(--button-primary-bg);
+  color: var(--button-primary-fg);
   font-weight: 600;
   cursor: pointer;
 }
@@ -294,5 +294,85 @@
 
   .workflow-canvas {
     height: 460px;
+  }
+}
+
+/* --- CKPT3 Phase 1: verified workflow runtime slice (minimal control) --- */
+
+.workflow-runtime-view .muted-note {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 var(--space-sm);
+}
+
+.workflow-runtime-definition-input,
+.workflow-runtime-inputs textarea {
+  width: 100%;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised, var(--surface));
+  color: var(--text);
+  resize: vertical;
+}
+
+.workflow-runtime-definition-input {
+  margin-top: var(--space-sm);
+}
+
+.workflow-runtime-inputs {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.workflow-runtime-inputs input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised, var(--surface));
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.workflow-runtime-errors {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.workflow-runtime-result {
+  margin-top: var(--space-sm);
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.workflow-runtime-evidence,
+.workflow-runtime-findings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.workflow-runtime-evidence code,
+.workflow-runtime-findings code {
+  font-size: 11px;
+}
+
+.notice-success {
+  border-color: var(--success, var(--border));
+}
+
+.spin {
+  animation: workflow-spin 1s linear infinite;
+}
+
+@keyframes workflow-spin {
+  to {
+    transform: rotate(360deg);
   }
 }

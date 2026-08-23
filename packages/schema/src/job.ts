@@ -31,6 +31,10 @@ export const reviewJobSchema = z.object({
   type: jobTypeSchema,
   status: jobStatusSchema,
   repositoryFullName: z.string().trim().min(1),
+  /** Canonical opaque repository association, persisted at job creation when
+   *  the caller holds a registered repository id (CKPT3 Phase 4 / D1).
+   *  Absent on legacy jobs — association is never name-inferred. */
+  repositoryId: z.string().trim().min(1).optional(),
   /** Absent for local reviews, which have no pull request. */
   pullRequestNumber: z.number().int().positive().optional(),
   installationId: z.number().int().positive().optional(),

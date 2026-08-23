@@ -6,6 +6,9 @@ import type { ReviewJobStore } from "../jobQueue";
 export type LocalTriggerInput = {
   /** Path to the checkout to review. */
   repoPath: string;
+  /** Canonical opaque repository id of the REGISTERED repository this review
+   *  belongs to (persisted on the job; no name inference anywhere). */
+  repositoryId?: string;
   /** Supply both to review a committed range; omit both for the working tree. */
   baseRef?: string;
   headRef?: string;
@@ -104,6 +107,7 @@ export async function triggerLocalReview(
   const job = jobs.enqueue({
     kind: "pull_request",
     repository: basename(repoPath),
+    repositoryId: input.repositoryId,
     repoPath,
     accessMode: "local_git",
     publicationPolicy: "disabled",

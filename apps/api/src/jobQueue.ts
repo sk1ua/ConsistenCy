@@ -27,6 +27,9 @@ export type ReviewJob = {
   status: JobStatus;
   deliveryId?: string;
   repository: string;
+  /** Canonical opaque repository id (persisted at creation when the caller
+   *  holds one; absent for legacy/unassociated jobs — never name-inferred). */
+  repositoryId?: string;
   repoPath?: string;
   installationId?: number;
   accessMode: ReviewAccessMode;
@@ -75,6 +78,8 @@ export type WebhookAcceptance = {
 export interface ReviewJobStore {
   enqueue(input: CreateReviewJobInput): ReviewJob;
   list(): ReviewJob[];
+  /** Per-repository history: canonical repository_id matches ONLY (Phase 4 / D1). */
+  listJobsForRepository(repositoryId: string, limit?: number): ReviewJob[];
   get(id: string): ReviewJob | undefined;
   nextQueued(): ReviewJob | undefined;
   claimNextQueued(): ReviewJob | undefined;
@@ -127,6 +132,13 @@ export class InMemoryJobQueue implements ReviewJobStore {
     return Array.from(this.jobs.values()).sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt)
     );
+  }
+
+  listJobsForRepository(repositoryId: string, limit = 50): ReviewJob[] {
+    const normalized = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 200) : 50;
+    return this.list()
+      .filter(job => job.repositoryId === repositoryId)
+      .slice(0, normalized);
   }
 
   get(id: string): ReviewJob | undefined {

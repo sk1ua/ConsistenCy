@@ -46,8 +46,19 @@ const violations = [];
 for (const file of files) {
   const content = readFileSync(file, "utf8");
   const rel = relativePath(file);
-  for (const pattern of forbiddenPatterns) {
-    if (pattern.test(content)) violations.push(`${rel} contains ${pattern}`);
+
+  // Exact-path exemption (owner decision 2026-08-24): the verbatim project
+  // constitution lives at docs/CONSISTENCY_V3_MASTER_SPEC.md per Master Spec
+  // §43. Its frozen v1.0 body legitimately contains historical uses of words
+  // like 验收 (§15.5, §26.2) — process-report patterns do not apply to the
+  // constitution. ONLY the forbidden-pattern content scan is skipped for this
+  // one exact path; every other check below (link validation, etc.) still
+  // applies to it, and all checks still apply to every other file.
+  const exemptFromContentPatterns = rel === "docs/CONSISTENCY_V3_MASTER_SPEC.md";
+  if (!exemptFromContentPatterns) {
+    for (const pattern of forbiddenPatterns) {
+      if (pattern.test(content)) violations.push(`${rel} contains ${pattern}`);
+    }
   }
 
   const linkPattern = /!?\[[^\]]*\]\(([^)]+)\)/g;

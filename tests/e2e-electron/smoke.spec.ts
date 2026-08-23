@@ -26,6 +26,12 @@ test.describe("desktop shell", () => {
       }
     });
     try {
+      await app.evaluate(({ dialog }, selectedPath) => {
+        Object.defineProperty(dialog, "showOpenDialog", {
+          configurable: true,
+          value: async () => ({ canceled: false, filePaths: [selectedPath] })
+        });
+      }, repositoryRoot);
       const window = await app.firstWindow();
       await expect(window.locator(".audit-shell")).toBeVisible({ timeout: 60_000 });
       await expect(window.getByText(/API connected|API 已连接/i)).toBeVisible();
@@ -44,11 +50,18 @@ test.describe("desktop shell", () => {
         const desktop = (window as typeof window & {
           consistencyDesktop?: {
             buildInfo?: () => Promise<{ version: string; commitSha: string; buildMode: string }>;
+            selectRepository?: () => Promise<{
+              canceled: boolean;
+              repository?: { id: string };
+            }>;
             updates?: { getState: () => Promise<Record<string, unknown>> };
           } & Record<string, unknown>;
         }).consistencyDesktop;
         const updates = desktop?.updates;
         const buildInfo = desktop?.buildInfo ? await desktop.buildInfo() : null;
+        const selection = desktop?.selectRepository ? await desktop.selectRepository() : null;
+        const repositoryId = selection?.repository?.id;
+        if (!repositoryId) throw new Error("Expected the desktop host to register its local repository");
 
         const settingsUpdate = await fetch("/api/settings", {
           method: "PUT",
@@ -66,7 +79,7 @@ test.describe("desktop shell", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            repositoryId: "sk1ua/ConsistenCy",
+            repositoryId,
             baseRef: "72ff4ee",
             headRef: "HEAD"
           })

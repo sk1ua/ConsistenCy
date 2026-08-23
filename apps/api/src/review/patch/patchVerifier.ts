@@ -78,7 +78,10 @@ export async function verifyPatch(patch: string, options: VerifyPatchOptions): P
 
     const checkout = join(scratch, "checkout");
     // --no-hardlinks so the clone shares no object files with the original.
-    await runGit(["clone", "--no-hardlinks", "--quiet", repoPath, checkout], { cwd: scratch });
+    await runGit(["clone", "--no-hardlinks", "--quiet", repoPath, checkout], {
+      cwd: scratch,
+      allowLocalFileTransport: true
+    });
     await runGit(["apply", "--whitespace=nowarn", patchFile], { cwd: checkout });
 
     return {

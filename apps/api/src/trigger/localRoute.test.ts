@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WORKING_TREE_REV } from "@consistency/schema";
 import { createApiServer } from "../http";
 import { InMemoryJobQueue } from "../jobQueue";
+import { SQLiteAuditDomainStore } from "../audit/store";
+import { openDatabase, type ConsistencyDatabase } from "../db/connection";
+import { runMigrations } from "../db/migrations";
 import { LocalTriggerError } from "./local";
 
 async function listen(server: ReturnType<typeof createApiServer>): Promise<number> {
@@ -37,21 +40,35 @@ function post(
 
 describe("POST /reviews/local", () => {
   const servers: ReturnType<typeof createApiServer>[] = [];
+  const databases: ConsistencyDatabase[] = [];
 
   afterEach(async () => {
     await Promise.all(servers.map(server => new Promise<void>(resolve => { server.close(() => resolve()); })));
     servers.length = 0;
+    for (const database of databases.splice(0)) database.close();
   });
 
   function serve(localReview?: (input: { repoPath: string; baseRef?: string; headRef?: string }) => Promise<{ jobId: string }>) {
     const jobs = new InMemoryJobQueue();
-    const server = createApiServer({ jobs, apiToken: "api-secret", localReview });
+    const database = openDatabase(":memory:");
+    databases.push(database);
+    runMigrations(database);
+    const auditStore = new SQLiteAuditDomainStore(database);
+    const repository = auditStore.createRepository({
+      displayName: "ConsistenCy",
+      source: "local_git",
+      monitoringEnabled: true
+    }, {
+      serverLocator: "D:/workspaces/ConsistenCy",
+      trustLevel: "trusted_local"
+    });
+    const server = createApiServer({ jobs, apiToken: "api-secret", localReview, auditStore });
     servers.push(server);
-    return { jobs, server };
+    return { jobs, repository, server };
   }
 
   it("queues a local review and echoes the persisted job", async () => {
-    const { jobs, server } = serve(async ({ repoPath }) => {
+    const { jobs, repository, server } = serve(async ({ repoPath }) => {
       const job = jobs.enqueue({
         kind: "pull_request",
         repository: "ConsistenCy",
@@ -66,7 +83,7 @@ describe("POST /reviews/local", () => {
     });
     const port = await listen(server);
 
-    const response = await post(port, "/reviews/local", { repoPath: "D:/workspaces/ConsistenCy" }, {
+    const response = await post(port, "/reviews/local", { repositoryId: repository.id }, {
       authorization: "Bearer api-secret"
     });
 
@@ -83,21 +100,21 @@ describe("POST /reviews/local", () => {
   });
 
   it("requires the management bearer token", async () => {
-    const { server } = serve(async () => ({ jobId: "job_x" }));
+    const { repository, server } = serve(async () => ({ jobId: "job_x" }));
     const port = await listen(server);
 
-    const response = await post(port, "/reviews/local", { repoPath: "D:/workspaces/ConsistenCy" });
+    const response = await post(port, "/reviews/local", { repositoryId: repository.id });
     expect(response.status).toBe(401);
     expect(response.body).toMatchObject({ error: { code: "UNAUTHORIZED" } });
   });
 
   it("maps a disallowed path to 403 rather than leaking that the path exists", async () => {
-    const { server } = serve(async () => {
+    const { repository, server } = serve(async () => {
       throw new LocalTriggerError("Repository path is outside the configured review roots", "PATH_NOT_ALLOWED");
     });
     const port = await listen(server);
 
-    const response = await post(port, "/reviews/local", { repoPath: "D:/elsewhere/private" }, {
+    const response = await post(port, "/reviews/local", { repositoryId: repository.id }, {
       authorization: "Bearer api-secret"
     });
     expect(response.status).toBe(403);
@@ -105,12 +122,12 @@ describe("POST /reviews/local", () => {
   });
 
   it("maps a clean worktree to 409", async () => {
-    const { server } = serve(async () => {
+    const { repository, server } = serve(async () => {
       throw new LocalTriggerError("The working tree is clean", "NOTHING_TO_REVIEW");
     });
     const port = await listen(server);
 
-    const response = await post(port, "/reviews/local", { repoPath: "D:/workspaces/ConsistenCy" }, {
+    const response = await post(port, "/reviews/local", { repositoryId: repository.id }, {
       authorization: "Bearer api-secret"
     });
     expect(response.status).toBe(409);
@@ -129,10 +146,10 @@ describe("POST /reviews/local", () => {
   });
 
   it("returns 503 when local review is not configured", async () => {
-    const { server } = serve(undefined);
+    const { repository, server } = serve(undefined);
     const port = await listen(server);
 
-    const response = await post(port, "/reviews/local", { repoPath: "D:/workspaces/ConsistenCy" }, {
+    const response = await post(port, "/reviews/local", { repositoryId: repository.id }, {
       authorization: "Bearer api-secret"
     });
     expect(response.status).toBe(503);

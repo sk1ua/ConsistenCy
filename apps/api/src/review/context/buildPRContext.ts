@@ -57,12 +57,14 @@ export type BuildPRContextInput = {
   headSha: string;
 };
 
+type BuildPRClient = Pick<PullRequestClient, "getPullRequest" | "listChangedFiles" | "getDiff">;
+
 export async function buildPRContext(
   input: BuildPRContextInput,
   dependencies: {
     authenticator?: Pick<GitHubAppAuthenticator, "getInstallationToken">;
     publicReadToken?: string;
-    clientFactory?: (token?: string) => PullRequestClient;
+    clientFactory?: (token?: string) => BuildPRClient;
     cloneWorkspace?: typeof clonePullRequestWorkspace;
     runGitFile?: (executable: string, args: string[], options: { cwd: string; maxBuffer: number; encoding: "buffer"; windowsHide: boolean }) => Promise<{ stdout: Buffer }>;
     workspaceRoot?: string;
@@ -86,8 +88,8 @@ export async function buildPRContext(
   const client = dependencies.clientFactory?.(token)
     ?? new OctokitPullRequestClient(token);
   const coordinates = { owner, repo, pullRequestNumber: input.pullRequestNumber };
-  let pullRequest: Awaited<ReturnType<PullRequestClient["getPullRequest"]>>;
-  let rawChangedFiles: Awaited<ReturnType<PullRequestClient["listChangedFiles"]>>;
+  let pullRequest: Awaited<ReturnType<BuildPRClient["getPullRequest"]>>;
+  let rawChangedFiles: Awaited<ReturnType<BuildPRClient["listChangedFiles"]>>;
   let rawDiff: string;
   try {
     [pullRequest, rawChangedFiles, rawDiff] = await Promise.all([

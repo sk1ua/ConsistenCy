@@ -44,21 +44,12 @@ export const publicPrRequestSchema = z.object({
 }).strict();
 
 export const localReviewRequestSchema = z.object({
-  repositoryId: z.string().trim().min(1).max(255).optional(),
-  repoPath: z.string().trim().min(1).max(4_096).optional(),
+  repositoryId: z.string().trim().min(1).max(255),
   baseRef: z.string().trim().min(1).max(255).optional(),
   headRef: z.string().trim().min(1).max(255).optional(),
   model: reviewModelOverrideSchema.optional(),
   llm: reviewModelOverrideSchema.optional()
-}).strict().superRefine((data, ctx) => {
-  if (!data.repositoryId && !data.repoPath) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Either repositoryId or repoPath is required",
-      path: ["repositoryId"]
-    });
-  }
-});
+}).strict();
 
 export const localReviewResponseSchema = z.object({
   jobId: z.string().trim().min(1),
@@ -121,7 +112,6 @@ export const jobDiffResponseSchema = z.object({
 
 export const gitRemoteInfoSchema = z.object({
   name: z.string().trim().min(1),
-  url: z.string().trim().min(1),
   githubFullName: z.string().optional()
 }).strict();
 
@@ -139,35 +129,64 @@ export const repositoryGitStatusResponseSchema = z.object({
   primaryRemote: gitRemoteInfoSchema.optional()
 }).strict();
 
-export const repositoryCommitsResponseSchema = z.object({
+const repositoryCommitsAvailableResponseSchema = z.object({
   repositoryId: z.string().trim().min(1),
+  available: z.literal(true),
   commits: z.array(vcsCommitSummarySchema)
 }).strict();
 
+const repositoryCommitsUnavailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(false),
+  reason: z.string().trim().min(1),
+  commits: z.array(vcsCommitSummarySchema).length(0)
+}).strict();
+
+export const repositoryCommitsResponseSchema = z.discriminatedUnion("available", [
+  repositoryCommitsAvailableResponseSchema,
+  repositoryCommitsUnavailableResponseSchema
+]);
+
 export const pullRequestSummarySchema = z.object({
+  provider: z.literal("github"),
   number: z.number().int().positive(),
   title: z.string().trim().min(1),
-  state: z.enum(["open", "closed", "merged"]),
-  author: z.string().trim().min(1),
+  state: z.enum(["open", "closed"]),
+  author: z.string().trim().min(1).nullable(),
   baseRef: z.string().trim().min(1),
   headRef: z.string().trim().min(1),
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-  mergedAt: z.string().datetime().optional(),
-  reviewStatus: z.enum(["succeeded", "running", "failed", "unreviewed"]).optional(),
-  score: z.number().optional(),
-  riskLevel: riskLevelSchema.optional(),
-  jobId: z.string().optional()
+  mergedAt: z.string().datetime().nullable(),
+  htmlUrl: z.string().url().refine(value => value.startsWith("https://")),
+  latestReview: z.object({
+    jobId: z.string().trim().min(1),
+    status: z.enum(["queued", "running", "awaiting_publish", "publishing", "succeeded", "failed", "publish_failed", "cancelled"]),
+    score: z.number().optional(),
+    riskLevel: riskLevelSchema.optional(),
+    createdAt: z.string().datetime()
+  }).strict().optional()
 }).strict();
 
-export const repositoryPullRequestsResponseSchema = z.object({
+const repositoryPullRequestsAvailableResponseSchema = z.object({
   repositoryId: z.string().trim().min(1),
-  available: z.boolean(),
-  reason: z.string().optional(),
+  available: z.literal(true),
   pullRequests: z.array(pullRequestSummarySchema)
 }).strict();
+
+const repositoryPullRequestsUnavailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(false),
+  reason: z.string().trim().min(1),
+  pullRequests: z.array(pullRequestSummarySchema).length(0)
+}).strict();
+
+export const repositoryPullRequestsResponseSchema = z.discriminatedUnion("available", [
+  repositoryPullRequestsAvailableResponseSchema,
+  repositoryPullRequestsUnavailableResponseSchema
+]);
 
 export const reviewPreparationSourceWorkingTreeSchema = z.object({
   available: z.boolean(),
@@ -201,7 +220,12 @@ export const reviewPreparationModelSchema = z.object({
   providers: z.object({
     deepseek: reviewPreparationModelProviderSchema,
     openai: reviewPreparationModelProviderSchema
-  }).strict()
+  }).strict(),
+  pendingRestart: z.object({
+    provider: z.enum(["deepseek", "openai"]),
+    model: z.string().trim().min(1),
+    credentialConfigured: z.boolean()
+  }).strict().nullable()
 }).strict();
 
 export const reviewPreparationRepositorySchema = z.object({

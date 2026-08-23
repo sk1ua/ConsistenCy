@@ -22,10 +22,12 @@ import {
   repositoryGitStatusResponseSchema,
   repositoryCommitsResponseSchema,
   repositoryPullRequestsResponseSchema,
+  reviewPreparationResponseSchema,
   runRuntimeSnapshotSchema,
   runtimeRunsResponseSchema,
   localReviewResponseSchema,
   publicPrResponseSchema,
+  type LocalReviewRequest,
   type ReviewModelOverride,
   type JobStatus,
   type Notebook,
@@ -37,6 +39,7 @@ import {
   type RepositoryGitStatusResponse,
   type RepositoryCommitsResponse,
   type RepositoryPullRequestsResponse,
+  type ReviewPreparationResponse,
   type PullRequestSummary,
   type Severity,
   type StatsResponse,
@@ -45,6 +48,16 @@ import {
   type WorkflowResponse,
   type WorkflowSpec,
   type WorkflowSummary,
+  type WorkflowRuntimeDefinition,
+  type WorkflowRuntimeNodeType,
+  type WorkflowRuntimeDefinitionSummary,
+  type WorkflowRuntimeDefinitionRevision,
+  type WorkflowRuntimeDryLoadResult,
+  type WorkflowRuntimeBinding,
+  type WorkflowRuntimeRun,
+  type WorkflowRuntimeRunSummary,
+  type WorkflowRuntimeRunV2,
+  type WorkflowRuntimeValidationResult,
   type JobDiffResponse,
   type AuditCapabilities,
   type Automation,
@@ -264,6 +277,13 @@ export const api = {
     }) as { repository?: unknown };
     return repositorySchema.parse(payload.repository);
   },
+  async repositoryReviews(repositoryId: string, signal?: AbortSignal): Promise<ReviewJob[]> {
+    const payload = await request(
+      `/repositories/${encodeURIComponent(repositoryId)}/reviews`,
+      { signal }
+    ) as { reviews: ReviewJob[] };
+    return payload.reviews;
+  },
   async repositoryTimeline(repositoryId: string, signal?: AbortSignal): Promise<{ repositoryEvents: RepositoryEvent[]; repositoryPulses: RepositoryPulse[]; auditRuns: AuditRun[] }> {
     const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/timeline`, { signal }) as {
       repositoryEvents?: unknown;
@@ -293,6 +313,9 @@ export const api = {
   },
   async repositoryPullRequests(repositoryId: string, signal?: AbortSignal): Promise<RepositoryPullRequestsResponse> {
     return repositoryPullRequestsResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/pull-requests`, { signal }));
+  },
+  async reviewPreparation(repositoryId: string, signal?: AbortSignal): Promise<ReviewPreparationResponse> {
+    return reviewPreparationResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/review-preparation`, { signal }));
   },
   async automations(signal?: AbortSignal): Promise<Automation[]> {
     const payload = await request("/automations", { signal }) as { automations?: unknown };
@@ -328,14 +351,7 @@ export const api = {
       body: JSON.stringify({ url, ...(model ? { model } : {}) })
     }));
   },
-  async triggerLocalReview(input: {
-    repositoryId?: string;
-    repoPath?: string;
-    baseRef?: string;
-    headRef?: string;
-    model?: ReviewModelOverride;
-    llm?: ReviewModelOverride;
-  }) {
+  async triggerLocalReview(input: LocalReviewRequest) {
     return localReviewResponseSchema.parse(await request("/reviews/local", {
       method: "POST",
       body: JSON.stringify(input)
@@ -375,5 +391,85 @@ export const api = {
   },
   async runtimeSnapshot(runId: string, signal?: AbortSignal): Promise<RunRuntimeSnapshot> {
     return runRuntimeSnapshotSchema.parse(await request(`/runtime/runs/${encodeURIComponent(runId)}`, { signal }));
+  },
+  async workflowRuntimeOverview(signal?: AbortSignal): Promise<{ definition: WorkflowRuntimeDefinition; nodeTypes: WorkflowRuntimeNodeType[] }> {
+    return request("/workflow-runtime/overview", { signal }) as Promise<{ definition: WorkflowRuntimeDefinition; nodeTypes: WorkflowRuntimeNodeType[] }>;
+  },
+  async validateWorkflowRuntime(definition: unknown, signal?: AbortSignal): Promise<WorkflowRuntimeValidationResult & { plan?: unknown }> {
+    return request("/workflow-runtime/validate", {
+      method: "POST",
+      body: JSON.stringify({ definition }),
+      signal
+    }) as Promise<WorkflowRuntimeValidationResult & { plan?: unknown }>;
+  },
+  async triggerWorkflowRuntime(repositoryId: string, pin?: { definitionId: string; revisionId: string }): Promise<{ runId: string; status: string; revisionId: string }> {
+    return request("/workflow-runtime/runs", {
+      method: "POST",
+      body: JSON.stringify({ repositoryId, ...(pin ?? {}) })
+    }) as Promise<{ runId: string; status: string; revisionId: string }>;
+  },
+  async workflowRuntimeDefinitions(signal?: AbortSignal): Promise<WorkflowRuntimeDefinitionSummary[]> {
+    const payload = await request("/workflow-runtime/definitions", { signal }) as { definitions: WorkflowRuntimeDefinitionSummary[] };
+    return payload.definitions;
+  },
+  async saveWorkflowRuntimeDefinition(input: { definitionId?: string; definition: unknown }): Promise<WorkflowRuntimeDefinitionRevision> {
+    const payload = await request("/workflow-runtime/definitions", {
+      method: "POST",
+      body: JSON.stringify(input)
+    }) as { revision: WorkflowRuntimeDefinitionRevision };
+    return payload.revision;
+  },
+  async deleteWorkflowRuntimeDefinition(definitionId: string): Promise<void> {
+    await request(`/workflow-runtime/definitions/${encodeURIComponent(definitionId)}`, { method: "DELETE" });
+  },
+  async workflowRuntimeRevision(definitionId: string, revisionId: string, signal?: AbortSignal): Promise<WorkflowRuntimeDefinitionRevision> {
+    const payload = await request(
+      `/workflow-runtime/definitions/${encodeURIComponent(definitionId)}/revisions/${encodeURIComponent(revisionId)}`,
+      { signal }
+    ) as { revision: WorkflowRuntimeDefinitionRevision };
+    return payload.revision;
+  },
+  async workflowRuntimeDryLoad(definitionId: string, revisionId: string, signal?: AbortSignal): Promise<WorkflowRuntimeDryLoadResult> {
+    return request(
+      `/workflow-runtime/definitions/${encodeURIComponent(definitionId)}/revisions/${encodeURIComponent(revisionId)}/dry-load`,
+      { signal }
+    ) as Promise<WorkflowRuntimeDryLoadResult>;
+  },
+  async workflowRuntimeRuns(limit = 20, signal?: AbortSignal): Promise<WorkflowRuntimeRunSummary[]> {
+    const payload = await request(`/workflow-runtime/runs?limit=${limit}`, { signal }) as { runs: WorkflowRuntimeRunSummary[] };
+    return payload.runs;
+  },
+  async workflowRuntimeRunV2(runId: string, signal?: AbortSignal): Promise<WorkflowRuntimeRunV2> {
+    return request(`/workflow-runtime/runs/${encodeURIComponent(runId)}`, { signal }) as Promise<WorkflowRuntimeRunV2>;
+  },
+  async workflowRuntimeBindings(repositoryId: string, signal?: AbortSignal): Promise<WorkflowRuntimeBinding[]> {
+    const payload = await request(
+      `/workflow-runtime/repositories/${encodeURIComponent(repositoryId)}/bindings`,
+      { signal }
+    ) as { bindings: WorkflowRuntimeBinding[] };
+    return payload.bindings;
+  },
+  async setWorkflowRuntimeBinding(repositoryId: string, definitionId: string, enabled: boolean): Promise<WorkflowRuntimeBinding> {
+    const payload = await request(
+      `/workflow-runtime/repositories/${encodeURIComponent(repositoryId)}/bindings/${encodeURIComponent(definitionId)}`,
+      { method: "PUT", body: JSON.stringify({ enabled }) }
+    ) as { binding: WorkflowRuntimeBinding };
+    return payload.binding;
+  },
+  async triggerWorkflowRuntimeForRepository(repositoryId: string, definitionId: string): Promise<{ runId: string; status: string; revisionId: string }> {
+    return request(
+      `/workflow-runtime/repositories/${encodeURIComponent(repositoryId)}/runs`,
+      { method: "POST", body: JSON.stringify({ definitionId }) }
+    ) as Promise<{ runId: string; status: string; revisionId: string }>;
+  },
+  async workflowRuntimeRunsForRepository(repositoryId: string, limit = 20, signal?: AbortSignal): Promise<WorkflowRuntimeRunSummary[]> {
+    const payload = await request(
+      `/workflow-runtime/repositories/${encodeURIComponent(repositoryId)}/runs?limit=${limit}`,
+      { signal }
+    ) as { runs: WorkflowRuntimeRunSummary[] };
+    return payload.runs;
+  },
+  async workflowRuntimeRun(runId: string, signal?: AbortSignal): Promise<WorkflowRuntimeRun> {
+    return request(`/workflow-runtime/runs/${encodeURIComponent(runId)}`, { signal }) as Promise<WorkflowRuntimeRun>;
   }
 };

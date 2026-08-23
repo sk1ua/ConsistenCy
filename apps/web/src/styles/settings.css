@@ -347,3 +347,26 @@
 .save-settings:hover {
   background: var(--primary-strong);
 }
+
+.settings-lifecycle-banner {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: var(--ds-spacing-md, 16px);
+  justify-content: space-between;
+}
+.settings-lifecycle-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+.settings-lifecycle-notice small {
+  font-size: 12px;
+  opacity: 0.9;
+}
+.settings-lifecycle-manual {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-left: auto;
+}

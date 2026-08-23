@@ -1,17 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { createE2eGitFixture } from "./fixture";
+import { createE2eLocalReview } from "./fixture";
 
 test.describe("public PR Notebook UI", () => {
   test("opens a full-page Notebook, renders Markdown, and switches back to the review", async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.addInitScript(() => window.localStorage.setItem("consistency.locale.v1", "en-US"));
 
-    const repoPath = createE2eGitFixture("notebook-e2e-repo");
-    const localReviewResponse = await request.post("http://127.0.0.1:3001/reviews/local", {
-      data: { repoPath }
-    });
-    expect(localReviewResponse.ok()).toBe(true);
-    const { jobId } = await localReviewResponse.json() as { jobId: string };
+    const { jobId } = await createE2eLocalReview(request, "notebook-e2e-repo");
     const notebookId = `notebook_${jobId}`;
 
     await page.route("**/api/reviews/public-pr", async route => {

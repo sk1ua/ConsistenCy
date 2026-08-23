@@ -39,13 +39,14 @@ export class SQLiteJobStore implements ReviewJobStore {
       : input.publicationPolicy ?? "github_comment";
     this.database.prepare(`
       INSERT INTO jobs (
-        id, type, status, repository_full_name, pull_request_number, repo_path,
+        id, type, status, repository_full_name, repository_id, pull_request_number, repo_path,
         installation_id, access_mode, base_sha, head_sha, delivery_id, sender_login,
         action, publication_policy, llm_provider, llm_model, created_at, updated_at
-      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, 'PR_REVIEW', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       input.repository,
+      input.repositoryId ?? null,
       input.pullRequestNumber ?? null,
       accessMode === "local_git" ? input.repoPath ?? null : null,
       accessMode === "github_app" ? input.installationId ?? null : null,
@@ -67,6 +68,19 @@ export class SQLiteJobStore implements ReviewJobStore {
 
   list(): ReviewJob[] {
     const rows = this.database.prepare("SELECT * FROM jobs ORDER BY created_at DESC").all() as any[];
+    return rows.map(row => this.rowToJob(row));
+  }
+
+  /**
+   * Per-repository review history: ONLY jobs whose canonical opaque
+   * repository_id matches (CKPT3 Phase 4 / D1). Legacy rows with no
+   * association never appear here — no name-inference joins.
+   */
+  listJobsForRepository(repositoryId: string, limit = 50): ReviewJob[] {
+    const normalized = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 200) : 50;
+    const rows = this.database
+      .prepare("SELECT * FROM jobs WHERE repository_id = ? ORDER BY created_at DESC LIMIT ?")
+      .all(repositoryId, normalized) as any[];
     return rows.map(row => this.rowToJob(row));
   }
 
@@ -588,6 +602,7 @@ export class SQLiteJobStore implements ReviewJobStore {
       status: row.status,
       deliveryId: row.delivery_id ?? undefined,
       repository: row.repository_full_name,
+      repositoryId: row.repository_id ?? undefined,
       repoPath: row.repo_path ?? undefined,
       installationId: row.installation_id ?? undefined,
       accessMode: row.access_mode === "public_read" || row.access_mode === "local_git"

@@ -10,6 +10,7 @@ import { PublishWorker } from "./publish/worker";
 import { publishToGitHub } from "./publish/githubPublisher";
 import { PermanentPublishError } from "./publish/error";
 import { GitHubAppAuthenticator } from "./github/auth";
+import { RepositoryPullRequestService } from "./github/pullRequestReader";
 import { createContextBuilder } from "./review/context/contextRouter";
 import { triggerLocalReview } from "./trigger/local";
 import { HeartbeatDaemon } from "./heartbeat/daemon";
@@ -30,6 +31,8 @@ import { buildRepositorySupervisorRegistrations } from "./audit/repositorySuperv
 import { AuditRunPlanner } from "./audit/planner";
 import { AutomationScheduler } from "./audit/scheduler";
 import { RuntimeRegistry } from "./review/runtimeRegistry";
+import { WorkflowRuntimeHost } from "./workflow-runtime/host";
+import { WorkflowRuntimeStore } from "./workflow-runtime/store";
 
 const { config, store: settingsStore } = loadRuntimeConfig();
 const database = openDatabase(config.databasePath);
@@ -73,6 +76,44 @@ const notebookGraph = new NotebookGraph({
 
 export const workflows = new WorkflowStore();
 export const runtimeRegistry = new RuntimeRegistry();
+const workflowRuntimeStore = new WorkflowRuntimeStore(database);
+export const workflowRuntimeHost = new WorkflowRuntimeHost({
+  store: workflowRuntimeStore,
+  // Canonical repository resolution: opaque repositoryId → registered local
+  // Git checkout binding. Unknown ids and non-local/unpathed repositories
+  // never reach snapshot construction (host fails closed with sanitized
+  // 404/503 semantics).
+  resolveRepository: repositoryId => {
+    const repository = auditStore.getRepository(repositoryId);
+    if (!repository) return undefined;
+    if (repository.source !== "local_git") {
+      return { status: "unavailable" as const, reason: "repository has no local Git checkout to pin" };
+    }
+    const localPath = auditStore.getLocalRepositoryPath(repository.id);
+    if (!localPath) {
+      return { status: "unavailable" as const, reason: "repository local path is unavailable" };
+    }
+    return {
+      status: "ok" as const,
+      binding: {
+        repositoryId: repository.id,
+        displayName: repository.displayName,
+        ...(repository.remoteFullName === undefined ? {} : { remoteFullName: repository.remoteFullName }),
+        localPath
+      }
+    };
+  }
+});
+
+// Seed the immutable builtin workflow definition + honestly fail runs that
+// were still `running` when the previous process exited.
+const workflowRuntimeInit = workflowRuntimeHost.initialize();
+if (workflowRuntimeInit.interruptedRunsRecovered > 0) {
+  logger.warn(
+    { interruptedRuns: workflowRuntimeInit.interruptedRunsRecovered },
+    "Marked interrupted workflow-runtime runs as failed after restart"
+  );
+}
 
 export const worker = new ReviewWorker({
   jobStore: jobs,
@@ -224,7 +265,14 @@ async function reconcileRepositorySupervisor(): Promise<void> {
 
 export const server = createApiServer({
   jobs,
+  pullRequestService: new RepositoryPullRequestService({
+    authenticator,
+    publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
+    jobs,
+    listRemotes: async localPath => new LocalGitAdapter({ root: localPath }).getRemotes()
+  }),
   runtimeRegistry,
+  workflowRuntime: workflowRuntimeHost,
   githubWebhookSecret: config.GITHUB_WEBHOOK_SECRET,
   apiToken: config.CONSISTENCY_API_TOKEN,
   desktopControlToken: config.CONSISTENCY_DESKTOP_CONTROL_TOKEN,

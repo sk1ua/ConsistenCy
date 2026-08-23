@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
-import { resolveTheme, ThemeProvider } from "./theme";
+import { readThemePreference, resolveTheme, ThemeProvider } from "./theme";
 
 describe("resolveTheme", () => {
   it("resolves the system preference from the OS signal", () => {
@@ -11,9 +11,28 @@ describe("resolveTheme", () => {
     expect(resolveTheme("system", false)).toBe("light");
   });
 
+  it("follows OS changes while the preference remains system", () => {
+    expect(resolveTheme("system", true)).toBe("dark");
+    expect(resolveTheme("system", false)).toBe("light");
+  });
+
   it("resolves explicit preferences regardless of the OS signal", () => {
     expect(resolveTheme("dark", false)).toBe("dark");
     expect(resolveTheme("light", true)).toBe("light");
+  });
+
+  it("keeps explicit preferences stable across OS changes", () => {
+    expect(resolveTheme("light", true)).toBe("light");
+    expect(resolveTheme("light", false)).toBe("light");
+    expect(resolveTheme("dark", true)).toBe("dark");
+    expect(resolveTheme("dark", false)).toBe("dark");
+  });
+
+  it("reads the persisted preference and defaults to system", () => {
+    expect(readThemePreference({ getItem: () => null })).toBe("system");
+    expect(readThemePreference({ getItem: () => "light" })).toBe("light");
+    expect(readThemePreference({ getItem: () => "dark" })).toBe("dark");
+    expect(readThemePreference({ getItem: () => "invalid" })).toBe("system");
   });
 });
 

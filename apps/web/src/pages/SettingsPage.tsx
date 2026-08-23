@@ -144,6 +144,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       const loaded = credentialStatus ? withDesktopCredentialStatus(snapshot, credentialStatus) : snapshot;
       setSettings(loaded);
       setDraft(loaded);
+      setRestartNeeded(loaded.restartRequired);
     }).catch(error => {
       if (active) setMessage({ tone: "error", text: formatSettingsError(error, t) });
     }).finally(() => { if (active) setLoading(false); });
@@ -224,8 +225,8 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       setDraft(updated);
       setSecrets(emptySecrets);
       setClearSecrets(keepSecrets);
-      setRestartNeeded(true);
-      setMessage({ tone: "success", text: t("Settings saved. Restart the API to apply the new runtime configuration.") });
+      setRestartNeeded(updated.restartRequired);
+      setMessage({ tone: "success", text: t("Settings saved.") });
     } catch (error) {
       setMessage({ tone: "error", text: formatSettingsError(error, t) });
     } finally {
@@ -249,6 +250,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
         const loaded = status ? withDesktopCredentialStatus(snapshot, status) : snapshot;
         setSettings(loaded);
         setDraft(loaded);
+        setRestartNeeded(loaded.restartRequired);
       }
     } catch (error) {
       setMessage({ tone: "error", text: error instanceof Error ? error.message : t("Could not restart runtime") });
@@ -277,21 +279,36 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       )}
     </section>
 
-    {message && (
-      <div className={`settings-message ${message.tone}`} role="status">
-        <span>{message.text}</span>
-        {desktopBridge()?.restartRuntime && restartNeeded && (
+    {restartNeeded && (
+      <div className="settings-message warning settings-lifecycle-banner" role="status">
+        <div className="settings-lifecycle-notice">
+          <span>{t("Configuration saved. Restart the API to apply.")}</span>
+          <small>
+            {t("Saved configuration")}: {settings.llm.provider === "none" ? t("Not active") : <><strong>{settings.llm.provider === "deepseek" ? "DeepSeek" : "OpenAI"}</strong> &middot; {settings.llm.provider === "deepseek" ? settings.llm.deepseekModel : settings.llm.openaiModel}</>}
+            {" | "}
+            {t("Active runtime")}: {health.llmProvider === "none" ? t("Not active") : <><strong>{health.llmProvider === "deepseek" ? "DeepSeek" : health.llmProvider === "openai" ? "OpenAI" : health.llmProvider}</strong> &middot; {health.llmModel}</>}
+          </small>
+        </div>
+        {desktopBridge()?.restartRuntime ? (
           <button
             type="button"
             className="secondary-button"
-            style={{ marginLeft: "1rem", padding: "3px 8px", fontSize: "12px", height: "auto", display: "inline-flex", alignItems: "center", gap: "6px" }}
             disabled={restarting}
             onClick={() => void handleRestartRuntime()}
           >
             {restarting ? <LoaderCircle className="spinning" size={13} /> : <RotateCcw size={13} />}
-            {t(restarting ? "Restarting runtime..." : "Restart ConsistenCy Runtime")}
+            {t(restarting ? "Restarting..." : "Restart Runtime")}
           </button>
+        ) : (
+          <small className="settings-lifecycle-manual">
+            {t("Restart the terminal process to apply.")}
+          </small>
         )}
+      </div>
+    )}
+    {message && (
+      <div className={`settings-message ${message.tone}`} role="status">
+        <span>{message.text}</span>
       </div>
     )}
     {draft.overriddenByEnvironment.length > 0 && <div className="settings-message warning">{t("Environment variables override: {keys}", { keys: draft.overriddenByEnvironment.join(", ") })}</div>}

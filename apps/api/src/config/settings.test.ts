@@ -53,6 +53,24 @@ describe("SettingsStore", () => {
     expect(JSON.stringify(snapshot)).not.toContain("environment-key");
   });
 
+  it("keeps restart required after a changed save for this process but not a fresh store", () => {
+    const settings = store();
+
+    const saved = settings.update({
+      llm: {
+        provider: "deepseek",
+        deepseekModel: "deepseek-v4-flash",
+        deepseekApiKey: "saved-key"
+      }
+    });
+    const subsequentRead = settings.snapshot({});
+    const restartedProcess = new SettingsStore(settings.rootDirectory).snapshot({});
+
+    expect(saved.restartRequired).toBe(true);
+    expect(subsequentRead.restartRequired).toBe(true);
+    expect(restartedProcess.restartRequired).toBe(false);
+  });
+
   it("can clear a stored secret", () => {
     const settings = store();
     settings.update({ github: { webhookSecret: "configured", publicReadToken: "read-token" } });

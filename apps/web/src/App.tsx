@@ -11,7 +11,7 @@ import { workspaceQueryKeys } from "./query/client";
 import { safeRequestError } from "./query/safeRequestError";
 import { useWorkspaceQueries } from "./query/useWorkspaceQueries";
 import { routeMeta } from "./routes/meta";
-import { AppShell, type DataNotice } from "./shell/AppShell";
+import { AppShell, safeDecodeURIComponent, type DataNotice } from "./shell/AppShell";
 import { useTheme } from "./theme";
 
 const DashboardPage = lazy(() => import("./pages/DashboardPage").then(module => ({ default: module.DashboardPage })));
@@ -52,7 +52,7 @@ function LegacyReportRedirect() {
 
 export function App() {
   const { locale, setLocale, t } = useI18n();
-  const { preference, cycle: cycleTheme } = useTheme();
+  const { preference, setPreference: setThemePreference, cycle: cycleTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -73,8 +73,8 @@ export function App() {
   const inspectorContext = useMemo(() => {
     const match = location.pathname.match(/^\/runs\/([^/]+)/);
     if (match?.[1]) {
-      let runId: string;
-      try { runId = decodeURIComponent(match[1]); } catch { return undefined; }
+      const runId = safeDecodeURIComponent(match[1]);
+      if (!runId) return undefined;
       const job = jobs.find(candidate => candidate.id === runId);
       const embedded = job && job.report?.jobId === job.id ? job.report : undefined;
       const report = embedded ?? reports.find(candidate => candidate.jobId === job?.id);
@@ -163,6 +163,7 @@ export function App() {
     setLocale={setLocale}
     themePreference={preference}
     themeLabel={themeLabel}
+    setThemePreference={setThemePreference}
     cycleTheme={cycleTheme}
     jobs={jobs}
     repositories={repositories}
@@ -207,15 +208,15 @@ export function App() {
         <Route path="/repositories/:repositoryId/*" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository source"} /> : <RepositoryDetailPage jobs={jobs} repositories={repositories} automations={automations} pulse={heartbeatPulse} health={health} />} />
         <Route path="/runs" element={queries.jobs.isPending ? <RouteLoading label={zh ? "正在加载审查队列" : "Loading review queue"} /> : <JobsPage jobs={jobs} onOpenJob={openJob} />} />
         <Route path="/runs/:runId" element={<RunIndexRedirect />} />
-        <Route path="/runs/:runId/overview" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
-        <Route path="/runs/:runId/diff" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
-        <Route path="/runs/:runId/evidence" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
-        <Route path="/runs/:runId/notebook" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
-        <Route path="/runs/:runId/runtime" element={<ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/overview" element={<ReportRoute jobs={jobs} reports={reports} repositories={repositories} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/diff" element={<ReportRoute jobs={jobs} reports={reports} repositories={repositories} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/evidence" element={<ReportRoute jobs={jobs} reports={reports} repositories={repositories} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/notebook" element={<ReportRoute jobs={jobs} reports={reports} repositories={repositories} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
+        <Route path="/runs/:runId/runtime" element={<ReportRoute jobs={jobs} reports={reports} repositories={repositories} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} onSelectAgent={setSelectedAgent} selectedAgentId={selectedAgent?.agentId} />} />
         <Route path="/runs/:runId/*" element={<RunIndexRedirect />} />
         <Route path="/findings" element={queries.reports.isPending ? <RouteLoading label={zh ? "正在加载发现" : "Loading findings"} /> : <FindingsPage reports={reports} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/jobs" element={<Navigate replace to="/runs" />} />
-        <Route path="/reports" element={queries.jobs.isPending || queries.reports.isPending ? <RouteLoading label={zh ? "正在加载审查报告" : "Loading review reports"} /> : <ReportRoute jobs={jobs} reports={reports} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
+        <Route path="/reports" element={queries.jobs.isPending || queries.reports.isPending ? <RouteLoading label={zh ? "正在加载审查报告" : "Loading review reports"} /> : <ReportRoute jobs={jobs} reports={reports} repositories={repositories} health={health} jobsUnavailable={queries.jobs.isError} reportsUnavailable={queries.reports.isError} />} />
         <Route path="/reports/:jobId" element={<LegacyReportRedirect />} />
         <Route path="/automations" element={<Navigate replace to="/workflows?tab=triggers" />} />
         <Route path="/workflows" element={<WorkflowPage

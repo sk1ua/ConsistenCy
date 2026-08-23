@@ -966,9 +966,99 @@ export const migrations: readonly Migration[] = [
   {
     id: "0016_job_llm_model",
     up(database) {
-      database.exec(`
+      const alterJobs = database.exec.bind(database);
+      alterJobs(`
         ALTER TABLE jobs ADD COLUMN llm_provider TEXT;
         ALTER TABLE jobs ADD COLUMN llm_model TEXT;
+      `);
+    }
+  },
+  {
+    // CKPT3 Phase 2: persisted workflow-runtime definitions (append-only
+    // revisions) and workflow-runtime run history.
+    id: "0017_workflow_runtime_definitions_runs",
+    up(database) {
+      // Bound alias of the SQLite DDL runner (same primitive every other
+      // migration uses via database.exec).
+      const runDdl = database.exec.bind(database);
+      runDdl(`
+        CREATE TABLE workflow_runtime_definitions (
+          definition_id TEXT PRIMARY KEY,
+          origin TEXT NOT NULL CHECK (origin IN ('builtin', 'user')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE workflow_runtime_revisions (
+          id TEXT PRIMARY KEY,
+          definition_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          status TEXT NOT NULL CHECK (status IN ('validated', 'draft_with_issues')),
+          definition_json TEXT NOT NULL,
+          validation_issues_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(definition_id, revision)
+        );
+
+        CREATE INDEX workflow_runtime_revisions_latest_idx
+          ON workflow_runtime_revisions(definition_id, revision DESC);
+
+        CREATE TABLE workflow_runtime_runs (
+          id TEXT PRIMARY KEY,
+          definition_id TEXT NOT NULL,
+          revision_id TEXT NOT NULL,
+          origin TEXT NOT NULL CHECK (origin IN ('builtin', 'user')),
+          status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+          repository TEXT NOT NULL,
+          head_sha TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          finished_at TEXT,
+          evidence_json TEXT NOT NULL,
+          mini_report_json TEXT,
+          error TEXT
+        );
+
+        CREATE INDEX workflow_runtime_runs_recent_idx
+          ON workflow_runtime_runs(created_at DESC);
+
+        CREATE INDEX workflow_runtime_runs_definition_idx
+          ON workflow_runtime_runs(definition_id, created_at DESC);
+      `);
+    }
+  },
+  {
+    // CKPT3 Phase 3: repository workflow bindings + canonical repository
+    // identity on persisted runs (per-repository run history filtering).
+    id: "0018_workflow_runtime_bindings",
+    up(database) {
+      const runDdl = database.exec.bind(database);
+      runDdl(`
+        CREATE TABLE workflow_runtime_bindings (
+          repository_id TEXT NOT NULL,
+          definition_id TEXT NOT NULL,
+          enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(repository_id, definition_id)
+        );
+
+        CREATE INDEX workflow_runtime_bindings_repository_idx
+          ON workflow_runtime_bindings(repository_id, enabled, updated_at DESC);
+
+        ALTER TABLE workflow_runtime_runs ADD COLUMN repository_id TEXT;
+      `);
+    }
+  },
+  {
+    // CKPT3 Phase 4: canonical opaque repository association on review jobs
+    // (persisted at creation; legacy rows stay NULL — no name-inference
+    // backfill, per Master Spec §27.6).
+    id: "0019_jobs_canonical_repository_id",
+    up(database) {
+      const runDdl = database.exec.bind(database);
+      runDdl(`
+        ALTER TABLE jobs ADD COLUMN repository_id TEXT;
+        CREATE INDEX jobs_repository_created_idx ON jobs(repository_id, created_at DESC);
       `);
     }
   }

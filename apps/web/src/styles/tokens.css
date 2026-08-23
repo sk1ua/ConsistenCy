@@ -34,7 +34,7 @@
   --surface-subtle: #f0f3f0;
   --surface-muted: #f7faf9;
   --foreground: #17202a;
-  --muted: #687483;
+  --muted: #5d6875;
   --muted-strong: #59677a;
   --border: #dbe1dd;
   --border-strong: #c8d0cb;
@@ -50,7 +50,11 @@
   --header-bg: rgba(255, 255, 255, 0.94);
 
   /* Blue / primary */
-  --primary: #2f6bff;
+   --primary: #2f6bff;
+  --primary-action: #2457ce;
+  --on-primary: #ffffff;
+  --button-primary-bg: var(--primary-action);
+  --button-primary-fg: var(--on-primary);
   --primary-strong: #2457ce;
   --primary-soft: #edf2ff;
   --primary-faint: #cbd7f5;
@@ -109,7 +113,11 @@
   --overlay: rgba(5, 7, 10, 0.68);
   --header-bg: rgba(11, 13, 16, 0.88);
 
-  --primary: #6fa8ff;
+   --primary: #6fa8ff;
+  --primary-action: #6fa8ff;
+  --on-primary: #0b0d10;
+  --button-primary-bg: var(--primary-action);
+  --button-primary-fg: var(--on-primary);
   --primary-strong: #8ab8ff;
   --primary-soft: #16253b;
   --primary-faint: #263954;

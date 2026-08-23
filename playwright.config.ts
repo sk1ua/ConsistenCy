@@ -29,7 +29,10 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL: "http://127.0.0.1:5173",
-    trace: "on-first-retry"
+    trace: "on-first-retry",
+    extraHTTPHeaders: {
+      Authorization: "Bearer e2e-api-token"
+    }
   },
   projects: [
     {
@@ -61,7 +64,8 @@ export default defineConfig({
         GITHUB_WEBHOOK_SECRET: "",
         DEEPSEEK_API_KEY: "test-deepseek-key",
         OPENAI_API_KEY: "",
-        CONSISTENCY_API_TOKEN: "",
+        CONSISTENCY_API_TOKEN: "e2e-api-token",
+        CONSISTENCY_DESKTOP_CONTROL_TOKEN: "e2e-desktop-control-token",
         CONSISTENCY_PYTHON_PATH: process.env.CONSISTENCY_PYTHON_PATH ?? join(process.cwd(), ".venv", "Scripts", "python.exe")
       }
     },

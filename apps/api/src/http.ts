@@ -19,58 +19,44 @@ import {
   notebookCardRequestSchema,
   notebookMessageRequestSchema,
   publicPrRequestSchema,
+  reviewPreparationResponseSchema,
   riskScoreSchema,
   saveWorkflowRequestSchema,
   stepIdSchema,
   workflowSpecSchema,
+  type GitRemoteInfo,
   type ReviewModelOverride
 } from "@consistency/schema";
 import type { HeartbeatPulse, HeartbeatStreamEvent, VcsChangedFile } from "@consistency/schema";
 import { LocalGitAdapter, parseGitHubRemote } from "@consistency/vcs-core";
-import { existsSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { RepositoryPullRequestService, type RepositoryPullRequestRequest } from "./github/pullRequestReader";
 import { ReviewModelResolutionError, type ResolvedReviewModel } from "./review/llm/factory";
 
 function resolveLocalPathForRepository(repositoryId: string, options: CreateApiServerOptions): string | undefined {
-  if (options.auditStore) {
-    const direct = options.auditStore.getLocalRepositoryPath?.(repositoryId);
-    if (direct) return resolve(direct);
+  const repository = options.auditStore?.getRepository(repositoryId);
+  if (repository?.source !== "local_git") return undefined;
+  return options.auditStore?.getLocalRepositoryPath?.(repository.id);
+}
 
-    const repos = options.auditStore.listRepositories?.() ?? [];
-    const matched = repos.find(r =>
-      r.id === repositoryId ||
-      r.remoteFullName === repositoryId ||
-      r.displayName === repositoryId ||
-      (repositoryId.startsWith("local:") && r.displayName === repositoryId.replace(/^local:/, ""))
-    );
-    if (matched && matched.source === "local_git") {
-      const p = options.auditStore.getLocalRepositoryPath?.(matched.id);
-      if (p) return resolve(p);
-    }
+function toRendererGitRemote(remote: {
+  readonly name: string;
+  readonly url: string;
+  readonly githubFullName?: string;
+}): GitRemoteInfo {
+  const githubFullName = remote.githubFullName ?? parseGitHubRemote(remote.url)?.fullName;
+  return {
+    name: remote.name,
+    ...(githubFullName === undefined ? {} : { githubFullName })
+  };
+}
+
+function fulfilledValue<T>(result: PromiseSettledResult<T>): T | undefined {
+  switch (result.status) {
+    case "fulfilled":
+      return result.value;
+    case "rejected":
+      return undefined;
   }
-  const heartbeatPulse = options.heartbeat?.latest?.();
-  if (heartbeatPulse?.repository.root && heartbeatPulse.repository.root !== "unknown") {
-    const pulseRoot = heartbeatPulse.repository.root;
-    const pulseName = pulseRoot.split(/[\\/]/).filter(Boolean).at(-1);
-    if (repositoryId === `local:${pulseName}` || repositoryId === pulseName || repositoryId === pulseRoot) {
-      return resolve(pulseRoot);
-    }
-  }
-  const projectRoot = findProjectRoot();
-  const projectName = projectRoot.split(/[\\/]/).filter(Boolean).at(-1);
-  if (
-    repositoryId === "sk1ua/ConsistenCy" ||
-    repositoryId === "ConsistenCy" ||
-    repositoryId === projectName ||
-    repositoryId === `local:${projectName}` ||
-    repositoryId.startsWith("local:ConsistenCy")
-  ) {
-    return resolve(projectRoot);
-  }
-  if (repositoryId && (isAbsolute(repositoryId) || repositoryId.startsWith(".") || repositoryId.includes("/") || repositoryId.includes("\\"))) {
-    return resolve(repositoryId);
-  }
-  return undefined;
 }
 import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
 import { buildHealthPayload } from "./health";
@@ -78,7 +64,7 @@ import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
 import { LocalTriggerError } from "./trigger/local";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
 import { sanitizePublicError } from "./security/redact";
-import { settingsPatchSchema, toRendererSettings, findProjectRoot, type SettingsSnapshot } from "./config/settings";
+import { settingsPatchSchema, toRendererSettings, type SettingsSnapshot } from "./config/settings";
 import type { RealDataSnapshot } from "./data/realData";
 import { PublicPrError } from "./review/publicPr";
 import type { NotebookGraph } from "./notebook/graph";
@@ -90,8 +76,47 @@ import { AuditDomainError, type AuditDomainStore } from "./audit/store";
 import { validateLocalRepositoryRegistration } from "./audit/localRegistration";
 import { AuditRunPlanner } from "./audit/planner";
 import { RuntimeRegistry } from "./review/runtimeRegistry";
+import {
+  WorkflowRuntimeHost,
+  WorkflowRepositoryNotFoundError,
+  WorkflowSnapshotUnavailableError,
+  WorkflowDefinitionNotFoundError,
+  WorkflowDefinitionNotExecutableError,
+  WorkflowRuntimePersistenceError,
+} from "./workflow-runtime/host";
+import { WorkflowRuntimeStoreError } from "./workflow-runtime/store";
+import { compileWorkflowRuntimeDefinition } from "./workflow-runtime/compile";
+import {
+  workflowRuntimeSaveDefinitionRequestSchema,
+  workflowRuntimeSetBindingRequestSchema,
+  workflowRuntimeRepositoryTriggerRequestSchema,
+  workflowRuntimeTriggerRequestV2Schema,
+} from "@consistency/schema";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Sanitized fail-closed mapping for workflow-runtime host/store errors. */
+function mapWorkflowRuntimeError(error: unknown): unknown {
+  if (error instanceof WorkflowRepositoryNotFoundError) {
+    return new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+  }
+  if (error instanceof WorkflowSnapshotUnavailableError) {
+    return new ApiError(error.message, "WORKFLOW_SNAPSHOT_UNAVAILABLE", 503);
+  }
+  if (error instanceof WorkflowDefinitionNotFoundError) {
+    return new ApiError("Workflow definition not found", "WORKFLOW_DEFINITION_NOT_FOUND", 404);
+  }
+  if (error instanceof WorkflowDefinitionNotExecutableError) {
+    return new ApiError(error.message, "WORKFLOW_DEFINITION_NOT_EXECUTABLE", 409);
+  }
+  if (error instanceof WorkflowRuntimePersistenceError) {
+    return new ApiError("Workflow runtime persistence is unavailable", "WORKFLOW_RUNTIME_STORE_UNAVAILABLE", 503);
+  }
+  if (error instanceof WorkflowRuntimeStoreError) {
+    return new ApiError(error.message, error.code, error.statusCode);
+  }
+  return error;
+}
 
 export class ApiError extends Error {
   constructor(message: string, readonly code: string, readonly statusCode = 500, readonly details?: Record<string, unknown>) {
@@ -316,7 +341,7 @@ export type CreateApiServerOptions = {
   publicPr?: (url: string, modelOverride?: ResolvedReviewModel) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
   publicPrAnalysisEnabled?: boolean;
   llmProviderConfigured?: boolean;
-  localReview?: (input: { repoPath: string; baseRef?: string; headRef?: string; llmProvider?: "deepseek" | "openai"; llmModel?: string }) => Promise<{ jobId: string }>;
+  localReview?: (input: { repoPath: string; repositoryId?: string; baseRef?: string; headRef?: string; llmProvider?: "deepseek" | "openai"; llmModel?: string }) => Promise<{ jobId: string }>;
   auditStore?: AuditDomainStore;
   auditPlanner?: AuditRunPlanner;
   automationScheduler?: { available: boolean };
@@ -331,6 +356,8 @@ export type CreateApiServerOptions = {
   notebookStore?: NotebookStore;
   notebookGraph?: NotebookGraph;
   runtimeRegistry?: RuntimeRegistry;
+  pullRequestService?: Pick<RepositoryPullRequestService, "list">;
+  workflowRuntime?: WorkflowRuntimeHost;
 };
 
 type RequestContext = {
@@ -471,6 +498,219 @@ const routes: Route[] = [
         : raw;
       const spec = parseAuditInput(workflowSpecSchema, specCandidate);
       sendJson(request, response, 200, { valid: true, workflowId, spec }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-runtime/overview",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      sendJson(request, response, 200, options.workflowRuntime.overview(), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-runtime/validate",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins }) => {
+      const raw = await readJson(request);
+      const definition =
+        raw !== null && typeof raw === "object" && !Array.isArray(raw) && "definition" in raw
+          ? (raw as { definition: unknown }).definition
+          : raw;
+      const compilation = compileWorkflowRuntimeDefinition(definition);
+      sendJson(
+        request,
+        response,
+        200,
+        { ok: compilation.ok, errors: compilation.errors, ...(compilation.plan === undefined ? {} : { plan: compilation.plan }) },
+        allowedOrigins
+      );
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-runtime/definitions",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        sendJson(request, response, 200, { definitions: options.workflowRuntime.listDefinitions() }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-runtime/definitions",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const input = parseAuditInput(workflowRuntimeSaveDefinitionRequestSchema, await readJson(request));
+      try {
+        const revision = options.workflowRuntime.saveDefinition(input);
+        sendJson(request, response, 201, { revision }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/definitions\/([^/]+)\/revisions\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const revision = options.workflowRuntime.getDefinitionRevision(
+          decodeURIComponent(match?.[1] ?? ""),
+          decodeURIComponent(match?.[2] ?? "")
+        );
+        sendJson(request, response, 200, { revision }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/definitions\/([^/]+)\/revisions\/([^/]+)\/dry-load$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const result = options.workflowRuntime.dryLoad(
+          decodeURIComponent(match?.[1] ?? ""),
+          decodeURIComponent(match?.[2] ?? "")
+        );
+        sendJson(request, response, 200, result, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "DELETE",
+    path: /^\/workflow-runtime\/definitions\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        options.workflowRuntime.deleteDefinition(decodeURIComponent(match?.[1] ?? ""));
+        sendJson(request, response, 200, { deleted: true }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-runtime/runs",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+      try {
+        sendJson(request, response, 200, { runs: options.workflowRuntime.listRuns(limit) }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-runtime/runs",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const input = parseAuditInput(workflowRuntimeTriggerRequestV2Schema, await readJson(request));
+      try {
+        const created = await options.workflowRuntime.trigger(input);
+        sendJson(request, response, 201, created, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/bindings$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const repositoryId = decodeURIComponent(match?.[1] ?? "");
+        sendJson(request, response, 200, { bindings: options.workflowRuntime.listBindings(repositoryId) }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "PUT",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/bindings\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const definitionId = decodeURIComponent(match?.[2] ?? "");
+      const input = parseAuditInput(workflowRuntimeSetBindingRequestSchema, await readJson(request));
+      try {
+        const binding = options.workflowRuntime.setBinding({ repositoryId, definitionId, enabled: input.enabled });
+        sendJson(request, response, 200, { binding }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/runs$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(workflowRuntimeRepositoryTriggerRequestSchema, await readJson(request));
+      try {
+        const created = await options.workflowRuntime.triggerBinding({ repositoryId, definitionId: input.definitionId });
+        sendJson(request, response, 201, created, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/runs$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, url }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+      try {
+        sendJson(request, response, 200, { runs: options.workflowRuntime.listRunsForRepository(repositoryId, limit) }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/runs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const run = options.workflowRuntime.getRun(decodeURIComponent(match?.[1] ?? ""));
+        if (!run) throw new ApiError("Workflow run not found", "WORKFLOW_RUN_NOT_FOUND", 404);
+        sendJson(request, response, 200, run, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
     }
   },
   {
@@ -643,24 +883,43 @@ const routes: Route[] = [
       }
       try {
         const vcs = new LocalGitAdapter({ root: localPath });
-        const [branch, headSha, diff, untracked, remotes] = await Promise.all([
-          vcs.getCurrentBranch().catch(() => undefined),
-          vcs.getHeadSha().catch(() => undefined),
-          vcs.getWorkingDiff().catch(() => []),
-          vcs.getUntrackedFiles().catch(() => []),
-          vcs.getRemotes().catch(() => [])
-        ]);
+        const [branchResult, headShaResult, diffResult, untrackedResult, remotesResult] = await Promise.allSettled([
+          vcs.getCurrentBranch(),
+          vcs.getHeadSha(),
+          vcs.getWorkingDiff(),
+          vcs.getUntrackedFiles(),
+          vcs.getRemotes()
+        ] as const);
+        if (diffResult.status === "rejected" || untrackedResult.status === "rejected") {
+          sendJson(request, response, 200, {
+            repositoryId,
+            available: false,
+            reason: "failed to execute git status",
+            branch: null,
+            headSha: null,
+            dirtyFileCount: 0,
+            untrackedFileCount: 0,
+            changedFiles: [],
+            untrackedFiles: [],
+            remotes: []
+          }, allowedOrigins);
+          return;
+        }
+        const branch = fulfilledValue(branchResult);
+        const headSha = fulfilledValue(headShaResult);
+        const remotes = fulfilledValue(remotesResult) ?? [];
+        const rendererRemotes = remotes.map(toRendererGitRemote);
         sendJson(request, response, 200, {
           repositoryId,
           available: true,
           branch: branch ?? null,
           headSha: headSha ?? null,
-          dirtyFileCount: diff.length,
-          untrackedFileCount: untracked.length,
-          changedFiles: diff,
-          untrackedFiles: untracked,
-          remotes,
-          primaryRemote: remotes[0]
+          dirtyFileCount: diffResult.value.length,
+          untrackedFileCount: untrackedResult.value.length,
+          changedFiles: diffResult.value,
+          untrackedFiles: untrackedResult.value,
+          remotes: rendererRemotes,
+          ...(rendererRemotes[0] === undefined ? {} : { primaryRemote: rendererRemotes[0] })
         }, allowedOrigins);
       } catch {
         sendJson(request, response, 200, {
@@ -686,66 +945,63 @@ const routes: Route[] = [
       const repositoryId = decodeURIComponent(match?.[1] ?? "");
       const depth = Math.min(50, Math.max(1, Number(url.searchParams.get("depth") || 30)));
       const localPath = resolveLocalPathForRepository(repositoryId, options);
-      if (localPath) {
-        try {
-          const vcs = new LocalGitAdapter({ root: localPath });
-          const commits = await vcs.getCommitHistory(depth);
-          sendJson(request, response, 200, { repositoryId, commits }, allowedOrigins);
-          return;
-        } catch {
-          // fall through
-        }
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "local repository path unavailable",
+          commits: []
+        }, allowedOrigins);
+        return;
       }
-      sendJson(request, response, 200, { repositoryId, commits: [] }, allowedOrigins);
+      try {
+        const vcs = new LocalGitAdapter({ root: localPath });
+        const commits = await vcs.getCommitHistory(depth);
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: true,
+          commits
+        }, allowedOrigins);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "unable to read commit history",
+          commits: []
+        }, allowedOrigins);
+      }
     }
   },
   {
     method: "GET",
     path: /^\/repositories\/([^/]+)\/pull-requests$/,
     auth: true,
-    handler: ({ request, response, allowedOrigins, options, match }) => {
+    handler: async ({ request, response, allowedOrigins, options, jobs, match }) => {
       const repositoryId = decodeURIComponent(match?.[1] ?? "");
-      const allJobs = options.jobs?.list() ?? [];
-      const matchingJobs = allJobs.filter(job =>
-        job.repository === repositoryId ||
-        repositoryId.includes(job.repository) ||
-        (repositoryId.startsWith("local:") && job.accessMode === "local_git")
-      );
-
-      const prs = matchingJobs
-        .filter(job => job.pullRequestNumber !== undefined)
-        .map(job => ({
-          number: job.pullRequestNumber!,
-          title: job.result?.summary ? `Review for ${job.repository} #${job.pullRequestNumber}` : `Pull request #${job.pullRequestNumber}`,
-          state: job.status === "succeeded" ? "open" as const : job.status === "failed" ? "closed" as const : "open" as const,
-          author: "demo-contributor",
-          baseRef: "main",
-          headRef: `pr-${job.pullRequestNumber}`,
-          baseSha: job.baseSha ?? "base-sha",
-          headSha: job.headSha ?? "head-sha",
-          createdAt: job.createdAt,
-          updatedAt: job.finishedAt ?? job.startedAt ?? job.createdAt,
-          reviewStatus: job.status as "succeeded" | "running" | "failed",
-          score: job.result?.score,
-          riskLevel: job.result?.riskLevel,
-          jobId: job.id
-        }));
-
-      if (prs.length === 0 && (repositoryId.startsWith("local:") || repositoryId.startsWith("repo_"))) {
+      const registered = options.auditStore?.getRepository(repositoryId);
+      if (!registered) {
         sendJson(request, response, 200, {
           repositoryId,
           available: false,
-          reason: "No GitHub remote connected or PR history unavailable",
+          reason: "GitHub repository remote unavailable",
           pullRequests: []
         }, allowedOrigins);
         return;
       }
-
-      sendJson(request, response, 200, {
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      const input: RepositoryPullRequestRequest = {
         repositoryId,
-        available: true,
-        pullRequests: prs
-      }, allowedOrigins);
+        ...(registered.remoteFullName === undefined ? {} : { registeredRemoteFullName: registered.remoteFullName }),
+        registeredSource: registered.source,
+        ...(localPath === undefined ? {} : { localPath })
+      };
+      const service = options.pullRequestService ?? new RepositoryPullRequestService({
+        jobs,
+        listRemotes: async localPath => new LocalGitAdapter({ root: localPath }).getRemotes()
+      });
+      const payload = await service.list(input);
+      sendJson(request, response, 200, payload, allowedOrigins);
     }
   },
   {
@@ -754,29 +1010,17 @@ const routes: Route[] = [
     auth: true,
     handler: async ({ request, response, allowedOrigins, options, match }) => {
       const repositoryId = decodeURIComponent(match?.[1] ?? "");
-      let repo = options.auditStore?.getRepository(repositoryId);
+      const repo = options.auditStore?.getRepository(repositoryId);
       const localPath = resolveLocalPathForRepository(repositoryId, options);
 
       if (!repo) {
-        if (options.auditStore) {
-          const repos = options.auditStore.listRepositories?.() ?? [];
-          repo = repos.find(r =>
-            r.id === repositoryId ||
-            r.remoteFullName === repositoryId ||
-            r.displayName === repositoryId ||
-            (repositoryId.startsWith("local:") && r.displayName === repositoryId.replace(/^local:/, ""))
-          );
-        }
-      }
-
-      if (!repo && !localPath) {
         throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
       }
 
-      const id = repo?.id ?? repositoryId;
-      const displayName = repo?.displayName ?? (localPath ? filesystemDisplayLabel(localPath) : repositoryId);
-      const sourceKind = repo?.source ?? "local_git";
-      const trust = repo?.trustLevel ?? "trusted_local";
+      const id = repo.id;
+      const displayName = repo.displayName;
+      const sourceKind = repo.source;
+      const trust = repo.trustLevel;
 
       let workingTree = {
         available: false,
@@ -804,13 +1048,30 @@ const routes: Route[] = [
             reason: dirtyCount === 0 ? "工作区无未提交变更" : undefined,
             changedFileCount: dirtyCount
           };
-          const isMainBranch = branch === "main" || branch === "master";
-          branchSource = {
-            available: Boolean(branch && !isMainBranch),
-            base: isMainBranch ? undefined : "main",
-            head: branch ?? undefined,
-            reason: isMainBranch ? "当前处于主分支，无法自动对比分支差异" : (!branch ? "未检测到有效分支" : undefined)
-          };
+          const trunkRef = await vcs.resolveTrunkRef().catch(() => undefined);
+          const onTrunk =
+            branch !== undefined &&
+            (branch === trunkRef || (trunkRef === undefined && (branch === "main" || branch === "master")));
+          branchSource = onTrunk
+            ? {
+                available: false,
+                base: undefined,
+                head: branch,
+                reason: "当前处于主分支，无法自动对比分支差异"
+              }
+            : trunkRef === undefined
+              ? {
+                  available: false,
+                  base: undefined,
+                  head: branch ?? undefined,
+                  reason: "无法确定基准分支"
+                }
+              : {
+                  available: Boolean(branch),
+                  base: trunkRef,
+                  head: branch ?? undefined,
+                  reason: branch ? undefined : "未检测到有效分支"
+                };
         } catch {
           workingTree = {
             available: false,
@@ -841,8 +1102,7 @@ const routes: Route[] = [
       const allJobs = options.jobs?.list() ?? [];
       const prJobs = allJobs.filter(job =>
         job.repository === repositoryId ||
-        repositoryId.includes(job.repository) ||
-        (repositoryId.startsWith("local:") && job.accessMode === "local_git")
+        job.repository === repo.remoteFullName
       );
       const prSource = {
         available: prJobs.length > 0 || sourceKind === "github",
@@ -852,23 +1112,35 @@ const routes: Route[] = [
 
       const health = options.healthDetails?.();
       const settings = options.settings?.get();
-      const deepseekConfigured = Boolean(health?.llmCapabilities?.deepseek?.configured ?? settings?.llm?.deepseekApiKeyConfigured ?? options.llmProviderConfigured);
-      const openaiConfigured = Boolean(health?.llmCapabilities?.openai?.configured ?? settings?.llm?.openaiApiKeyConfigured);
-
-      const defaultProviderName = settings?.llm?.provider === "openai" ? "openai" : "deepseek";
-      const defaultModelName = defaultProviderName === "openai"
-        ? (settings?.llm?.openaiModel || health?.llmCapabilities?.openai?.defaultModel || "gpt-4.1-mini")
-        : (settings?.llm?.deepseekModel || health?.llmCapabilities?.deepseek?.defaultModel || "deepseek-v4-flash");
-
-      const hasConfiguredLlm = (defaultProviderName === "openai" && openaiConfigured) ||
-        (defaultProviderName === "deepseek" && deepseekConfigured) ||
-        deepseekConfigured ||
-        openaiConfigured ||
-        options.llmProviderConfigured === true;
+      const deepseekConfigured = health?.llmCapabilities?.deepseek?.configured === true;
+      const openaiConfigured = health?.llmCapabilities?.openai?.configured === true;
+      const activeProvider = health?.llmProvider === "deepseek" || health?.llmProvider === "openai"
+        ? health.llmProvider
+        : undefined;
+      const hasConfiguredLlm = activeProvider !== undefined;
+      const defaultModelName = activeProvider === "openai"
+        ? health?.llmModel ?? health?.llmCapabilities?.openai?.defaultModel ?? "gpt-4.1-mini"
+        : activeProvider === "deepseek"
+          ? health?.llmModel ?? health?.llmCapabilities?.deepseek?.defaultModel ?? "deepseek-v4-flash"
+          : "";
+      const pendingProvider = settings?.llm.provider === "deepseek" || settings?.llm.provider === "openai"
+        ? settings.llm.provider
+        : undefined;
+      const pendingRestart = settings?.restartRequired === true && pendingProvider
+        ? {
+            provider: pendingProvider,
+            model: pendingProvider === "deepseek" ? settings.llm.deepseekModel : settings.llm.openaiModel,
+            credentialConfigured: pendingProvider === "deepseek"
+              ? settings.llm.deepseekApiKeyConfigured
+              : settings.llm.openaiApiKeyConfigured
+          }
+        : null;
 
       const blockingReasons: string[] = [];
       if (!hasConfiguredLlm) {
-        blockingReasons.push("尚未配置大语言模型 (DeepSeek 或 OpenAI)。请前往设置页配置。");
+        blockingReasons.push(pendingRestart
+          ? `已保存 ${pendingRestart.provider === "deepseek" ? "DeepSeek" : "OpenAI"} 配置，重启 API 后生效。`
+          : "尚未配置大语言模型 (DeepSeek 或 OpenAI)。请前往设置页配置。");
       }
       if (!workingTree.available && !branchSource.available && !prSource.available) {
         blockingReasons.push("当前无可用的审查来源 (工作区无变更且未检测到分支差异)");
@@ -876,7 +1148,7 @@ const routes: Route[] = [
 
       const canStartReview = blockingReasons.length === 0;
 
-      const payload = {
+      const payload = reviewPreparationResponseSchema.parse({
         repository: {
           id,
           displayName,
@@ -890,7 +1162,7 @@ const routes: Route[] = [
         },
         model: {
           default: {
-            provider: hasConfiguredLlm ? defaultProviderName : ("none" as const),
+            provider: activeProvider ?? "none",
             model: defaultModelName
           },
           providers: {
@@ -902,17 +1174,40 @@ const routes: Route[] = [
               configured: openaiConfigured,
               defaultModel: health?.llmCapabilities?.openai?.defaultModel ?? "gpt-4.1-mini"
             }
-          }
+          },
+          pendingRestart
         },
         canStartReview,
         blockingReasons
-      };
+      });
 
       sendJson(request, response, 200, payload, allowedOrigins);
     }
   },
   {
-    method: "POST",
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/reviews$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, jobs, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore?.getRepository(repositoryId)) {
+        throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      }
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+      // ONLY canonically associated jobs (repository_id matches); legacy
+      // unassociated jobs never appear via name inference (CKPT3 Phase 4 / D1).
+      let reviews;
+      try {
+        reviews = jobs.listJobsForRepository(repositoryId, limit).map(toApiJob);
+      } catch {
+        throw new ApiError("Review history is unavailable", "REVIEWS_UNAVAILABLE", 503);
+      }
+      sendJson(request, response, 200, { repositoryId, reviews }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
     path: /^\/repositories\/([^/]+)\/actions\/set-monitoring$/,
     auth: true,
     handler: async ({ request, response, allowedOrigins, options, match }) => {
@@ -1403,8 +1698,7 @@ const routes: Route[] = [
         }
       }
 
-      const requested = body.repositoryId ?? body.repoPath;
-      const targetPath = requested ? resolveLocalPathForRepository(requested, options) : undefined;
+      const targetPath = resolveLocalPathForRepository(body.repositoryId, options);
       if (!targetPath) {
         throw new ApiError("The requested local repository could not be found or is not registered", "LOCAL_REPOSITORY_NOT_FOUND", 404);
       }
@@ -1413,6 +1707,7 @@ const routes: Route[] = [
       try {
         result = await options.localReview({
           repoPath: targetPath,
+          repositoryId: body.repositoryId,
           baseRef: body.baseRef,
           headRef: body.headRef,
           llmProvider: resolvedModel?.provider,

@@ -2,11 +2,41 @@ import { spawn } from "node:child_process";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
+const RUNTIME_ENVIRONMENT_KEYS = ["PATH", "PATHEXT", "SystemRoot", "TEMP", "TMP", "TMPDIR"] as const;
+const READ_ONLY_GIT_CONFIG = [
+  "core.quotePath=false",
+  "core.fsmonitor=false",
+  "diff.external=",
+  "core.askPass=",
+  "core.editor=",
+  "core.sshCommand=",
+  "credential.helper=",
+  "credential.interactive=false"
+] as const;
+const DENIED_TRANSPORT_CONFIG = [
+  "protocol.allow=never",
+  "protocol.file.allow=never",
+  "protocol.git.allow=never",
+  "protocol.http.allow=never",
+  "protocol.https.allow=never",
+  "protocol.ssh.allow=never",
+  "protocol.ext.allow=never"
+] as const;
+const LOCAL_FILE_TRANSPORT_CONFIG = [
+  "protocol.allow=never",
+  "protocol.file.allow=always",
+  "protocol.git.allow=never",
+  "protocol.http.allow=never",
+  "protocol.https.allow=never",
+  "protocol.ssh.allow=never",
+  "protocol.ext.allow=never"
+] as const;
 
 export type GitExecOptions = {
-  cwd: string;
-  timeoutMs?: number;
-  maxBytes?: number;
+  readonly cwd: string;
+  readonly timeoutMs?: number;
+  readonly maxBytes?: number;
+  readonly allowLocalFileTransport?: true;
 };
 
 export type GitExecResult = {
@@ -16,6 +46,32 @@ export type GitExecResult = {
 };
 
 export type GitExec = (args: string[], options: GitExecOptions) => Promise<GitExecResult>;
+
+type GitOutput = {
+  on(event: "data", listener: (chunk: Buffer) => void): unknown;
+};
+
+export type GitProcess = {
+  readonly stdout: GitOutput;
+  readonly stderr: GitOutput;
+  kill(): boolean;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "close", listener: (code: number | null) => void): unknown;
+};
+
+export type GitSpawnOptions = {
+  readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly shell: false;
+  readonly windowsHide: true;
+  readonly stdio: ["ignore", "pipe", "pipe"];
+};
+
+export type GitSpawn = (
+  command: string,
+  args: readonly string[],
+  options: GitSpawnOptions
+) => GitProcess;
 
 export class GitCommandError extends Error {
   constructor(
@@ -34,108 +90,126 @@ export class GitCommandError extends Error {
  *
  * `GIT_OPTIONAL_LOCKS=0` is the load-bearing flag: without it, read commands
  * refresh and lock the index, which fights a developer running git in the same
- * checkout. Ambient GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE are stripped so no
- * inherited environment can redirect a command away from `cwd`, and
- * `core.quotePath=false` keeps non-ASCII paths raw instead of octal-escaped.
+ * checkout. The process receives only runtime variables needed to find and run
+ * Git, so application secrets and ambient Git configuration cannot leak into
+ * repository-controlled helpers. Repository configuration remains available
+ * for discovery, but command-level settings disable helper execution.
  */
-export const execGit: GitExec = (args, options) => new Promise<GitExecResult>((resolve, reject) => {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  delete env.GIT_INDEX_FILE;
-  delete env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
-  env.GIT_TERMINAL_PROMPT = "0";
-  env.GIT_OPTIONAL_LOCKS = "0";
-
-  const fullArgs = ["--no-pager", "-c", "core.quotePath=false", ...args];
-  const child = spawn("git", fullArgs, {
-    cwd: options.cwd,
-    env,
-    shell: false,
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
-  const stdoutChunks: Buffer[] = [];
-  let stdoutBytes = 0;
-  let stderr = "";
-  let settled = false;
-  let timedOut = false;
-  let overflowed = false;
-
-  const finish = (fn: () => void) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    fn();
-  };
-
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill();
-  }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-
-  child.stdout.on("data", (chunk: Buffer) => {
-    stdoutBytes += chunk.length;
-    if (stdoutBytes > maxBytes) {
-      overflowed = true;
-      child.kill();
-      return;
+export function createGitExec(spawnGit: GitSpawn, ambientEnv: NodeJS.ProcessEnv = process.env): GitExec {
+  return (args, options) => new Promise<GitExecResult>((resolve, reject) => {
+    const env: NodeJS.ProcessEnv = {};
+    for (const key of RUNTIME_ENVIRONMENT_KEYS) {
+      const value = ambientEnv[key] ?? Object.entries(ambientEnv)
+        .find(([candidate]) => candidate.toLowerCase() === key.toLowerCase())?.[1];
+      if (value !== undefined) env[key] = value;
     }
-    stdoutChunks.push(chunk);
-  });
+    env.GIT_CONFIG_NOSYSTEM = "1";
+    env.GIT_CONFIG_GLOBAL = process.platform === "win32" ? "NUL" : "/dev/null";
+    env.GIT_NO_LAZY_FETCH = "1";
+    env.GIT_TERMINAL_PROMPT = "0";
+    env.GIT_OPTIONAL_LOCKS = "0";
 
-  child.stderr.on("data", (chunk: Buffer) => {
-    if (stderr.length < 8_192) stderr += chunk.toString("utf8");
-  });
+    const transportConfig = options.allowLocalFileTransport === true
+      ? LOCAL_FILE_TRANSPORT_CONFIG
+      : DENIED_TRANSPORT_CONFIG;
+    const fullArgs = [
+      "--no-pager",
+      ...[...READ_ONLY_GIT_CONFIG, ...transportConfig].flatMap((config) => ["-c", config]),
+      ...args
+    ];
+    const child = spawnGit("git", fullArgs, {
+      cwd: options.cwd,
+      env,
+      shell: false,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
 
-  child.on("error", (error) => {
-    finish(() => reject(new GitCommandError(
-      `Failed to start git: ${error.message}`,
-      fullArgs,
-      null,
-      stderr
-    )));
-  });
+    const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+    const stdoutChunks: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderr = "";
+    let settled = false;
+    let timedOut = false;
+    let overflowed = false;
 
-  child.on("close", (code) => {
-    finish(() => {
-      if (overflowed) {
-        reject(new GitCommandError(
-          `git output exceeded ${maxBytes} bytes`,
-          fullArgs,
-          code,
-          stderr
-        ));
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > maxBytes) {
+        overflowed = true;
+        child.kill();
         return;
       }
-      if (timedOut) {
-        reject(new GitCommandError(
-          `git timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`,
-          fullArgs,
-          code,
-          stderr
-        ));
-        return;
-      }
-      if (code !== 0) {
-        reject(new GitCommandError(
-          `git exited with code ${code}: ${stderr.trim().slice(0, 500)}`,
-          fullArgs,
-          code,
-          stderr
-        ));
-        return;
-      }
-      resolve({
-        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
-        stderr,
-        exitCode: code ?? 0
+      stdoutChunks.push(chunk);
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length < 8_192) stderr += chunk.toString("utf8");
+    });
+
+    child.on("error", (error) => {
+      finish(() => reject(new GitCommandError(
+        `Failed to start git: ${error.message}`,
+        fullArgs,
+        null,
+        stderr
+      )));
+    });
+
+    child.on("close", (code) => {
+      finish(() => {
+        if (overflowed) {
+          reject(new GitCommandError(
+            `git output exceeded ${maxBytes} bytes`,
+            fullArgs,
+            code,
+            stderr
+          ));
+          return;
+        }
+        if (timedOut) {
+          reject(new GitCommandError(
+            `git timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`,
+            fullArgs,
+            code,
+            stderr
+          ));
+          return;
+        }
+        if (code !== 0) {
+          reject(new GitCommandError(
+            `git exited with code ${code}: ${stderr.trim().slice(0, 500)}`,
+            fullArgs,
+            code,
+            stderr
+          ));
+          return;
+        }
+        resolve({
+          stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+          stderr,
+          exitCode: code ?? 0
+        });
       });
     });
   });
-});
+}
+
+const defaultGitSpawn: GitSpawn = (command, args, options) => spawn(command, args, options);
+
+export const execGit = createGitExec(defaultGitSpawn);
 
 /**
  * Validates a single revision before it is placed on an argv line. `shell:false`

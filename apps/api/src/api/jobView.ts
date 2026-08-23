@@ -8,6 +8,7 @@ export function toApiJob(job: ReviewJob): ApiReviewJob {
     type: "PR_REVIEW",
     status: job.status,
     repositoryFullName: job.repository,
+    ...(job.repositoryId === undefined ? {} : { repositoryId: job.repositoryId }),
     pullRequestNumber: job.pullRequestNumber!,
     installationId: job.installationId,
     accessMode: job.accessMode,

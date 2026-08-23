@@ -61,7 +61,7 @@ export async function enqueuePublicPrReview(options: {
   publicReadToken?: string;
   llmProvider?: "deepseek" | "openai";
   llmModel?: string;
-  clientFactory?: (token?: string) => PullRequestClient;
+  clientFactory?: (token?: string) => Pick<PullRequestClient, "getPullRequest">;
 }): Promise<{ coordinates: PublicPrCoordinates; job: ReviewJob }> {
   const coordinates = parsePublicPrUrl(options.url);
   const client = options.clientFactory?.(options.publicReadToken)

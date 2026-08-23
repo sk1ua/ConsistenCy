@@ -40,3 +40,9 @@ declare global {
 export function desktopBridge(): ConsistencyDesktopBridge | undefined {
   return typeof window === "undefined" ? undefined : window.consistencyDesktop;
 }
+
+export function openExternalUrl(url: string): void {
+  if (typeof window !== "undefined") {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}

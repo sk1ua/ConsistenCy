@@ -35,6 +35,21 @@ ConsistenCy adheres to strict data-provenance rules:
 - **Forbidden Inferences**: PR numbers and boundaries are **never** guessed or inferred from commit message titles (e.g. `Merge pull request #123`), branch names (e.g. `feat/pr-45`), or merge commit topologies.
 - **Unavailable States**: When GitHub metadata is unavailable (such as offline local-only repositories, unauthenticated public PRs, or API rate limits), the workspace presents the local Git state faithfully and marks remote PR metadata as explicitly unlinked or unavailable, rather than fabricating synthetic connections.
 
+### 1.3 Repository Authority and Selectors
+- The API and renderer use the opaque registered `Repository.id` as the repository authority.
+- A repository lookup requires an exact registration in the audit store. Display names, remote names, `local:` aliases, heartbeat roots, project-root shortcuts, relative paths, and absolute paths are not selectors.
+- Local filesystem locators remain server-only. They are resolved only for an exact registered record whose source is `local_git`, and are never returned in renderer DTOs.
+- Renderer repository selection therefore carries the registered ID, not a path or a display label.
+
+### 1.4 Safe Remote Projection
+Git remote data crossing into renderer responses has exactly this shape:
+
+```json
+{"name": "origin", "githubFullName": "owner/repository"}
+```
+
+`githubFullName` is optional. Raw fetch URLs, raw push URLs, and embedded credentials never cross into renderer responses.
+
 ---
 
 ## 2. Workspace Navigation & Views
@@ -57,3 +72,60 @@ In Electron Desktop mode:
 3. Upon selection, the main process verifies the directory contains a valid Git worktree root (`.git`).
 4. The main process registers the repository with the local API via `POST /internal/repositories/local` using the internal desktop-control token.
 5. Only the sanitized public `Repository` DTO is returned to the renderer; raw local file paths remain protected inside the main and API processes.
+
+## 4. Pull Request Lifecycle Authority
+
+- GitHub remains authoritative for Pull Request lifecycle state. Provider `state` is `open` or `closed`.
+- `mergedAt` is required nullable metadata. The UI derives the merged display state only when `state` is `closed` and `mergedAt` is non-null.
+- ConsistenCy never infers a Pull Request's merged state from local Git history, merge commits, branch topology, or commit messages.
+
+For workspace Pull Request listing, credential candidates are attempted in this exact order:
+
+1. GitHub App installation token, when available.
+2. Configured server-side public-read token.
+3. Anonymous access.
+
+Candidates are deduplicated and each candidate is attempted at most once. A malformed provider payload is reported as invalid provider data and is not retried as a credential failure. This workspace listing behavior is separate from standalone public PR URL ingestion, which remains read-only and does not use GitHub App credentials merely because an App is configured.
+
+## 5. Repository Workflows (CKPT3 Phase 3)
+
+The repository Workflows tab is a real binding surface (no longer a
+prototype placeholder):
+
+- Bindings: each registered repository can enable/disable any persisted
+  workflow definition (builtin seed or user drafts). Enabling is an explicit
+  user action; registration never auto-enables.
+- Manual trigger: resolves the definition's latest VALIDATED revision at
+  trigger time, pins the repository's current HEAD as a SHA-fixed snapshot,
+  and executes through the canonical Kernel/Harness chain. Disabled or
+  missing bindings, deleted definitions, or draft-only definitions fail
+  closed with sanitized errors before any run is created.
+- Run history: filtered by the canonical opaque repository id; run details
+  carry the pinned revision, snapshot identity, evidence summaries, and
+  findings. "管理工作流 / Manage workflows" links to the global Workflow
+  page — there is exactly one workflow product object (Master Spec §17).
+- Bindings are data, not authorization: every protected operation is still
+  authorized per-syscall by the Kernel at execution time.
+
+## 6. Repository Reviews (CKPT3 Phase 4)
+
+The repository Reviews tab is a real review-history surface (no longer a
+prototype placeholder):
+
+- Association truth: a ReviewJob belongs to a repository only through the
+  canonical opaque `repositoryId` persisted at job creation (the local
+  review path carries it end-to-end). This closes the §27.6 debt pattern for
+  NEW jobs: no display-name / remote-name / basename inference anywhere.
+- Legacy jobs without a canonical association remain readable in the global
+  runs view and simply never appear in per-repository lists (honest
+  missing-association, per owner decision D1).
+- The list shows only fields that truly exist on the job/report DTO —
+  status (existing vocabulary), created/finished timestamps, model
+  provenance (llmProvider/llmModel as persisted), source (PR number /
+  working tree), and the report's score/riskLevel when a report exists.
+  Absent fields render "—". Risk scores are triage signals.
+- Clicking a review navigates to the EXISTING Review Run detail view
+  (`/runs/:jobId/overview` …); there is no second detail surface.
+- Empty (no associated reviews yet) and unavailable (load failure) are
+  distinct states. Starting a review stays on the existing Composer entry
+  from the repository overview.

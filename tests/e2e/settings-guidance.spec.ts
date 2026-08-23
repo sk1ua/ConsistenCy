@@ -5,7 +5,8 @@ test.describe("beginner settings guidance", () => {
     await page.addInitScript(() => window.localStorage.setItem("consistency.locale.v1", "en-US"));
     await page.goto("/#/settings");
     await expect(page).toHaveURL(/#\/settings$/);
-    await expect(page.locator(".settings-editor")).toBeVisible();
+    await expect(page.getByLabel("Provider")).toHaveValue("deepseek");
+    await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
 
     await expect(page.locator(".source-mode-guide > span")).toHaveCount(3);
     await expect(page.locator(".source-mode-guide")).toContainText("Anonymous public PR");

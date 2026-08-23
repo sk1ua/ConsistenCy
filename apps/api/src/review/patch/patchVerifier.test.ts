@@ -103,6 +103,34 @@ describe("verifyPatch", { timeout: 60_000 }, () => {
     expect(readFileSync(join(root, "src", "app.ts"), "utf8")).toBe(ORIGINAL);
   });
 
+  it("grants local file transport only to the isolated clone", async () => {
+    // Given
+    const calls: Array<{ args: string[]; allowLocalFileTransport?: true }> = [];
+
+    // When
+    await verifyPatch(GOOD_PATCH, {
+      repoPath: root,
+      reviewedPaths: REVIEWED,
+      runGit: async (args, options) => {
+        calls.push(options.allowLocalFileTransport === true
+          ? { args, allowLocalFileTransport: true }
+          : { args });
+        return execGit(args, options);
+      },
+      sandbox: async () => ({ ok: true, summary: "checks passed" })
+    });
+
+    // Then
+    expect(calls).toEqual([
+      { args: ["apply", "--check", "--whitespace=nowarn", expect.any(String)] },
+      {
+        args: ["clone", "--no-hardlinks", "--quiet", root, expect.any(String)],
+        allowLocalFileTransport: true
+      },
+      { args: ["apply", "--whitespace=nowarn", expect.any(String)] }
+    ]);
+  });
+
   it("cleans up the scratch directory even when the sandbox throws", async () => {
     let checkoutPath = "";
     await expect(verifyPatch(GOOD_PATCH, {

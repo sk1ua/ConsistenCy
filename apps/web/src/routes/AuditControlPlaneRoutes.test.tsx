@@ -67,6 +67,17 @@ describe("audit control-plane routes", () => {
     expect(html).not.toContain("file://");
   });
 
+  it("repository list renders exactly two semantic primary controls: one button and one anchor", () => {
+    const html = render(<RepositoriesPage jobs={[]} pulse={null} heartbeatUnavailable={false} jobsUnavailable={false} repositories={[repository]} />);
+
+    const primaryMatches = html.match(/ds-button ds-button--primary/g) ?? [];
+    expect(primaryMatches).toHaveLength(2);
+    const anchorMatches = html.match(/<a [^>]*ds-button--primary[^>]*>/g) ?? [];
+    expect(anchorMatches).toHaveLength(1);
+    const buttonMatches = html.match(/<button [^>]*ds-button--primary[^>]*>/g) ?? [];
+    expect(buttonMatches).toHaveLength(1);
+  });
+
   it("shows persisted automation trigger definitions under workflow triggers without pretending scheduling is available", () => {
     const html = renderToString(
       <I18nProvider initialLocale="en-US">
@@ -80,5 +91,55 @@ describe("audit control-plane routes", () => {
     expect(html).toContain("Definitions only");
     expect(html).toContain("Static read-only");
     expect(html).not.toContain("Run now");
+  });
+
+  it("strictly prohibits non-registered repository IDs from generating navigable routes", () => {
+    const pulse = {
+      pulseId: "pulse1",
+      observedAt: "2026-08-14T00:00:00.000Z",
+      pendingEvents: 0,
+      state: "idle" as const,
+      timestamp: "2026-08-14T00:00:00.000Z",
+      dirtyFileCount: 0,
+      repository: {
+        provider: "local_git" as const,
+        root: "unknown_folder",
+        branch: "detached",
+        dirtyFiles: []
+      }
+    };
+
+    const html = render(
+      <RepositoriesPage
+        jobs={[{
+          id: "job1",
+          type: "PR_REVIEW",
+          pullRequestNumber: 1,
+          status: "succeeded",
+          repositoryFullName: "unknown/source_from_job",
+          accessMode: "github_app",
+          baseSha: "abc",
+          headSha: "def",
+          publicationPolicy: "disabled",
+          createdAt: "2026-08-14T00:00:00.000Z",
+          startedAt: "2026-08-14T00:00:00.000Z",
+          finishedAt: "2026-08-14T00:00:00.000Z"
+        }]}
+        pulse={pulse}
+        heartbeatUnavailable={false}
+        jobsUnavailable={false}
+        repositories={[repository]}
+      />
+    );
+
+    expect(html).toContain('href="/repositories/repo-1"');
+
+    expect(html).toContain('unknown_folder');
+    expect(html).not.toContain('href="/repositories/local:unknown_folder"');
+    expect(html).not.toContain('href="/repositories/pulse-unknown_folder"');
+
+    expect(html).toContain('unknown/source_from_job');
+    expect(html).not.toContain('href="/repositories/source-unknown%2Fsource_from_job"');
+    expect(html).not.toContain('href="/repositories/unknown%2Fsource_from_job"');
   });
 });

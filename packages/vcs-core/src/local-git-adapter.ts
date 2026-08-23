@@ -9,7 +9,7 @@ import type {
   WorkingDirDirtyEvent
 } from "@consistency/schema";
 import { parseUnifiedDiff, splitNulRecords } from "./diff";
-import { assertSafeRef, execGit, type GitExec } from "./git";
+import { GitCommandError, assertSafeRef, execGit, type GitExec } from "./git";
 
 const UNIT = "\x1f";
 const RECORD = "\x1e";
@@ -22,12 +22,16 @@ const RECORD = "\x1e";
 const DIFF_FLAGS = [
   "--patch",
   "--no-color",
+  "--no-ext-diff",
+  "--no-textconv",
   "--find-renames",
   "--src-prefix=a/",
   "--dst-prefix=b/"
 ];
 
 const LS_TREE_ENTRY = /^(\d+) (blob|tree|commit) ([0-9a-f]+)\s+(\d+|-)\t(.*)$/;
+const HISTORY_HEAD_ARGS = ["rev-parse", "--verify", "--quiet", "HEAD"];
+const GIT_SHA = /^[0-9a-f]{40,64}$/;
 
 export type ChurnStats = {
   windowDays: number;
@@ -78,6 +82,19 @@ export class LocalGitAdapter implements IVCSService {
     }
   }
 
+  private async hasHistoryHead(): Promise<boolean> {
+    try {
+      const head = (await this.run(HISTORY_HEAD_ARGS)).trim();
+      if (!GIT_SHA.test(head)) {
+        throw new GitCommandError("git returned invalid HEAD output", HISTORY_HEAD_ARGS, 0, "");
+      }
+      return true;
+    } catch (error) {
+      if (error instanceof GitCommandError && error.exitCode === 1) return false;
+      throw error;
+    }
+  }
+
   /** Absolute path of the working tree root, per git rather than per caller. */
   async getRepositoryRoot(): Promise<string> {
     return (await this.run(["rev-parse", "--show-toplevel"])).trim();
@@ -104,6 +121,36 @@ export class LocalGitAdapter implements IVCSService {
     if (branch !== undefined) ref.branch = branch;
     if (headSha !== undefined) ref.headSha = headSha;
     return ref;
+  }
+
+  private async refExists(ref: string): Promise<boolean> {
+    try {
+      await this.run(["rev-parse", "--verify", "--quiet", assertSafeRef(ref)]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Trunk branch for branch-diff basing: the branch pinned by
+   * `refs/remotes/origin/HEAD` when the remote set one, otherwise the first of
+   * `main`/`master` that actually resolves. Undefined when no trunk can be
+   * verified, so callers must not advertise a branch diff against a
+   * hypothetical base then.
+   */
+  async resolveTrunkRef(): Promise<string | undefined> {
+    try {
+      const remoteHead = (await this.run(["symbolic-ref", "--short", "--quiet", "refs/remotes/origin/HEAD"])).trim();
+      const remoteBranch = remoteHead.replace(/^origin\//, "");
+      if (remoteBranch.length > 0 && (await this.refExists(remoteBranch))) return remoteBranch;
+    } catch {
+      // No pinned origin/HEAD; fall through to the local candidates.
+    }
+    for (const candidate of ["main", "master"]) {
+      if (await this.refExists(candidate)) return candidate;
+    }
+    return undefined;
   }
 
   /**
@@ -134,7 +181,7 @@ export class LocalGitAdapter implements IVCSService {
     if (!Number.isInteger(depth) || depth <= 0) {
       throw new Error("depth must be a positive integer");
     }
-    if (!(await this.hasCommits())) return [];
+    if (!(await this.hasHistoryHead())) return [];
 
     const format = ["%H", "%P", "%an", "%ae", "%aI", "%B"].join(UNIT) + RECORD;
     const stdout = await this.run(["log", `--max-count=${depth}`, `--format=${format}`]);

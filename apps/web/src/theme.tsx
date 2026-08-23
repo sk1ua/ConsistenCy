@@ -5,6 +5,8 @@ export type ResolvedTheme = "dark" | "light";
 
 const STORAGE_KEY = "consistency.theme.v1";
 
+export const THEME_PREFERENCES: ThemePreference[] = ["system", "light", "dark"];
+
 export function resolveTheme(preference: ThemePreference, systemDark: boolean): ResolvedTheme {
   return preference === "system" ? (systemDark ? "dark" : "light") : preference;
 }
@@ -17,17 +19,22 @@ type ThemeValue = {
 };
 
 const fallback: ThemeValue = {
-  preference: "dark",
-  resolved: "dark",
+  preference: "system",
+  resolved: "light",
   setPreference: () => undefined,
   cycle: () => "dark"
 };
 
-function defaultPreference(): ThemePreference {
-  if (typeof window === "undefined") return "dark";
-  const saved = window.localStorage.getItem(STORAGE_KEY);
+export function readThemePreference(storage?: Pick<Storage, "getItem">): ThemePreference {
+  const source = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
+  const saved = source?.getItem(STORAGE_KEY);
   if (saved === "dark" || saved === "light" || saved === "system") return saved;
-  return "dark";
+  return "system";
+}
+
+function defaultPreference(): ThemePreference {
+  if (typeof window === "undefined") return "system";
+  return readThemePreference();
 }
 
 const ThemeContext = createContext<ThemeValue>(fallback);

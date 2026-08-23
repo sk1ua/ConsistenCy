@@ -109,6 +109,51 @@ describe("LocalGitAdapter", { timeout: 30_000 }, () => {
     await expect(adapter.getCommitHistory(0)).rejects.toThrow(/positive integer/);
   });
 
+  it("returns empty history only for a readable unborn repository", async () => {
+    const unbornRoot = mkdtempSync(join(tmpdir(), "consistency-vcs-unborn-"));
+    try {
+      await execGit(["init"], { cwd: unbornRoot });
+      const unbornAdapter = new LocalGitAdapter({ root: unbornRoot });
+      const failingAdapter = new LocalGitAdapter({
+        root: unbornRoot,
+        exec: async () => {
+          throw new GitCommandError("injected operational failure", [], 128, "D:/private/token");
+        }
+      });
+
+      await expect(unbornAdapter.getCommitHistory(15)).resolves.toEqual([]);
+      await expect(failingAdapter.getCommitHistory(15)).rejects.toBeInstanceOf(GitCommandError);
+    } finally {
+      rmSync(unbornRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an empty successful history HEAD probe", async () => {
+    const malformedAdapter = new LocalGitAdapter({
+      root,
+      exec: async () => ({
+        stdout: "",
+        stderr: "",
+        exitCode: 0
+      })
+    });
+
+    await expect(malformedAdapter.getCommitHistory(15)).rejects.toBeInstanceOf(GitCommandError);
+  });
+
+  it("rejects a malformed successful history HEAD probe", async () => {
+    const malformedAdapter = new LocalGitAdapter({
+      root,
+      exec: async (args) => ({
+        stdout: args[0] === "rev-parse" ? "not-a-git-sha" : "",
+        stderr: "",
+        exitCode: 0
+      })
+    });
+
+    await expect(malformedAdapter.getCommitHistory(15)).rejects.toBeInstanceOf(GitCommandError);
+  });
+
   it("preserves multi-paragraph commit messages", async () => {
     write("d.txt", "d\n");
     await git(["add", "."]);
@@ -197,5 +242,53 @@ describe("LocalGitAdapter.getChurnStats", { timeout: 30_000 }, () => {
   it("rejects a nonsensical window", async () => {
     await expect(adapter.getChurnStats(0)).rejects.toThrow(/positive integer/);
     await expect(adapter.getChurnStats(1.5)).rejects.toThrow(/positive integer/);
+  });
+});
+
+describe("LocalGitAdapter.resolveTrunkRef", { timeout: 30_000 }, () => {
+  const initTrunkRepo = async (prefix: string, trunk: string) => {
+    const repoRoot = mkdtempSync(join(tmpdir(), prefix));
+    const repoGit = (args: string[]) => execGit(args, { cwd: repoRoot });
+    await repoGit(["init", "--quiet", `--initial-branch=${trunk}`]);
+    await repoGit(["config", "user.name", "Test Runner"]);
+    await repoGit(["config", "user.email", "test@example.com"]);
+    writeFileSync(join(repoRoot, "a.txt"), "line\n");
+    await repoGit(["add", "."]);
+    await repoGit(["commit", "--quiet", "-m", "initial commit"]);
+    return { repoRoot, repoGit };
+  };
+
+  it("resolves main and master trunks from local branches", async () => {
+    const mainRepo = await initTrunkRepo("consistency-vcs-trunk-main-", "main");
+    const masterRepo = await initTrunkRepo("consistency-vcs-trunk-master-", "master");
+    try {
+      await expect(new LocalGitAdapter({ root: mainRepo.repoRoot }).resolveTrunkRef()).resolves.toBe("main");
+      await expect(new LocalGitAdapter({ root: masterRepo.repoRoot }).resolveTrunkRef()).resolves.toBe("master");
+    } finally {
+      rmSync(mainRepo.repoRoot, { recursive: true, force: true });
+      rmSync(masterRepo.repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers the branch pinned by refs/remotes/origin/HEAD", async () => {
+    const { repoRoot, repoGit } = await initTrunkRepo("consistency-vcs-trunk-remote-", "main");
+    try {
+      await repoGit(["branch", "master"]);
+      await repoGit(["update-ref", "refs/remotes/origin/master", "refs/heads/master"]);
+      await repoGit(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"]);
+      await expect(new LocalGitAdapter({ root: repoRoot }).resolveTrunkRef()).resolves.toBe("master");
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("returns undefined when no trunk ref can be verified", async () => {
+    const unbornRoot = mkdtempSync(join(tmpdir(), "consistency-vcs-trunk-unborn-"));
+    try {
+      await execGit(["init", "--quiet"], { cwd: unbornRoot });
+      await expect(new LocalGitAdapter({ root: unbornRoot }).resolveTrunkRef()).resolves.toBeUndefined();
+    } finally {
+      rmSync(unbornRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -19,9 +19,10 @@ import {
   ShieldCheck,
   X
 } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useI18n } from "../i18n";
 import { StatusBadge } from "../components/StatusBadge";
+import { Button, ButtonLink } from "../design-system/Button";
 
 function localRepositoryName(pulse: HeartbeatPulse): string {
   if (pulse.repository.root === "unknown") return "Local repository";
@@ -118,7 +119,7 @@ export function RepositoriesPage({
     if (pulse && !list.some(l => l.name === localRepositoryName(pulse))) {
       const name = localRepositoryName(pulse);
       list.push({
-        id: name.includes("ConsistenCy") ? "sk1ua/ConsistenCy" : `local:${name}`,
+        id: `pulse-${name}`,
         name,
         branch: pulse.repository.branch ?? "detached",
         isLive: true
@@ -140,7 +141,7 @@ export function RepositoriesPage({
     for (const s of sources) {
       if (!repositories.some(r => r.remoteFullName === s.name || r.displayName === s.name)) {
         if (localNames.has("ConsistenCy-pr2-clean") && s.name === "sk1ua/ConsistenCy") continue;
-        list.push({ id: s.name, name: s.name, branch: "main", reviewCount: s.jobs.length });
+        list.push({ id: `source-${s.name}`, name: s.name, branch: "main", reviewCount: s.jobs.length });
       }
     }
     return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
@@ -148,9 +149,15 @@ export function RepositoriesPage({
 
   function handleConnectPublic(e: React.FormEvent) {
     e.preventDefault();
-    if (!publicRepoInput.trim()) return;
-    setConnectModalOpen(false);
-    navigate(`/repositories/${encodeURIComponent(publicRepoInput.trim())}`);
+    const input = publicRepoInput.trim();
+    if (!input) return;
+    const match = repositories.find(r => r.id === input);
+    if (match) {
+      setConnectModalOpen(false);
+      navigate(`/repositories/${encodeURIComponent(match.id)}`);
+    } else {
+      alert(zh ? "未找到该仓库。公开仓库在首次分析 PR 时自动注册。" : "Repository not found. Public repositories are registered automatically upon first PR analysis.");
+    }
   }
 
   return (
@@ -159,21 +166,18 @@ export function RepositoriesPage({
       <section className="section-block repo-hub-intro">
         <div className="hub-intro-left">
           <span className="panel-kicker"><FolderGit2 size={13} />{zh ? "代码仓库" : "Repositories"}</span>
-          <h2>{zh ? "已连接仓库与工作区" : "Connected Repositories"}</h2>
-          <p>{zh ? "以仓库为核心：查看本地 Git 状态、浏览提交历史与拉取请求，并直接发起 ConsistenCy 多智能体代码审查。" : "Project-first workspace: inspect local Git status, commits, pull requests, and launch multi-agent reviews."}</p>
+          <h2>{zh ? "已连接仓库" : "Connected Repositories"}</h2>
+          <p>{zh ? "查看 Git 状态、提交历史与拉取请求，并发起代码审查。" : "Inspect Git status, commits, pull requests, and launch code reviews."}</p>
         </div>
 
         <div className="hub-intro-actions">
-          <button
-            ref={connectButtonRef}
-            type="button"
-            className="primary-button connect-btn-main"
+          <Button ref={connectButtonRef} variant="primary" type="button" className="connect-btn-main"
             aria-haspopup="dialog"
             aria-expanded={connectModalOpen}
             onClick={() => setConnectModalOpen(true)}
           >
             <FolderPlus size={14} /> {zh ? "连接仓库" : "Connect repository"}
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -224,13 +228,17 @@ export function RepositoriesPage({
                   {repo.isLive && <span className="status-pill telemetry-live">{zh ? "实时监控中" : "LIVE MONITOR"}</span>}
                 </div>
                 <div className="repo-row-meta">
-                  <small>{repo.raw?.trustLevel === "trusted_local" ? (zh ? "受信本地" : "trusted local") : (zh ? "只读" : "read-only")}</small>
+                   {repo.raw?.trustLevel && (
+                     <small>{repo.raw.trustLevel === "trusted_local" ? (zh ? "受信本地" : "trusted local") : (zh ? "只读" : "read-only")}</small>
+                   )}
                   <code><GitBranch size={11} /> {repo.branch}</code>
                 </div>
                 <div className="repo-row-actions">
-                  <Link to={`/repositories/${encodeURIComponent(repo.id)}`} className="primary-button btn-small">
-                    {zh ? "打开" : "Open"}
-                  </Link>
+                  {repo.raw && (
+                    <ButtonLink to={`/repositories/${encodeURIComponent(repo.id)}`} variant="primary" size="sm">
+                      {zh ? "打开" : "Open"}
+                    </ButtonLink>
+                  )}
                 </div>
               </div>
             ))}
@@ -262,9 +270,11 @@ export function RepositoriesPage({
                   {repo.reviewCount > 0 && <small>{repo.reviewCount} {zh ? "次审查" : "reviews"}</small>}
                 </div>
                 <div className="repo-row-actions">
-                  <Link to={`/repositories/${encodeURIComponent(repo.id)}`} className="primary-button btn-small">
-                    {zh ? "打开" : "Open"}
-                  </Link>
+                  {repo.raw && (
+                    <ButtonLink to={`/repositories/${encodeURIComponent(repo.id)}`} variant="primary" size="sm">
+                      {zh ? "打开" : "Open"}
+                    </ButtonLink>
+                  )}
                 </div>
               </div>
             ))}
@@ -301,9 +311,9 @@ export function RepositoriesPage({
                       <p>{zh ? "通过受保护的系统目录选择器打开本地工作树，路径安全隔离" : "Select a local worktree via privileged desktop dialog"}</p>
                     </div>
                   </div>
-                  <button type="button" className="primary-button connect-action-btn" onClick={() => { closeConnectModal(); onAddRepository?.(); }}>
+                  <Button variant="primary" type="button" className="connect-action-btn" onClick={() => { closeConnectModal(); onAddRepository?.(); }}>
                     <FolderPlus size={15} /> {zh ? "选择本地文件夹" : "Select local folder"}
-                  </button>
+                  </Button>
                 </div>
               )}
 
@@ -325,9 +335,9 @@ export function RepositoriesPage({
                     value={publicRepoInput}
                     onChange={e => setPublicRepoInput(e.target.value)}
                   />
-                  <button type="submit" className="primary-button connect-action-btn" disabled={!publicRepoInput.trim()}>
+                  <Button variant="primary" type="submit" className="connect-action-btn" disabled={!publicRepoInput.trim()}>
                     {zh ? "连接" : "Connect"}
-                  </button>
+                  </Button>
                 </div>
               </form>
             </div>
