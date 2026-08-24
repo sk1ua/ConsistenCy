@@ -32,7 +32,7 @@ import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
 import { SQLiteJobStore } from "../jobs/sqliteJobStore";
 import type { ConsistencyDatabase } from "../db/connection";
-import type { CreateReviewJobInput } from "../jobQueue";
+import { InMemoryJobQueue, type CreateReviewJobInput, type ReviewJobStore } from "../jobQueue";
 import type { AuditDomainStore } from "../audit/store";
 
 const TMP_DIRS: string[] = [];
@@ -77,11 +77,11 @@ function fakeAuditStore(knownIds: string[]): Pick<AuditDomainStore, "getReposito
 interface Rig {
   server: ReturnType<typeof createApiServer>;
   port: number;
-  jobs: SQLiteJobStore;
+  jobs: ReviewJobStore;
   database: ConsistencyDatabase;
 }
 
-function makeApi(options: { knownRepositoryIds?: string[]; jobs?: SQLiteJobStore } = {}): Promise<Rig> {
+function makeApi(options: { knownRepositoryIds?: string[]; jobs?: ReviewJobStore } = {}): Promise<Rig> {
   const database = options.jobs ? openDatabase(":memory:") : openDatabase(":memory:");
   runMigrations(database);
   const jobs = options.jobs ?? new SQLiteJobStore(database);
@@ -233,7 +233,7 @@ describe("TEST T — list semantics", () => {
       listJobsForRepository: () => {
         throw new Error("sqlite exploded");
       }
-    } as unknown as SQLiteJobStore;
+    } as unknown as ReviewJobStore;
     const rig = await makeApi({ jobs: broken });
     try {
       const response = await httpJson(rig.port, "GET", "/repositories/repo-a/reviews");
@@ -241,6 +241,28 @@ describe("TEST T — list semantics", () => {
       const body = response.body as { error: { code: string; message: string } };
       expect(body.error.code).toBe("REVIEWS_UNAVAILABLE");
       expect(body.error.message).not.toContain("sqlite");
+    } finally {
+      rig.server.close();
+      rig.database.close();
+    }
+  });
+
+  it("fails closed when the final review response contains another repository association", async () => {
+    const jobs = new InMemoryJobQueue();
+    const mismatched = jobs.enqueue(jobInput({ repositoryId: "repo-b" }));
+    jobs.listJobsForRepository = () => [mismatched];
+    const rig = await makeApi({ jobs });
+    try {
+      const response = await httpJson(rig.port, "GET", "/repositories/repo-a/reviews");
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        error: {
+          code: "REPOSITORY_REVIEWS_RESPONSE_INVALID",
+          message: "Repository review history response is unavailable"
+        }
+      });
+      expect(JSON.stringify(response.body)).not.toContain("repo-b");
+      expect(JSON.stringify(response.body)).not.toContain(mismatched.id);
     } finally {
       rig.server.close();
       rig.database.close();

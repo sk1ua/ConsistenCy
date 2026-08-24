@@ -90,6 +90,13 @@ export function App() {
       navigate(`/runs/${encodeURIComponent(result.jobId)}/notebook?notebook=${encodeURIComponent(result.notebookId)}`);
     }
   });
+  const connectPublicRepository = useMutation({
+    mutationFn: (input: string) => api.connectPublicRepository(input),
+    onSuccess: async repository => {
+      await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.repositories });
+      navigate(`/repositories/${encodeURIComponent(repository.id)}`);
+    }
+  });
   const selectRepository = useMutation({
     mutationFn: async () => {
       const bridge = desktopBridge();
@@ -202,6 +209,9 @@ export function App() {
           addRepositoryError={selectRepository.error ? safeRequestError(selectRepository.error) : undefined}
           monitoringError={setRepositoryMonitoring.error ? safeRequestError(setRepositoryMonitoring.error) : undefined}
           onAddRepository={() => selectRepository.mutate()}
+          connectingPublicRepository={connectPublicRepository.isPending}
+          publicRepositoryError={connectPublicRepository.error}
+          onConnectPublicRepository={input => connectPublicRepository.mutateAsync(input)}
           monitoringRepositoryId={setRepositoryMonitoring.variables?.repositoryId}
           onSetMonitoring={(repository, enabled) => setRepositoryMonitoring.mutate({ repositoryId: repository.id, enabled })}
         />} />

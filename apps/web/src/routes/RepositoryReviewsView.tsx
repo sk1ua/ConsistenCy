@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, RefreshCw, FileSearch } from "lucide-react";
 import type { ReviewJob } from "@consistency/schema";
 import { api } from "../api/client";
+import { workspaceQueryKeys } from "../query/client";
 import { Button } from "../design-system/Button";
 import { SectionHeader } from "../design-system/SectionHeader";
 import { EmptyState } from "../design-system/EmptyState";
@@ -34,6 +35,24 @@ function isLive(status: string): boolean {
   return status === "queued" || status === "running" || status === "awaiting_publish" || status === "publishing";
 }
 
+export function canonicalRepositoryReviews(
+  reviews: readonly ReviewJob[],
+  repositoryId: string
+): ReviewJob[] {
+  return reviews.filter(review => review.repositoryId === repositoryId);
+}
+
+export function createRepositoryReviewsQueryOptions(
+  repositoryId: string,
+  fetchReviews = (id: string, signal: AbortSignal) => api.repositoryReviews(id, signal)
+) {
+  return {
+    queryKey: workspaceQueryKeys.repositoryReviews(repositoryId),
+    queryFn: ({ signal }: { signal: AbortSignal }) => fetchReviews(repositoryId, signal),
+    retry: false as const
+  };
+}
+
 /**
  * Repository-local review history (CKPT3 Phase 4, read-mostly). Lists ONLY
  * canonically associated ReviewJobs (repository_id persisted at creation);
@@ -47,13 +66,9 @@ export function RepositoryReviewsView({
   repositoryId: string;
   zh: boolean;
 }) {
-  const reviewsQuery = useQuery({
-    queryKey: ["repository-reviews", repositoryId],
-    queryFn: () => api.repositoryReviews(repositoryId),
-    retry: false
-  });
+  const reviewsQuery = useQuery(createRepositoryReviewsQueryOptions(repositoryId));
 
-  const reviews = reviewsQuery.data ?? [];
+  const reviews = canonicalRepositoryReviews(reviewsQuery.data ?? [], repositoryId);
   const runningCount = reviews.filter(job => isLive(job.status)).length;
   const failedCount = reviews.filter(job => job.status === "failed" || job.status === "publish_failed").length;
 

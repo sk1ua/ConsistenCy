@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import type {
-  IVCSService,
-  RepoRef,
-  VcsChangedFile,
-  VcsCommitSummary,
-  VcsFileTreeEntry,
-  WorkingDirDirtyEvent
+import {
+  parseGitHubRepositoryFullName,
+  type GitHubRepositoryIdentity,
+  type IVCSService,
+  type RepoRef,
+  type VcsChangedFile,
+  type VcsCommitSummary,
+  type VcsFileTreeEntry,
+  type WorkingDirDirtyEvent
 } from "@consistency/schema";
 import { parseUnifiedDiff, splitNulRecords } from "./diff";
 import { GitCommandError, assertSafeRef, execGit, type GitExec } from "./git";
@@ -129,6 +131,25 @@ export class LocalGitAdapter implements IVCSService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Resolves only a verified symbolic default for the selected remote. This
+   * does not fetch and never falls back to local branch-name heuristics.
+   */
+  async resolveRemoteDefaultBranch(remoteName: string): Promise<string | undefined> {
+    if (!/^[A-Za-z0-9._-]+$/.test(remoteName) || remoteName.startsWith("-")) return undefined;
+    const remoteHeadRef = `refs/remotes/${remoteName}/HEAD`;
+    try {
+      const symbolicTarget = (await this.run(["symbolic-ref", "--short", "--quiet", remoteHeadRef])).trim();
+      const prefix = `${remoteName}/`;
+      if (!symbolicTarget.startsWith(prefix)) return undefined;
+      const branch = symbolicTarget.slice(prefix.length);
+      if (!branch || !/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..")) return undefined;
+      return (await this.refExists(`refs/remotes/${remoteName}/${branch}`)) ? branch : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -304,25 +325,27 @@ export class LocalGitAdapter implements IVCSService {
   }
 
   /**
-   * Discovers configured git remotes.
+   * Discovers configured git remotes while keeping fetch and push URLs distinct.
+   * Raw URLs are server-internal and must not cross the renderer boundary.
    */
-  async getRemotes(): Promise<Array<{ name: string; url: string; githubFullName?: string }>> {
+  async getRemotes(): Promise<GitRemoteObservation[]> {
     try {
       const stdout = await this.run(["remote", "-v"]);
-      const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
-      const remoteMap = new Map<string, string>();
-      for (const line of lines) {
-        const parts = line.split(/\s+/);
-        if (parts.length >= 2 && parts[0] && parts[1]) {
-          remoteMap.set(parts[0], parts[1]);
-        }
+      const remoteMap = new Map<string, { fetchUrl?: string; pushUrl?: string }>();
+      for (const line of stdout.split("\n")) {
+        const match = line.trim().match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
+        if (!match?.[1] || !match[2] || !match[3]) continue;
+        const observation = remoteMap.get(match[1]) ?? {};
+        if (match[3] === "fetch" && observation.fetchUrl === undefined) observation.fetchUrl = match[2];
+        if (match[3] === "push" && observation.pushUrl === undefined) observation.pushUrl = match[2];
+        remoteMap.set(match[1], observation);
       }
-      return Array.from(remoteMap.entries()).map(([name, url]) => {
-        const parsed = parseGitHubRemote(url);
+      return Array.from(remoteMap.entries()).map(([name, observation]) => {
+        const parsed = observation.fetchUrl === undefined ? null : parseGitHubRemote(observation.fetchUrl);
         return {
           name,
-          url,
-          githubFullName: parsed?.fullName
+          ...observation,
+          ...(parsed === null ? {} : { githubFullName: parsed.fullName })
         };
       });
     } catch {
@@ -331,16 +354,109 @@ export class LocalGitAdapter implements IVCSService {
   }
 }
 
+export type GitHubRemoteIdentity = GitHubRepositoryIdentity;
+export { parseGitHubRepositoryFullName };
+
+export type GitRemoteObservation = {
+  readonly name: string;
+  readonly fetchUrl?: string;
+  readonly pushUrl?: string;
+  readonly githubFullName?: string;
+};
+
+function parseRawOwnerRepoClonePath(
+  pathname: string,
+  form: "url" | "scp"
+): GitHubRemoteIdentity | null {
+  if (
+    pathname.includes("%")
+    || pathname.includes("\\")
+    || pathname.includes("?")
+    || pathname.includes("#")
+  ) return null;
+
+  let rawPath = pathname;
+  if (form === "url") {
+    if (!rawPath.startsWith("/")) return null;
+    rawPath = rawPath.slice(1);
+  } else if (rawPath.startsWith("/")) {
+    return null;
+  }
+
+  if (rawPath.endsWith("/")) rawPath = rawPath.slice(0, -1);
+  const parts = rawPath.split("/");
+  if (
+    parts.length !== 2
+    || parts.some(part => part.length === 0 || part === "." || part === "..")
+  ) return null;
+
+  const repositoryPart = parts[1]!;
+  const repo = repositoryPart.endsWith(".git")
+    ? repositoryPart.slice(0, -4)
+    : repositoryPart;
+  return parseGitHubRepositoryFullName(`${parts[0]}/${repo}`);
+}
+
+function hasExplicitUrlPortDelimiter(authority: string): boolean {
+  const hostAndPort = authority.slice(authority.lastIndexOf("@") + 1);
+  return hostAndPort.includes(":");
+}
+
 /**
- * Robust parser for GitHub remote URLs (HTTPS, SSH, git://, etc.)
+ * Parses trusted github.com HTTPS and SSH clone forms. The unauthenticated
+ * git:// transport is intentionally unsupported; enterprise hosts and URLs
+ * containing credentials, query strings, or fragments are rejected.
  */
-export function parseGitHubRemote(url: string): { owner: string; repo: string; fullName: string } | null {
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  // Handle https://github.com/owner/repo(.git), git@github.com:owner/repo(.git), ssh://git@github.com/owner/repo(.git)
-  const match = trimmed.match(/^(?:https?:\/\/|git@|ssh:\/\/git@)github\.com[:/]([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+?)(?:\.git)?$/);
-  if (!match || !match[1] || !match[2]) return null;
-  const owner = match[1];
-  const repo = match[2];
-  return { owner, repo, fullName: `${owner}/${repo}` };
+export function parseGitHubRemote(value: string): GitHubRemoteIdentity | null {
+  if (
+    value !== value.trim()
+    || value.includes("%")
+    || value.includes("\\")
+    || /[\s\u0000-\u001f\u007f]/.test(value)
+  ) return null;
+  if (!value) return null;
+
+  const trimmed = value;
+  const scpMatch = /^git@github\.com:([^?#]+)$/i.exec(trimmed);
+  if (scpMatch?.[1]) return parseRawOwnerRepoClonePath(scpMatch[1], "scp");
+
+  const rawUrlMatch = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)(\/[^?#]*)?$/.exec(trimmed);
+  const rawAuthority = rawUrlMatch?.[1];
+  const rawPath = rawUrlMatch?.[2];
+  if (
+    rawAuthority === undefined
+    || rawPath === undefined
+    || hasExplicitUrlPortDelimiter(rawAuthority)
+  ) return null;
+  const identity = parseRawOwnerRepoClonePath(rawPath, "url");
+  if (identity === null) return null;
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (
+    url.pathname !== rawPath
+    || url.hostname.toLowerCase() !== "github.com"
+    || url.search
+    || url.hash
+  ) return null;
+  if (url.protocol === "https:") {
+    if (url.username || url.password) return null;
+  } else if (url.protocol === "ssh:") {
+    if (url.username.toLowerCase() !== "git" || url.password) return null;
+  } else {
+    return null;
+  }
+  return identity;
+}
+
+/** Selects canonical GitHub identity from fetch URLs only. */
+export function selectGitHubRemote(remotes: readonly GitRemoteObservation[]): GitRemoteObservation | undefined {
+  const recognized = remotes
+    .filter(remote => remote.fetchUrl !== undefined && remote.githubFullName !== undefined)
+    .sort((left, right) => left.name.localeCompare(right.name));
+  return recognized.find(remote => remote.name === "origin") ?? recognized[0];
 }

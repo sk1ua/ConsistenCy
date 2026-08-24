@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
 import { SQLiteJobStore } from "./sqliteJobStore";
@@ -241,6 +241,47 @@ describe("SQLiteJobStore", () => {
       const queuedJob = acceptJob(store, "delivery-queued");
       expect(() => store.persistReportAndEnqueuePublish(queuedJob.id, report)).toThrow(/Invalid job status/);
     } finally {
+      database.close();
+    }
+  });
+
+  it("returns the exact latest pull request job per requested number with memory-store parity", () => {
+    vi.useFakeTimers();
+    const { database, store } = createStore();
+    try {
+      vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+      const pr1 = store.enqueue({
+        kind: "pull_request",
+        repository: "owner/repo",
+        repositoryId: "repository-1",
+        pullRequestNumber: 1,
+        baseSha: "base-1",
+        headSha: "head-1"
+      });
+      let newestPr2 = "";
+      for (let index = 0; index < 201; index += 1) {
+        vi.setSystemTime(new Date(Date.parse("2026-08-02T00:00:00.000Z") + index * 1_000));
+        newestPr2 = store.enqueue({
+          kind: "pull_request",
+          repository: "owner/repo",
+          repositoryId: "repository-1",
+          pullRequestNumber: 2,
+          baseSha: "base-2",
+          headSha: "head-2"
+        }).id;
+      }
+      store.enqueue({ kind: "pull_request", repository: "other/repo", repositoryId: "repository-2", pullRequestNumber: 1, baseSha: "base-other", headSha: "head-other" });
+      store.enqueue({ kind: "pull_request", repository: "owner/repo", pullRequestNumber: 1, baseSha: "base-legacy", headSha: "head-legacy" });
+
+      expect(store.listLatestPullRequestJobsForRepository("repository-1", [1, 2, 2]).map(job => job.id))
+        .toEqual([newestPr2, pr1.id]);
+      expect(store.listLatestPullRequestJobsForRepository("repository-1", [])).toEqual([]);
+      expect(() => store.listLatestPullRequestJobsForRepository(
+        "repository-1",
+        Array.from({ length: 101 }, (_, index) => index + 1)
+      )).toThrow();
+    } finally {
+      vi.useRealTimers();
       database.close();
     }
   });

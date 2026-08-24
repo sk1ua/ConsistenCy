@@ -30,7 +30,11 @@ import { RepositoryChangesView } from "./RepositoryChangesView";
 import { RepositoryHistoryView } from "./RepositoryHistoryView";
 import { RepositoryPullRequestsView } from "./RepositoryPullRequestsView";
 import { RepositoryWorkflowsView } from "./RepositoryWorkflowsView";
-import { RepositoryReviewsView } from "./RepositoryReviewsView";
+import {
+  canonicalRepositoryReviews,
+  createRepositoryReviewsQueryOptions,
+  RepositoryReviewsView
+} from "./RepositoryReviewsView";
 
 export interface RepositoryDetailPageProps {
   jobs: ReviewJob[];
@@ -48,8 +52,20 @@ export function formatReviewMutationError(zh: boolean, _error: unknown): string 
   return zh ? "请求失败，请稍后重试。" : "Request failed. Please try again later.";
 }
 
+export function createRepositoryPullRequestsQueryOptions(
+  repositoryId: string,
+  activeTab: string,
+  fetchPullRequests = (id: string, signal: AbortSignal) => api.repositoryPullRequests(id, signal)
+) {
+  return {
+    queryKey: workspaceQueryKeys.repositoryPullRequests(repositoryId),
+    queryFn: ({ signal }: { signal: AbortSignal }) => fetchPullRequests(repositoryId, signal),
+    enabled: activeTab === "pull-requests",
+    staleTime: 30_000
+  };
+}
+
 export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
-  jobs = [],
   repositories = [],
   pulse,
   health
@@ -121,20 +137,24 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
     refetchInterval: 15_000
   });
 
-  const prsKey = ["repository-pull-requests", repositoryId] as const;
-  const prsQuery = useQuery({
-    queryKey: prsKey,
-    queryFn: () => api.repositoryPullRequests(repositoryId),
-    refetchInterval: 60_000
-  });
+  const prsOptions = createRepositoryPullRequestsQueryOptions(repositoryId, activeTab);
+  const prsKey = prsOptions.queryKey;
+  const prsQuery = useQuery(prsOptions);
   const prsError = prsQuery.error ?? queryClient.getQueryState(prsKey)?.error;
   const prsLoading = prsQuery.isLoading && !prsError;
   const prsData = prsError ? {
     repositoryId,
-    available: false,
+    available: false as const,
+    reasonCode: "provider_unavailable" as const,
     reason: zh ? "由于网络或服务异常，无法加载拉取请求" : "Failed to load pull requests due to network or service error",
     pullRequests: []
   } : prsQuery.data;
+
+  const reviewsQuery = useQuery(createRepositoryReviewsQueryOptions(repositoryId));
+  const repoJobs = useMemo(
+    () => canonicalRepositoryReviews(reviewsQuery.data ?? [], repositoryId),
+    [repositoryId, reviewsQuery.data]
+  );
 
   // Find repository model
   const repo = useMemo(
@@ -145,14 +165,6 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
   const displayName = preparedRepository?.displayName ?? repo?.displayName ?? (zh ? "仓库不可用" : "Repository unavailable");
   const sourceKind = preparedRepository?.sourceKind ?? repo?.source;
   const trust = preparedRepository?.trust ?? (repo?.trustLevel === "trusted_local" ? "trusted_local" : undefined);
-
-  // Repository-specific review jobs
-  const repoJobs = useMemo(() => {
-    const repositoryNames = new Set([repositoryId, displayName, repo?.remoteFullName].filter((value): value is string => Boolean(value)));
-    return jobs.filter(
-      j => repositoryNames.has(j.repositoryFullName)
-    );
-  }, [displayName, jobs, repo?.remoteFullName, repositoryId]);
 
   const triggerReview = useMutation({
     mutationFn: async (request: LocalReviewRequest) => {
@@ -337,7 +349,16 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                 </span>
               </div>
 
-              {repoJobs.length === 0 ? (
+              {reviewsQuery.isLoading ? (
+                <div style={{ padding: "20px", textAlign: "center", color: "var(--muted)", fontSize: "12px" }}>
+                  <Loader2 size={16} className="ds-spin" style={{ margin: "0 auto 4px" }} />
+                  <div>{zh ? "正在读取审查历史..." : "Loading review history..."}</div>
+                </div>
+              ) : reviewsQuery.isError ? (
+                <div role="alert" style={{ padding: "16px", color: "var(--muted)", fontSize: "12px" }}>
+                  {zh ? "审查历史暂时不可用。" : "Review history is temporarily unavailable."}
+                </div>
+              ) : repoJobs.length === 0 ? (
                 <EmptyState
                   compact
                   className="repo-overview-empty"
@@ -465,7 +486,11 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
             title={zh ? "拉取请求列表" : "Pull Requests"}
             subtitle={zh ? "关联的 GitHub 拉取请求及其审查记录" : "Linked GitHub Pull Requests and their review history"}
           />
-          <RepositoryPullRequestsView isLoading={prsLoading} data={prsData} defaultFilter="all" />
+          <RepositoryPullRequestsView
+            isLoading={prsLoading}
+            data={prsData}
+            defaultFilter="all"
+          />
         </div>
       ) : activeTab === "workflows" ? (
         <RepositoryWorkflowsView repositoryId={repositoryId} zh={zh} />

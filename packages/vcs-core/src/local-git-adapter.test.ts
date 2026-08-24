@@ -2,9 +2,18 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { codeChangeEventSchema, vcsChangedFileSchema } from "@consistency/schema";
+import {
+  codeChangeEventSchema,
+  parseGitHubRepositoryFullName as parseSharedGitHubRepositoryFullName,
+  vcsChangedFileSchema
+} from "@consistency/schema";
 import { GitCommandError, assertSafeRef, execGit } from "./git";
-import { LocalGitAdapter, parseGitHubRemote } from "./local-git-adapter";
+import {
+  LocalGitAdapter,
+  parseGitHubRemote,
+  parseGitHubRepositoryFullName,
+  selectGitHubRemote
+} from "./local-git-adapter";
 
 let root: string;
 let adapter: LocalGitAdapter;
@@ -201,25 +210,161 @@ describe("LocalGitAdapter", { timeout: 30_000 }, () => {
   });
 });
 
-describe("parseGitHubRemote", () => {
-  it("parses https, ssh, and git URLs into canonical owner/repo", () => {
-    expect(parseGitHubRemote("https://github.com/sk1ua/ConsistenCy.git")).toEqual({
-      owner: "sk1ua",
-      repo: "ConsistenCy",
-      fullName: "sk1ua/ConsistenCy"
+describe("GitHub remote discovery", () => {
+  it.each([
+    ["https://github.com/foo/bar.git", "foo", "bar"],
+    ["https://github.com/foo/bar", "foo", "bar"],
+    ["https://github.com/foo/bar/", "foo", "bar"],
+    ["HTTPS://GITHUB.COM/Mixed-Owner/Repo.Name.git/", "Mixed-Owner", "Repo.Name"],
+    ["git@github.com:foo/bar.git", "foo", "bar"],
+    ["GIT@GITHUB.COM:Mixed-Owner/Repo.Name.git/", "Mixed-Owner", "Repo.Name"],
+    ["ssh://git@github.com/foo/bar.git", "foo", "bar"],
+    ["SSH://git@GITHUB.COM/Mixed-Owner/Repo.Name.git/", "Mixed-Owner", "Repo.Name"]
+  ])("parses trusted github.com clone form %s", (value, owner, repo) => {
+    expect(parseGitHubRemote(value)).toEqual({ owner, repo, fullName: `${owner}/${repo}` });
+  });
+
+  it("preserves valid dots, underscores, and hyphens in repository coordinates", () => {
+    expect(parseGitHubRemote("https://github.com/acme-org/repo.name_with-parts.git")).toEqual({
+      owner: "acme-org",
+      repo: "repo.name_with-parts",
+      fullName: "acme-org/repo.name_with-parts"
     });
-    expect(parseGitHubRemote("git@github.com:sk1ua/ConsistenCy.git")).toEqual({
-      owner: "sk1ua",
-      repo: "ConsistenCy",
-      fullName: "sk1ua/ConsistenCy"
-    });
-    expect(parseGitHubRemote("ssh://git@github.com/openai/codex")).toEqual({
-      owner: "openai",
-      repo: "codex",
-      fullName: "openai/codex"
-    });
-    expect(parseGitHubRemote("https://gitlab.com/owner/repo.git")).toBeNull();
-    expect(parseGitHubRemote("not a url")).toBeNull();
+  });
+
+  it("re-exports the shared canonical GitHub identity parser without contract drift", () => {
+    const values = [
+      "Mixed-Owner/repo.name_with-parts",
+      `${"a".repeat(39)}/${"r".repeat(100)}`,
+      "bad-/repo",
+      "owner/...",
+      `${"a".repeat(40)}/repo`,
+      `owner/${"r".repeat(101)}`,
+      " owner/repo",
+      "owner/repo\n"
+    ];
+    for (const value of values) {
+      expect(parseGitHubRepositoryFullName(value)).toEqual(parseSharedGitHubRepositoryFullName(value));
+    }
+  });
+
+  it.each([
+    "http://github.com/foo/bar",
+    "git://github.com/foo/bar.git",
+    "https://user:secret@github.com/foo/bar.git",
+    "https://github.com:/foo/bar.git",
+    "https://github.com:abc/foo/bar.git",
+    "https://github.com:443/foo/bar.git",
+    "https://github.com:8443/foo/bar.git",
+    "ssh://git@github.com:/foo/bar.git",
+    "ssh://git@github.com:abc/foo/bar.git",
+    "ssh://git@github.com:22/foo/bar.git",
+    "ssh://git@github.com:2222/foo/bar.git",
+    "https://github.com/-bad/repo",
+    "https://github.com/bad-/repo",
+    "https://github.com/./repo",
+    "https://github.com/../repo",
+    "https://github.com/owner/.",
+    "https://github.com/owner/..",
+    "https://github.com/owner/...",
+    "https://github.com/owner/../repo",
+    "https://github.com/foo/./bar.git",
+    "https://github.com/foo/segment/../bar.git",
+    "https://github.com/foo/segment/%2e%2e/bar.git",
+    "https://github.com/foo/%2Fbar.git",
+    String.raw`https://github.com/foo\bar.git`,
+    "https://github.com/foo/bar.git\\",
+    "ssh://git@github.com/foo/./bar.git",
+    "ssh://git@github.com/foo/segment/../bar.git",
+    "ssh://git@github.com/foo/segment/%2e%2e/bar.git",
+    "ssh://git@github.com/foo/%2Fbar.git",
+    String.raw`ssh://git@github.com/foo\bar.git`,
+    "git@github.com:foo/./bar.git",
+    "git@github.com:foo/segment/../bar.git",
+    "git@github.com:foo/segment/%2e%2e/bar.git",
+    "git@github.com:foo/%2Fbar.git",
+    String.raw`git@github.com:foo\bar.git`,
+    "https://github.com/foo//bar.git",
+    "https://github.com//foo/bar.git",
+    "https://github.com/foo/bar.git//",
+    "ssh://git@github.com/foo//bar.git",
+    "git@github.com:foo//bar.git",
+    "https://github.com/foo",
+    "https://github.com/foo/bar/extra",
+    "https://github.com/foo/bar?tab=readme",
+    "https://github.com/foo/bar#readme",
+    "https://github.com/foo/%62ar",
+    " https://github.com/foo/bar.git",
+    "https://github.com/foo/bar.git ",
+    "https://github.com/foo/ba\tr.git",
+    "https://github.com/foo/bar.git\n",
+    "git@github.com:foo/ba\u0000r.git",
+    "https://gitlab.com/foo/bar.git",
+    "https://github.enterprise.example/foo/bar.git",
+    "not a url"
+  ])("rejects malformed, ambiguous, credential-bearing, or unsupported remote %s", value => {
+    expect(parseGitHubRemote(value)).toBeNull();
+  });
+
+  it("prefers origin fetch identity and never lets push-only identity win", () => {
+    expect(selectGitHubRemote([
+      { name: "upstream", fetchUrl: "https://github.com/upstream/repo.git", githubFullName: "upstream/repo" },
+      { name: "origin", fetchUrl: "https://github.com/canonical/repo.git", pushUrl: "git@github.com:fork/repo.git", githubFullName: "canonical/repo" }
+    ])?.githubFullName).toBe("canonical/repo");
+    expect(selectGitHubRemote([
+      { name: "origin", pushUrl: "git@github.com:push-only/repo.git" },
+      { name: "zeta", fetchUrl: "https://github.com/zeta/repo.git", githubFullName: "zeta/repo" },
+      { name: "alpha", fetchUrl: "https://github.com/alpha/repo.git", githubFullName: "alpha/repo" }
+    ])?.githubFullName).toBe("alpha/repo");
+  });
+
+  it("keeps fetch and push observations separate", async () => {
+    const remotes = await new LocalGitAdapter({
+      root,
+      exec: async () => ({
+        stdout: [
+          "origin https://github.com/acme/project.git (fetch)",
+          "origin git@github.com:fork/project.git (push)"
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0
+      })
+    }).getRemotes();
+    expect(remotes).toEqual([{
+      name: "origin",
+      fetchUrl: "https://github.com/acme/project.git",
+      pushUrl: "git@github.com:fork/project.git",
+      githubFullName: "acme/project"
+    }]);
+  });
+
+  it("does not derive canonical identity from normalized or push-only remote URLs", async () => {
+    const remotes = await new LocalGitAdapter({
+      root,
+      exec: async () => ({
+        stdout: [
+          "origin https://github.com/acme/./project.git (fetch)",
+          "origin git@github.com:acme/project.git (push)",
+          "upstream GIT@GITHUB.COM:Mixed-Owner/Repo.Name.git/ (fetch)"
+        ].join("\n"),
+        stderr: "",
+        exitCode: 0
+      })
+    }).getRemotes();
+
+    expect(remotes).toEqual([
+      {
+        name: "origin",
+        fetchUrl: "https://github.com/acme/./project.git",
+        pushUrl: "git@github.com:acme/project.git"
+      },
+      {
+        name: "upstream",
+        fetchUrl: "GIT@GITHUB.COM:Mixed-Owner/Repo.Name.git/",
+        githubFullName: "Mixed-Owner/Repo.Name"
+      }
+    ]);
+    expect(selectGitHubRemote(remotes)?.githubFullName).toBe("Mixed-Owner/Repo.Name");
   });
 });
 
@@ -242,6 +387,44 @@ describe("LocalGitAdapter.getChurnStats", { timeout: 30_000 }, () => {
   it("rejects a nonsensical window", async () => {
     await expect(adapter.getChurnStats(0)).rejects.toThrow(/positive integer/);
     await expect(adapter.getChurnStats(1.5)).rejects.toThrow(/positive integer/);
+  });
+});
+
+describe("LocalGitAdapter.resolveRemoteDefaultBranch", { timeout: 30_000 }, () => {
+  const initRemoteDefaultRepo = async (prefix: string) => {
+    const repoRoot = mkdtempSync(join(tmpdir(), prefix));
+    const repoGit = (args: string[]) => execGit(args, { cwd: repoRoot });
+    await repoGit(["init", "--quiet", "--initial-branch=main"]);
+    await repoGit(["config", "user.name", "Test Runner"]);
+    await repoGit(["config", "user.email", "test@example.com"]);
+    writeFileSync(join(repoRoot, "a.txt"), "line\n");
+    await repoGit(["add", "."]);
+    await repoGit(["commit", "--quiet", "-m", "initial commit"]);
+    return { repoRoot, repoGit };
+  };
+
+  it.each(["develop", "trunk"])("resolves verified remote symbolic HEAD for %s", async branch => {
+    const { repoRoot, repoGit } = await initRemoteDefaultRepo(`consistency-vcs-remote-default-${branch}-`);
+    try {
+      await repoGit(["update-ref", `refs/remotes/upstream/${branch}`, "HEAD"]);
+      await repoGit(["symbolic-ref", "refs/remotes/upstream/HEAD", `refs/remotes/upstream/${branch}`]);
+      await expect(new LocalGitAdapter({ root: repoRoot }).resolveRemoteDefaultBranch("upstream"))
+        .resolves.toBe(branch);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not infer a default from stale local main or a dangling remote HEAD", async () => {
+    const { repoRoot, repoGit } = await initRemoteDefaultRepo("consistency-vcs-remote-default-missing-");
+    try {
+      const adapter = new LocalGitAdapter({ root: repoRoot });
+      await expect(adapter.resolveRemoteDefaultBranch("origin")).resolves.toBeUndefined();
+      await repoGit(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"]);
+      await expect(adapter.resolveRemoteDefaultBranch("origin")).resolves.toBeUndefined();
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
   });
 });
 

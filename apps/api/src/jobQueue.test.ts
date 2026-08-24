@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryJobQueue } from "./jobQueue";
 
 describe("InMemoryJobQueue Outbox & Schema Parity", () => {
@@ -96,5 +96,42 @@ describe("InMemoryJobQueue Outbox & Schema Parity", () => {
     queue.updateStatus(job.id, "publishing");
     const terminalResult = queue.persistReportAndEnqueuePublish(job.id, {} as any);
     expect(terminalResult?.status).toBe("publishing");
+  });
+
+  it("returns the exact latest pull request job per requested number without a global history cutoff", () => {
+    vi.useFakeTimers();
+    try {
+      const queue = new InMemoryJobQueue();
+      vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+      const pr1 = queue.enqueue({
+        kind: "pull_request",
+        repository: "owner/repo",
+        repositoryId: "repository-1",
+        pullRequestNumber: 1
+      });
+      let newestPr2 = "";
+      for (let index = 0; index < 201; index += 1) {
+        vi.setSystemTime(new Date(Date.parse("2026-08-02T00:00:00.000Z") + index * 1_000));
+        newestPr2 = queue.enqueue({
+          kind: "pull_request",
+          repository: "owner/repo",
+          repositoryId: "repository-1",
+          pullRequestNumber: 2
+        }).id;
+      }
+      queue.enqueue({ kind: "pull_request", repository: "other/repo", repositoryId: "repository-2", pullRequestNumber: 1 });
+      queue.enqueue({ kind: "pull_request", repository: "owner/repo", pullRequestNumber: 1 });
+      queue.enqueue({ kind: "push", repository: "owner/repo", repositoryId: "repository-1", pullRequestNumber: 1 });
+
+      expect(queue.listLatestPullRequestJobsForRepository("repository-1", [1, 2, 2]).map(job => job.id))
+        .toEqual([newestPr2, pr1.id]);
+      expect(queue.listLatestPullRequestJobsForRepository("repository-1", [])).toEqual([]);
+      expect(() => queue.listLatestPullRequestJobsForRepository(
+        "repository-1",
+        Array.from({ length: 101 }, (_, index) => index + 1)
+      )).toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -11,6 +11,7 @@ import { publishToGitHub } from "./publish/githubPublisher";
 import { PermanentPublishError } from "./publish/error";
 import { GitHubAppAuthenticator } from "./github/auth";
 import { RepositoryPullRequestService } from "./github/pullRequestReader";
+import { connectPublicGitHubRepository } from "./github/publicRepository";
 import { createContextBuilder } from "./review/context/contextRouter";
 import { triggerLocalReview } from "./trigger/local";
 import { HeartbeatDaemon } from "./heartbeat/daemon";
@@ -290,9 +291,16 @@ export const server = createApiServer({
   notebookStore,
   notebookGraph,
   resolveReviewModel: override => resolveReviewModel({ config, override }),
+  publicRepositoryConnect: input => connectPublicGitHubRepository({
+    input,
+    store: auditStore,
+    authenticator,
+    publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN
+  }),
   publicPr: (url, modelOverride) => enqueuePublicPrReview({
     url,
     jobs,
+    repositoryStore: auditStore,
     publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
     llmProvider: modelOverride?.provider,
     llmModel: modelOverride?.model

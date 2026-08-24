@@ -58,7 +58,369 @@ describe("SQLiteAuditDomainStore", () => {
     }
   });
 
+  it("resolves canonical GitHub identity case-insensitively and prefers a local checkout", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const remote = store.connectGitHubRepository({
+        displayName: "Repository",
+        source: "github",
+        remoteFullName: "Acme/Repository",
+        defaultBranch: "main"
+      });
+      expect(store.connectGitHubRepository({
+        displayName: "duplicate",
+        source: "github",
+        remoteFullName: "acme/repository"
+      }).id).toBe(remote.id);
+
+      const local = store.registerLocalRepository({
+        displayName: "local-repository",
+        source: "local_git",
+        remoteFullName: "ACME/REPOSITORY",
+        defaultBranch: "trunk",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/local-repository" });
+      expect(local).toMatchObject({
+        id: remote.id,
+        source: "local_git",
+        remoteFullName: "ACME/REPOSITORY",
+        defaultBranch: "main"
+      });
+      expect(store.findRepositoryByRemoteFullName("acme/REPOSITORY")?.id).toBe(remote.id);
+      expect(store.listRepositories()).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("updates GitHub records from verified provider metadata without nulling a known default branch", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const original = store.connectGitHubRepository({
+        displayName: "Original",
+        source: "github",
+        remoteFullName: "Acme/Repository",
+        defaultBranch: "main"
+      });
+      const refreshed = store.connectGitHubRepository({
+        displayName: "Provider Name",
+        source: "github",
+        remoteFullName: "acme/repository",
+        defaultBranch: "trunk"
+      });
+      expect(refreshed).toMatchObject({
+        id: original.id,
+        displayName: "Provider Name",
+        remoteFullName: "acme/repository",
+        defaultBranch: "trunk"
+      });
+      expect(store.connectGitHubRepository({
+        displayName: "Provider Name",
+        source: "github",
+        remoteFullName: "ACME/REPOSITORY"
+      })).toMatchObject({ id: original.id, defaultBranch: "trunk" });
+
+      const renamed = store.connectGitHubRepository({
+        displayName: "Renamed",
+        source: "github",
+        remoteFullName: "Acme/Renamed.Repository",
+        defaultBranch: "main"
+      }, { existingRepositoryId: original.id });
+      expect(renamed).toMatchObject({
+        id: original.id,
+        remoteFullName: "Acme/Renamed.Repository",
+        defaultBranch: "main"
+      });
+      expect(store.findRepositoryByRemoteFullName("acme/renamed.repository")?.id).toBe(original.id);
+      expect(store.findRepositoryByRemoteFullName("acme/repository")).toBeUndefined();
+      const row = database.prepare("SELECT identity_key FROM repositories WHERE id = ?")
+        .get(original.id) as { identity_key: string };
+      expect(row.identity_key).toBe("github:acme/renamed.repository");
+      expect(store.listRepositories()).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rolls back provider rename metadata when the target identity key collides", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const original = store.connectGitHubRepository({
+        displayName: "Original",
+        source: "github",
+        remoteFullName: "Acme/Original",
+        defaultBranch: "main"
+      });
+      const blocker = store.createRepository({
+        displayName: "Blocker",
+        source: "gitlab",
+        remoteFullName: "elsewhere/blocker"
+      });
+      database.prepare("UPDATE repositories SET identity_key = ? WHERE id = ?")
+        .run("github:acme/renamed", blocker.id);
+      const before = store.getRepository(original.id);
+
+      expect(() => store.connectGitHubRepository({
+        displayName: "Renamed",
+        source: "github",
+        remoteFullName: "Acme/Renamed",
+        defaultBranch: "trunk"
+      }, { existingRepositoryId: original.id })).toThrowError(/reconciliation/i);
+      expect(store.getRepository(original.id)).toEqual(before);
+      expect(store.findRepositoryByRemoteFullName("acme/original")?.id).toBe(original.id);
+      expect(store.findRepositoryByRemoteFullName("acme/renamed")).toBeUndefined();
+      const row = database.prepare("SELECT identity_key FROM repositories WHERE id = ?")
+        .get(original.id) as { identity_key: string };
+      expect(row.identity_key).toBe("github:acme/original");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps a local identity key when verified provider metadata renames its remote", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const local = store.registerLocalRepository({
+        displayName: "Local",
+        source: "local_git",
+        remoteFullName: "Acme/Original",
+        defaultBranch: "main"
+      }, { serverLocator: "D:/private/work/local-provider-rename" });
+      const before = database.prepare("SELECT identity_key FROM repositories WHERE id = ?")
+        .get(local.id) as { identity_key: string };
+      const renamed = store.connectGitHubRepository({
+        displayName: "Provider Renamed",
+        source: "github",
+        remoteFullName: "Acme/Renamed",
+        defaultBranch: "trunk"
+      }, { existingRepositoryId: local.id });
+      const after = database.prepare("SELECT identity_key FROM repositories WHERE id = ?")
+        .get(local.id) as { identity_key: string };
+      expect(renamed).toMatchObject({
+        id: local.id,
+        source: "local_git",
+        remoteFullName: "Acme/Renamed",
+        defaultBranch: "trunk"
+      });
+      expect(after.identity_key).toBe(before.identity_key);
+      expect(after.identity_key.startsWith("local:")).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("enriches an existing same-path local registration without changing its opaque ID", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const original = store.createRepository({
+        displayName: "legacy-local",
+        source: "local_git",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/legacy-local" });
+      const enriched = store.registerLocalRepository({
+        displayName: "legacy-local",
+        source: "local_git",
+        remoteFullName: "Acme/Repository",
+        defaultBranch: "develop",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/legacy-local" });
+      expect(enriched).toMatchObject({
+        id: original.id,
+        remoteFullName: "Acme/Repository",
+        defaultBranch: "develop"
+      });
+      expect(store.registerLocalRepository({
+        displayName: "legacy-local",
+        source: "local_git",
+        remoteFullName: "acme/repository",
+        defaultBranch: "develop",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/legacy-local" }).id).toBe(original.id);
+      expect(store.listRepositories()).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("uses fill-only default-branch precedence for local registration", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const providerRepository = store.connectGitHubRepository({
+        displayName: "Repository",
+        source: "github",
+        remoteFullName: "Acme/Repository",
+        defaultBranch: "main"
+      });
+      const reconciled = store.registerLocalRepository({
+        displayName: "local-repository",
+        source: "local_git",
+        remoteFullName: "acme/repository",
+        defaultBranch: "stale-local",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/provider-preservation" });
+      expect(reconciled).toMatchObject({
+        id: providerRepository.id,
+        source: "local_git",
+        defaultBranch: "main"
+      });
+
+      const repeated = store.registerLocalRepository({
+        displayName: "local-repository",
+        source: "local_git",
+        remoteFullName: "ACME/REPOSITORY",
+        defaultBranch: "changed-symbolic-head",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/provider-preservation" });
+      expect(repeated).toMatchObject({ id: providerRepository.id, defaultBranch: "main" });
+
+      const branchless = store.createRepository({
+        displayName: "branchless",
+        source: "local_git",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/branchless" });
+      expect(store.registerLocalRepository({
+        displayName: "branchless",
+        source: "local_git",
+        defaultBranch: "develop",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/branchless" })).toMatchObject({
+        id: branchless.id,
+        defaultBranch: "develop"
+      });
+      expect(store.registerLocalRepository({
+        displayName: "branchless",
+        source: "local_git",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/branchless" })).toMatchObject({
+        id: branchless.id,
+        defaultBranch: "develop"
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects same-path and cross-checkout canonical identity conflicts without mutation", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const existingPath = store.createRepository({
+        displayName: "existing-path",
+        source: "local_git",
+        remoteFullName: "Acme/Original",
+        defaultBranch: "main",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/existing-path" });
+      const beforeDifferentRemote = store.listRepositories();
+      expect(() => store.registerLocalRepository({
+        displayName: "changed",
+        source: "local_git",
+        remoteFullName: "Acme/Different",
+        defaultBranch: "trunk",
+        monitoringEnabled: false
+      }, { serverLocator: "D:/private/work/existing-path" })).toThrowError(AuditDomainError);
+      try {
+        store.registerLocalRepository({
+          displayName: "changed",
+          source: "local_git",
+          remoteFullName: "Acme/Different"
+        }, { serverLocator: "D:/private/work/existing-path" });
+      } catch (error) {
+        expect(error).toMatchObject({ code: "REPOSITORY_RECONCILIATION_CONFLICT", statusCode: 409 });
+      }
+      expect(store.listRepositories()).toEqual(beforeDifferentRemote);
+
+      const otherCheckout = store.createRepository({
+        displayName: "other-checkout",
+        source: "local_git",
+        remoteFullName: "Acme/Shared",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/other-checkout" });
+      const beforeCrossCheckout = store.listRepositories();
+      expect(() => store.registerLocalRepository({
+        displayName: "selected-checkout",
+        source: "local_git",
+        remoteFullName: "acme/shared",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/selected-checkout" })).toThrowError(/reconciliation/i);
+      expect(store.listRepositories()).toEqual(beforeCrossCheckout);
+      expect(store.getRepository(otherCheckout.id)).toEqual(otherCheckout);
+      expect(store.getRepository(existingPath.id)).toEqual(existingPath);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects a same-path local plus separate GitHub canonical row without mutating either record", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      const local = store.createRepository({
+        displayName: "legacy-local",
+        source: "local_git",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/legacy-local-conflict" });
+      const provider = store.connectGitHubRepository({
+        displayName: "provider-record",
+        source: "github",
+        remoteFullName: "Acme/Repository",
+        defaultBranch: "main"
+      });
+      const before = store.listRepositories();
+      expect(() => store.registerLocalRepository({
+        displayName: "legacy-local",
+        source: "local_git",
+        remoteFullName: "acme/repository",
+        defaultBranch: "trunk",
+        monitoringEnabled: true
+      }, { serverLocator: "D:/private/work/legacy-local-conflict" })).toThrowError(/reconciliation/i);
+      expect(store.listRepositories()).toEqual(before);
+      expect(store.getRepository(local.id)).toEqual(local);
+      expect(store.getRepository(provider.id)).toEqual(provider);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not confuse a GitLab full name with canonical GitHub identity", () => {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    try {
+      store.createRepository({
+        displayName: "GitLab repository",
+        source: "gitlab",
+        remoteFullName: "acme/repository"
+      });
+      expect(store.findRepositoryByRemoteFullName("acme/repository")).toBeUndefined();
+      expect(store.connectGitHubRepository({
+        displayName: "GitHub repository",
+        source: "github",
+        remoteFullName: "acme/repository"
+      }).source).toBe("github");
+      expect(store.listRepositories()).toHaveLength(2);
+    } finally {
+      database.close();
+    }
+  });
+
   it("persists revisions, automation definitions, honest run drafts, and issue actions", () => {
+
+
     const { database, store, repository, workflow, policy } = fixture();
     try {
       const duplicateRevision = store.createWorkflowRevision({ workflowId: "vibe-safety", spec: workflowSpec });

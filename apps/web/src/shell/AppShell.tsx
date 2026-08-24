@@ -41,6 +41,7 @@ import { Badge } from "../design-system/Badge";
 import type { BadgeVariant } from "../design-system/Badge";
 import { Breadcrumb, type BreadcrumbItem } from "../design-system/Breadcrumb";
 import { Dialog } from "../design-system/Dialog";
+import { SettingsDialog } from "../components/SettingsDialog";
 import { desktopBridge, type DesktopBuildInfo } from "../desktop";
 
 export type DataNotice = {
@@ -138,6 +139,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   const zh = locale === "zh-CN";
 
   const [isConnectOpen, setIsConnectOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -283,8 +285,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       ) : undefined
     },
     { to: "/findings", label: zh ? "审查发现" : "Findings", icon: <ShieldAlert size={15} /> },
-    { to: "/workflows", label: zh ? "工作流" : "Workflows", icon: <GitFork size={15} /> },
-    { to: "/settings", label: zh ? "系统设置" : "Settings", icon: <Settings size={15} /> }
+    { to: "/workflows", label: zh ? "工作流" : "Workflows", icon: <GitFork size={15} /> }
   ];
 
   const activeBranch = pulse?.repository.branch || "—";
@@ -434,7 +435,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             ))}
           </div>
 
-          {/* Sidebar Footer: Heartbeat daemon indicator */}
+          {/* Sidebar Footer: Settings gear + Heartbeat daemon indicator */}
           <div
             style={{
               padding: "8px 10px",
@@ -446,6 +447,13 @@ export const AppShell: React.FC<AppShellProps> = ({
               justifyContent: "space-between"
             }}
           >
+            <IconButton
+              icon={<Settings size={14} />}
+              label={zh ? "设置" : "Settings"}
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsSettingsOpen(true)}
+            />
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <span
                 style={{
@@ -727,6 +735,15 @@ export const AppShell: React.FC<AppShellProps> = ({
           </div>
         </div>
       </Dialog>
+
+      {/* Settings Dialog */}
+      {isSettingsOpen && (
+        <SettingsDialog
+          isOpen
+          onClose={() => setIsSettingsOpen(false)}
+          health={health}
+        />
+      )}
 
       {/* Command Palette Dialog */}
       <Dialog

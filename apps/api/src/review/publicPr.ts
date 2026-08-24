@@ -1,5 +1,12 @@
+import { parseCanonicalGitHubPullRequestUrl } from "@consistency/schema";
 import type { CreateReviewJobInput, ReviewJob, ReviewJobStore } from "../jobQueue";
-import { GitHubApiError, OctokitPullRequestClient, splitRepositoryFullName, type PullRequestClient } from "../github/client";
+import {
+  classifyGitHubApiError,
+  GitHubApiError,
+  OctokitPullRequestClient,
+  type PullRequestClient
+} from "../github/client";
+import type { AuditDomainStore } from "../audit/store";
 
 export type PublicPrErrorCode =
   | "INVALID_PUBLIC_PR_URL"
@@ -29,30 +36,20 @@ export type PublicPrCoordinates = {
 };
 
 export function parsePublicPrUrl(value: string): PublicPrCoordinates {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new PublicPrError("Enter a valid GitHub pull request URL", "INVALID_PUBLIC_PR_URL", 400);
+  const parsed = parseCanonicalGitHubPullRequestUrl(value);
+  if (parsed === null) {
+    throw new PublicPrError(
+      "Enter a canonical GitHub pull request URL",
+      "INVALID_PUBLIC_PR_URL",
+      400
+    );
   }
-
-  if (url.protocol !== "https:" || url.hostname !== "github.com") {
-    throw new PublicPrError("Only https://github.com/.../pull/... URLs are supported", "INVALID_PUBLIC_PR_URL", 400);
-  }
-
-  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/);
-  if (!match) {
-    throw new PublicPrError("URL must point to a GitHub pull request", "INVALID_PUBLIC_PR_URL", 400);
-  }
-
-  const repository = `${match[1]}/${match[2]}`;
-  const { owner, repo } = splitRepositoryFullName(repository);
-  const pullRequestNumber = Number(match[3]);
-  if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
-    throw new PublicPrError("Pull request number must be a positive integer", "INVALID_PUBLIC_PR_URL", 400);
-  }
-
-  return { repository, owner, repo, pullRequestNumber };
+  return {
+    repository: parsed.fullName,
+    owner: parsed.owner,
+    repo: parsed.repo,
+    pullRequestNumber: parsed.pullRequestNumber
+  };
 }
 
 export async function enqueuePublicPrReview(options: {
@@ -61,6 +58,7 @@ export async function enqueuePublicPrReview(options: {
   publicReadToken?: string;
   llmProvider?: "deepseek" | "openai";
   llmModel?: string;
+  repositoryStore?: Pick<AuditDomainStore, "findRepositoryByRemoteFullName">;
   clientFactory?: (token?: string) => Pick<PullRequestClient, "getPullRequest">;
 }): Promise<{ coordinates: PublicPrCoordinates; job: ReviewJob }> {
   const coordinates = parsePublicPrUrl(options.url);
@@ -77,9 +75,11 @@ export async function enqueuePublicPrReview(options: {
     throw mapGitHubError(error);
   }
 
+  const canonicalRepository = options.repositoryStore?.findRepositoryByRemoteFullName(coordinates.repository);
   const input: CreateReviewJobInput = {
     kind: "pull_request",
     repository: coordinates.repository,
+    ...(canonicalRepository === undefined ? {} : { repositoryId: canonicalRepository.id }),
     pullRequestNumber: coordinates.pullRequestNumber,
     baseSha: pullRequest.baseSha,
     headSha: pullRequest.headSha,
@@ -103,15 +103,14 @@ export function mapGitHubError(error: unknown): PublicPrError {
     ...(error.rateLimitReset ? { rateLimitReset: error.rateLimitReset } : {}),
     ...(error.retryAfter ? { retryAfter: error.retryAfter } : {})
   };
-  const rateLimited = error.status === 429 || (error.status === 403 && error.rateLimitRemaining === "0");
-  if (rateLimited) {
-    return new PublicPrError("GitHub public API rate limit reached", "PUBLIC_GITHUB_RATE_LIMITED", 429, details);
+  switch (classifyGitHubApiError(error)) {
+    case "rate_limited":
+      return new PublicPrError("GitHub public API rate limit reached", "PUBLIC_GITHUB_RATE_LIMITED", 429, details);
+    case "not_found":
+      return new PublicPrError("The public GitHub pull request was not found", "PUBLIC_GITHUB_NOT_FOUND", 404);
+    case "access_denied":
+      return new PublicPrError("GitHub denied access to this public pull request", "PUBLIC_GITHUB_FORBIDDEN", 403);
+    case "provider_unavailable":
+      return new PublicPrError("GitHub public data is temporarily unavailable", "PUBLIC_GITHUB_UNAVAILABLE", 502);
   }
-  if (error.status === 404) {
-    return new PublicPrError("The public GitHub pull request was not found", "PUBLIC_GITHUB_NOT_FOUND", 404);
-  }
-  if (error.status === 401 || error.status === 403) {
-    return new PublicPrError("GitHub denied access to this public pull request", "PUBLIC_GITHUB_FORBIDDEN", 403);
-  }
-  return new PublicPrError("GitHub public data is temporarily unavailable", "PUBLIC_GITHUB_UNAVAILABLE", 502);
 }

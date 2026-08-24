@@ -86,11 +86,19 @@ export type CompleteAutomationScheduleWindowInput = {
   nextScheduledAt: string;
 };
 
+export type ConnectGitHubRepositoryOptions = {
+  /** Existing pre-verification row selected by the requested canonical identity. */
+  existingRepositoryId?: string;
+};
+
 export interface AuditDomainStore {
   listRepositories(): Repository[];
   getRepository(id: string): Repository | undefined;
+  findRepositoryByRemoteFullName(remoteFullName: string): Repository | undefined;
   getLocalRepositoryPath?(id: string): string | undefined;
   createRepository(input: CreateRepositoryRequest, options?: RegisterRepositoryOptions): Repository;
+  registerLocalRepository(input: CreateRepositoryRequest, options: RegisterRepositoryOptions & { serverLocator: string }): Repository;
+  connectGitHubRepository(input: CreateRepositoryRequest, options?: ConnectGitHubRepositoryOptions): Repository;
   setRepositoryMonitoring(id: string, enabled: boolean): Repository;
   listLocalRepositorySupervisionTargets(): LocalRepositorySupervisionTarget[];
   listRepositoryEvents(repositoryId?: string): RepositoryEvent[];
@@ -170,7 +178,33 @@ export class SQLiteAuditDomainStore implements AuditDomainStore {
     return row === undefined ? undefined : this.repositoryFromRow(row);
   }
 
+  findRepositoryByRemoteFullName(remoteFullName: string): Repository | undefined {
+    return this.findRepositoriesByRemoteFullName(remoteFullName)[0];
+  }
+
+  private findRepositoriesByRemoteFullName(remoteFullName: string): Repository[] {
+    const normalized = remoteFullName.trim().toLowerCase();
+    if (!normalized) return [];
+    const rows = this.database.prepare(`
+      SELECT * FROM repositories
+      WHERE source IN ('local_git', 'github')
+        AND remote_full_name IS NOT NULL
+        AND lower(remote_full_name) = ?
+      ORDER BY CASE source WHEN 'local_git' THEN 0 ELSE 1 END, created_at ASC, id ASC
+    `).all(normalized) as any[];
+    return rows.map(row => this.repositoryFromRow(row));
+  }
+
+  private reconciliationConflict(): never {
+    throw new AuditDomainError(
+      "Repository identity requires explicit reconciliation",
+      "REPOSITORY_RECONCILIATION_CONFLICT",
+      409
+    );
+  }
+
   getLocalRepositoryPath(id: string): string | undefined {
+
     const row = this.database.prepare("SELECT server_locator FROM repositories WHERE id = ?").get(id) as any;
     return row?.server_locator ? String(row.server_locator) : undefined;
   }
@@ -223,7 +257,142 @@ export class SQLiteAuditDomainStore implements AuditDomainStore {
     return assertFound(this.getRepository(id), "Repository");
   }
 
+  registerLocalRepository(
+    input: CreateRepositoryRequest,
+    options: RegisterRepositoryOptions & { serverLocator: string }
+  ): Repository {
+    const parsed = createRepositoryRequestSchema.parse(input);
+    if (parsed.source !== "local_git") {
+      throw new AuditDomainError("Expected a local Git repository", "LOCAL_REPOSITORY_SOURCE_REQUIRED", 400);
+    }
+    const serverLocator = resolve(options.serverLocator);
+    const localIdentityKey = `local:${serverLocator}`;
+    const trustLevel = options.trustLevel === "trusted_local" ? "trusted_local" : "untrusted_readonly";
+
+    return this.database.transaction(() => {
+      const existingPath = this.database.prepare("SELECT id FROM repositories WHERE identity_key = ?")
+        .get(localIdentityKey) as { id: string } | undefined;
+      if (existingPath !== undefined) {
+        const existing = assertFound(this.getRepository(existingPath.id), "Repository");
+        if (
+          existing.remoteFullName !== undefined
+          && parsed.remoteFullName !== undefined
+          && existing.remoteFullName.toLowerCase() !== parsed.remoteFullName.toLowerCase()
+        ) {
+          return this.reconciliationConflict();
+        }
+        const remoteFullName = existing.remoteFullName ?? parsed.remoteFullName;
+        if (
+          remoteFullName !== undefined
+          && this.findRepositoriesByRemoteFullName(remoteFullName).some(repository => repository.id !== existing.id)
+        ) {
+          return this.reconciliationConflict();
+        }
+        this.database.prepare(`
+          UPDATE repositories SET
+            display_name = ?, remote_full_name = ?, default_branch = ?, trust_level = ?,
+            monitoring_enabled = ?, updated_at = ?
+          WHERE id = ?
+        `).run(
+          parsed.displayName,
+          remoteFullName ?? null,
+          existing.defaultBranch ?? parsed.defaultBranch ?? null,
+          options.trustLevel ?? existing.trustLevel,
+          parsed.monitoringEnabled ? 1 : 0,
+          now(),
+          existing.id
+        );
+        return assertFound(this.getRepository(existing.id), "Repository");
+      }
+
+      const matchingRemote = parsed.remoteFullName === undefined
+        ? undefined
+        : this.findRepositoryByRemoteFullName(parsed.remoteFullName);
+      if (matchingRemote?.source === "local_git") return this.reconciliationConflict();
+      if (matchingRemote !== undefined) {
+        this.database.prepare(`
+          UPDATE repositories SET
+            display_name = ?, source = 'local_git', identity_key = ?, server_locator = ?,
+            remote_full_name = ?, default_branch = ?, trust_level = ?, monitoring_enabled = ?, updated_at = ?
+          WHERE id = ?
+        `).run(
+          parsed.displayName,
+          localIdentityKey,
+          serverLocator,
+          parsed.remoteFullName ?? matchingRemote.remoteFullName ?? null,
+          matchingRemote.defaultBranch ?? parsed.defaultBranch ?? null,
+          trustLevel,
+          parsed.monitoringEnabled ? 1 : 0,
+          now(),
+          matchingRemote.id
+        );
+        return assertFound(this.getRepository(matchingRemote.id), "Repository");
+      }
+      return this.createRepository(parsed, { ...options, serverLocator });
+    })();
+  }
+
+  connectGitHubRepository(
+    input: CreateRepositoryRequest,
+    options: ConnectGitHubRepositoryOptions = {}
+  ): Repository {
+    const parsed = createRepositoryRequestSchema.parse(input);
+    if (parsed.source !== "github" || parsed.remoteFullName === undefined) {
+      throw new AuditDomainError("Expected a GitHub repository", "GITHUB_REPOSITORY_SOURCE_REQUIRED", 400);
+    }
+    const remoteFullName = parsed.remoteFullName;
+
+    return this.database.transaction(() => {
+      const canonicalMatches = this.findRepositoriesByRemoteFullName(remoteFullName);
+      const selected = options.existingRepositoryId === undefined
+        ? canonicalMatches[0]
+        : this.getRepository(options.existingRepositoryId);
+      if (
+        selected !== undefined
+        && selected.source !== "local_git"
+        && selected.source !== "github"
+      ) {
+        return this.reconciliationConflict();
+      }
+      if (
+        options.existingRepositoryId !== undefined
+        && (
+          selected === undefined
+          || canonicalMatches.some(repository => repository.id !== options.existingRepositoryId)
+        )
+      ) {
+        return this.reconciliationConflict();
+      }
+      if (selected !== undefined) {
+        const providerIdentityKey = `github:${remoteFullName.toLowerCase()}`;
+        if (selected.source === "github") {
+          const identityCollision = this.database.prepare(`
+            SELECT id FROM repositories WHERE identity_key = ? AND id <> ? LIMIT 1
+          `).get(providerIdentityKey, selected.id) as { id: string } | undefined;
+          if (identityCollision !== undefined) return this.reconciliationConflict();
+        }
+        this.database.prepare(`
+          UPDATE repositories SET
+            display_name = ?, remote_full_name = ?, default_branch = ?,
+            identity_key = CASE WHEN source = 'github' THEN ? ELSE identity_key END,
+            updated_at = ?
+          WHERE id = ?
+        `).run(
+          parsed.displayName,
+          remoteFullName,
+          parsed.defaultBranch ?? selected.defaultBranch ?? null,
+          providerIdentityKey,
+          now(),
+          selected.id
+        );
+        return assertFound(this.getRepository(selected.id), "Repository");
+      }
+      return this.createRepository(parsed);
+    })();
+  }
+
   setRepositoryMonitoring(id: string, enabled: boolean): Repository {
+
     const updatedAt = now();
     const result = this.database.prepare(`
       UPDATE repositories SET monitoring_enabled = ?, updated_at = ? WHERE id = ?

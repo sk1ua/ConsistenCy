@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import type { AuditCapabilities, Automation, Repository } from "@consistency/schema";
 import { I18nProvider } from "../i18n";
 import { WorkflowPage } from "../pages/WorkflowPage";
-import { RepositoriesPage } from "./RepositoriesPage";
+import { RepositoriesPage, publicRepositoryErrorMessage } from "./RepositoriesPage";
+import { ApiRequestError } from "../api/client";
 
 const repository: Repository = {
   id: "repo-1",
@@ -78,7 +79,20 @@ describe("audit control-plane routes", () => {
     expect(buttonMatches).toHaveLength(1);
   });
 
+  it("maps typed public repository failures to localized safe UI messages", () => {
+    expect(publicRepositoryErrorMessage(
+      new ApiRequestError("provider detail", "PUBLIC_REPOSITORY_RATE_LIMITED", 429),
+      false
+    )).toContain("rate limit");
+    expect(publicRepositoryErrorMessage(
+      new ApiRequestError("provider detail", "PUBLIC_REPOSITORY_AUTH_REQUIRED", 403),
+      true
+    )).toContain("身份验证");
+    expect(publicRepositoryErrorMessage(new Error("D:/private/token"), false)).not.toContain("D:/private/token");
+  });
+
   it("shows persisted automation trigger definitions under workflow triggers without pretending scheduling is available", () => {
+
     const html = renderToString(
       <I18nProvider initialLocale="en-US">
         <MemoryRouter initialEntries={["/workflows?tab=triggers"]}>

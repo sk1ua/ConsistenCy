@@ -75,11 +75,31 @@ export type WebhookAcceptance = {
   job?: ReviewJob;
 };
 
+export function normalizePullRequestNumberQuery(pullRequestNumbers: readonly number[]): number[] {
+  if (pullRequestNumbers.length > 100) throw new RangeError("pullRequestNumbers must contain at most 100 entries");
+  const unique = new Set<number>();
+  for (const number of pullRequestNumbers) {
+    if (!Number.isSafeInteger(number) || number <= 0) {
+      throw new RangeError("pullRequestNumbers must contain positive safe integers");
+    }
+    unique.add(number);
+  }
+  return Array.from(unique);
+}
+
+function compareReviewJobRecency(left: ReviewJob, right: ReviewJob): number {
+  return right.createdAt.localeCompare(left.createdAt)
+    || right.updatedAt.localeCompare(left.updatedAt)
+    || right.id.localeCompare(left.id);
+}
+
 export interface ReviewJobStore {
   enqueue(input: CreateReviewJobInput): ReviewJob;
   list(): ReviewJob[];
   /** Per-repository history: canonical repository_id matches ONLY (Phase 4 / D1). */
   listJobsForRepository(repositoryId: string, limit?: number): ReviewJob[];
+  /** Exact latest PR review per requested number; input and output are bounded to 100. */
+  listLatestPullRequestJobsForRepository(repositoryId: string, pullRequestNumbers: readonly number[]): ReviewJob[];
   get(id: string): ReviewJob | undefined;
   nextQueued(): ReviewJob | undefined;
   claimNextQueued(): ReviewJob | undefined;
@@ -139,6 +159,26 @@ export class InMemoryJobQueue implements ReviewJobStore {
     return this.list()
       .filter(job => job.repositoryId === repositoryId)
       .slice(0, normalized);
+  }
+
+  listLatestPullRequestJobsForRepository(repositoryId: string, pullRequestNumbers: readonly number[]): ReviewJob[] {
+    const requested = normalizePullRequestNumberQuery(pullRequestNumbers);
+    if (requested.length === 0) return [];
+    const requestedSet = new Set(requested);
+    const latestByNumber = new Map<number, ReviewJob>();
+    for (const job of this.jobs.values()) {
+      if (
+        job.repositoryId !== repositoryId
+        || job.kind !== "pull_request"
+        || job.pullRequestNumber === undefined
+        || !requestedSet.has(job.pullRequestNumber)
+      ) continue;
+      const current = latestByNumber.get(job.pullRequestNumber);
+      if (current === undefined || compareReviewJobRecency(job, current) < 0) {
+        latestByNumber.set(job.pullRequestNumber, job);
+      }
+    }
+    return Array.from(latestByNumber.values()).sort(compareReviewJobRecency);
   }
 
   get(id: string): ReviewJob | undefined {

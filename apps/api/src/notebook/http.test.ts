@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer } from "../http";
 import { InMemoryJobQueue } from "../jobQueue";
+import { openDatabase, type ConsistencyDatabase } from "../db/connection";
+import { runMigrations } from "../db/migrations";
+import { SQLiteAuditDomainStore } from "../audit/store";
+import { SQLiteJobStore } from "../jobs/sqliteJobStore";
+import { enqueuePublicPrReview } from "../review/publicPr";
 import { MockLLMProvider } from "../review/llm/mockProvider";
 import { RepositorySnapshotIndexer } from "./indexer";
 import { NotebookGraph } from "./graph";
@@ -38,9 +43,11 @@ function httpRequest(port: number, method: string, path: string, payload?: unkno
 describe("public PR and Notebook HTTP routes", () => {
   const servers: ReturnType<typeof createApiServer>[] = [];
   const directories: string[] = [];
+  const databases: ConsistencyDatabase[] = [];
 
   afterEach(async () => {
     await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))));
+    for (const database of databases.splice(0)) database.close();
     for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   });
 
@@ -82,5 +89,51 @@ describe("public PR and Notebook HTTP routes", () => {
     expect(stream.body).toContain("event: citation");
     expect(stream.body).toContain("event: text.delta");
     expect(stream.body).toContain("event: run.completed");
+  });
+
+  it("persists canonical repository association through the public PR HTTP route and SQLite queue", async () => {
+    const database = openDatabase(":memory:");
+    databases.push(database);
+    runMigrations(database);
+    const auditStore = new SQLiteAuditDomainStore(database);
+    const jobs = new SQLiteJobStore(database);
+    const repository = auditStore.connectGitHubRepository({
+      displayName: "Repository",
+      source: "github",
+      remoteFullName: "Acme/Repository",
+      defaultBranch: "main"
+    });
+    const notebooks = new InMemoryNotebookStore();
+    const server = createApiServer({
+      jobs,
+      auditStore,
+      notebookStore: notebooks,
+      publicPrAnalysisEnabled: true,
+      publicPr: url => enqueuePublicPrReview({
+        url,
+        jobs,
+        repositoryStore: auditStore,
+        clientFactory: () => ({
+          getPullRequest: async () => ({ baseSha: "a".repeat(40), headSha: "b".repeat(40) })
+        })
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const created = await httpRequest(port, "POST", "/reviews/public-pr", {
+      url: "https://github.com/ACME/REPOSITORY/pull/17"
+    });
+    expect(created.status).toBe(202);
+    const response = JSON.parse(created.body) as { jobId: string };
+    expect(jobs.get(response.jobId)).toMatchObject({
+      id: response.jobId,
+      repositoryId: repository.id,
+      accessMode: "public_read",
+      publicationPolicy: "disabled"
+    });
+    expect(jobs.listJobsForRepository(repository.id)).toEqual([
+      expect.objectContaining({ id: response.jobId, repositoryId: repository.id })
+    ]);
   });
 });

@@ -7,6 +7,21 @@ import { vcsChangedFileSchema, vcsCommitSummarySchema } from "./vcs";
 
 export const jobListResponseSchema = z.object({ jobs: z.array(reviewJobSchema) }).strict();
 export const jobDetailResponseSchema = z.object({ job: reviewJobSchema }).strict();
+export const REPOSITORY_REVIEWS_MAX_LIMIT = 200;
+export const repositoryReviewsResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1).max(255),
+  reviews: z.array(reviewJobSchema).max(REPOSITORY_REVIEWS_MAX_LIMIT)
+}).strict().superRefine((response, context) => {
+  response.reviews.forEach((review, index) => {
+    if (review.repositoryId !== response.repositoryId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reviews", index, "repositoryId"],
+        message: "repository review must match the canonical opaque repository identifier"
+      });
+    }
+  });
+});
 export const reportResponseSchema = z.object({ report: reviewReportSchema }).strict();
 export const recentReportsResponseSchema = z.object({ reports: z.array(reviewReportSchema) }).strict();
 export const statsResponseSchema = z.object({
@@ -147,20 +162,175 @@ export const repositoryCommitsResponseSchema = z.discriminatedUnion("available",
   repositoryCommitsUnavailableResponseSchema
 ]);
 
+const providerTextSchema = (maxLength: number) => z.string()
+  .min(1)
+  .max(maxLength)
+  .refine(value => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value), {
+    message: "provider text must be clean and unmodified"
+  });
+
+export type GitHubRepositoryIdentity = {
+  readonly owner: string;
+  readonly repo: string;
+  readonly fullName: string;
+};
+
+export function parseGitHubRepositoryFullName(value: string): GitHubRepositoryIdentity | null {
+  if (value !== value.trim() || /[\s\u0000-\u001f\u007f]/.test(value)) return null;
+  const parts = value.split("/");
+  if (parts.length !== 2) return null;
+  const owner = parts[0]!;
+  const repo = parts[1]!;
+  if (owner.length < 1 || owner.length > 39) return null;
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(owner)) return null;
+  if (repo.length < 1 || repo.length > 100) return null;
+  if (!/^[A-Za-z0-9._-]+$/.test(repo) || /^\.+$/.test(repo)) return null;
+  return { owner, repo, fullName: `${owner}/${repo}` };
+}
+
+export function parseCanonicalGitHubRepositoryUrl(value: string): GitHubRepositoryIdentity | null {
+  if (
+    value !== value.trim()
+    || value.includes("%")
+    || value.includes("\\")
+    || /[\s\u0000-\u001f\u007f]/.test(value)
+    || !value.startsWith("https://github.com/")
+  ) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:"
+      || url.hostname !== "github.com"
+      || url.username !== ""
+      || url.password !== ""
+      || url.port !== ""
+      || url.search !== ""
+      || url.hash !== ""
+    ) return null;
+    const match = /^\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+    if (!match) return null;
+    const identity = parseGitHubRepositoryFullName(`${match[1]}/${match[2]}`);
+    if (identity === null) return null;
+    return value === `https://github.com/${identity.fullName}` ? identity : null;
+  } catch {
+    return null;
+  }
+}
+
+export type CanonicalGitHubPullRequestUrl = GitHubRepositoryIdentity & {
+  readonly pullRequestNumber: number;
+};
+
+export function parseCanonicalGitHubPullRequestUrl(value: string): CanonicalGitHubPullRequestUrl | null {
+  if (
+    value !== value.trim()
+    || value.includes("%")
+    || value.includes("\\")
+    || /[\s\u0000-\u001f\u007f]/.test(value)
+    || !value.startsWith("https://github.com/")
+  ) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:"
+      || url.hostname !== "github.com"
+      || url.username !== ""
+      || url.password !== ""
+      || url.port !== ""
+      || url.search !== ""
+      || url.hash !== ""
+    ) return null;
+    const match = /^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)$/.exec(url.pathname);
+    if (!match) return null;
+    const identity = parseGitHubRepositoryFullName(`${match[1]}/${match[2]}`);
+    if (identity === null) return null;
+    const pullRequestNumber = Number(match[3]);
+    if (
+      !Number.isSafeInteger(pullRequestNumber)
+      || pullRequestNumber <= 0
+      || match[3] !== String(pullRequestNumber)
+    ) return null;
+    const canonical = `https://github.com/${identity.fullName}/pull/${pullRequestNumber}`;
+    return value === canonical ? { ...identity, pullRequestNumber } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isCanonicalGitHubPullRequestUrl(
+  value: string,
+  pullRequestNumber?: number,
+  repositoryFullName?: string
+): boolean {
+  const parsed = parseCanonicalGitHubPullRequestUrl(value);
+  if (parsed === null) return false;
+  if (pullRequestNumber !== undefined && parsed.pullRequestNumber !== pullRequestNumber) return false;
+  if (repositoryFullName === undefined) return true;
+  const expectedIdentity = parseGitHubRepositoryFullName(repositoryFullName);
+  return expectedIdentity !== null
+    && parsed.fullName.toLowerCase() === expectedIdentity.fullName.toLowerCase();
+}
+
+export function pullRequestLifecycleErrors(input: {
+  readonly state: "open" | "closed";
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly closedAt: string | null;
+  readonly mergedAt: string | null;
+}): string[] {
+  const errors: string[] = [];
+  const createdAt = Date.parse(input.createdAt);
+  const updatedAt = Date.parse(input.updatedAt);
+  const closedAt = input.closedAt === null ? undefined : Date.parse(input.closedAt);
+  const mergedAt = input.mergedAt === null ? undefined : Date.parse(input.mergedAt);
+  if (input.state === "open" && (closedAt !== undefined || mergedAt !== undefined)) {
+    errors.push("open pull request must not have closed or merged timestamps");
+  }
+  if (input.state === "closed" && closedAt === undefined) {
+    errors.push("closed pull request must have a closed timestamp");
+  }
+  if (updatedAt < createdAt || (closedAt !== undefined && closedAt < createdAt) || (mergedAt !== undefined && mergedAt < createdAt)) {
+    errors.push("pull request lifecycle timestamps must not predate creation");
+  }
+  if (mergedAt !== undefined && (closedAt === undefined || mergedAt > closedAt)) {
+    errors.push("merged timestamp must not follow the closed timestamp");
+  }
+  if ((closedAt !== undefined && updatedAt < closedAt) || (mergedAt !== undefined && updatedAt < mergedAt)) {
+    errors.push("pull request update timestamp must not predate closure or merge");
+  }
+  return errors;
+}
+
+const safePullRequestUrlSchema = z.string().url().max(2_048).refine(
+  value => isCanonicalGitHubPullRequestUrl(value),
+  { message: "pull request URL must be a canonical github.com pull URL" }
+);
+
+const githubRepositoryFullNameSchema = providerTextSchema(140).refine(
+  value => parseGitHubRepositoryFullName(value) !== null,
+  { message: "repository identity must use canonical GitHub owner/repository coordinates" }
+);
+
 export const pullRequestSummarySchema = z.object({
   provider: z.literal("github"),
-  number: z.number().int().positive(),
-  title: z.string().trim().min(1),
+  number: z.number().int().positive().safe(),
+  title: providerTextSchema(1_024),
   state: z.enum(["open", "closed"]),
-  author: z.string().trim().min(1).nullable(),
-  baseRef: z.string().trim().min(1),
-  headRef: z.string().trim().min(1),
-  baseSha: z.string().trim().min(1),
-  headSha: z.string().trim().min(1),
+  draft: z.boolean(),
+  labels: z.array(z.object({
+    name: providerTextSchema(100),
+    color: providerTextSchema(100)
+  }).strict()).max(100),
+  author: providerTextSchema(100).nullable(),
+  baseRef: providerTextSchema(255),
+  headRef: providerTextSchema(255),
+  baseSha: providerTextSchema(64),
+  headSha: providerTextSchema(64),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  closedAt: z.string().datetime().nullable(),
   mergedAt: z.string().datetime().nullable(),
-  htmlUrl: z.string().url().refine(value => value.startsWith("https://")),
+  htmlUrl: safePullRequestUrlSchema,
   latestReview: z.object({
     jobId: z.string().trim().min(1),
     status: z.enum(["queued", "running", "awaiting_publish", "publishing", "succeeded", "failed", "publish_failed", "cancelled"]),
@@ -168,25 +338,59 @@ export const pullRequestSummarySchema = z.object({
     riskLevel: riskLevelSchema.optional(),
     createdAt: z.string().datetime()
   }).strict().optional()
-}).strict();
+}).strict().superRefine((pullRequest, context) => {
+  if (!isCanonicalGitHubPullRequestUrl(pullRequest.htmlUrl, pullRequest.number)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["htmlUrl"], message: "pull request URL number mismatch" });
+  }
+  for (const message of pullRequestLifecycleErrors(pullRequest)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message });
+  }
+});
+
+export const repositoryPullRequestsUnavailableReasonCodeSchema = z.enum([
+  "not_github",
+  "identity_unavailable",
+  "not_found",
+  "access_denied",
+  "rate_limited",
+  "provider_unavailable",
+  "invalid_provider_data"
+]);
 
 const repositoryPullRequestsAvailableResponseSchema = z.object({
   repositoryId: z.string().trim().min(1),
+  repositoryFullName: githubRepositoryFullNameSchema,
   available: z.literal(true),
-  pullRequests: z.array(pullRequestSummarySchema)
+  page: z.object({
+    limit: z.literal(100),
+    truncated: z.boolean()
+  }).strict(),
+  pullRequests: z.array(pullRequestSummarySchema).max(100)
 }).strict();
 
 const repositoryPullRequestsUnavailableResponseSchema = z.object({
   repositoryId: z.string().trim().min(1),
   available: z.literal(false),
-  reason: z.string().trim().min(1),
+  reasonCode: repositoryPullRequestsUnavailableReasonCodeSchema,
+  reason: providerTextSchema(255),
   pullRequests: z.array(pullRequestSummarySchema).length(0)
 }).strict();
 
 export const repositoryPullRequestsResponseSchema = z.discriminatedUnion("available", [
   repositoryPullRequestsAvailableResponseSchema,
   repositoryPullRequestsUnavailableResponseSchema
-]);
+]).superRefine((response, context) => {
+  if (!response.available) return;
+  response.pullRequests.forEach((pullRequest, index) => {
+    if (!isCanonicalGitHubPullRequestUrl(pullRequest.htmlUrl, pullRequest.number, response.repositoryFullName)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pullRequests", index, "htmlUrl"],
+        message: "pull request URL repository identity mismatch"
+      });
+    }
+  });
+});
 
 export const reviewPreparationSourceWorkingTreeSchema = z.object({
   available: z.boolean(),
@@ -251,11 +455,13 @@ export type GitRemoteInfo = z.infer<typeof gitRemoteInfoSchema>;
 export type RepositoryGitStatusResponse = z.infer<typeof repositoryGitStatusResponseSchema>;
 export type RepositoryCommitsResponse = z.infer<typeof repositoryCommitsResponseSchema>;
 export type PullRequestSummary = z.infer<typeof pullRequestSummarySchema>;
+export type RepositoryPullRequestsUnavailableReasonCode = z.infer<typeof repositoryPullRequestsUnavailableReasonCodeSchema>;
 export type RepositoryPullRequestsResponse = z.infer<typeof repositoryPullRequestsResponseSchema>;
 export type ReviewPreparationResponse = z.infer<typeof reviewPreparationResponseSchema>;
 
 export type JobListResponse = z.infer<typeof jobListResponseSchema>;
 export type JobDetailResponse = z.infer<typeof jobDetailResponseSchema>;
+export type RepositoryReviewsResponse = z.infer<typeof repositoryReviewsResponseSchema>;
 export type ReportResponse = z.infer<typeof reportResponseSchema>;
 export type RecentReportsResponse = z.infer<typeof recentReportsResponseSchema>;
 export type StatsResponse = z.infer<typeof statsResponseSchema>;

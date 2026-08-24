@@ -11,7 +11,7 @@ import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
 import type { SettingsSnapshot } from "./config/settings";
 import type { RepositoryPullRequestRequest } from "./github/pullRequestReader";
-import type { AuditDomainStore } from "./audit/store";
+import { AuditDomainError, type AuditDomainStore } from "./audit/store";
 
 const validAnalysisResult = {
   risk_score: 0.1,
@@ -152,12 +152,31 @@ class TestAuditStore implements AuditDomainStore {
     return this.repositories.get(id);
   }
 
+  findRepositoryByRemoteFullName(remoteFullName: string): Repository | undefined {
+    const normalized = remoteFullName.toLowerCase();
+    return this.listRepositories().find(repository => repository.remoteFullName?.toLowerCase() === normalized);
+  }
+
   getLocalRepositoryPath(id: string): string | undefined {
     return this.localRepositoryPaths.get(id);
   }
 
+  registerLocalRepository(): never { throw new Error("Not implemented in HTTP route tests"); }
+  connectGitHubRepository(): never { throw new Error("Not implemented in HTTP route tests"); }
   createRepository(): never { throw new Error("Not implemented in HTTP route tests"); }
-  setRepositoryMonitoring(): never { throw new Error("Not implemented in HTTP route tests"); }
+  setRepositoryMonitoring(id: string, enabled: boolean): Repository {
+    const existing = this.repositories.get(id);
+    if (!existing) {
+      throw new AuditDomainError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+    }
+    const updated: Repository = {
+      ...existing,
+      monitoringEnabled: enabled,
+      updatedAt: new Date().toISOString()
+    };
+    this.repositories.set(id, updated);
+    return updated;
+  }
   listLocalRepositorySupervisionTargets(): never { throw new Error("Not implemented in HTTP route tests"); }
   listRepositoryEvents(): never { throw new Error("Not implemented in HTTP route tests"); }
   getRepositoryEvent(): never { throw new Error("Not implemented in HTTP route tests"); }
@@ -789,7 +808,7 @@ describe("createApiServer", () => {
     expect(unavailable.reason).not.toContain(unbornRepository);
   });
 
-  it("marks pull requests unavailable when a repository has no GitHub identity", async () => {
+  it("returns 404 for an unregistered opaque repository ID", async () => {
     let pullRequestServiceCalled = false;
     const server = createApiServer({
       pullRequestService: {
@@ -798,6 +817,7 @@ describe("createApiServer", () => {
           return {
             repositoryId: input.repositoryId,
             available: false,
+            reasonCode: "identity_unavailable",
             reason: "GitHub repository remote unavailable",
             pullRequests: []
           };
@@ -808,15 +828,9 @@ describe("createApiServer", () => {
     const port = await listen(server);
 
     const response = await getJson(port, "/repositories/repository-without-a-github-remote/pull-requests");
-    const payload = repositoryPullRequestsResponseSchema.parse(response.body);
 
-    expect(response.status).toBe(200);
-    expect(payload).toEqual({
-      repositoryId: "repository-without-a-github-remote",
-      available: false,
-      reason: "GitHub repository remote unavailable",
-      pullRequests: []
-    });
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({ error: { code: "REPOSITORY_NOT_FOUND" } });
     expect(pullRequestServiceCalled).toBe(false);
   });
 
@@ -831,12 +845,16 @@ describe("createApiServer", () => {
           requests.push(input);
           return {
             repositoryId: input.repositoryId,
+            repositoryFullName: "Octo/Repository",
             available: true,
+            page: { limit: 100, truncated: true },
             pullRequests: [{
               provider: "github",
               number: 42,
               title: "Provider title",
               state: "open",
+              draft: false,
+              labels: [{ name: "review", color: "ededed" }],
               author: "octocat",
               baseRef: "main",
               headRef: "feature/provider",
@@ -844,6 +862,7 @@ describe("createApiServer", () => {
               headSha: "head-456",
               createdAt: "2026-08-01T00:00:00.000Z",
               updatedAt: "2026-08-02T00:00:00.000Z",
+              closedAt: null,
               mergedAt: null,
               htmlUrl: "https://github.com/octo/repository/pull/42"
             }]
@@ -860,7 +879,9 @@ describe("createApiServer", () => {
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
       repositoryId: repository.id,
+      repositoryFullName: "Octo/Repository",
       available: true,
+      page: { limit: 100, truncated: true },
       pullRequests: [{ provider: "github", number: 42, title: "Provider title" }]
     });
     expect(requests).toHaveLength(1);
@@ -870,6 +891,120 @@ describe("createApiServer", () => {
       registeredSource: "github"
     });
     expect(requests[0]).not.toHaveProperty("localPath");
+  });
+
+  it.each([
+    ["missing canonical identity", (repositoryId: string) => ({
+      repositoryId,
+      available: true,
+      page: { limit: 100, truncated: false },
+      pullRequests: []
+    })],
+    ["trailing-hyphen owner identity", (repositoryId: string) => ({
+      repositoryId,
+      repositoryFullName: "bad-/repo",
+      available: true,
+      page: { limit: 100, truncated: false },
+      pullRequests: []
+    })],
+    ["all-dot repository identity", (repositoryId: string) => ({
+      repositoryId,
+      repositoryFullName: "owner/...",
+      available: true,
+      page: { limit: 100, truncated: false },
+      pullRequests: []
+    })],
+    ["overlong identity components", (repositoryId: string) => ({
+      repositoryId,
+      repositoryFullName: `${"a".repeat(40)}/${"r".repeat(101)}`,
+      available: true,
+      page: { limit: 100, truncated: false },
+      pullRequests: []
+    })],
+    ["more than 100 rows", (repositoryId: string) => ({
+      repositoryId,
+      repositoryFullName: "Octo/Repository",
+      available: true,
+      page: { limit: 100, truncated: true },
+      pullRequests: Array.from({ length: 101 }, (_, index) => ({
+        provider: "github" as const,
+        number: index + 1,
+        title: `Provider PR ${index + 1}`,
+        state: "open" as const,
+        draft: false,
+        labels: [],
+        author: null,
+        baseRef: "main",
+        headRef: `feature-${index + 1}`,
+        baseSha: "base-123",
+        headSha: "head-456",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-02T00:00:00.000Z",
+        closedAt: null,
+        mergedAt: null,
+        htmlUrl: `https://github.com/Octo/Repository/pull/${index + 1}`
+      }))
+    })]
+  ])("fails closed for an invalid injected PR service response: %s", async (_case, invalidResponse) => {
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerRemote("Invalid service repository", "Octo/Repository");
+    const server = createApiServer({
+      auditStore,
+      pullRequestService: {
+        list: async input => invalidResponse(input.repositoryId) as never
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, `/repositories/${repository.id}/pull-requests`);
+    const serialized = JSON.stringify(response.body);
+
+    expect(response.status).toBe(502);
+    expect(response.body).toEqual({
+      error: {
+        code: "PULL_REQUEST_HISTORY_RESPONSE_INVALID",
+        message: "Pull request history response is unavailable"
+      }
+    });
+    expect(serialized).not.toContain("Zod");
+    expect(serialized).not.toContain("pullRequests.100");
+    expect(serialized).not.toContain("repositoryFullName");
+  });
+
+  it("serves sanitized typed pull request unavailability without secrets or paths", async () => {
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerRemote("Unavailable repository", "Octo/Repository");
+    const server = createApiServer({
+      auditStore,
+      pullRequestService: {
+        list: async input => ({
+          repositoryId: input.repositoryId,
+          available: false,
+          reasonCode: "rate_limited",
+          reason: "GitHub rate limit reached",
+          pullRequests: []
+        })
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, `/repositories/${repository.id}/pull-requests`);
+    const payload = repositoryPullRequestsResponseSchema.parse(response.body);
+    const serialized = JSON.stringify(response.body);
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      repositoryId: repository.id,
+      available: false,
+      reasonCode: "rate_limited",
+      reason: "GitHub rate limit reached",
+      pullRequests: []
+    });
+    expect(serialized).not.toContain("Authorization");
+    expect(serialized).not.toContain("token");
+    expect(serialized).not.toMatch(/[A-Za-z]:[\\/]/);
   });
 
   it("rejects /demo/seed as route not found", async () => {
@@ -1336,5 +1471,46 @@ describe("createApiServer", () => {
       openai: { configured: false, defaultModel: "gpt-4.1-mini" }
     });
     expect(preparation.model.pendingRestart).toBeNull();
+  });
+
+  it("handles set-monitoring as POST, updates monitoring status, and handles invalid inputs", async () => {
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Monitored Repo", "D:/workspace/repo");
+    let changedCount = 0;
+    const server = createApiServer({
+      auditStore,
+      onAuditRepositoriesChanged: async () => {
+        changedCount++;
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    // 1. Success case: POST with valid boolean payload
+    const postRes = await postJson(port, `/repositories/${repository.id}/actions/set-monitoring`, { enabled: true });
+    expect(postRes.status).toBe(200);
+    expect(postRes.body).toMatchObject({
+      repository: {
+        id: repository.id,
+        monitoringEnabled: true
+      }
+    });
+    expect(changedCount).toBe(1);
+
+    // 2. Reject GET on set-monitoring endpoint
+    const getRes = await getJson(port, `/repositories/${repository.id}/actions/set-monitoring`);
+    expect(getRes.status).toBe(404);
+
+    // 3. Reject invalid body (not boolean)
+    const invalidBodyRes = await postJson(port, `/repositories/${repository.id}/actions/set-monitoring`, { enabled: "true" as any });
+    expect(invalidBodyRes.status).toBe(400);
+
+    // 4. Reject extra properties (strict)
+    const extraPropRes = await postJson(port, `/repositories/${repository.id}/actions/set-monitoring`, { enabled: false, extra: 123 });
+    expect(extraPropRes.status).toBe(400);
+
+    // 5. Unknown repository ID
+    const unknownRepoRes = await postJson(port, `/repositories/repo_nonexistent/actions/set-monitoring`, { enabled: true });
+    expect(unknownRepoRes.status).toBe(404);
   });
 });

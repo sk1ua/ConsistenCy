@@ -9,15 +9,16 @@ import {
   type ReviewReport
 } from "@consistency/schema";
 import type { ConsistencyDatabase } from "../db/connection";
-import type {
-  CreateReviewJobInput,
-  GitHubCommentStatus,
-  JobStatus,
-  ReviewJob,
-  ReviewJobStore,
-  WebhookAcceptance,
-  WebhookDelivery,
-  WebhookJobInput
+import {
+  normalizePullRequestNumberQuery,
+  type CreateReviewJobInput,
+  type GitHubCommentStatus,
+  type JobStatus,
+  type ReviewJob,
+  type ReviewJobStore,
+  type WebhookAcceptance,
+  type WebhookDelivery,
+  type WebhookJobInput
 } from "../jobQueue";
 
 class FencingRollbackError extends Error {
@@ -81,6 +82,30 @@ export class SQLiteJobStore implements ReviewJobStore {
     const rows = this.database
       .prepare("SELECT * FROM jobs WHERE repository_id = ? ORDER BY created_at DESC LIMIT ?")
       .all(repositoryId, normalized) as any[];
+    return rows.map(row => this.rowToJob(row));
+  }
+
+  listLatestPullRequestJobsForRepository(repositoryId: string, pullRequestNumbers: readonly number[]): ReviewJob[] {
+    const requested = normalizePullRequestNumberQuery(pullRequestNumbers);
+    if (requested.length === 0) return [];
+    const placeholders = requested.map(() => "?").join(", ");
+    const rows = this.database.prepare(`
+      WITH ranked AS (
+        SELECT j.*, r.report_json,
+          ROW_NUMBER() OVER (
+            PARTITION BY j.pull_request_number
+            ORDER BY j.created_at DESC, j.updated_at DESC, j.id DESC
+          ) AS latest_rank
+        FROM jobs j
+        LEFT JOIN reports r ON r.job_id = j.id
+        WHERE j.repository_id = ?
+          AND j.type = 'PR_REVIEW'
+          AND j.pull_request_number IN (${placeholders})
+      )
+      SELECT * FROM ranked
+      WHERE latest_rank = 1
+      ORDER BY created_at DESC, updated_at DESC, id DESC
+    `).all(repositoryId, ...requested) as any[];
     return rows.map(row => this.rowToJob(row));
   }
 
@@ -593,8 +618,10 @@ export class SQLiteJobStore implements ReviewJobStore {
   }
 
   private rowToJob(row: any): ReviewJob {
-    const reportRow = this.database.prepare("SELECT report_json FROM reports WHERE job_id = ?").get(row.id) as { report_json: string } | undefined;
-    const report = reportRow ? reviewReportSchema.parse(JSON.parse(reportRow.report_json)) : undefined;
+    const reportJson = Object.prototype.hasOwnProperty.call(row, "report_json")
+      ? row.report_json as string | null
+      : (this.database.prepare("SELECT report_json FROM reports WHERE job_id = ?").get(row.id) as { report_json: string } | undefined)?.report_json;
+    const report = reportJson ? reviewReportSchema.parse(JSON.parse(reportJson)) : undefined;
 
     return {
       id: row.id,

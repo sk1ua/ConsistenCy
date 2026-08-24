@@ -44,6 +44,7 @@
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
     "esbuild": "^0.25.12",
+    "happy-dom": "^20.11.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",

@@ -76,7 +76,7 @@ In Electron Desktop mode:
 ## 4. Pull Request Lifecycle Authority
 
 - GitHub remains authoritative for Pull Request lifecycle state. Provider `state` is `open` or `closed`.
-- `mergedAt` is required nullable metadata. The UI derives the merged display state only when `state` is `closed` and `mergedAt` is non-null.
+- `closedAt` and `mergedAt` are required nullable metadata. Open rows have neither timestamp; closed rows require `closedAt`; merged rows are closed rows with non-null `mergedAt`. Lifecycle timestamps cannot predate creation, and merge cannot follow closure. The UI derives the merged display state only when `state` is `closed` and `mergedAt` is non-null.
 - ConsistenCy never infers a Pull Request's merged state from local Git history, merge commits, branch topology, or commit messages.
 
 For workspace Pull Request listing, credential candidates are attempted in this exact order:
@@ -85,7 +85,9 @@ For workspace Pull Request listing, credential candidates are attempted in this 
 2. Configured server-side public-read token.
 3. Anonymous access.
 
-Candidates are deduplicated and each candidate is attempted at most once. A malformed provider payload is reported as invalid provider data and is not retried as a credential failure. This workspace listing behavior is separate from standalone public PR URL ingestion, which remains read-only and does not use GitHub App credentials merely because an App is configured.
+Candidates are deduplicated and each candidate is attempted at most once. A malformed provider payload is reported as invalid provider data and is not retried as a credential failure. Public repository connection follows the same fail-closed rule: only typed GitHub API/access failures advance to another credential candidate. Rate limiting is classified consistently for HTTP 429, exhausted 403 responses, and 403 responses carrying a valid `Retry-After`. `Retry-After` accepts only non-negative decimal delta-seconds or strict IMF-fixdate values; locale dates, ISO dates, obsolete HTTP-date forms, and date-like strings are rejected. This workspace listing behavior is separate from standalone public PR URL ingestion, which remains read-only and does not use GitHub App credentials merely because an App is configured.
+
+The Pull Requests tab performs one provider-authoritative GitHub request only when that tab is active. The request asks for the newest Pull Requests first and returns at most 100 summaries. Available responses carry the server-resolved canonical `repositoryFullName`; the renderer creates an external link only when the PR URL equals the exact raw canonical reconstruction and matches that identity and PR number, otherwise it renders plain text. Dot segments, parent-segment normalization, backslashes, percent encoding, and other WHATWG normalization differences fail closed through the shared schema/provider/renderer parser. A `page.truncated` flag states whether GitHub advertised an older page; when true, the UI says only the most recent 100 are shown without claiming a total. `latestReview` is resolved by an exact bounded store lookup over only those returned PR numbers, matching the canonical opaque `repositoryId` and PR-review kind. The memory and SQLite adapters return one latest job per number; SQLite performs one bounded query, so an older requested PR remains associated even after more than 200 newer jobs for another PR. Legacy unassociated jobs, other repositories, and non-PR jobs are ignored. This phase has no background polling, synchronization, automatic loading of older records, or infinite scrolling. The summaries remain public read-only metadata: no comments, labels, status, merge state, or other provider data can be published or mutated.
 
 ## 5. Repository Workflows (CKPT3 Phase 3)
 
@@ -119,6 +121,15 @@ prototype placeholder):
 - Legacy jobs without a canonical association remain readable in the global
   runs view and simply never appear in per-repository lists (honest
   missing-association, per owner decision D1).
+- Overview recent reviews, the Reviews tab, and its navigation count consume
+  the same canonical repository-reviews query and filter only exact opaque
+  `repositoryId` equality. Display name, remote full name, repository name,
+  and legacy-name fallbacks are not association mechanisms, including when
+  two registered repositories share the same display or remote text.
+- The shared `{ repositoryId, reviews }` response is strict and bounded to 200
+  rows. API egress and Web ingress both validate it; response identity must
+  match the requested opaque ID and every row must carry that same ID.
+  Malformed responses fail closed with fixed non-leaking errors.
 - The list shows only fields that truly exist on the job/report DTO —
   status (existing vocabulary), created/finished timestamps, model
   provenance (llmProvider/llmModel as persisted), source (PR number /

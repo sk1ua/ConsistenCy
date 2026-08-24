@@ -539,7 +539,15 @@ const zh: Record<string, string> = {
   "Diff view mode": "差异视图模式",
   "Unified": "统一视图",
   "Split": "分栏视图",
-  "No changes to show.": "没有可显示的变更。"
+  "No changes to show.": "没有可显示的变更。",
+  // Settings dialog section labels
+  "Models": "模型",
+  "Appearance": "外观",
+  "Desktop": "桌面端",
+  "About": "关于",
+  "Coming soon": "即将上线",
+  "Saved — restart required": "配置已保存，需重启后生效",
+  "Settings sections": "设置分区"
 };
 
 function defaultLocale(): Locale {

@@ -370,3 +370,141 @@
   opacity: 0.8;
   margin-left: auto;
 }
+
+/* ===== Settings Dialog internal layout ===== */
+.settings-dialog-layout {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  min-height: 320px;
+}
+
+.settings-dialog-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 180px;
+  flex-shrink: 0;
+  padding: 10px 8px;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-muted);
+}
+
+.settings-dialog-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-sm, 4px);
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ds-transition-fast, 120ms ease), color var(--ds-transition-fast, 120ms ease);
+}
+
+.settings-dialog-nav-item:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  color: var(--foreground);
+}
+
+.settings-dialog-nav-item--active {
+  background: var(--surface-subtle);
+  color: var(--primary-strong);
+  border-color: var(--border-subtle);
+  font-weight: 700;
+}
+
+.settings-dialog-nav-item--disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.settings-dialog-nav-item--disabled:hover {
+  background: transparent;
+}
+
+.settings-dialog-nav-item small {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.settings-dialog-content {
+  flex: 1;
+  min-width: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-dialog-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.settings-dialog-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===== Dialog-scoped modal presentation ===== */
+/* Override the page-level .settings-group two-column grid (description sidebar +
+   form fields) with a single-column stack: section title+description on top,
+   full-width form fields below. Logic reuse != layout reuse. */
+
+.settings-dialog-content .settings-group {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-dialog-content .settings-group-title {
+  padding: 0 0 10px;
+  flex-direction: column;
+  gap: 4px;
+  border-right: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-dialog-content .settings-group-title > svg {
+  display: none;
+}
+
+.settings-dialog-content .settings-group-title h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.settings-dialog-content .settings-group-title p {
+  font-size: 12px;
+}
+
+.settings-dialog-content .settings-fields {
+  padding: 0;
+  gap: 14px;
+}
+
+.settings-dialog-content .source-mode-guide {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  padding: 12px 14px;
+}
+
+.settings-dialog-content .source-mode-guide > span {
+  flex: 1 1 200px;
+}

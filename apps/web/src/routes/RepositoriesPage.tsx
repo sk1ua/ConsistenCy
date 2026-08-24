@@ -19,15 +19,32 @@ import {
   ShieldCheck,
   X
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { useI18n } from "../i18n";
 import { StatusBadge } from "../components/StatusBadge";
 import { Button, ButtonLink } from "../design-system/Button";
+import { ApiRequestError } from "../api/client";
 
 function localRepositoryName(pulse: HeartbeatPulse): string {
   if (pulse.repository.root === "unknown") return "Local repository";
   const segments = pulse.repository.root.split(/[\\/]/).filter(Boolean);
   return segments.at(-1) ?? "Local repository";
+}
+
+export function publicRepositoryErrorMessage(error: unknown, zh: boolean): string | undefined {
+  if (!error) return undefined;
+  const code = error instanceof ApiRequestError ? error.code : undefined;
+  const messages: Record<string, [string, string]> = {
+    PUBLIC_REPOSITORY_INVALID_INPUT: ["Enter owner/repository or a canonical GitHub URL.", "请输入 owner/repository 或规范的 GitHub URL。"],
+    PUBLIC_REPOSITORY_UNSUPPORTED_HOST: ["Only public repositories on github.com are supported.", "仅支持 github.com 上的公开仓库。"],
+    PUBLIC_REPOSITORY_NOT_FOUND: ["The public repository was not found or is unavailable.", "未找到该公开仓库，或仓库当前不可用。"],
+    PUBLIC_REPOSITORY_AUTH_REQUIRED: ["This repository is private or requires GitHub authentication.", "该仓库为私有仓库或需要 GitHub 身份验证。"],
+    PUBLIC_REPOSITORY_RATE_LIMITED: ["GitHub rate limit reached. Try again after the limit resets.", "已达到 GitHub 速率限制，请在限制重置后重试。"],
+    PUBLIC_REPOSITORY_PROVIDER_UNAVAILABLE: ["GitHub is temporarily unavailable. Try again later.", "GitHub 暂时不可用，请稍后重试。"],
+    PUBLIC_REPOSITORY_CONNECTION_UNAVAILABLE: ["Public repository connection is unavailable.", "公开仓库连接当前不可用。"]
+  };
+  const message = code === undefined ? undefined : messages[code];
+  if (message) return message[zh ? 1 : 0];
+  return zh ? "无法连接公开仓库，请重试。" : "Could not connect the public repository. Try again.";
 }
 
 export function RepositoriesPage({
@@ -42,6 +59,9 @@ export function RepositoriesPage({
   addRepositoryError,
   monitoringError,
   onAddRepository,
+  connectingPublicRepository = false,
+  publicRepositoryError,
+  onConnectPublicRepository,
   monitoringRepositoryId,
   onSetMonitoring
 }: {
@@ -56,12 +76,14 @@ export function RepositoriesPage({
   addRepositoryError?: string;
   monitoringError?: string;
   onAddRepository?: () => void;
+  connectingPublicRepository?: boolean;
+  publicRepositoryError?: unknown;
+  onConnectPublicRepository?: (input: string) => Promise<Repository>;
   monitoringRepositoryId?: string;
   onSetMonitoring?: (repository: Repository, enabled: boolean) => void;
 }) {
   const { locale } = useI18n();
   const zh = locale === "zh-CN";
-  const navigate = useNavigate();
   const [filterQuery, setFilterQuery] = useState("");
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [publicRepoInput, setPublicRepoInput] = useState("");
@@ -128,37 +150,45 @@ export function RepositoriesPage({
     return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
   }, [repositories, pulse, filterQuery]);
 
-  // Remote / public connected repositories (not unified local)
+  // Remote / public connected repositories (canonical remote identity only).
   const remoteRepos = useMemo(() => {
     const list: Array<{ id: string; name: string; branch: string; reviewCount: number; raw?: Repository }> = [];
-    const localNames = new Set(localRepos.map(l => l.name));
-    for (const r of repositories) {
-      if (r.source !== "local_git") {
-        if (localNames.has("ConsistenCy-pr2-clean") && (r.remoteFullName === "sk1ua/ConsistenCy" || r.displayName === "ConsistenCy")) continue;
-        list.push({ id: r.id, name: r.displayName, branch: r.defaultBranch ?? "main", reviewCount: 0, raw: r });
+    const canonicalRemoteNames = new Set(
+      repositories.flatMap(repository => repository.remoteFullName ? [repository.remoteFullName.toLowerCase()] : [])
+    );
+    for (const repository of repositories) {
+      if (repository.source !== "local_git") {
+        list.push({
+          id: repository.id,
+          name: repository.displayName,
+          branch: repository.defaultBranch ?? "main",
+          reviewCount: 0,
+          raw: repository
+        });
       }
     }
-    for (const s of sources) {
-      if (!repositories.some(r => r.remoteFullName === s.name || r.displayName === s.name)) {
-        if (localNames.has("ConsistenCy-pr2-clean") && s.name === "sk1ua/ConsistenCy") continue;
-        list.push({ id: `source-${s.name}`, name: s.name, branch: "main", reviewCount: s.jobs.length });
+    for (const source of sources) {
+      if (!canonicalRemoteNames.has(source.name.toLowerCase())) {
+        list.push({ id: `source-${source.name}`, name: source.name, branch: "main", reviewCount: source.jobs.length });
       }
     }
-    return list.filter(r => r.name.toLowerCase().includes(filterQuery.toLowerCase()));
-  }, [repositories, sources, localRepos, filterQuery]);
+    return list.filter(repository => repository.name.toLowerCase().includes(filterQuery.toLowerCase()));
+  }, [repositories, sources, filterQuery]);
 
-  function handleConnectPublic(e: React.FormEvent) {
+  async function handleConnectPublic(e: React.FormEvent) {
     e.preventDefault();
     const input = publicRepoInput.trim();
-    if (!input) return;
-    const match = repositories.find(r => r.id === input);
-    if (match) {
+    if (!input || !onConnectPublicRepository || connectingPublicRepository) return;
+    try {
+      await onConnectPublicRepository(input);
       setConnectModalOpen(false);
-      navigate(`/repositories/${encodeURIComponent(match.id)}`);
-    } else {
-      alert(zh ? "未找到该仓库。公开仓库在首次分析 PR 时自动注册。" : "Repository not found. Public repositories are registered automatically upon first PR analysis.");
+      setPublicRepoInput("");
+    } catch {
+      // The mutation error is rendered inline below the field.
     }
   }
+
+  const publicConnectErrorMessage = publicRepositoryErrorMessage(publicRepositoryError, zh);
 
   return (
     <div className="repository-hub-page page-stack">
@@ -331,14 +361,28 @@ export function RepositoriesPage({
                     ref={firstInputRef}
                     type="text"
                     aria-label={zh ? "公开 GitHub 仓库地址" : "Public GitHub repository URL"}
-                    placeholder="e.g. openai/codex or github.com/owner/repo"
+                    placeholder="e.g. openai/codex or https://github.com/owner/repo"
                     value={publicRepoInput}
+                    disabled={connectingPublicRepository}
+                    aria-describedby={publicConnectErrorMessage ? "public-repository-connect-error" : undefined}
                     onChange={e => setPublicRepoInput(e.target.value)}
                   />
-                  <Button variant="primary" type="submit" className="connect-action-btn" disabled={!publicRepoInput.trim()}>
-                    {zh ? "连接" : "Connect"}
+                  <Button
+                    variant="primary"
+                    type="submit"
+                    className="connect-action-btn"
+                    disabled={!publicRepoInput.trim() || connectingPublicRepository || !onConnectPublicRepository}
+                  >
+                    {connectingPublicRepository && <LoaderCircle size={14} className="spinning" />}
+                    {connectingPublicRepository ? (zh ? "正在连接" : "Connecting") : (zh ? "连接" : "Connect")}
                   </Button>
                 </div>
+                {publicConnectErrorMessage && (
+                  <div id="public-repository-connect-error" className="route-query-notice" role="alert">
+                    <strong>{zh ? "无法连接仓库" : "Could not connect repository"}</strong>
+                    <span>{publicConnectErrorMessage}</span>
+                  </div>
+                )}
               </form>
             </div>
           </div>

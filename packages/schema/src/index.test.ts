@@ -7,6 +7,7 @@ import {
   prReviewContextSchema,
   repositoryCommitsResponseSchema,
   repositoryPullRequestsResponseSchema,
+  repositoryReviewsResponseSchema,
   reviewFindingSchema,
   reviewPlanSchema,
   reviewReportSchema,
@@ -150,12 +151,54 @@ describe("@consistency/schema", () => {
     })).toThrow();
   });
 
+  it("strictly bounds repository reviews and requires exact opaque association", () => {
+    const review = {
+      id: "job-review-1",
+      type: "PR_REVIEW" as const,
+      status: "succeeded" as const,
+      repositoryFullName: "shared/display-name",
+      repositoryId: "repository-1",
+      accessMode: "local_git" as const,
+      baseSha: "base-123",
+      headSha: "head-456",
+      publicationPolicy: "disabled" as const,
+      createdAt: "2026-08-24T00:00:00.000Z"
+    };
+
+    expect(repositoryReviewsResponseSchema.parse({
+      repositoryId: "repository-1",
+      reviews: [review]
+    }).reviews).toHaveLength(1);
+    expect(() => repositoryReviewsResponseSchema.parse({
+      repositoryId: "repository-1",
+      reviews: [{ ...review, repositoryId: "repository-2" }]
+    })).toThrow();
+    expect(() => repositoryReviewsResponseSchema.parse({
+      repositoryId: "repository-1",
+      reviews: [{ ...review, repositoryId: undefined }]
+    })).toThrow();
+    expect(() => repositoryReviewsResponseSchema.parse({
+      repositoryId: "repository-1",
+      reviews: [],
+      unexpected: true
+    })).toThrow();
+    expect(() => repositoryReviewsResponseSchema.parse({
+      repositoryId: "repository-1",
+      reviews: Array.from({ length: 201 }, (_, index) => ({
+        ...review,
+        id: `job-review-${index + 1}`
+      }))
+    })).toThrow();
+  });
+
   it("requires provider-owned pull request rows and exclusive availability states", () => {
     const pullRequest = {
       provider: "github",
       number: 42,
       title: "Provider title",
       state: "open",
+      draft: false,
+      labels: [],
       author: null,
       baseRef: "main",
       headRef: "feature/provider",
@@ -163,13 +206,16 @@ describe("@consistency/schema", () => {
       headSha: "head-456",
       createdAt: "2026-08-01T00:00:00.000Z",
       updatedAt: "2026-08-02T00:00:00.000Z",
+      closedAt: null,
       mergedAt: null,
       htmlUrl: "https://github.com/octo/repository/pull/42"
     };
 
     expect(repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
       available: true,
+      page: { limit: 100, truncated: false },
       pullRequests: [pullRequest]
     }).available).toBe(true);
     expect(() => repositoryPullRequestsResponseSchema.parse({
@@ -180,12 +226,15 @@ describe("@consistency/schema", () => {
     expect(() => repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
       available: false,
+      reasonCode: "provider_unavailable",
       reason: "provider unavailable",
       pullRequests: [pullRequest]
     })).toThrow();
     expect(() => repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
       available: true,
+      page: { limit: 100, truncated: false },
       pullRequests: [{
         number: pullRequest.number,
         title: pullRequest.title,
@@ -207,6 +256,8 @@ describe("@consistency/schema", () => {
       provider: "github",
       number: 42,
       title: "Provider title",
+      draft: false,
+      labels: [],
       author: null,
       baseRef: "main",
       headRef: "feature/provider",
@@ -214,23 +265,30 @@ describe("@consistency/schema", () => {
       headSha: "head-456",
       createdAt: "2026-08-01T00:00:00.000Z",
       updatedAt: "2026-08-02T00:00:00.000Z",
+      closedAt: null,
       htmlUrl: "https://github.com/octo/repository/pull/42"
     };
 
     expect(repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
       available: true,
+      page: { limit: 100, truncated: false },
       pullRequests: [{ ...pullRequest, state: "open", mergedAt: null }]
     }).pullRequests[0]?.mergedAt).toBeNull();
     expect(repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
       available: true,
-      pullRequests: [{ ...pullRequest, state: "closed", mergedAt: null }]
+      page: { limit: 100, truncated: false },
+      pullRequests: [{ ...pullRequest, state: "closed", updatedAt: "2026-08-03T00:00:00.000Z", closedAt: "2026-08-03T00:00:00.000Z", mergedAt: null }]
     }).pullRequests[0]?.mergedAt).toBeNull();
     expect(repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
       available: true,
-      pullRequests: [{ ...pullRequest, state: "closed", mergedAt: "2026-08-03T00:00:00.000Z" }]
+      page: { limit: 100, truncated: false },
+      pullRequests: [{ ...pullRequest, state: "closed", updatedAt: "2026-08-03T00:00:01.000Z", closedAt: "2026-08-03T00:00:01.000Z", mergedAt: "2026-08-03T00:00:00.000Z" }]
     }).pullRequests[0]?.mergedAt).toBe("2026-08-03T00:00:00.000Z");
   });
 
@@ -239,6 +297,8 @@ describe("@consistency/schema", () => {
       provider: "github",
       number: 42,
       title: "Provider title",
+      draft: false,
+      labels: [],
       author: null,
       baseRef: "main",
       headRef: "feature/provider",
@@ -246,19 +306,161 @@ describe("@consistency/schema", () => {
       headSha: "head-456",
       createdAt: "2026-08-01T00:00:00.000Z",
       updatedAt: "2026-08-02T00:00:00.000Z",
+      closedAt: null,
       htmlUrl: "https://github.com/octo/repository/pull/42"
     };
 
     expect(() => repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
       available: true,
+      page: { limit: 100, truncated: false },
       pullRequests: [{ ...pullRequest, state: "merged", mergedAt: "2026-08-03T00:00:00.000Z" }]
     })).toThrow();
     expect(() => repositoryPullRequestsResponseSchema.parse({
       repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
       available: true,
+      page: { limit: 100, truncated: false },
       pullRequests: [{ ...pullRequest, state: "closed" }]
     })).toThrow();
+  });
+
+  it("bounds pull request rows, labels, provider strings, URLs, and unavailable metadata", () => {
+    const row = {
+      provider: "github" as const,
+      number: 1,
+      title: "Provider title",
+      state: "open" as const,
+      draft: true,
+      labels: [{ name: "security", color: "d73a4a" }],
+      author: "octocat",
+      baseRef: "main",
+      headRef: "feature/provider",
+      baseSha: "base-123",
+      headSha: "head-456",
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-02T00:00:00.000Z",
+      closedAt: null,
+      mergedAt: null,
+      htmlUrl: "https://github.com/octo/repository/pull/1"
+    };
+    const available = (pullRequests: unknown[]) => ({
+      repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
+      available: true,
+      page: { limit: 100, truncated: false },
+      pullRequests
+    });
+
+    expect(repositoryPullRequestsResponseSchema.parse(available([])).pullRequests).toHaveLength(0);
+    expect(repositoryPullRequestsResponseSchema.parse(available(Array.from({ length: 100 }, (_, index) => ({
+      ...row,
+      number: index + 1,
+      htmlUrl: `https://github.com/octo/repository/pull/${index + 1}`
+    })))).pullRequests).toHaveLength(100);
+    expect(() => repositoryPullRequestsResponseSchema.parse(available(Array.from({ length: 101 }, () => row)))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, labels: Array.from({ length: 101 }, () => ({ name: "label", color: "fff" })) }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, title: ` ${row.title}` }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, title: "dirty\ntext" }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, title: "x".repeat(1_025) }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, htmlUrl: "https://user@github.com/octo/repository/pull/1" }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, htmlUrl: `${row.htmlUrl}?x=1` }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, htmlUrl: "https://github.com/octo/repository/pull/2" }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{
+      ...row,
+      number: 9_007_199_254_740_992,
+      htmlUrl: "https://github.com/octo/repository/pull/9007199254740992"
+    }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse(available([{
+      ...row,
+      number: 9_007_199_254_740_993,
+      htmlUrl: "https://github.com/octo/repository/pull/9007199254740993"
+    }]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse({ ...available([row]), repositoryFullName: "octo/other" })).toThrow();
+    expect(repositoryPullRequestsResponseSchema.parse({ ...available([row]), repositoryFullName: "OCTO/REPOSITORY" }).available).toBe(true);
+
+    const owner39 = "a".repeat(39);
+    const repo100 = `Repo.${"x".repeat(91)}_end`;
+    const boundaryRow = {
+      ...row,
+      htmlUrl: `https://github.com/${owner39}/${repo100}/pull/1`
+    };
+    expect(repositoryPullRequestsResponseSchema.parse({
+      ...available([boundaryRow]),
+      repositoryFullName: `${owner39}/${repo100}`
+    }).available).toBe(true);
+    expect(repositoryPullRequestsResponseSchema.parse({
+      ...available([{ ...row, htmlUrl: "https://github.com/Mixed-Owner/repo.name_with-parts/pull/1" }]),
+      repositoryFullName: "mIXED-oWNER/REPO.NAME_WITH-PARTS"
+    }).available).toBe(true);
+    for (const repositoryFullName of [
+      "",
+      "/repo",
+      "owner/",
+      "bad-/repo",
+      "owner/...",
+      `${"a".repeat(40)}/repo`,
+      `owner/${"r".repeat(101)}`,
+      "owner/repo\n",
+      " owner/repo"
+    ]) {
+      expect(() => repositoryPullRequestsResponseSchema.parse({
+        ...available([]),
+        repositoryFullName
+      })).toThrow();
+    }
+    for (const htmlUrl of [
+      "https://github.com/bad-/repo/pull/1",
+      "https://github.com/owner/.../pull/1",
+      "https://github.com/owner/./repo/pull/1",
+      "https://github.com/owner/segment/../repo/pull/1",
+      String.raw`https://github.com/owner\repo/pull/1`,
+      String.raw`https://github.com/owner/repo\pull/1`,
+      `https://github.com/${"a".repeat(40)}/repo/pull/1`,
+      `https://github.com/owner/${"r".repeat(101)}/pull/1`
+    ]) {
+      expect(() => repositoryPullRequestsResponseSchema.parse(available([{ ...row, htmlUrl }]))).toThrow();
+    }
+
+    for (const invalidLifecycle of [
+      { ...row, state: "open", closedAt: "2026-08-03T00:00:00.000Z" },
+      { ...row, state: "closed", closedAt: null },
+      { ...row, updatedAt: "2026-07-31T00:00:00.000Z" },
+      { ...row, state: "closed", closedAt: "2026-07-31T00:00:00.000Z" },
+      { ...row, state: "closed", closedAt: "2026-08-03T00:00:00.000Z", mergedAt: "2026-07-31T00:00:00.000Z" },
+      { ...row, state: "closed", closedAt: "2026-08-03T00:00:00.000Z", mergedAt: "2026-08-04T00:00:00.000Z" },
+      { ...row, state: "closed", updatedAt: "2026-08-02T00:00:00.000Z", closedAt: "2026-08-03T00:00:00.000Z", mergedAt: null },
+      { ...row, state: "closed", updatedAt: "2026-08-02T00:00:00.000Z", closedAt: "2026-08-04T00:00:00.000Z", mergedAt: "2026-08-03T00:00:00.000Z" }
+    ]) expect(() => repositoryPullRequestsResponseSchema.parse(available([invalidLifecycle]))).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: false,
+      reasonCode: "access_denied",
+      reason: "GitHub access denied",
+      page: { limit: 100, truncated: false },
+      pullRequests: []
+    })).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      ...available([]),
+      reasonCode: "provider_unavailable",
+      reason: "unexpected"
+    })).toThrow();
+    expect(() => repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      repositoryFullName: "octo/repository",
+      available: false,
+      reasonCode: "provider_unavailable",
+      reason: "GitHub unavailable",
+      pullRequests: []
+    })).toThrow();
+    expect(repositoryPullRequestsResponseSchema.parse({
+      repositoryId: "repository-1",
+      available: false,
+      reasonCode: "rate_limited",
+      reason: "GitHub rate limit reached",
+      pullRequests: []
+    }).available).toBe(false);
   });
 
   it("accepts renderer-safe git remotes and rejects exposed URLs", () => {

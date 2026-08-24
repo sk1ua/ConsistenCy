@@ -76,7 +76,7 @@ describe("audit control-plane HTTP skeleton", () => {
 
     const repositoryResponse = await call(port, "POST", "/repositories", {
       displayName: "espnet/espnet",
-      source: "github",
+      source: "gitlab",
       remoteFullName: "espnet/espnet",
       monitoringEnabled: true
     });

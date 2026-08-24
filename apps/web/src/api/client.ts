@@ -22,6 +22,7 @@ import {
   repositoryGitStatusResponseSchema,
   repositoryCommitsResponseSchema,
   repositoryPullRequestsResponseSchema,
+  repositoryReviewsResponseSchema,
   reviewPreparationResponseSchema,
   runRuntimeSnapshotSchema,
   runtimeRunsResponseSchema,
@@ -154,6 +155,18 @@ export type SettingsPatch = {
 
 export type NotebookStreamEvent = { event: string; data: unknown };
 
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status: number,
+    readonly details?: Record<string, unknown>
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
@@ -164,10 +177,15 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = typeof payload === "object" && payload && "error" in payload
-      ? (payload as { error?: { message?: string } }).error?.message
+    const apiError = typeof payload === "object" && payload && "error" in payload
+      ? (payload as { error?: { message?: string; code?: string; details?: Record<string, unknown> } }).error
       : undefined;
-    throw new Error(message ?? `API request failed with ${response.status}`);
+    throw new ApiRequestError(
+      apiError?.message ?? `API request failed with ${response.status}`,
+      apiError?.code ?? "API_REQUEST_FAILED",
+      response.status,
+      apiError?.details
+    );
   }
   return payload;
 }
@@ -270,6 +288,13 @@ export const api = {
     const payload = await request("/repositories", { signal }) as { repositories?: unknown };
     return repositorySchema.array().parse(payload.repositories);
   },
+  async connectPublicRepository(input: string): Promise<Repository> {
+    const payload = await request("/repositories/connect-public", {
+      method: "POST",
+      body: JSON.stringify({ input })
+    }) as { repository?: unknown };
+    return repositorySchema.parse(payload.repository);
+  },
   async setRepositoryMonitoring(repositoryId: string, enabled: boolean): Promise<Repository> {
     const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/actions/set-monitoring`, {
       method: "POST",
@@ -278,11 +303,21 @@ export const api = {
     return repositorySchema.parse(payload.repository);
   },
   async repositoryReviews(repositoryId: string, signal?: AbortSignal): Promise<ReviewJob[]> {
-    const payload = await request(
-      `/repositories/${encodeURIComponent(repositoryId)}/reviews`,
-      { signal }
-    ) as { reviews: ReviewJob[] };
-    return payload.reviews;
+    try {
+      const payload = repositoryReviewsResponseSchema.parse(await request(
+        `/repositories/${encodeURIComponent(repositoryId)}/reviews`,
+        { signal }
+      ));
+      if (payload.repositoryId !== repositoryId) throw new Error("repository review identity mismatch");
+      return payload.reviews;
+    } catch (error) {
+      if (error instanceof ApiRequestError) throw error;
+      throw new ApiRequestError(
+        "Repository review history response is unavailable",
+        "REPOSITORY_REVIEWS_RESPONSE_INVALID",
+        502
+      );
+    }
   },
   async repositoryTimeline(repositoryId: string, signal?: AbortSignal): Promise<{ repositoryEvents: RepositoryEvent[]; repositoryPulses: RepositoryPulse[]; auditRuns: AuditRun[] }> {
     const payload = await request(`/repositories/${encodeURIComponent(repositoryId)}/timeline`, { signal }) as {

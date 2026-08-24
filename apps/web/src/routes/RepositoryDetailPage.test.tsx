@@ -1,12 +1,13 @@
 import { renderToString } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReviewJob, Repository, ReviewPreparationResponse } from "@consistency/schema";
 import { repositoryGitStatusResponseSchema, repositoryCommitsResponseSchema, repositoryPullRequestsResponseSchema } from "@consistency/schema";
 import { I18nProvider, type Locale } from "../i18n";
-import { formatReviewMutationError, isReviewStartDisabled, RepositoryDetailPage } from "./RepositoryDetailPage";
+import { api } from "../api/client";
+import { createRepositoryPullRequestsQueryOptions, formatReviewMutationError, isReviewStartDisabled, RepositoryDetailPage } from "./RepositoryDetailPage";
 import { buildLocalReviewRequest, calculateDialogTransition, createReviewSubmissionGate, getReviewComposerValidationMessage, ReviewComposerDialog } from "./ReviewComposerDialog";
 import { parseGitHubRemote } from "@consistency/vcs-core";
 
@@ -27,6 +28,8 @@ function renderWithProviders(
     });
     if (typeof queryClientArg === 'function') queryClientArg(qc);
   }
+  const reviewsKey = ["workspace", "repositories", "repo_test_1", "reviews"] as const;
+  if (qc.getQueryState(reviewsKey) === undefined) qc.setQueryData(reviewsKey, []);
   return renderToString(
     <QueryClientProvider client={qc}>
       <I18nProvider initialLocale={locale}>
@@ -134,6 +137,35 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
     expect(parseGitHubRemote("https://gitlab.com/owner/repo")).toBeNull();
   });
 
+  it.each([
+    {
+      repositoryId: "repo_test_2",
+      reviews: []
+    },
+    {
+      repositoryId: "repo_test_1",
+      reviews: [],
+      unexpected: "provider detail"
+    },
+    {
+      repositoryId: "repo_test_1",
+      reviews: [{ ...mockJobs[0], repositoryId: undefined }]
+    }
+  ])("fails closed for malformed repository review client responses", async payload => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    })));
+    try {
+      await expect(api.repositoryReviews("repo_test_1")).rejects.toMatchObject({
+        code: "REPOSITORY_REVIEWS_RESPONSE_INVALID",
+        message: "Repository review history response is unavailable"
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("AC-UX-REPO-2: Repository Workspace renders repository identity and review action", () => {
     const html = renderWithProviders(
       <RepositoryDetailPage
@@ -191,11 +223,71 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
         repositories={mockRepositories}
         pulse={null}
       />,
-      "/repositories/repo_test_1"
+      "/repositories/repo_test_1",
+      queryClient => queryClient.setQueryData(
+        ["workspace", "repositories", "repo_test_1", "reviews"],
+        [{ ...mockJobs[0]!, repositoryId: "repo_test_1" }]
+      )
     );
 
     expect(html).toContain("PR #254");
     expect(html).toContain("68");
+  });
+
+  it("uses only exact opaque repository review association across overview, count, and Reviews tab", () => {
+    const exact = {
+      ...mockJobs[0]!,
+      id: "job-exact-repository",
+      repositoryId: "repo_test_1",
+      pullRequestNumber: 101
+    };
+    const sameNameOtherId = {
+      ...mockJobs[0]!,
+      id: "job-other-repository",
+      repositoryId: "repo_test_2",
+      pullRequestNumber: 202
+    };
+    const legacy = {
+      ...mockJobs[0]!,
+      id: "job-legacy-no-id",
+      repositoryId: undefined,
+      pullRequestNumber: 303
+    };
+    const repositories = [
+      mockRepositories[0]!,
+      { ...mockRepositories[0]!, id: "repo_test_2" }
+    ];
+    const seedReviews = (queryClient: QueryClient) => {
+      queryClient.setQueryData(["workspace", "repositories", "repo_test_1", "reviews"], [exact]);
+    };
+
+    const overview = renderWithProviders(
+      <RepositoryDetailPage
+        jobs={[exact, sameNameOtherId, legacy]}
+        repositories={repositories}
+        pulse={null}
+      />,
+      "/repositories/repo_test_1",
+      seedReviews
+    );
+    expect(overview).toContain("PR #101");
+    expect(overview).not.toContain("PR #202");
+    expect(overview).not.toContain("PR #303");
+    expect(overview).toMatch(/<span[^>]*>审查<\/span><span[^>]*>1<\/span>/);
+
+    const reviews = renderWithProviders(
+      <RepositoryDetailPage
+        jobs={[exact, sameNameOtherId, legacy]}
+        repositories={repositories}
+        pulse={null}
+      />,
+      "/repositories/repo_test_1/reviews",
+      seedReviews
+    );
+    expect(reviews).toContain("共 1 条");
+    expect(reviews).toContain("PR #101");
+    expect(reviews).not.toContain("PR #202");
+    expect(reviews).not.toContain("PR #303");
   });
 
   it("AC-UX-REPO-8: overview uses compact single-language section headings", () => {
@@ -316,15 +408,19 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
       />,
       "/repositories/repo_test_1/pull-requests",
       (qc) => {
-        qc.setQueryData(["repository-pull-requests", "repo_test_1"], repositoryPullRequestsResponseSchema.parse({
+        qc.setQueryData(["workspace", "repositories", "repo_test_1", "pull-requests"], repositoryPullRequestsResponseSchema.parse({
           repositoryId: "repo_test_1",
+          repositoryFullName: "sk1ua/ConsistenCy",
           available: true,
+          page: { limit: 100, truncated: false },
           pullRequests: [
             {
               provider: "github",
               number: 1,
               title: "Demo PR",
               state: "open",
+              draft: false,
+              labels: [],
               author: "alice",
               createdAt: "2026-08-18T00:00:00.000Z",
               updatedAt: "2026-08-18T01:00:00.000Z",
@@ -333,6 +429,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
               headRef: "feature",
               baseSha: "1111111",
               headSha: "2222222",
+              closedAt: null,
               mergedAt: null
             }
           ]
@@ -352,17 +449,18 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
     const emptyHtml = renderWithProviders(
       <RepositoryDetailPage jobs={mockJobs} repositories={mockRepositories} pulse={null} />,
       "/repositories/repo_test_1/pull-requests",
-      (qc) => qc.setQueryData(["repository-pull-requests", "repo_test_1"], repositoryPullRequestsResponseSchema.parse({ repositoryId: "repo_test_1", available: true, pullRequests: [] }))
+      (qc) => qc.setQueryData(["workspace", "repositories", "repo_test_1", "pull-requests"], repositoryPullRequestsResponseSchema.parse({ repositoryId: "repo_test_1", repositoryFullName: "sk1ua/ConsistenCy", available: true, page: { limit: 100, truncated: false }, pullRequests: [] }))
     );
     expect(emptyHtml).toContain("暂无拉取请求");
 
     const unavailableHtml = renderWithProviders(
       <RepositoryDetailPage jobs={mockJobs} repositories={mockRepositories} pulse={null} />,
       "/repositories/repo_test_1/pull-requests",
-      (qc) => qc.setQueryData(["repository-pull-requests", "repo_test_1"], repositoryPullRequestsResponseSchema.parse({ repositoryId: "repo_test_1", available: false, reason: "No GitHub token", pullRequests: [] }))
+      (qc) => qc.setQueryData(["workspace", "repositories", "repo_test_1", "pull-requests"], repositoryPullRequestsResponseSchema.parse({ repositoryId: "repo_test_1", available: false, reasonCode: "access_denied", reason: "GitHub access denied", pullRequests: [] }))
     );
     expect(unavailableHtml).toContain("拉取请求历史不可用");
-    expect(unavailableHtml).toContain("No GitHub token");
+    expect(unavailableHtml).toContain("GitHub 访问被拒绝。");
+    expect(unavailableHtml).not.toContain("GitHub access denied");
   });
 
   it("AC-UX-REPO-15: Changes, History, and PR views handle actual rejected queries", async () => {
@@ -385,11 +483,11 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
       },
       {
         id: "pull-requests",
-        queryKey: ["repository-pull-requests", "repo_test_1"],
-        zhFallback: "由于网络或服务异常，无法加载拉取请求",
-        enFallback: "Failed to load pull requests due to network or service error",
-        zhLoading: "正在加载审查工作区",
-        enLoading: "Loading review workspace"
+        queryKey: ["workspace", "repositories", "repo_test_1", "pull-requests"],
+        zhFallback: "GitHub 拉取请求历史暂时不可用。",
+        enFallback: "GitHub pull request history is temporarily unavailable.",
+        zhLoading: "正在加载拉取请求历史",
+        enLoading: "Loading pull request history"
       }
     ];
 
@@ -630,6 +728,25 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
     expect(calculateDialogTransition(true, true)).toEqual({ shouldInitialize: false, nextWasOpen: true });
     expect(calculateDialogTransition(true, false)).toEqual({ shouldInitialize: false, nextWasOpen: false });
     expect(calculateDialogTransition(false, true)).toEqual({ shouldInitialize: true, nextWasOpen: true });
+  });
+
+  it("requests PR history only for the active tab with cancellation and no polling", async () => {
+    const fetchPullRequests = vi.fn(async () => ({
+      repositoryId: "repo_test_1",
+      repositoryFullName: "sk1ua/ConsistenCy",
+      available: true as const,
+      page: { limit: 100 as const, truncated: false },
+      pullRequests: []
+    }));
+    const inactive = createRepositoryPullRequestsQueryOptions("repo_test_1", "overview", fetchPullRequests);
+    const active = createRepositoryPullRequestsQueryOptions("repo_test_1", "pull-requests", fetchPullRequests);
+    expect(inactive.enabled).toBe(false);
+    expect(active.enabled).toBe(true);
+    expect(active.queryKey).toEqual(["workspace", "repositories", "repo_test_1", "pull-requests"]);
+    expect(active).not.toHaveProperty("refetchInterval");
+    const controller = new AbortController();
+    await active.queryFn({ signal: controller.signal });
+    expect(fetchPullRequests).toHaveBeenCalledWith("repo_test_1", controller.signal);
   });
 
   it("AC-UX-REPO-22: strictly requires exact repository ID and rejects display/remote aliases", () => {

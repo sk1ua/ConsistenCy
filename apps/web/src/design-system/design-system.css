@@ -481,6 +481,12 @@
   animation: ds-scale-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Sizing variant for the Settings dialog (820–960px per §21.2) */
+.ds-dialog.ds-dialog--settings {
+  max-width: min(900px, 92vw);
+  max-height: 88vh;
+}
+
 .ds-dialog-header {
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);

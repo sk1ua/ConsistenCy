@@ -19,6 +19,9 @@ import {
   notebookCardRequestSchema,
   notebookMessageRequestSchema,
   publicPrRequestSchema,
+  REPOSITORY_REVIEWS_MAX_LIMIT,
+  repositoryPullRequestsResponseSchema,
+  repositoryReviewsResponseSchema,
   reviewPreparationResponseSchema,
   riskScoreSchema,
   saveWorkflowRequestSchema,
@@ -27,9 +30,10 @@ import {
   type GitRemoteInfo,
   type ReviewModelOverride
 } from "@consistency/schema";
-import type { HeartbeatPulse, HeartbeatStreamEvent, VcsChangedFile } from "@consistency/schema";
-import { LocalGitAdapter, parseGitHubRemote } from "@consistency/vcs-core";
+import type { HeartbeatPulse, HeartbeatStreamEvent, Repository, VcsChangedFile } from "@consistency/schema";
+import { LocalGitAdapter } from "@consistency/vcs-core";
 import { RepositoryPullRequestService, type RepositoryPullRequestRequest } from "./github/pullRequestReader";
+import { PublicRepositoryError } from "./github/publicRepository";
 import { ReviewModelResolutionError, type ResolvedReviewModel } from "./review/llm/factory";
 
 function resolveLocalPathForRepository(repositoryId: string, options: CreateApiServerOptions): string | undefined {
@@ -40,13 +44,11 @@ function resolveLocalPathForRepository(repositoryId: string, options: CreateApiS
 
 function toRendererGitRemote(remote: {
   readonly name: string;
-  readonly url: string;
   readonly githubFullName?: string;
 }): GitRemoteInfo {
-  const githubFullName = remote.githubFullName ?? parseGitHubRemote(remote.url)?.fullName;
   return {
     name: remote.name,
-    ...(githubFullName === undefined ? {} : { githubFullName })
+    ...(remote.githubFullName === undefined ? {} : { githubFullName: remote.githubFullName })
   };
 }
 
@@ -226,7 +228,7 @@ function sendError(request: IncomingMessage, response: ServerResponse, error: un
     sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error instanceof ApiError ? error.details : undefined), allowedOrigins);
     return;
   }
-  if (error instanceof PublicPrError) {
+  if (error instanceof PublicPrError || error instanceof PublicRepositoryError) {
     sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error.details), allowedOrigins);
     return;
   }
@@ -339,6 +341,7 @@ export type CreateApiServerOptions = {
   realData?: () => RealDataSnapshot | undefined;
   resolveReviewModel?: (override?: ReviewModelOverride) => ResolvedReviewModel;
   publicPr?: (url: string, modelOverride?: ResolvedReviewModel) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
+  publicRepositoryConnect?: (input: string) => Promise<Repository>;
   publicPrAnalysisEnabled?: boolean;
   llmProviderConfigured?: boolean;
   localReview?: (input: { repoPath: string; repositoryId?: string; baseRef?: string; headRef?: string; llmProvider?: "deepseek" | "openai"; llmModel?: string }) => Promise<{ jobId: string }>;
@@ -447,10 +450,12 @@ const routes: Route[] = [
         await readJson(request)
       );
       const validated = await validateLocalRepositoryRegistration(input);
-      const repository = options.auditStore.createRepository({
+      const repository = options.auditStore.registerLocalRepository({
         displayName: validated.displayName,
         source: "local_git",
-        monitoringEnabled: validated.monitoringEnabled
+        monitoringEnabled: validated.monitoringEnabled,
+        ...(validated.remoteFullName === undefined ? {} : { remoteFullName: validated.remoteFullName }),
+        ...(validated.defaultBranch === undefined ? {} : { defaultBranch: validated.defaultBranch })
       }, {
         serverLocator: validated.serverLocator
       });
@@ -774,6 +779,27 @@ const routes: Route[] = [
   },
   {
     method: "POST",
+    path: "/repositories/connect-public",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      if (!options.publicRepositoryConnect) {
+        throw new ApiError("Public repository connection is unavailable", "PUBLIC_REPOSITORY_CONNECTION_UNAVAILABLE", 503);
+      }
+      const parsedBody = z.object({ input: z.string().max(500) }).strict().safeParse(await readJson(request));
+      if (!parsedBody.success) {
+        throw new PublicRepositoryError(
+          "Enter owner/repository or a canonical GitHub URL",
+          "PUBLIC_REPOSITORY_INVALID_INPUT",
+          400
+        );
+      }
+      const repository = await options.publicRepositoryConnect(parsedBody.data.input);
+      sendJson(request, response, 200, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
     path: "/repositories",
     auth: true,
     handler: async ({ request, response, allowedOrigins, options }) => {
@@ -786,6 +812,13 @@ const routes: Route[] = [
           "Local repository registration requires the privileged desktop adapter",
           "LOCAL_PATH_REGISTRATION_UNAVAILABLE",
           501
+        );
+      }
+      if (input.source === "github") {
+        throw new ApiError(
+          "GitHub repositories must be verified through the public connection endpoint",
+          "GITHUB_REPOSITORY_VERIFICATION_REQUIRED",
+          422
         );
       }
       const repository = options.auditStore.createRepository(input);
@@ -981,13 +1014,7 @@ const routes: Route[] = [
       const repositoryId = decodeURIComponent(match?.[1] ?? "");
       const registered = options.auditStore?.getRepository(repositoryId);
       if (!registered) {
-        sendJson(request, response, 200, {
-          repositoryId,
-          available: false,
-          reason: "GitHub repository remote unavailable",
-          pullRequests: []
-        }, allowedOrigins);
-        return;
+        throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
       }
       const localPath = resolveLocalPathForRepository(repositoryId, options);
       const input: RepositoryPullRequestRequest = {
@@ -1000,8 +1027,16 @@ const routes: Route[] = [
         jobs,
         listRemotes: async localPath => new LocalGitAdapter({ root: localPath }).getRemotes()
       });
-      const payload = await service.list(input);
-      sendJson(request, response, 200, payload, allowedOrigins);
+      const servicePayload = await service.list(input);
+      const parsedPayload = repositoryPullRequestsResponseSchema.safeParse(servicePayload);
+      if (!parsedPayload.success) {
+        throw new ApiError(
+          "Pull request history response is unavailable",
+          "PULL_REQUEST_HISTORY_RESPONSE_INVALID",
+          502
+        );
+      }
+      sendJson(request, response, 200, parsedPayload.data, allowedOrigins);
     }
   },
   {
@@ -1194,20 +1229,35 @@ const routes: Route[] = [
         throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
       }
       const limitParam = Number(url.searchParams.get("limit"));
-      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+      const limit = Number.isFinite(limitParam) && limitParam > 0
+        ? Math.min(Math.trunc(limitParam), REPOSITORY_REVIEWS_MAX_LIMIT)
+        : undefined;
       // ONLY canonically associated jobs (repository_id matches); legacy
       // unassociated jobs never appear via name inference (CKPT3 Phase 4 / D1).
-      let reviews;
+      let storedReviews: ReviewJob[];
       try {
-        reviews = jobs.listJobsForRepository(repositoryId, limit).map(toApiJob);
+        storedReviews = jobs.listJobsForRepository(repositoryId, limit);
       } catch {
         throw new ApiError("Review history is unavailable", "REVIEWS_UNAVAILABLE", 503);
       }
-      sendJson(request, response, 200, { repositoryId, reviews }, allowedOrigins);
+      let payload;
+      try {
+        payload = repositoryReviewsResponseSchema.parse({
+          repositoryId,
+          reviews: storedReviews.map(toApiJob)
+        });
+      } catch {
+        throw new ApiError(
+          "Repository review history response is unavailable",
+          "REPOSITORY_REVIEWS_RESPONSE_INVALID",
+          500
+        );
+      }
+      sendJson(request, response, 200, payload, allowedOrigins);
     }
   },
   {
-    method: "GET",
+    method: "POST",
     path: /^\/repositories\/([^/]+)\/actions\/set-monitoring$/,
     auth: true,
     handler: async ({ request, response, allowedOrigins, options, match }) => {
