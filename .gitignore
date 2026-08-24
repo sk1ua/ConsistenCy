@@ -37,6 +37,9 @@ verify-*.tmp.mjs
 /ui-*.png
 /.codex-screenshot-doc.diff
 /.playwright-cli/
+# Ad-hoc browser QA captures at repo root (session evidence, never repo content)
+/*.png
+/.playwright-mcp/
 
 # Logs and local databases
 *.log
