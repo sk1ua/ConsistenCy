@@ -14,6 +14,7 @@ import {
   createWorkflowRevisionRequestSchema,
   DEFAULT_SECURITY_GUARANTEES,
   evaluateAuditPolicy,
+  githubConnectionTestResponseSchema,
   internalLocalRepositoryRegistrationRequestSchema,
   localReviewRequestSchema,
   notebookCardRequestSchema,
@@ -28,6 +29,7 @@ import {
   stepIdSchema,
   workflowSpecSchema,
   type GitRemoteInfo,
+  type GitHubConnectionTestResponse,
   type ReviewModelOverride
 } from "@consistency/schema";
 import type { HeartbeatPulse, HeartbeatStreamEvent, Repository, VcsChangedFile } from "@consistency/schema";
@@ -320,6 +322,9 @@ export type ApiHealthDetails = {
     storage: { kind: "memory" | "file"; configured: boolean };
     workerConcurrency: number;
     publishWorkerConcurrency?: number;
+    // Effective review pipeline workflow name (a public-safe workflow name,
+    // never a path or credential). Optional so older details stay valid.
+    reviewWorkflow?: string;
   };
 };
 
@@ -361,6 +366,7 @@ export type CreateApiServerOptions = {
   runtimeRegistry?: RuntimeRegistry;
   pullRequestService?: Pick<RepositoryPullRequestService, "list">;
   workflowRuntime?: WorkflowRuntimeHost;
+  testGitHubConnection?: () => Promise<GitHubConnectionTestResponse>;
 };
 
 type RequestContext = {
@@ -1998,7 +2004,10 @@ const routes: Route[] = [
           workerConcurrency: details.configuration.workerConcurrency,
           ...(details.configuration.publishWorkerConcurrency === undefined
             ? {}
-            : { publishWorkerConcurrency: details.configuration.publishWorkerConcurrency })
+            : { publishWorkerConcurrency: details.configuration.publishWorkerConcurrency }),
+          ...(details.configuration.reviewWorkflow === undefined
+            ? {}
+            : { reviewWorkflow: details.configuration.reviewWorkflow })
         }
       }, allowedOrigins);
     }
@@ -2033,6 +2042,34 @@ const routes: Route[] = [
       sendJson(request, response, 200, {
         settings: toRendererSettings(options.settings.update(patch))
       }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/settings/github/test-connection",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      // Body is accepted and ignored: the probe always targets the ACTIVE
+      // runtime credential, never unsaved Settings drafts.
+      await readJson(request);
+      if (!options.testGitHubConnection) {
+        throw new ApiError("GitHub connection test is unavailable", "GITHUB_CONNECTION_TEST_UNAVAILABLE", 503);
+      }
+      let result: GitHubConnectionTestResponse;
+      try {
+        result = await options.testGitHubConnection();
+      } catch {
+        throw new ApiError("GitHub connection test is unavailable", "GITHUB_CONNECTION_TEST_FAILED", 502);
+      }
+      const parsed = githubConnectionTestResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new ApiError(
+          "GitHub connection test response is unavailable",
+          "GITHUB_CONNECTION_TEST_RESPONSE_INVALID",
+          502
+        );
+      }
+      sendJson(request, response, 200, parsed.data, allowedOrigins);
     }
   },
   {

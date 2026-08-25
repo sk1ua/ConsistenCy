@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, type Repository } from "@consistency/schema";
+import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
@@ -336,6 +336,50 @@ describe("createApiServer", () => {
       localReview: { configured: true, rootCount: 1 }
     });
     expect(JSON.stringify({ health: healthBody, settings: settingsBody })).not.toContain("D:/private");
+  });
+
+  it("projects the effective review workflow name through /health and omits it when unreported", async () => {
+    const server = createApiServer({
+      healthDetails: () => ({
+        database: { ok: true },
+        worker: { running: false, activeJobs: 0, concurrency: 1 },
+        llmProvider: "none",
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory", configured: true },
+          workerConcurrency: 1,
+          reviewWorkflow: "pr-review"
+        }
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const health = await getJson(port, "/health");
+    expect((health.body as any).configuration).toMatchObject({ reviewWorkflow: "pr-review" });
+
+    // A details provider that predates the field still yields a valid
+    // payload — the projection omits the key instead of leaking undefined.
+    const legacy = createApiServer({
+      healthDetails: () => ({
+        database: { ok: true },
+        worker: { running: false, activeJobs: 0, concurrency: 1 },
+        llmProvider: "none",
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory", configured: true },
+          workerConcurrency: 1
+        }
+      })
+    });
+    servers.push(legacy);
+    const legacyPort = await listen(legacy);
+    const legacyHealth = await getJson(legacyPort, "/health");
+    expect((legacyHealth.body as any).configuration).not.toHaveProperty("reviewWorkflow");
   });
 
   it("verifies GitHub pull_request webhooks and enqueues review jobs", async () => {
@@ -1197,6 +1241,98 @@ describe("createApiServer", () => {
     expect(updateRes.status).toBe(200);
     const successBody = await updateRes.json() as any;
     expect(successBody.settings.llm.provider).toBe("openai");
+  });
+
+  it("serves the GitHub connection test through a single sanitized probe call", async () => {
+    const probe = vi.fn(async (): Promise<GitHubConnectionTestResponse> => ({
+      status: "connected",
+      mode: "pat",
+      testedAt: "2026-08-24T00:00:00.000Z"
+    }));
+    const server = createApiServer({ testGitHubConnection: probe });
+    servers.push(server);
+    const port = await listen(server);
+
+    // An empty body and a `{}` body are both accepted and ignored: the probe
+    // always targets the ACTIVE runtime credential.
+    const emptyBody = await httpJson(port, "POST", "/settings/github/test-connection");
+    expect(emptyBody.status).toBe(200);
+    expect(emptyBody.body).toEqual({
+      status: "connected",
+      mode: "pat",
+      testedAt: "2026-08-24T00:00:00.000Z"
+    });
+
+    const jsonBody = await postJson(port, "/settings/github/test-connection", {});
+    expect(jsonBody.status).toBe(200);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns not_configured as a 200 result and guards the probe behind the bearer token", async () => {
+    const server = createApiServer({
+      apiToken: "secret-token",
+      testGitHubConnection: async () => ({
+        status: "not_configured",
+        testedAt: "2026-08-24T00:00:00.000Z"
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const unauthorized = await postJson(port, "/settings/github/test-connection", {});
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.body).toMatchObject({ error: { code: "UNAUTHORIZED" } });
+
+    const authorized = await postJson(port, "/settings/github/test-connection", {}, {
+      authorization: "Bearer secret-token"
+    });
+    expect(authorized.status).toBe(200);
+    expect(authorized.body).toEqual({
+      status: "not_configured",
+      testedAt: "2026-08-24T00:00:00.000Z"
+    });
+  });
+
+  it("maps invalid probe payloads and probe crashes to sanitized 502 errors without secret leakage", async () => {
+    const server = createApiServer({
+      testGitHubConnection: async () => ({
+        status: "connected",
+        mode: "pat",
+        token: "ghp_test_fake",
+        testedAt: "not-a-date"
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const invalid = await postJson(port, "/settings/github/test-connection", {});
+    expect(invalid.status).toBe(502);
+    expect(invalid.body).toMatchObject({ error: { code: "GITHUB_CONNECTION_TEST_RESPONSE_INVALID" } });
+    expect(JSON.stringify(invalid.body)).not.toContain("ghp_test_fake");
+
+    const crashing = createApiServer({
+      testGitHubConnection: async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:443 with ghp_test_fake");
+      }
+    });
+    servers.push(crashing);
+    const crashPort = await listen(crashing);
+
+    const failed = await postJson(crashPort, "/settings/github/test-connection", {});
+    expect(failed.status).toBe(502);
+    expect(failed.body).toMatchObject({ error: { code: "GITHUB_CONNECTION_TEST_FAILED" } });
+    expect(JSON.stringify(failed.body)).not.toContain("ECONNREFUSED");
+    expect(JSON.stringify(failed.body)).not.toContain("ghp_test_fake");
+  });
+
+  it("reports a missing probe wiring as an explicit unavailable service", async () => {
+    const server = createApiServer({});
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await postJson(port, "/settings/github/test-connection", {});
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({ error: { code: "GITHUB_CONNECTION_TEST_UNAVAILABLE" } });
   });
 
   it("supports per-review model override on local review and rejects unconfigured or mock providers", async () => {

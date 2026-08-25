@@ -21,6 +21,13 @@ export type DesktopBuildInfo = {
   buildMode: "packaged" | "development" | "manual" | "release";
 };
 
+/** Identity-only projection of DesktopBuildInfo consumed by renderer surfaces
+ *  (About rows, settings badge) that do not care about buildMode. */
+export type BuildInfoSummary = {
+  version: string;
+  commitSha: string;
+};
+
 export type ConsistencyDesktopBridge = {
   appVersion: () => Promise<string>;
   buildInfo?: () => Promise<DesktopBuildInfo>;
@@ -29,6 +36,9 @@ export type ConsistencyDesktopBridge = {
   setCredential: (key: DesktopCredentialKey, value: string | null) => Promise<DesktopCredentialStatus>;
   showFromTray: () => Promise<{ visible: boolean }>;
   restartRuntime?: () => Promise<{ ok: boolean; error?: string }>;
+  /** Semantic desktop action: opens the host's own logs folder. Zero arguments,
+   *  boolean-only result — the renderer never supplies or learns a path. */
+  openLogsFolder?: () => Promise<{ ok: boolean }>;
 };
 
 declare global {

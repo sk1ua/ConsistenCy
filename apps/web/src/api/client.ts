@@ -16,6 +16,7 @@ import {
   auditRunSchema,
   automationSchema,
   evolutionSnapshotSchema,
+  githubConnectionTestResponseSchema,
   repositoryEventSchema,
   repositoryPulseSchema,
   repositorySchema,
@@ -66,6 +67,7 @@ import {
   type AuditIssue,
   type AuditRun,
   type EvolutionSnapshot,
+  type GitHubConnectionTestResponse,
   type RepositoryEvent,
   type RepositoryPulse
 } from "@consistency/schema";
@@ -79,6 +81,11 @@ const apiBaseUrl = "/api";
 export type HealthResponse = {
   ok: boolean;
   service: string;
+  // The /health payload also carries the deterministic engine kind and the
+  // shared protocol version; both are delivered passthrough (no zod schema on
+  // this route) and stay optional so older payloads remain valid.
+  engine?: string;
+  schemaVersion?: string;
   database: { ok: boolean };
   worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
   deterministicAnalyzer?: { running: boolean; generation: number; pendingCount: number };
@@ -99,6 +106,10 @@ export type HealthResponse = {
     storage: { kind: "memory" | "file"; configured: boolean };
     workerConcurrency: number;
     publishWorkerConcurrency?: number;
+    // Effective review pipeline workflow name; optional because older API
+    // payloads predate the field and the Reviews section degrades to
+    // "not reported" without it.
+    reviewWorkflow?: string;
   };
 };
 
@@ -379,6 +390,13 @@ export const api = {
   },
   async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
     return (await request("/settings", { method: "PUT", body: JSON.stringify(patch) }) as { settings: SettingsSnapshot }).settings;
+  },
+  async testGitHubConnection(signal?: AbortSignal): Promise<GitHubConnectionTestResponse> {
+    return githubConnectionTestResponseSchema.parse(await request("/settings/github/test-connection", {
+      method: "POST",
+      body: "{}",
+      signal
+    }));
   },
   async analyzePublicPr(url: string, model?: ReviewModelOverride) {
     return publicPrResponseSchema.parse(await request("/reviews/public-pr", {

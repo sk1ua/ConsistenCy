@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type HealthResponse, type SettingsPatch, type SettingsSnapshot } from "../api/client";
-import { DESKTOP_CREDENTIAL_KEYS, desktopBridge, type ConsistencyDesktopBridge, type DesktopCredentialKey, type DesktopCredentialStatus } from "../desktop";
+import { DESKTOP_CREDENTIAL_KEYS, desktopBridge, type BuildInfoSummary, type ConsistencyDesktopBridge, type DesktopCredentialKey, type DesktopCredentialStatus } from "../desktop";
 import { useI18n } from "../i18n";
 
 export type SecretName = "deepseekApiKey" | "openaiApiKey" | "privateKey" | "webhookSecret" | "publicReadToken";
@@ -180,7 +180,7 @@ export interface UseSettingsFormResult {
   restarting: boolean;
   restartNeeded: boolean;
   message: { tone: "success" | "error"; text: string } | undefined;
-  buildInfo: { version: string; commitSha: string } | null;
+  buildInfo: BuildInfoSummary | null;
   updateSecret: (name: SecretName, value: string) => void;
   updateClear: (name: SecretName, value: boolean) => void;
   updateLlm: (patch: Partial<SettingsSnapshot["llm"]>) => void;
@@ -218,7 +218,7 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
   const [restarting, setRestarting] = useState(false);
   const [restartNeeded, setRestartNeeded] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string }>();
-  const [buildInfo, setBuildInfo] = useState<{ version: string; commitSha: string } | null>(null);
+  const [buildInfo, setBuildInfo] = useState<BuildInfoSummary | null>(null);
 
   const loadSettings = useCallback(async (): Promise<void> => {
     const snapshot = await (deps.fetchSettings ?? api.settings)();

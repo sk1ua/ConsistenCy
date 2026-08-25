@@ -1,9 +1,13 @@
 import { Check, CheckCircle2, Database, Globe2, Github, KeyRound, LoaderCircle, LockKeyhole, RotateCcw, Save, ServerCog, XCircle } from "lucide-react";
 import type { FormEvent } from "react";
 import type { HealthResponse } from "../api/client";
-import { SettingHelp } from "../components/SettingHelp";
 import { ModelSettingsSection } from "../components/settings/ModelSettingsSection";
 import { GitHubSettingsSection } from "../components/settings/GitHubSettingsSection";
+import { ReviewsSettingsSection } from "../components/settings/ReviewsSettingsSection";
+import { RuntimeSettingsSection } from "../components/settings/RuntimeSettingsSection";
+import { AppearanceSettingsSection } from "../components/settings/AppearanceSettingsSection";
+import { DesktopSettingsSection } from "../components/settings/DesktopSettingsSection";
+import { AboutSettingsSection } from "../components/settings/AboutSettingsSection";
 import { desktopBridge } from "../desktop";
 import { useI18n } from "../i18n";
 import { useSettingsForm } from "../hooks/useSettingsForm";
@@ -113,19 +117,24 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       updateGithub={updateGithub}
       updateSecret={updateSecret}
       updateClear={updateClear}
+      health={health}
+      restartPending={restartNeeded}
     />
 
-    <section className="settings-group section-block">
-      <div className="settings-group-title"><ServerCog size={18} /><div><span>{t("03 · Runtime")}</span><h3>{t("Local service")}</h3><p>{t("Control storage, workspace isolation and worker throughput.")}</p></div></div>
-      <div className="settings-fields">
-        <div className="setting-field setting-note"><Database size={17} /><div><strong>{t("Database")}</strong><p>{t(draft.runtime.storage.kind === "memory" ? "In-memory storage configured" : "Local file storage configured")}</p><SettingHelp id="setting-database-help" text="The local filesystem location is owned by the API process and is never sent to the renderer." /></div></div>
-        <div className="setting-field setting-note"><ServerCog size={17} /><div><strong>{t("Workspace")}</strong><p>{t(draft.runtime.workspace.configured ? "Review workspace configured" : "Review workspace not configured")}</p><SettingHelp id="setting-workspace-help" text="Choose local folders through the privileged desktop folder picker; raw paths do not cross into Web UI state." /></div></div>
-        <div className="setting-field"><label htmlFor="setting-concurrency">{t("Worker concurrency")}</label><input id="setting-concurrency" aria-describedby="setting-concurrency-help" type="number" min="1" max="16" value={draft.runtime.workerConcurrency} onChange={event => updateRuntime({ workerConcurrency: Number(event.target.value) })} /><SettingHelp id="setting-concurrency-help" text="Start with 1. Increase only after checking CPU, memory and provider rate limits." /></div>
-        <div className="setting-field"><label htmlFor="setting-poll">{t("Poll interval (ms)")}</label><input id="setting-poll" aria-describedby="setting-poll-help" type="number" min="50" max="60000" value={draft.runtime.workerPollIntervalMs} onChange={event => updateRuntime({ workerPollIntervalMs: Number(event.target.value) })} /><SettingHelp id="setting-poll-help" text="How often the worker checks for queued jobs. The default is appropriate for local use." /></div>
-        <div className="setting-field setting-field-wide"><label htmlFor="setting-web-url">{t("Web URL")}</label><input id="setting-web-url" aria-describedby="setting-web-url-help" type="url" value={draft.runtime.webUrl} onChange={event => updateRuntime({ webUrl: event.target.value })} /><SettingHelp id="setting-web-url-help" text="The browser URL used in links and callbacks, usually http://127.0.0.1:5173 for local development." /></div>
-        <div className="setting-field setting-field-wide setting-note"><LockKeyhole size={17} /><div><strong>{t("API session")}</strong><p>{t(settings.runtime.apiTokenConfigured ? "Protected API session configured" : "Browser development session is not protected")}</p><code>npm run config -- set runtime.api-token</code><SettingHelp id="setting-api-token-help" text="Electron owns its one-time session token in the main process. The renderer never receives or stores that token." /></div></div>
-      </div>
-    </section>
+    <ReviewsSettingsSection settings={settings} health={health} />
+
+    <RuntimeSettingsSection
+      draft={draft}
+      settings={settings}
+      health={health}
+      updateRuntime={updateRuntime}
+    />
+
+    <AppearanceSettingsSection />
+
+    <DesktopSettingsSection />
+
+    <AboutSettingsSection health={health} buildInfo={buildInfo} />
 
     <section className="settings-status section-block">
       <div className="section-heading"><div><h2>{t("Active runtime")}</h2><p>{t("These values describe the currently running API process.")}</p></div></div>

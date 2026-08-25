@@ -10,6 +10,7 @@ import { PublishWorker } from "./publish/worker";
 import { publishToGitHub } from "./publish/githubPublisher";
 import { PermanentPublishError } from "./publish/error";
 import { GitHubAppAuthenticator } from "./github/auth";
+import { testGitHubConnection } from "./github/connectionTest";
 import { RepositoryPullRequestService } from "./github/pullRequestReader";
 import { connectPublicGitHubRepository } from "./github/publicRepository";
 import { createContextBuilder } from "./review/context/contextRouter";
@@ -297,6 +298,13 @@ export const server = createApiServer({
     authenticator,
     publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN
   }),
+  // Settings "Test Connection" probe: bounded, read-only, and always aimed at
+  // the ACTIVE process credential — never unsaved Settings drafts.
+  testGitHubConnection: () => testGitHubConnection({
+    publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
+    appAuthenticator: authenticator,
+    publicPrAnalysisEnabled: config.publicPrAnalysisEnabled
+  }),
   publicPr: (url, modelOverride) => enqueuePublicPrReview({
     url,
     jobs,
@@ -376,7 +384,11 @@ export const server = createApiServer({
         configured: config.databasePath.trim().length > 0
       },
       workerConcurrency: config.CONSISTENCY_WORKER_CONCURRENCY,
-      publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY
+      publishWorkerConcurrency: config.CONSISTENCY_PUBLISH_WORKER_CONCURRENCY,
+      // Effective review pipeline workflow name. config.reviewWorkflow is null
+      // only for the documented "legacy" opt-out, so this round-trips the
+      // CONSISTENCY_REVIEW_WORKFLOW value the process actually runs with.
+      reviewWorkflow: config.reviewWorkflow ?? "legacy"
     }
   })
 });

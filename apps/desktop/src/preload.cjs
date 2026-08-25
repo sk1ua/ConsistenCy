@@ -24,5 +24,6 @@ contextBridge.exposeInMainWorld("consistencyDesktop", Object.freeze({
   setCredential: (key, value) => ipcRenderer.invoke("credentials:set", { key, value }),
   showFromTray: () => ipcRenderer.invoke("tray:show"),
   restartRuntime: () => ipcRenderer.invoke("runtime:restart"),
+  openLogsFolder: () => ipcRenderer.invoke("logs:open"),
   updates
 }));

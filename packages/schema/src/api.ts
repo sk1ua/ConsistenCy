@@ -392,6 +392,31 @@ export const repositoryPullRequestsResponseSchema = z.discriminatedUnion("availa
   });
 });
 
+/**
+ * Truthful GitHub connection probe statuses (CKPT4 Slice 2). The probe is a
+ * single bounded read-only call against the ACTIVE runtime credential; the
+ * response carries status enums and bounded metadata only — never a token,
+ * URL, or filesystem path.
+ */
+export const githubConnectionTestStatusSchema = z.enum([
+  "connected",
+  "anonymous_available",
+  "invalid_credential",
+  "rate_limited",
+  "unavailable",
+  "not_configured"
+]);
+
+export const githubConnectionTestResponseSchema = z.object({
+  status: githubConnectionTestStatusSchema,
+  mode: z.enum(["pat", "app", "anonymous"]).optional(),
+  retryAfterMs: z.number().int().positive().optional(),
+  testedAt: z.string().datetime()
+}).strict();
+
+export type GitHubConnectionTestStatus = z.infer<typeof githubConnectionTestStatusSchema>;
+export type GitHubConnectionTestResponse = z.infer<typeof githubConnectionTestResponseSchema>;
+
 export const reviewPreparationSourceWorkingTreeSchema = z.object({
   available: z.boolean(),
   reason: z.string().optional(),

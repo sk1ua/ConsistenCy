@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
+import { toGitHubApiError } from "./client";
 
 export type InstallationToken = {
   token: string;
@@ -99,6 +100,26 @@ export class GitHubAppAuthenticator {
         throw new Error("GitHub App is not installed on this repository");
       }
       throw error;
+    }
+  }
+
+  /**
+   * Repository-independent credential validation for the Settings connection
+   * probe: one authenticated read-only `GET /app` call with the app JWT.
+   * Returns true when GitHub accepts the credentials, false on a 401
+   * rejection, and throws a normalized GitHubApiError for every other
+   * failure (rate limits, network errors, 5xx). Never returns a token.
+   */
+  async verifyAppCredentials(signal?: AbortSignal): Promise<boolean> {
+    const appAuthentication = await this.auth({ type: "app" });
+    const octokit = new Octokit({ auth: appAuthentication.token });
+    try {
+      await octokit.rest.apps.getAuthenticated(signal ? { request: { signal } } : {});
+      return true;
+    } catch (error) {
+      const apiError = toGitHubApiError(error);
+      if (apiError.status === 401) return false;
+      throw apiError;
     }
   }
 }

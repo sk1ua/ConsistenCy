@@ -281,6 +281,20 @@
   color: var(--primary-strong);
   font-size: 12px;
 }
+/* Desired-vs-active runtime drift inside the shared Runtime section.
+   Data-derived echo of the authoritative restart banner, not new state. */
+.runtime-active-note .runtime-drift-notice {
+  margin: 3px 0 7px;
+  color: var(--warning-strong);
+  font-weight: 700;
+}
+/* Restart hint inside the GitHub connection-test row — the same
+   data-derived echo semantics as the runtime drift notice. */
+.github-restart-hint {
+  margin: 3px 0 7px;
+  color: var(--warning-strong);
+  font-weight: 700;
+}
 .settings-status {
   padding: 18px;
 }

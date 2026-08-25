@@ -126,6 +126,7 @@ test.describe("desktop shell", () => {
         "appVersion",
         "buildInfo",
         "credentialStatus",
+        "openLogsFolder",
         "restartRuntime",
         "selectRepository",
         "setCredential",

@@ -7,6 +7,11 @@ import { useI18n } from "../i18n";
 import { useSettingsForm } from "../hooks/useSettingsForm";
 import { ModelSettingsSection } from "./settings/ModelSettingsSection";
 import { GitHubSettingsSection } from "./settings/GitHubSettingsSection";
+import { ReviewsSettingsSection } from "./settings/ReviewsSettingsSection";
+import { RuntimeSettingsSection } from "./settings/RuntimeSettingsSection";
+import { AppearanceSettingsSection } from "./settings/AppearanceSettingsSection";
+import { DesktopSettingsSection } from "./settings/DesktopSettingsSection";
+import { AboutSettingsSection } from "./settings/AboutSettingsSection";
 import { desktopBridge } from "../desktop";
 
 export type SettingsSectionId = "models" | "github" | "reviews" | "runtime" | "appearance" | "desktop" | "about";
@@ -20,11 +25,11 @@ interface SettingsNavItem {
 const SECTION_ITEMS: readonly SettingsNavItem[] = [
   { id: "models", labelKey: "Models", disabled: false },
   { id: "github", labelKey: "GitHub", disabled: false },
-  { id: "reviews", labelKey: "Reviews", disabled: true },
-  { id: "runtime", labelKey: "Runtime", disabled: true },
-  { id: "appearance", labelKey: "Appearance", disabled: true },
-  { id: "desktop", labelKey: "Desktop", disabled: true },
-  { id: "about", labelKey: "About", disabled: true }
+  { id: "reviews", labelKey: "Reviews", disabled: false },
+  { id: "runtime", labelKey: "Runtime", disabled: false },
+  { id: "appearance", labelKey: "Appearance", disabled: false },
+  { id: "desktop", labelKey: "Desktop", disabled: false },
+  { id: "about", labelKey: "About", disabled: false }
 ];
 
 export interface SettingsDialogProps {
@@ -49,10 +54,12 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
     restarting,
     restartNeeded,
     message,
+    buildInfo,
     updateSecret,
     updateClear,
     updateLlm,
     updateGithub,
+    updateRuntime,
     save,
     resetChanges,
     handleRestartRuntime
@@ -105,7 +112,18 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
           ))}
         </nav>
         <div className="settings-dialog-content">
-          {loading ? (
+          {/* Appearance, Desktop and About are renderer-local read-only
+              status sections (theme + locale apply immediately; the desktop
+              rows describe fixed Electron behavior; About mirrors buildInfo
+              and /health), so they render without waiting for the settings
+              snapshot. */}
+          {activeSection === "appearance" ? (
+            <AppearanceSettingsSection />
+          ) : activeSection === "desktop" ? (
+            <DesktopSettingsSection />
+          ) : activeSection === "about" ? (
+            <AboutSettingsSection health={health} buildInfo={buildInfo} />
+          ) : loading ? (
             <div className="loading-state"><LoaderCircle size={22} /><span>{t("Loading configuration")}</span></div>
           ) : !draft || !settings ? (
             <div className="empty-state">{t("Configuration editor is unavailable. Run {command} for details.", { command: "npm run config -- doctor" })}</div>
@@ -164,9 +182,26 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   updateGithub={updateGithub}
                   updateSecret={updateSecret}
                   updateClear={updateClear}
+                  health={health}
+                  restartPending={restartNeeded}
                 />
               )}
-              {activeSection !== "models" && activeSection !== "github" && (
+              {activeSection === "reviews" && (
+                <ReviewsSettingsSection settings={settings} health={health} />
+              )}
+              {activeSection === "runtime" && (
+                <RuntimeSettingsSection
+                  draft={draft}
+                  settings={settings}
+                  health={health}
+                  updateRuntime={updateRuntime}
+                />
+              )}
+              {/* Appearance, Desktop and About cannot reach this branch — the
+                  ternary above routes them to renderer-local sections before
+                  the form guard. With Reviews enabled every nav id renders a
+                  real section, so the empty-state below is purely defensive. */}
+              {activeSection !== "models" && activeSection !== "github" && activeSection !== "reviews" && activeSection !== "runtime" && (
                 <div className="empty-state">{t("Coming soon")}</div>
               )}
             </>

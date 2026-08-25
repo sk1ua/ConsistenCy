@@ -123,6 +123,37 @@ test.describe("desktop repository security boundary", () => {
     expect(preload).not.toContain("x-consistency-desktop-control");
   });
 
+  test("wires the logs folder as a semantic main-only action with no renderer path authority", () => {
+    const main = readFileSync(resolve(repositoryRoot, "apps", "desktop", "src", "main.cjs"), "utf8");
+    const preload = readFileSync(resolve(repositoryRoot, "apps", "desktop", "src", "preload.cjs"), "utf8");
+
+    // The handler shape is pinned verbatim: zero renderer arguments, the
+    // trusted-sender guard, and a main-side helper call only.
+    expect(main).toContain(
+      'ipcMain.handle("logs:open", async event => {\n' +
+      '    assertTrustedSender(event);\n' +
+      '    return openLogsFolder();\n' +
+      '  });'
+    );
+    expect(main).toContain("async function openLogsFolder()");
+    // The path is resolved exclusively in main from userData.
+    expect(main).toContain('app.getPath("userData")');
+    expect(main).toContain('shell.openPath(userData)');
+    // Only a boolean crosses the bridge; the shell error description (which
+    // may embed local paths) is never forwarded.
+    expect(main).toContain('return { ok: result === "" };');
+    const logsHelper = main.match(/async function openLogsFolder\(\) \{([\s\S]*?)\n\}/)?.[1];
+    expect(logsHelper).toBeDefined();
+    expect(logsHelper).not.toMatch(/\berror\b/);
+
+    // Preload surface: the method takes no parameters by construction and
+    // never opens paths renderer-side.
+    expect(preload).toContain('openLogsFolder: () => ipcRenderer.invoke("logs:open")');
+    expect(preload).not.toMatch(/openLogsFolder:\s*\([^)]/);
+    expect(preload).not.toContain("shell.openPath");
+    expect(preload).not.toMatch(/openPath\s*\(/);
+  });
+
   test("validates external URLs allowing only safe HTTPS and denying unsafe schemes", () => {
     expect(boundary.isSafeExternalUrl("https://platform.openai.com/api-keys")).toBe(true);
     expect(boundary.isSafeExternalUrl("https://api-docs.deepseek.com/api/deepseek-api")).toBe(true);

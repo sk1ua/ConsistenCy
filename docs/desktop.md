@@ -91,7 +91,10 @@ The API binds to `127.0.0.1` on a dynamically assigned port. Each launch generat
 - A desktop control token required for internal administrative routes (e.g. `POST /internal/repositories/local`).
 
 ### 4.3 Runtime Restart from Settings
-When LLM provider keys or review worker settings are updated in the Settings page, the Desktop host provides a **[Restart ConsistenCy Runtime]** button. Clicking this instructs Electron to gracefully terminate the API child process, spawn a fresh instance with the updated settings, and re-establish connectivity seamlessly.
+When LLM provider keys or review worker settings are updated in the Settings page or the in-app Settings Dialog (Runtime section), the Desktop host provides a **[Restart ConsistenCy Runtime]** button. Clicking this instructs Electron to gracefully terminate the API child process, spawn a fresh instance with the updated settings, and re-establish connectivity seamlessly.
+
+### 4.4 Open Logs Folder (Semantic Action)
+The About section of Settings exposes an **[Open logs folder]** button (desktop only; browsers show a not-available note). This is a semantic privileged action, not a filesystem capability: the `logs:open` IPC method takes **no arguments**, the main process resolves the `userData` folder itself — the documented home of `consistency.log` and `api.log` — opens it in the OS file manager via `shell.openPath`, and returns only `{ ok: boolean }` to the renderer. The renderer never receives arbitrary path-opening authority, never learns the resolved folder path, and never sees `shell.openPath`'s error description (which may embed local paths). There is no generic `openPath(pathFromRenderer)` API.
 
 ---
 

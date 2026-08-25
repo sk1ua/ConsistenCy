@@ -61,6 +61,7 @@ x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
 | `GET` | `/workflow-runtime/repositories/:id/runs` | Bounded per-repository run history (canonical repositoryId join) | Authenticated |
 | `GET` | `/settings` | Get sanitized runtime configuration snapshot | Authenticated |
 | `PUT` | `/settings` | Update editable runtime settings (dev / desktop mode) | Authenticated |
+| `POST` | `/settings/github/test-connection` | Single bounded read-only probe of the ACTIVE GitHub credential (sanitized status enum + bounded retry metadata only; CKPT4 Slice 2) | Authenticated |
 | `POST` | `/github/webhook` | Incoming HMAC-verified GitHub webhook event | GitHub HMAC Header |
 
 ---

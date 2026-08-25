@@ -543,6 +543,23 @@ function readBuildInfo() {
   };
 }
 
+// Semantic privileged action: the renderer never supplies — or learns — a
+// path. The main process resolves the userData folder itself (it holds
+// consistency.log, api.log and the OS-encrypted credentials) and opens it in
+// the OS file manager. shell.openPath resolves "" on success or an error
+// description that may embed local paths, so only a boolean crosses the
+// bridge; the description is dropped here.
+async function openLogsFolder() {
+  try {
+    const userData = app.getPath("userData");
+    if (!fs.existsSync(userData)) return { ok: false };
+    const result = await shell.openPath(userData);
+    return { ok: result === "" };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function assertTrustedSender(event) {
   const senderUrl = event.senderFrame && event.senderFrame.url
     ? event.senderFrame.url
@@ -586,6 +603,10 @@ function registerIpc() {
   ipcMain.handle("runtime:restart", async event => {
     assertTrustedSender(event);
     return restartApi();
+  });
+  ipcMain.handle("logs:open", async event => {
+    assertTrustedSender(event);
+    return openLogsFolder();
   });
   ipcMain.handle("updates:get-state", event => {
     assertTrustedSender(event);
