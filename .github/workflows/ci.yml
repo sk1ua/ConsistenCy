@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      # mock is scoped to this CI test environment only; product runtimes are real-data/real-LLM and have no mock mode (AGENTS.md contract).
       LLM_PROVIDER: mock
 
     steps:

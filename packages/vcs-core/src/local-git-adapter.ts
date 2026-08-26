@@ -175,6 +175,21 @@ export class LocalGitAdapter implements IVCSService {
   }
 
   /**
+   * Resolves any single revision git accepts (branch, tag, abbreviated or full
+   * SHA) into its immutable object name. Returns undefined when the revision
+   * cannot be verified, so callers can fail closed instead of storing a
+   * symbolic name that may move before a queued job executes.
+   */
+  async resolveRevision(revision: string): Promise<string | undefined> {
+    try {
+      const sha = (await this.run(["rev-parse", "--verify", "--quiet", assertSafeRef(revision)])).trim();
+      return GIT_SHA.test(sha) ? sha : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Staged and unstaged tracked changes against HEAD. Untracked files are not
    * included; they carry no baseline and are reported by `getUntrackedFiles`.
    *

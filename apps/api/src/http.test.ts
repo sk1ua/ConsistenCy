@@ -1473,6 +1473,29 @@ describe("createApiServer", () => {
     expect(emptyRes.status).toBe(400);
   });
 
+  it("fails closed when the legacy local review endpoint is not configured", async () => {
+    const jobs = new InMemoryJobQueue();
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Unconfigured Local Review", "D:/canonical/repo-path");
+    // No localReview dependency wired: mirrors a server started without
+    // CONSISTENCY_LOCAL_REVIEW_ROOTS, which must keep POST /reviews/local off
+    // regardless of what repositories are registered.
+    const server = createApiServer({ jobs, auditStore });
+    servers.push(server);
+    const port = await listen(server);
+
+    const res = await fetch(`http://127.0.0.1:${port}/reviews/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repositoryId: repository.id })
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: { code: "LOCAL_REVIEW_UNAVAILABLE" }
+    });
+    expect(jobs.list()).toHaveLength(0);
+  });
+
   it("reports saved DeepSeek as pending restart while runtime remains unconfigured", async () => {
     const savedSettings: SettingsSnapshot = {
       llm: {

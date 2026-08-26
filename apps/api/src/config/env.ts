@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { findProjectRoot } from "./settings";
 
@@ -92,7 +92,9 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   databasePath: string;
   workspaceRoot: string;
   engineRoot?: string;
+  /** Explicit review roots; empty when unset, which disables POST /reviews/local. */
   localReviewRoots: string[];
+  /** True when CONSISTENCY_LOCAL_REVIEW_ROOTS was not configured (reviews disabled). */
   localReviewRootsAreDefaulted: boolean;
   allowedOrigins: string[];
   LLM_PROVIDER?: "deepseek" | "openai";
@@ -143,8 +145,10 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   // Legacy path-based local reviews are fail-closed. Electron repository access
   // is granted by the main-process folder picker and the server-side registry;
   // deployments that still need POST /reviews/local must opt into exact roots.
+  // Unset configures nothing — the endpoint stays disabled instead of silently
+  // widening to the project's parent directory (matching .env.example).
   const localReviewRootsAreDefaulted = configuredLocalRoots.length === 0;
-  const localReviewRoots = configuredLocalRoots.length === 0 ? [dirname(findProjectRoot())] : configuredLocalRoots;
+  const localReviewRoots = configuredLocalRoots;
   if (parsed.NODE_ENV === "production" && (allowedOrigins.length === 0 || allowedOrigins.includes("*"))) {
     throw new Error("CONSISTENCY_ALLOWED_ORIGINS must contain explicit origins in production");
   }

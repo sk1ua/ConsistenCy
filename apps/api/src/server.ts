@@ -353,7 +353,12 @@ export const server = createApiServer({
     llmModel: modelOverride?.model
   }),
   llmProviderConfigured: Boolean(provider),
-  localReview: input => {
+  // Fail-closed: without explicit CONSISTENCY_LOCAL_REVIEW_ROOTS the legacy
+  // endpoint stays disabled entirely — http.ts reports a missing localReview
+  // dependency as LOCAL_REVIEW_UNAVAILABLE (503) instead of falling back to
+  // any implicit root. Registered checkout paths only extend what a review may
+  // read after an operator configures explicit roots.
+  localReview: config.localReviewRoots.length === 0 ? undefined : input => {
     const registeredLocalRoots: string[] = [];
     if (auditStore) {
       for (const repo of auditStore.listRepositories()) {
@@ -540,7 +545,7 @@ if (process.env.NODE_ENV !== "test") {
     if (config.localReviewRootsAreDefaulted) {
       logger.warn({
         localReviewRootCount: config.localReviewRoots.length
-      }, "CONSISTENCY_LOCAL_REVIEW_ROOTS is unset; every repository under the project's parent directory can be read via POST /reviews/local");
+      }, "CONSISTENCY_LOCAL_REVIEW_ROOTS is unset; the legacy local review endpoint (POST /reviews/local) is disabled until explicit review roots are configured");
     }
   });
 }

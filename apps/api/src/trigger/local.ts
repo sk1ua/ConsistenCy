@@ -9,11 +9,23 @@ export type LocalTriggerInput = {
   /** Canonical opaque repository id of the REGISTERED repository this review
    *  belongs to (persisted on the job; no name inference anywhere). */
   repositoryId?: string;
-  /** Supply both to review a committed range; omit both for the working tree. */
+  /** Supply both to review a committed range (pinned to resolved SHAs on the
+   *  job); omit both for the working tree. */
   baseRef?: string;
   headRef?: string;
   llmProvider?: "deepseek" | "openai";
   llmModel?: string;
+};
+
+/**
+ * Range triggers must store immutable commits on the queued job, so any VCS
+ * handed to this trigger has to expose single-revision resolution
+ * (`LocalGitAdapter.resolveRevision`). Re-resolving ref names at execution time
+ * would let branch movement between enqueue and execution change what is
+ * analyzed and what evidence cites.
+ */
+export type RevisionResolvingVCS = IVCSService & {
+  resolveRevision(revision: string): Promise<string | undefined>;
 };
 
 export type LocalTriggerDependencies = {
@@ -23,7 +35,7 @@ export type LocalTriggerDependencies = {
    * arbitrary repository on disk.
    */
   allowedRoots: string[];
-  vcsFactory?: (root: string) => IVCSService;
+  vcsFactory?: (root: string) => RevisionResolvingVCS;
 };
 
 export class LocalTriggerError extends Error {
@@ -71,7 +83,7 @@ export async function triggerLocalReview(
     throw new LocalTriggerError("baseRef and headRef must be supplied together", "NOTHING_TO_REVIEW");
   }
 
-  const vcs = dependencies.vcsFactory?.(repoPath) ?? new LocalGitAdapter({ root: repoPath });
+  const vcs: RevisionResolvingVCS = dependencies.vcsFactory?.(repoPath) ?? new LocalGitAdapter({ root: repoPath });
 
   let baseSha: string;
   let headSha: string;
@@ -79,12 +91,23 @@ export async function triggerLocalReview(
     if (reviewingRange) {
       const [base] = await vcs.getCommitHistory(1);
       if (base === undefined) throw new LocalTriggerError("Repository has no commits", "NOTHING_TO_REVIEW");
-      const changed = await vcs.getBranchDiff(input.baseRef as string, input.headRef as string);
+      // Resolve both refs to immutable commits before queueing so the job's
+      // baseSha/headSha cannot drift when branches move between enqueue and
+      // execution; rev-parse of an already-pinned SHA is a cheap identity.
+      const resolvedBase = await vcs.resolveRevision(input.baseRef as string);
+      const resolvedHead = await vcs.resolveRevision(input.headRef as string);
+      if (resolvedBase === undefined || resolvedHead === undefined) {
+        throw new LocalTriggerError(
+          "The requested range references revisions that do not exist in this repository",
+          "NOTHING_TO_REVIEW"
+        );
+      }
+      const changed = await vcs.getBranchDiff(resolvedBase, resolvedHead);
       if (changed.length === 0) {
         throw new LocalTriggerError("The requested range has no changes", "NOTHING_TO_REVIEW");
       }
-      baseSha = input.baseRef as string;
-      headSha = input.headRef as string;
+      baseSha = resolvedBase;
+      headSha = resolvedHead;
     } else {
       const [head] = await vcs.getCommitHistory(1);
       if (head === undefined) throw new LocalTriggerError("Repository has no commits", "NOTHING_TO_REVIEW");

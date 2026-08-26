@@ -101,4 +101,13 @@ describe("SettingsStore", () => {
     expect(JSON.stringify(renderer)).not.toContain("D:/private");
     expect(JSON.stringify(renderer)).not.toContain("D:/customers");
   });
+
+  it("reports local review as disabled when no roots are configured", () => {
+    const settings = store();
+    // No saved CONSISTENCY_LOCAL_REVIEW_ROOTS and none in the environment:
+    // the legacy endpoint is disabled, so the renderer must not see roots.
+    const snapshot = settings.snapshot({});
+    const renderer = toRendererSettings(snapshot);
+    expect(renderer.runtime.localReview).toEqual({ configured: false, rootCount: 0 });
+  });
 });

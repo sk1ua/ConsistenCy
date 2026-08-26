@@ -1,7 +1,6 @@
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "./env";
-import { findProjectRoot } from "./settings";
 
 const baseEnv = {
   NODE_ENV: "development",
@@ -10,9 +9,11 @@ const baseEnv = {
 } as const;
 
 describe("CONSISTENCY_LOCAL_REVIEW_ROOTS", () => {
-  it("defaults to the project's parent directory", () => {
+  it("fails closed: unset roots configure nothing and disable legacy local reviews", () => {
     const config = loadEnv({ ...baseEnv });
-    expect(config.localReviewRoots).toEqual([dirname(findProjectRoot())]);
+    // Documented contract (.env.example): unset disables the legacy
+    // path-based endpoint. No implicit project-parent fallback.
+    expect(config.localReviewRoots).toEqual([]);
   });
 
   it("parses an explicit comma-separated list into absolute paths", () => {
@@ -31,7 +32,7 @@ describe("CONSISTENCY_LOCAL_REVIEW_ROOTS", () => {
     expect(config.localReviewRoots).toEqual([resolve("D:/work/alpha")]);
   });
 
-  it("flags when the broad default is in force so startup can warn", () => {
+  it("flags unset roots so startup can warn that legacy reviews are disabled", () => {
     expect(loadEnv({ ...baseEnv }).localReviewRootsAreDefaulted).toBe(true);
     expect(loadEnv({
       ...baseEnv,

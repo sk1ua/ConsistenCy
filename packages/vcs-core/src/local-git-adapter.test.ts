@@ -102,6 +102,16 @@ describe("LocalGitAdapter", { timeout: 30_000 }, () => {
     expect(diff[0]?.additions).toBe(1);
   });
 
+  it("resolves revisions to immutable object names and declines unknown refs", async () => {
+    const mainSha = (await git(["rev-parse", "main"])).stdout.trim();
+    expect(await adapter.resolveRevision("main")).toBe(mainSha);
+    // A resolved SHA is its own identity.
+    expect(await adapter.resolveRevision(mainSha)).toBe(mainSha);
+    expect(await adapter.resolveRevision((await adapter.getHeadSha())!))
+      .toBe(await adapter.getHeadSha());
+    expect(await adapter.resolveRevision("no-such-ref-anywhere")).toBeUndefined();
+  });
+
   it("reads commit history newest-first with parent links", async () => {
     const history = await adapter.getCommitHistory(10);
     expect(history).toHaveLength(3);

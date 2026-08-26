@@ -16,7 +16,17 @@ const dirtyFile: VcsChangedFile = {
   hunks: []
 };
 
-function fakeVcs(overrides: Partial<IVCSService> = {}): IVCSService {
+/** Ref name -> immutable commit the fake checkout would resolve to. */
+const PINNED_REVISIONS: Record<string, string | undefined> = {
+  main: "b".repeat(40),
+  feature: "c".repeat(40)
+};
+
+type RevisionResolvingFake = IVCSService & {
+  resolveRevision(revision: string): Promise<string | undefined>;
+};
+
+function fakeVcs(overrides: Partial<RevisionResolvingFake> = {}): RevisionResolvingFake {
   return {
     provider: "local_git",
     getWorkingDiff: async () => [dirtyFile],
@@ -30,6 +40,7 @@ function fakeVcs(overrides: Partial<IVCSService> = {}): IVCSService {
     }],
     getUntrackedFiles: async () => [],
     getFileTreeAtCommit: async () => [],
+    resolveRevision: async revision => PINNED_REVISIONS[revision],
     ...overrides
   };
 }
@@ -57,17 +68,39 @@ describe("triggerLocalReview", () => {
     expect(job.publicationPolicy).toBe("disabled");
   });
 
-  it("records both real revisions when a committed range is requested", async () => {
+  it("pins queued jobs to immutable revisions rather than ref names", async () => {
     const jobs = new InMemoryJobQueue();
+    let diffArgs: readonly [string, string] | undefined;
     const { jobId } = await triggerLocalReview(
       jobs,
       { repoPath: REPO, baseRef: "main", headRef: "feature" },
-      deps()
+      deps({
+        vcsFactory: () => fakeVcs({
+          getBranchDiff: async (base, head) => {
+            diffArgs = [base, head];
+            return [dirtyFile];
+          }
+        })
+      })
     );
 
+    // The job must store the resolved commits, not the moving ref names, so
+    // branch movement between enqueue and execution cannot change what a local
+    // review analyzes or what evidence cites.
     const job = jobs.get(jobId)!;
-    expect(job.baseSha).toBe("main");
-    expect(job.headSha).toBe("feature");
+    expect(job.baseSha).toBe(PINNED_REVISIONS.main);
+    expect(job.headSha).toBe(PINNED_REVISIONS.feature);
+    expect(diffArgs).toEqual([PINNED_REVISIONS.main, PINNED_REVISIONS.feature]);
+  });
+
+  it("declines a range whose revisions cannot be resolved in this repository", async () => {
+    const jobs = new InMemoryJobQueue();
+    await expect(triggerLocalReview(
+      jobs,
+      { repoPath: REPO, baseRef: "no-such-base", headRef: "feature" },
+      deps()
+    )).rejects.toMatchObject({ code: "NOTHING_TO_REVIEW" });
+    expect(jobs.list()).toHaveLength(0);
   });
 
   it("refuses a repository outside the configured roots", async () => {

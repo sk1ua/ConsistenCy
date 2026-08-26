@@ -308,7 +308,9 @@ export class SettingsStore {
       runtime: {
         databasePath: effective.DATABASE_PATH ?? ".consistency/consistency.db",
         workspaceRoot: effective.CONSISTENCY_WORKSPACE_ROOT ?? ".consistency/workspaces",
-        localReviewRoots: effective.CONSISTENCY_LOCAL_REVIEW_ROOTS ?? dirname(findProjectRoot()),
+        // Fail-closed: unset means disabled, so the renderer sees
+        // localReview.configured=false rather than an implicit default root.
+        localReviewRoots: effective.CONSISTENCY_LOCAL_REVIEW_ROOTS ?? "",
         workerConcurrency: Number(effective.CONSISTENCY_WORKER_CONCURRENCY ?? 1),
         workerPollIntervalMs: Number(effective.CONSISTENCY_WORKER_POLL_INTERVAL_MS ?? 1_000),
         webUrl: effective.CONSISTENCY_WEB_URL ?? "http://127.0.0.1:5173",
