@@ -34,6 +34,7 @@ import { AuditRunPlanner } from "./audit/planner";
 import { AutomationScheduler } from "./audit/scheduler";
 import { RuntimeRegistry } from "./review/runtimeRegistry";
 import { WorkflowRuntimeHost } from "./workflow-runtime/host";
+import { WorkflowTriggerExecutor, WorkflowTriggerPlanner } from "./workflow-runtime/triggers";
 import { WorkflowRuntimeStore } from "./workflow-runtime/store";
 
 const { config, store: settingsStore } = loadRuntimeConfig();
@@ -214,11 +215,38 @@ export const heartbeat = new HeartbeatDaemon({
 function repositorySupervisorRegistrations() {
   return buildRepositorySupervisorRegistrations(
     auditStore,
-    config.CONSISTENCY_HEARTBEAT_INTERVAL_MS
+    config.CONSISTENCY_HEARTBEAT_INTERVAL_MS,
+    {
+      // Enabled on_change workflow bindings join the registration digest so
+      // binding changes re-arm change events (CKPT5).
+      onChangeBindings: repositoryId =>
+        workflowRuntimeStore
+          .listBindings(repositoryId)
+          .filter(binding => binding.enabled && binding.triggerMode === "on_change")
+          .map(binding => binding.definitionId)
+    }
   );
 }
 
 export const auditRunPlanner = new AuditRunPlanner(auditStore);
+export const workflowTriggerExecutor = new WorkflowTriggerExecutor({
+  store: workflowRuntimeStore,
+  trigger: (input) => workflowRuntimeHost.triggerBinding(input),
+  pollIntervalMs: config.CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS,
+  onError: failure => {
+    logger.warn({
+      planId: failure.planId,
+      error: sanitizePublicError(
+        failure.error instanceof Error ? failure.error.message : "Unknown workflow trigger execution error"
+      )
+    }, "Workflow trigger execution failed");
+  }
+});
+// Planning failures are handled at the supervisor sink call site (logged
+// sanitized; supervision itself never breaks).
+export const workflowTriggerPlanner = new WorkflowTriggerPlanner({
+  store: workflowRuntimeStore
+});
 export const automationScheduler = new AutomationScheduler(auditStore, auditRunPlanner, {
   pollIntervalMs: config.CONSISTENCY_AUTOMATION_SCHEDULER_INTERVAL_MS,
   onError: failure => {
@@ -246,6 +274,17 @@ export const repositorySupervisor = new RepositorySupervisor(
       writeChangeEvent: event => {
         const persisted = auditStore.saveRepositoryEvent(event);
         auditRunPlanner.planRepositoryEvent(persisted);
+        try {
+          workflowTriggerPlanner.planRepositoryEvent(persisted);
+        } catch (error) {
+          // Trigger planning must never break supervision; the durable event
+          // stays persisted and planning failure is logged sanitized.
+          logger.warn({
+            error: sanitizePublicError(
+              error instanceof Error ? error.message : "Unknown workflow trigger planning error"
+            )
+          }, "Workflow trigger planning failed");
+        }
       }
     },
     onError: failure => {
@@ -343,6 +382,7 @@ export const server = createApiServer({
   auditPlanner: auditRunPlanner,
   automationScheduler,
   onAuditRepositoriesChanged: reconcileRepositorySupervisor,
+  onWorkflowBindingsChanged: reconcileRepositorySupervisor,
   workflows,
   jobDiff: jobId => resolveJobDiff(jobId, {
     jobs,
@@ -404,6 +444,11 @@ export async function shutdownApplication(): Promise<void> {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     // 2. Stop schedulers and read-only observers before persistence is closed.
+    try {
+      workflowTriggerExecutor.stop();
+    } catch (err) {
+      logger.error({ error: err }, "Error stopping workflow trigger executor during shutdown");
+    }
     try {
       automationScheduler.stop();
     } catch (err) {
@@ -472,6 +517,9 @@ if (process.env.NODE_ENV !== "test") {
   }
   heartbeat.start();
   automationScheduler.start();
+  if (config.workflowTriggersEnabled) {
+    workflowTriggerExecutor.start();
+  }
   void repositorySupervisor.start().catch(error => {
     logger.error({
       error: sanitizePublicError(error instanceof Error ? error.message : "Unknown repository supervision error")

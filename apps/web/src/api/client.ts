@@ -502,10 +502,21 @@ export const api = {
     ) as { bindings: WorkflowRuntimeBinding[] };
     return payload.bindings;
   },
-  async setWorkflowRuntimeBinding(repositoryId: string, definitionId: string, enabled: boolean): Promise<WorkflowRuntimeBinding> {
+  async setWorkflowRuntimeBinding(
+    repositoryId: string,
+    definitionId: string,
+    enabled: boolean,
+    triggerMode?: "manual" | "on_change"
+  ): Promise<WorkflowRuntimeBinding> {
     const payload = await request(
       `/workflow-runtime/repositories/${encodeURIComponent(repositoryId)}/bindings/${encodeURIComponent(definitionId)}`,
-      { method: "PUT", body: JSON.stringify({ enabled }) }
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled,
+          ...(triggerMode === undefined ? {} : { triggerMode })
+        })
+      }
     ) as { binding: WorkflowRuntimeBinding };
     return payload.binding;
   },

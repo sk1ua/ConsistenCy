@@ -1061,6 +1061,43 @@ export const migrations: readonly Migration[] = [
         CREATE INDEX jobs_repository_created_idx ON jobs(repository_id, created_at DESC);
       `);
     }
+  },
+  {
+    // CKPT5: automatic (change-triggered) execution of verified workflow
+    // bindings. Bindings gain a trigger mode (default manual — existing rows
+    // keep CKPT3 behavior exactly); trigger plans are the durable, deduplicated
+    // ledger that turns persisted repository change events into at-most-one
+    // canonical run each; runs gain trigger provenance columns (NULL on all
+    // pre-CKPT5 rows).
+    id: "0020_workflow_runtime_triggers",
+    up(database) {
+      const runDdl = database.exec.bind(database);
+      runDdl(`
+        ALTER TABLE workflow_runtime_bindings ADD COLUMN trigger_mode TEXT NOT NULL
+          DEFAULT 'manual' CHECK (trigger_mode IN ('manual', 'on_change'));
+
+        CREATE TABLE workflow_runtime_trigger_plans (
+          id TEXT PRIMARY KEY,
+          repository_id TEXT NOT NULL,
+          definition_id TEXT NOT NULL,
+          dedupe_key TEXT NOT NULL,
+          source_event_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'executing', 'succeeded', 'failed', 'skipped')),
+          run_id TEXT,
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(repository_id, definition_id, dedupe_key)
+        );
+
+        CREATE INDEX workflow_runtime_trigger_plans_pending_idx
+          ON workflow_runtime_trigger_plans(status, created_at ASC);
+
+        ALTER TABLE workflow_runtime_runs ADD COLUMN trigger_source TEXT
+          CHECK (trigger_source IS NULL OR trigger_source IN ('manual', 'repository_change'));
+        ALTER TABLE workflow_runtime_runs ADD COLUMN trigger_event_id TEXT;
+      `);
+    }
   }
 ];
 

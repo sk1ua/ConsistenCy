@@ -25,8 +25,29 @@ import {
   type WorkflowRuntimeDefinitionSummary,
   type WorkflowRuntimeRun,
   type WorkflowRuntimeRunSummary,
+  type WorkflowRuntimeRunTrigger,
   type WorkflowRuntimeValidationIssue,
 } from "@consistency/schema";
+
+export type WorkflowRuntimeTriggerPlanStatus =
+  | "pending"
+  | "executing"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface WorkflowRuntimeTriggerPlan {
+  id: string;
+  repositoryId: string;
+  definitionId: string;
+  dedupeKey: string;
+  sourceEventId: string;
+  status: WorkflowRuntimeTriggerPlanStatus;
+  runId?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export class WorkflowRuntimeStoreError extends Error {
   constructor(
@@ -78,6 +99,9 @@ interface RunRow {
   created_at: string;
   finished_at: string | null;
   evidence_json: string;
+  /** Trigger provenance (NULL on rows persisted before 0020). */
+  trigger_source?: "manual" | "repository_change" | null;
+  trigger_event_id?: string | null;
   mini_report_json: string | null;
   error: string | null;
 }
@@ -120,7 +144,30 @@ export type PersistedRunInput = {
   evidence: unknown[];
   miniReport?: unknown;
   error?: string;
+  /** How the run was created (NULL columns on pre-0020 rows). */
+  trigger?: WorkflowRuntimeRunTrigger;
 };
+
+function runTriggerFromRow(row: Pick<RunRow, "trigger_source" | "trigger_event_id">): WorkflowRuntimeRunTrigger | undefined {
+  if (row.trigger_source !== "manual" && row.trigger_source !== "repository_change") return undefined;
+  return {
+    source: row.trigger_source,
+    ...(row.trigger_event_id == null ? {} : { eventId: row.trigger_event_id }),
+  };
+}
+
+interface TriggerPlanRow {
+  id: string;
+  repository_id: string;
+  definition_id: string;
+  dedupe_key: string;
+  source_event_id: string;
+  status: WorkflowRuntimeTriggerPlanStatus;
+  run_id: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export class WorkflowRuntimeStore {
   readonly #database: ConsistencyDatabase;
@@ -320,8 +367,8 @@ export class WorkflowRuntimeStore {
       .prepare(
         `INSERT INTO workflow_runtime_runs
            (id, definition_id, revision_id, origin, status, repository, repository_id, head_sha,
-            created_at, finished_at, evidence_json, mini_report_json, error)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            created_at, finished_at, evidence_json, mini_report_json, error, trigger_source, trigger_event_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.runId,
@@ -337,6 +384,8 @@ export class WorkflowRuntimeStore {
         JSON.stringify(input.evidence),
         input.miniReport === undefined ? null : JSON.stringify(input.miniReport),
         input.error ?? null,
+        input.trigger?.source ?? null,
+        input.trigger?.eventId ?? null,
       );
   }
 
@@ -396,6 +445,7 @@ export class WorkflowRuntimeStore {
     if (!row) return undefined;
     const evidence = JSON.parse(row.evidence_json) as unknown[];
     const miniReport = row.mini_report_json === null ? undefined : JSON.parse(row.mini_report_json);
+    const trigger = runTriggerFromRow(row);
     return {
       runId: row.id,
       definitionId: row.definition_id,
@@ -409,6 +459,7 @@ export class WorkflowRuntimeStore {
       evidence,
       ...(miniReport === undefined ? {} : { miniReport }),
       ...(row.error === null ? {} : { error: row.error }),
+      ...(trigger === undefined ? {} : { trigger }),
       run: {
         runId: row.id,
         definitionId: row.definition_id,
@@ -421,6 +472,7 @@ export class WorkflowRuntimeStore {
         evidence,
         ...(miniReport === undefined ? {} : { miniReport }),
         ...(row.error === null ? {} : { error: row.error }),
+        ...(trigger === undefined ? {} : { trigger }),
       },
     };
   }
@@ -430,12 +482,13 @@ export class WorkflowRuntimeStore {
     const rows = this.#database
       .prepare(
         `SELECT id, definition_id, revision_id, origin, status, repository, head_sha,
-                created_at, finished_at, mini_report_json, error
+                created_at, finished_at, mini_report_json, error, trigger_source, trigger_event_id
          FROM workflow_runtime_runs ORDER BY created_at DESC LIMIT ?`,
       )
       .all(normalized) as (Omit<RunRow, "evidence_json"> & { mini_report_json: string | null })[];
     return rows.map((row) => {
       const report = row.mini_report_json === null ? null : (JSON.parse(row.mini_report_json) as { findings?: unknown[]; evidenceCount?: number });
+      const trigger = runTriggerFromRow(row);
       return {
         runId: row.id,
         definitionId: row.definition_id,
@@ -448,6 +501,7 @@ export class WorkflowRuntimeStore {
         findingCount: report?.findings?.length ?? 0,
         evidenceCount: report?.evidenceCount ?? 0,
         ...(row.error === null ? {} : { error: row.error }),
+        ...(trigger === undefined ? {} : { trigger }),
       };
     });
   }
@@ -472,34 +526,36 @@ export class WorkflowRuntimeStore {
     repositoryId: string;
     definitionId: string;
     enabled: boolean;
+    triggerMode: "manual" | "on_change";
     definition: WorkflowRuntimeDefinitionSummary | null;
     createdAt: string;
     updatedAt: string;
   }> {
     const rows = this.#database
       .prepare("SELECT * FROM workflow_runtime_bindings WHERE repository_id = ? ORDER BY definition_id ASC")
-      .all(repositoryId) as Array<{ repository_id: string; definition_id: string; enabled: number; created_at: string; updated_at: string }>;
+      .all(repositoryId) as Array<{ repository_id: string; definition_id: string; enabled: number; trigger_mode: "manual" | "on_change"; created_at: string; updated_at: string }>;
     if (rows.length === 0) return [];
     const summaries = new Map(this.listDefinitions().map((summary) => [summary.definitionId, summary]));
     return rows.map((row) => ({
       repositoryId: row.repository_id,
       definitionId: row.definition_id,
       enabled: row.enabled === 1,
+      triggerMode: row.trigger_mode,
       definition: summaries.get(row.definition_id) ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }));
   }
 
-  getBinding(repositoryId: string, definitionId: string): { enabled: boolean } | undefined {
+  getBinding(repositoryId: string, definitionId: string): { enabled: boolean; triggerMode: "manual" | "on_change" } | undefined {
     const row = this.#database
-      .prepare("SELECT enabled FROM workflow_runtime_bindings WHERE repository_id = ? AND definition_id = ?")
-      .get(repositoryId, definitionId) as { enabled: number } | undefined;
-    return row ? { enabled: row.enabled === 1 } : undefined;
+      .prepare("SELECT enabled, trigger_mode FROM workflow_runtime_bindings WHERE repository_id = ? AND definition_id = ?")
+      .get(repositoryId, definitionId) as { enabled: number; trigger_mode: "manual" | "on_change" } | undefined;
+    return row ? { enabled: row.enabled === 1, triggerMode: row.trigger_mode } : undefined;
   }
 
   /** Idempotent enable/disable toggle (UPSERT — repeated calls never duplicate). */
-  setBinding(input: { repositoryId: string; definitionId: string; enabled: boolean }): void {
+  setBinding(input: { repositoryId: string; definitionId: string; enabled: boolean; triggerMode?: "manual" | "on_change" }): void {
     const now = new Date().toISOString();
     try {
       const count = this.#database
@@ -513,14 +569,15 @@ export class WorkflowRuntimeStore {
           409,
         );
       }
+      const triggerMode = input.triggerMode ?? existing?.triggerMode ?? "manual";
       this.#database
         .prepare(
-          `INSERT INTO workflow_runtime_bindings (repository_id, definition_id, enabled, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?)
+          `INSERT INTO workflow_runtime_bindings (repository_id, definition_id, enabled, trigger_mode, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(repository_id, definition_id)
-           DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at`,
+           DO UPDATE SET enabled = excluded.enabled, trigger_mode = excluded.trigger_mode, updated_at = excluded.updated_at`,
         )
-        .run(input.repositoryId, input.definitionId, input.enabled ? 1 : 0, now, now);
+        .run(input.repositoryId, input.definitionId, input.enabled ? 1 : 0, triggerMode, now, now);
     } catch (error) {
       if (error instanceof WorkflowRuntimeStoreError) throw error;
       throw new WorkflowRuntimeStoreError("Failed to persist workflow binding", "WORKFLOW_RUNTIME_STORE_UNAVAILABLE", 503);
@@ -541,13 +598,14 @@ export class WorkflowRuntimeStore {
     const rows = this.#database
       .prepare(
         `SELECT id, definition_id, revision_id, status, repository, head_sha,
-                created_at, finished_at, mini_report_json, error
+                created_at, finished_at, mini_report_json, error, trigger_source, trigger_event_id
          FROM workflow_runtime_runs WHERE repository_id = ?
          ORDER BY created_at DESC LIMIT ?`,
       )
       .all(repositoryId, normalized) as Array<Omit<RunRow, "evidence_json"> & { mini_report_json: string | null }>;
     return rows.map((row) => {
       const report = row.mini_report_json === null ? null : (JSON.parse(row.mini_report_json) as { findings?: unknown[]; evidenceCount?: number });
+      const trigger = runTriggerFromRow(row);
       return {
         runId: row.id,
         definitionId: row.definition_id,
@@ -560,7 +618,136 @@ export class WorkflowRuntimeStore {
         findingCount: report?.findings?.length ?? 0,
         evidenceCount: report?.evidenceCount ?? 0,
         ...(row.error === null ? {} : { error: row.error }),
+        ...(trigger === undefined ? {} : { trigger }),
       };
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Trigger plans (CKPT5 — durable ledger from repository change events to
+  // at-most-one canonical run each). Plans are DATA: executing one goes
+  // through the same binding-gated canonical path as a manual trigger.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Idempotent plan creation: the UNIQUE(repository, definition, dedupe_key)
+   * constraint makes replays of the same repository event no-ops. Returns the
+   * stored plan and whether this call created it.
+   */
+  insertTriggerPlan(input: {
+    repositoryId: string;
+    definitionId: string;
+    dedupeKey: string;
+    sourceEventId: string;
+  }): { created: boolean; plan: WorkflowRuntimeTriggerPlan } {
+    const now = new Date().toISOString();
+    const id = "wfplan_" + randomUUID();
+    try {
+      const result = this.#database
+        .prepare(
+          `INSERT INTO workflow_runtime_trigger_plans
+             (id, repository_id, definition_id, dedupe_key, source_event_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+           ON CONFLICT(repository_id, definition_id, dedupe_key) DO NOTHING`,
+        )
+        .run(id, input.repositoryId, input.definitionId, input.dedupeKey, input.sourceEventId, now, now);
+      return { created: result.changes === 1, plan: this.getTriggerPlanById(id) ?? this.getTriggerPlan(input.repositoryId, input.definitionId, input.dedupeKey)! };
+    } catch (error) {
+      if (error instanceof WorkflowRuntimeStoreError) throw error;
+      throw new WorkflowRuntimeStoreError("Failed to persist workflow trigger plan", "WORKFLOW_RUNTIME_STORE_UNAVAILABLE", 503);
+    }
+  }
+
+  #triggerPlanFromRow(row: TriggerPlanRow): WorkflowRuntimeTriggerPlan {
+    return {
+      id: row.id,
+      repositoryId: row.repository_id,
+      definitionId: row.definition_id,
+      dedupeKey: row.dedupe_key,
+      sourceEventId: row.source_event_id,
+      status: row.status,
+      ...(row.run_id === null ? {} : { runId: row.run_id }),
+      ...(row.error === null ? {} : { error: row.error }),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  getTriggerPlanById(id: string): WorkflowRuntimeTriggerPlan | undefined {
+    const row = this.#database
+      .prepare("SELECT * FROM workflow_runtime_trigger_plans WHERE id = ?")
+      .get(id) as TriggerPlanRow | undefined;
+    return row ? this.#triggerPlanFromRow(row) : undefined;
+  }
+
+  getTriggerPlan(repositoryId: string, definitionId: string, dedupeKey: string): WorkflowRuntimeTriggerPlan | undefined {
+    const row = this.#database
+      .prepare("SELECT * FROM workflow_runtime_trigger_plans WHERE repository_id = ? AND definition_id = ? AND dedupe_key = ?")
+      .get(repositoryId, definitionId, dedupeKey) as TriggerPlanRow | undefined;
+    return row ? this.#triggerPlanFromRow(row) : undefined;
+  }
+
+  /** Oldest-first pending plans (bounded — the executor is single-flight). */
+  listPendingTriggerPlans(limit = 5): WorkflowRuntimeTriggerPlan[] {
+    const rows = this.#database
+      .prepare("SELECT * FROM workflow_runtime_trigger_plans WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT ?")
+      .all(limit) as TriggerPlanRow[];
+    return rows.map((row) => this.#triggerPlanFromRow(row));
+  }
+
+  /**
+   * Claim a pending plan for execution. The guarded UPDATE (WHERE status =
+   * 'pending') is the fencing point: exactly one claimant transitions a plan
+   * to `executing`, and a lost claim returns undefined.
+   */
+  claimTriggerPlan(id: string): WorkflowRuntimeTriggerPlan | undefined {
+    const now = new Date().toISOString();
+    const result = this.#database
+      .prepare("UPDATE workflow_runtime_trigger_plans SET status = 'executing', updated_at = ? WHERE id = ? AND status = 'pending'")
+      .run(now, id);
+    if (result.changes !== 1) return undefined;
+    return this.getTriggerPlanById(id);
+  }
+
+  /** Terminal transition for a claimed plan (run id + honest sanitized error). */
+  completeTriggerPlan(input: {
+    id: string;
+    status: "succeeded" | "failed" | "skipped";
+    runId?: string;
+    error?: string;
+  }): WorkflowRuntimeTriggerPlan | undefined {
+    const now = new Date().toISOString();
+    const result = this.#database
+      .prepare(
+        `UPDATE workflow_runtime_trigger_plans
+         SET status = ?, run_id = ?, error = ?, updated_at = ?
+         WHERE id = ? AND status = 'executing'`,
+      )
+      .run(input.status, input.runId ?? null, input.error ?? null, now, input.id);
+    if (result.changes !== 1) return undefined;
+    return this.getTriggerPlanById(input.id);
+  }
+
+  /**
+   * Startup recovery: a plan still `executing` after an API restart belongs to
+   * a process that no longer exists — mark it FAILED(interrupted) honestly,
+   * mirroring `recoverInterruptedRuns`. The UNIQUE dedupe key keeps the same
+   * repository event from ever silently re-executing.
+   */
+  recoverInterruptedTriggerPlans(): number {
+    const now = new Date().toISOString();
+    const interrupted = this.#database
+      .prepare("SELECT id FROM workflow_runtime_trigger_plans WHERE status = 'executing'")
+      .all() as { id: string }[];
+    const markFailed = this.#database.prepare(
+      `UPDATE workflow_runtime_trigger_plans
+       SET status = 'failed', error = ?, updated_at = ?
+       WHERE id = ? AND status = 'executing'`,
+    );
+    let recovered = 0;
+    for (const row of interrupted) {
+      recovered += markFailed.run("trigger execution interrupted by API restart", now, row.id).changes;
+    }
+    return recovered;
   }
 }

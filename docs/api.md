@@ -53,12 +53,12 @@ x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
 | `GET` | `/workflow-runtime/definitions/:id/revisions/:rev/dry-load` | Per-node feasibility report (compile-sourced; NOT an authorization) | Authenticated |
 | `DELETE` | `/workflow-runtime/definitions/:id` | Delete a user definition (refused with run history) | Authenticated |
 | `POST` | `/workflow-runtime/runs` | Trigger a revision-pinned run on a registered repository (canonical HEAD-pinned snapshot; no LLM) | Authenticated |
-| `GET` | `/workflow-runtime/runs` | Bounded persisted run history summaries | Authenticated |
-| `GET` | `/workflow-runtime/runs/:runId` | Run detail: pinned revision, evidence summaries, MiniReport, audit counts | Authenticated |
-| `GET` | `/workflow-runtime/repositories/:id/bindings` | List a repository's workflow bindings (CKPT3 Phase 3) | Authenticated |
-| `PUT` | `/workflow-runtime/repositories/:id/bindings/:definitionId` | Idempotently enable/disable a binding | Authenticated |
+| `GET` | `/workflow-runtime/runs` | Bounded persisted run history summaries (optional trigger provenance) | Authenticated |
+| `GET` | `/workflow-runtime/runs/:runId` | Run detail: pinned revision, evidence summaries, MiniReport, audit counts, trigger provenance | Authenticated |
+| `GET` | `/workflow-runtime/repositories/:id/bindings` | List a repository's workflow bindings with `triggerMode` (CKPT3 Phase 3; CKPT5) | Authenticated |
+| `PUT` | `/workflow-runtime/repositories/:id/bindings/:definitionId` | Idempotently enable/disable a binding; optional `triggerMode` (`manual` default / `on_change` automatic change trigger — CKPT5) | Authenticated |
 | `POST` | `/workflow-runtime/repositories/:id/runs` | Binding-gated manual trigger (latest validated revision; fail-closed 404/409) | Authenticated |
-| `GET` | `/workflow-runtime/repositories/:id/runs` | Bounded per-repository run history (canonical repositoryId join) | Authenticated |
+| `GET` | `/workflow-runtime/repositories/:id/runs` | Bounded per-repository run history (canonical repositoryId join; optional trigger provenance) | Authenticated |
 | `GET` | `/settings` | Get sanitized runtime configuration snapshot | Authenticated |
 | `PUT` | `/settings` | Update editable runtime settings (dev / desktop mode) | Authenticated |
 | `POST` | `/settings/github/test-connection` | Single bounded read-only probe of the ACTIVE GitHub credential (sanitized status enum + bounded retry metadata only; CKPT4 Slice 2) | Authenticated |

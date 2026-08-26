@@ -188,3 +188,34 @@ describe("buildRepositorySupervisorRegistrations", () => {
     }
   });
 });
+
+describe("buildRepositorySupervisorRegistrations (CKPT5 on_change bindings)", () => {
+  it("keeps byte-identical digests without on_change bindings and re-arms when the binding set changes", () => {
+    const { database, store, monitored } = fixture();
+    try {
+      const digestFor = (options?: { onChangeBindings?: (repositoryId: string) => readonly string[] }) =>
+        buildRepositorySupervisorRegistrations(store, 30_000, options)
+          .find(registration => registration.repositoryId === monitored.id)!
+          .workflowDigest;
+
+      const legacy = digestFor();
+      // An empty binding source must reproduce the EXACT pre-CKPT5 digest —
+      // upgrading never re-arms events for unchanged configuration.
+      expect(digestFor({ onChangeBindings: () => [] })).toBe(legacy);
+
+      const withA = digestFor({ onChangeBindings: () => ["def-a"] });
+      expect(withA).not.toBe(legacy);
+      expect(withA).toMatch(/^[0-9a-f]{64}$/);
+
+      // Binding-set identity is order-independent and set-sensitive.
+      const withAB = digestFor({ onChangeBindings: () => ["def-b", "def-a"] });
+      expect(withAB).not.toBe(withA);
+      expect(digestFor({ onChangeBindings: () => ["def-a", "def-b"] })).toBe(withAB);
+
+      // Removing all bindings restores the legacy digest (config round-trips).
+      expect(digestFor({ onChangeBindings: () => [] })).toBe(legacy);
+    } finally {
+      database.close();
+    }
+  });
+});

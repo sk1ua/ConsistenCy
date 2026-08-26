@@ -219,11 +219,11 @@ export class WorkflowRuntimeHost {
 
   /**
    * Idempotently seed the immutable builtin definition (revision 1) and
-   * honestly recover runs interrupted by a previous shutdown. Called once at
-   * server startup; safe to call again.
+   * honestly recover runs + trigger plans interrupted by a previous shutdown.
+   * Called once at server startup; safe to call again.
    */
-  initialize(): { seeded: boolean; interruptedRunsRecovered: number } {
-    if (!this.#store) return { seeded: false, interruptedRunsRecovered: 0 };
+  initialize(): { seeded: boolean; interruptedRunsRecovered: number; interruptedTriggerPlansRecovered: number } {
+    if (!this.#store) return { seeded: false, interruptedRunsRecovered: 0, interruptedTriggerPlansRecovered: 0 };
     let seeded = false;
     if (!this.#store.definitionExists(BUILTIN_DEFINITION_ID)) {
       const validation = compileWorkflowRuntimeDefinition(VERIFIED_MINI_REVIEW_DEFINITION);
@@ -237,7 +237,8 @@ export class WorkflowRuntimeHost {
       seeded = true;
     }
     const interruptedRunsRecovered = this.#store.recoverInterruptedRuns();
-    return { seeded, interruptedRunsRecovered };
+    const interruptedTriggerPlansRecovered = this.#store.recoverInterruptedTriggerPlans();
+    return { seeded, interruptedRunsRecovered, interruptedTriggerPlansRecovered };
   }
 
   /** The fixed built-in definition + runtime registry truth (GET endpoint). */
@@ -327,6 +328,7 @@ export class WorkflowRuntimeHost {
       evidence: record.evidence as WorkflowRuntimeRunV2["evidence"],
       ...(record.miniReport === undefined ? {} : { miniReport: record.miniReport as WorkflowRuntimeRunV2["miniReport"] }),
       ...(record.error === undefined ? {} : { error: record.error }),
+      ...(record.trigger === undefined ? {} : { trigger: record.trigger }),
     };
   }
 
@@ -334,8 +336,12 @@ export class WorkflowRuntimeHost {
    * Trigger a run bound to a canonical repository, pinned to a specific
    * definition revision (built-in latest when omitted). Fails closed BEFORE
    * any Run record, snapshot, or authorization when anything is unresolvable.
+   * The optional trigger context is observability provenance only — it never
+   * widens what the run may do.
    */
-  async trigger(input: WorkflowRuntimeTriggerRequestV2): Promise<{ runId: string; status: "running"; revisionId: string }> {
+  async trigger(
+    input: WorkflowRuntimeTriggerRequestV2 & { trigger?: { source: "manual" | "repository_change"; eventId?: string } },
+  ): Promise<{ runId: string; status: "running"; revisionId: string }> {
     // 1. Resolve + compile the definition revision (fail-closed first).
     let definition: WorkflowRuntimeDefinition;
     let revisionId: string;
@@ -411,6 +417,7 @@ export class WorkflowRuntimeHost {
       headSha,
       createdAt,
       evidence: [],
+      trigger: input.trigger ?? { source: "manual" },
     });
 
     void executeWorkflowPlan(compilation.plan, {
@@ -468,8 +475,8 @@ export class WorkflowRuntimeHost {
     return this.#persist().listBindings(repositoryId);
   }
 
-  /** Idempotent enable/disable. Unknown repository/definition → 404, no side effect. */
-  setBinding(input: { repositoryId: string; definitionId: string; enabled: boolean }) {
+  /** Idempotent enable/disable toggle (mode optional; absent keeps current). */
+  setBinding(input: { repositoryId: string; definitionId: string; enabled: boolean; triggerMode?: "manual" | "on_change" }) {
     this.#requireKnownRepository(input.repositoryId);
     if (!this.#persist().definitionExists(input.definitionId)) {
       throw new WorkflowDefinitionNotFoundError(input.definitionId);
@@ -481,15 +488,21 @@ export class WorkflowRuntimeHost {
   }
 
   /**
-   * Binding-gated manual trigger from a repository context. Enforces, in
-   * order, BEFORE any Run record / snapshot / authorization:
+   * Binding-gated trigger from a repository context. Enforces, in order,
+   * BEFORE any Run record / snapshot / authorization:
    *   1. binding exists          → else 404 WORKFLOW_BINDING_NOT_FOUND;
    *   2. binding enabled         → else 409 WORKFLOW_BINDING_DISABLED;
    *   3. definition still exists → else 404 WORKFLOW_DEFINITION_NOT_FOUND;
    *   4. latest VALIDATED revision resolves → else 409 not-executable.
-   * Then reuses the canonical trigger path (D2).
+   * Then reuses the canonical trigger path (D2). The HTTP route calls this
+   * with manual provenance; the automatic executor calls it with the
+   * repository_change event identity — the SAME gates apply to both.
    */
-  async triggerBinding(input: { repositoryId: string; definitionId: string }): Promise<{ runId: string; status: "running"; revisionId: string }> {
+  async triggerBinding(
+    input: { repositoryId: string; definitionId: string } & {
+      trigger?: { source: "manual" | "repository_change"; eventId?: string };
+    },
+  ): Promise<{ runId: string; status: "running"; revisionId: string }> {
     this.#requireKnownRepository(input.repositoryId);
     const binding = this.#persist().getBinding(input.repositoryId, input.definitionId);
     if (!binding) {
@@ -508,7 +521,12 @@ export class WorkflowRuntimeHost {
         "Workflow definition has no validated revision and cannot execute (fail-closed)",
       );
     }
-    return this.trigger({ repositoryId: input.repositoryId, definitionId: input.definitionId, revisionId: revision.revisionId });
+    return this.trigger({
+      repositoryId: input.repositoryId,
+      definitionId: input.definitionId,
+      revisionId: revision.revisionId,
+      trigger: input.trigger ?? { source: "manual" },
+    });
   }
 
   /** Per-repository run history (canonical opaque-id join). */

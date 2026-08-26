@@ -526,6 +526,17 @@ function WorkflowRuntimeView({ zh }: { zh: boolean }) {
               <GitBranch size={14} />
               <span>{run.snapshot.repository} @ {run.snapshot.headSha.slice(0, 12)}</span>
             </div>
+            {run.trigger && (
+              <div className="trigger-status-item">
+                <ShieldCheck size={14} />
+                <span>
+                  {run.trigger.source === "repository_change"
+                    ? zh ? "变更触发" : "Change-triggered"
+                    : zh ? "手动触发" : "Manual"}
+                  {run.trigger.eventId ? ` · ${run.trigger.eventId.slice(0, 24)}…` : ""}
+                </span>
+              </div>
+            )}
             {run.evidence.length > 0 && (
               <ul className="workflow-runtime-evidence">
                 {run.evidence.map(record => (
@@ -570,7 +581,10 @@ function WorkflowRuntimeView({ zh }: { zh: boolean }) {
                 </span>
                 <div>
                   <strong>{summary.definitionId}</strong>
-                  <small>{summary.revisionId.slice(0, 14)}… · {summary.repository}</small>
+                  <small>
+                    {summary.revisionId.slice(0, 14)}… · {summary.repository}
+                    {summary.trigger ? ` · ${summary.trigger.source === "repository_change" ? (zh ? "变更触发" : "change") : zh ? "手动" : "manual"}` : ""}
+                  </small>
                 </div>
                 <span>{summary.evidenceCount} ev · {summary.findingCount} {zh ? "发现" : "findings"}</span>
                 <span>{new Date(summary.createdAt).toLocaleString()}</span>

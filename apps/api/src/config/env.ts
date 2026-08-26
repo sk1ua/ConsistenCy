@@ -50,6 +50,16 @@ export const envSchema = z.object({
   CONSISTENCY_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(30_000),
   CONSISTENCY_AUTOMATION_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(1_000).max(60_000).default(15_000),
   /**
+   * CKPT5: automatic execution of enabled on_change workflow bindings from
+   * persisted repository change events. Default on — a binding set to
+   * on_change is explicit user intent; set to "false" as a kill-switch.
+   */
+  CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED: z
+    .enum(["true", "false"])
+    .transform(value => value === "true")
+    .default("true"),
+  CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(5_000),
+  /**
    * Workflow backing the deterministic review stage. Set to "legacy" to fall
    * back to the single-shot `analyze` action.
    */
@@ -95,6 +105,7 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   heartbeatRepoPath: string;
   /** Workflow name, or null for the legacy single-shot analyze action. */
   reviewWorkflow: string | null;
+  workflowTriggersEnabled: boolean;
 };
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -168,6 +179,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     heartbeatRepoPath: findProjectRoot(),
     reviewWorkflow: parsed.CONSISTENCY_REVIEW_WORKFLOW === "legacy"
       ? null
-      : parsed.CONSISTENCY_REVIEW_WORKFLOW
+      : parsed.CONSISTENCY_REVIEW_WORKFLOW,
+    workflowTriggersEnabled: parsed.CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED
   };
 }

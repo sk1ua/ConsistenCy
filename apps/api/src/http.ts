@@ -354,6 +354,8 @@ export type CreateApiServerOptions = {
   auditPlanner?: AuditRunPlanner;
   automationScheduler?: { available: boolean };
   onAuditRepositoriesChanged?: () => Promise<void> | void;
+  /** CKPT5: binding changes (enable/mode) re-arm repository supervision. */
+  onWorkflowBindingsChanged?: () => Promise<void> | void;
   heartbeat?: {
     latest: () => HeartbeatPulse | undefined;
     subscribe: (subscriber: (event: HeartbeatStreamEvent) => void) => () => void;
@@ -670,7 +672,13 @@ const routes: Route[] = [
       const definitionId = decodeURIComponent(match?.[2] ?? "");
       const input = parseAuditInput(workflowRuntimeSetBindingRequestSchema, await readJson(request));
       try {
-        const binding = options.workflowRuntime.setBinding({ repositoryId, definitionId, enabled: input.enabled });
+        const binding = options.workflowRuntime.setBinding({
+          repositoryId,
+          definitionId,
+          enabled: input.enabled,
+          ...(input.triggerMode === undefined ? {} : { triggerMode: input.triggerMode })
+        });
+        await options.onWorkflowBindingsChanged?.();
         sendJson(request, response, 200, { binding }, allowedOrigins);
       } catch (error) {
         throw mapWorkflowRuntimeError(error);

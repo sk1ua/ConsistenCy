@@ -3,7 +3,8 @@
 Status: Phase 1 vertical slice + Phase 1.1 canonical snapshot remediation
 ACCEPTED (2026-08-23); Phase 2 productization increment (persisted
 definitions with append-only revisions, persisted run history, dry-load
-feasibility panel) shipped the same day.
+feasibility panel) shipped the same day. CKPT5 (2026-08-25) adds automatic
+change-triggered execution for `on_change` bindings (see below).
 
 ## Dual-schema decision record (Phase 2 D1; fixed as decision by Phase 5 D3)
 
@@ -15,7 +16,7 @@ separate namespaces, and the legacy side is FROZEN:
 | Positioning | **engine-legacy** (frozen) | Kernel/Harness runtime surface |
 | Executor | Python engine DAG (`run_workflow` over JSON-stdio) | Kernel Run → ACB → Scheduler → Cordis Fiber → per-syscall authorize |
 | HTTP namespace | `/workflows*` (legacy CRUD + validate) | `/workflow-runtime*` |
-| Status | zero-touch, zero-migration since Phase 2 | active surface (Phases 1–4) |
+| Status | zero-touch, zero-migration since Phase 2 | active surface (Phases 1–4; CKPT5 triggers) |
 
 - The migration decision (whether/how to converge or retire the legacy
   surface) is DEFERRED to the next checkpoint.
@@ -23,6 +24,17 @@ separate namespaces, and the legacy side is FROZEN:
   record before any workflow-schema work is scheduled.
 - Until then: no new capabilities are added to the legacy surface, and the
   runtime surface must not grow a second execution world.
+
+CKPT5 planning-cycle review of this record (2026-08-25): the FREEZE IS
+MAINTAINED. Executing legacy WorkflowSpecs (e.g. via the Python engine DAG)
+would add capability to the frozen surface and is therefore not an option
+for automatic execution. CKPT5's automatic triggers execute ONLY
+workflow-runtime definitions through the canonical executor. Full
+convergence/retirement of the legacy surface remains deferred: it entangles
+the engine-parity provider used for review grounding and the automation
+control plane, and is a product-level owner decision (candidate for a later
+checkpoint). The audit control plane keeps advertising `auditExecution:
+false` truthfully; nothing in CKPT5 changes legacy-side behavior.
 
 ## What the runtime is
 
@@ -97,9 +109,63 @@ explicit user action.
 - Per-repository run history filters on the run record's canonical opaque
   `repository_id` (persisted since 0018; pre-0018 rows have NULL and simply
   never match a filter — no name-based inference joins, per Master Spec §27.6).
-- Deferred by owner decision: automatic PR/webhook triggers, default-workflow
-  flag (no consumer yet), per-binding parameters, trigger rate limiting
-  (auth-gated dev surface stands).
+- Deferred by owner decision (CKPT3): automatic PR/webhook triggers,
+  default-workflow flag (no consumer yet), per-binding parameters, trigger
+  rate limiting (auth-gated dev surface stands).
+  CKPT5 (2026-08-25) lifts ONE deferral: repository change-event triggers
+  for LOCAL monitored repositories (next section). PR/webhook triggers for
+  repositories without a local checkout, per-binding parameters, and rate
+  limiting beyond the per-event dedupe remain deferred.
+
+## Automatic change triggers (CKPT5)
+
+A binding carries `triggerMode: "manual" | "on_change"` (default `manual` —
+every pre-CKPT5 binding keeps its exact behavior). `on_change` is DATA /
+intent: it never widens authorization. The chain:
+
+```
+RepositorySupervisor observes a monitored local repository
+  → persisted RepositoryEvent (idempotent, deduped per repository/head/config)
+  → WorkflowTriggerPlanner creates one durable trigger plan per enabled
+    on_change binding (UNIQUE(repository, definition, dedupe_key))
+  → WorkflowTriggerExecutor (single-flight background loop) claims the plan
+    (fenced pending→executing UPDATE) and executes it through the SAME
+    host.triggerBinding gate sequence as a manual click
+  → Run records trigger provenance { source, eventId } (observability only)
+```
+
+Semantics:
+
+- **At most once per event**: the plan dedupe key is derived from
+  (repository, definition, event dedupe key); replays of the same persisted
+  event never re-plan. One attempt per plan — no retry loop; a failed plan
+  keeps its sanitized reason.
+- **Snapshot pinning is at execution time**: the run pins the repository
+  HEAD when the executor runs, not when the event fired.
+- **Event re-arming on configuration change**: enabled on_change binding
+  definition-ids are part of the supervisor registration digest. The
+  digest material includes the bindings key ONLY when such bindings exist,
+  so repositories without on_change bindings keep byte-identical digests
+  across the CKPT5 upgrade (no event storm, no silent re-arm).
+- **Honest restart recovery**: plans still `executing` after an API restart
+  are marked `failed("trigger execution interrupted by API restart")`;
+  the dedupe key still blocks silent re-execution of the same event.
+- **Terminal plan statuses**: `succeeded` (a canonical run was created —
+  runId linked; the RUN's own status tracks execution outcome),
+  `skipped` (the binding no longer exists or is disabled at execution
+  time — the intent went away), `failed` (sanitized reason: snapshot
+  unavailable, definition not executable, store failure, …).
+- **Scope boundary**: change triggers require a LOCAL monitored repository
+  (the supervisor's domain). Public GitHub repositories without a local
+  checkout fail closed at the snapshot and are documented as manual-only.
+- **Kill switch**: `CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED=false` disables
+  the executor loop (planning continues; plans drain when re-enabled).
+  Poll interval: `CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS`.
+
+Kernel authority is unchanged: the executor is host-side trusted code
+exactly like the manual route handler; every protected syscall inside the
+run is authorized per-call by the Kernel (`repo.read`, `evidence.write`,
+`evidence.read`).
 
 ## API
 
@@ -128,6 +194,18 @@ All routes are auth-gated and additive (legacy `/workflows*` untouched):
 - `GET /workflow-runtime/runs/:runId` — run detail with pinned revisionId,
   origin, evidence summaries (provenance + fingerprints only), MiniReport,
   audit allow/deny counts.
+- `GET /workflow-runtime/repositories/:id/bindings` — binding summaries,
+  each carrying `enabled` and `triggerMode` (CKPT5).
+- `PUT /workflow-runtime/repositories/:id/bindings/:definitionId` —
+  `{ enabled, triggerMode? }` (idempotent UPSERT; absent `triggerMode`
+  keeps the stored mode; default `manual`).
+- `POST /workflow-runtime/repositories/:id/runs` — binding-gated manual
+  trigger; the created run records `trigger: { source: "manual" }`.
+
+Run summaries and run detail carry an optional `trigger` object
+(`{ source: "manual" | "repository_change", eventId? }`) — pure provenance;
+runs persisted before migration `0020` have no trigger field (honest NULL,
+never fabricated).
 
 ### Snapshot fallback policy (unchanged from Phase 1.1)
 
@@ -147,6 +225,13 @@ editor, validate (both outcome states), save-revision, dry-load panel (✓/✗
 snapshot identity, evidence, findings, audit counts), and persisted run
 history with refresh. Registry node types come from the API — the UI never
 invents executable node types. No canvas, no redesign.
+
+CKPT5: the Repository Workflows view adds a per-binding trigger-mode
+selector (手动 Manual / 变更时 On change) with an automatic-trigger hint for
+enabled on_change bindings; run history rows and run detail show the
+trigger-source badge (手动/变更触发, event id on hover) for runs that carry
+provenance. The global runtime tab shows the same provenance line in run
+detail and history rows.
 
 ## Execution-chain reference (Phase 1, unchanged)
 
@@ -180,6 +265,10 @@ host-side (like the canonical report boundary — there is deliberately no
 | Run `running` at restart | honestly `failed("run interrupted by API restart")` |
 | Definition edited/deleted mid-run | no effect (plan compiled + revision pinned); covered by TEST M |
 | Admission not granted (Scheduler authority) | agent stays READY, cancelled, Run FAILED; zero syscalls |
+| Trigger plan executes after binding deleted/disabled | plan `skipped` (sanitized reason); no Run, no snapshot |
+| Trigger plan executes against un-pinnable repository / non-executable definition | plan `failed` with sanitized reason; no Run record |
+| Trigger executor interrupted by API restart | plan honestly `failed("trigger execution interrupted by API restart")`; dedupe key blocks silent re-execution |
+| Same repository event replanned | second plan insert is a no-op (UNIQUE repository+definition+dedupe) |
 | Capability revoked after Fiber ACTIVE | next syscall DENIED (handler count 0), audit denial recorded |
 | Analyzer produced no evidence | verifier never runs; no pass claim |
 | Verifier fingerprint/provenance mismatch | MiniReport `failed`; never silently "verified" |

@@ -61,25 +61,44 @@ function automationDigestMaterial(
   };
 }
 
-function repositoryWorkflowDigest(store: RepositorySupervisionStore, repositoryId: string): string {
+function repositoryWorkflowDigest(
+  store: RepositorySupervisionStore,
+  repositoryId: string,
+  onChangeDefinitionIds: readonly string[]
+): string {
   const enabledAutomations = store.listAutomations(repositoryId).filter(automation => automation.enabled);
-  if (enabledAutomations.length === 0) return EMPTY_REPOSITORY_WORKFLOW_DIGEST;
+  const sortedBindings = [...onChangeDefinitionIds].sort(compareCodeUnits);
+  if (enabledAutomations.length === 0 && sortedBindings.length === 0) return EMPTY_REPOSITORY_WORKFLOW_DIGEST;
 
   const serializedAutomations = enabledAutomations
     .map(automation => stableJson(automationDigestMaterial(store, automation)))
     .sort(compareCodeUnits);
-  return createHash("sha256")
-    .update(stableJson({ domain: DIGEST_DOMAIN, automations: serializedAutomations }))
-    .digest("hex");
+  // Repositories without on_change workflow bindings keep the EXACT
+  // pre-CKPT5 digest bytes: the bindings key joins the material only when
+  // such bindings exist, so upgrading never re-arms events for unchanged
+  // configuration. Binding identity is the definition id only — the executed
+  // revision is resolved at execution time, not pinned at event time.
+  const material = sortedBindings.length === 0
+    ? { domain: DIGEST_DOMAIN, automations: serializedAutomations }
+    : {
+        domain: DIGEST_DOMAIN,
+        automations: serializedAutomations,
+        bindings: sortedBindings.map(definitionId => stableJson({ definitionId }))
+      };
+  return createHash("sha256").update(stableJson(material)).digest("hex");
 }
 
 /**
  * Builds the server-only registrations consumed by RepositorySupervisor.
  * This only composes persisted configuration; it does not inspect or execute repository code.
+ * `onChangeBindings` supplies the enabled on_change workflow-runtime binding
+ * definition ids per repository (CKPT5): their set is part of the
+ * registration digest, so binding changes re-arm change events.
  */
 export function buildRepositorySupervisorRegistrations(
   store: RepositorySupervisionStore,
-  pollIntervalMs: number
+  pollIntervalMs: number,
+  options?: { onChangeBindings?: (repositoryId: string) => readonly string[] }
 ): RepositorySupervisorRegistration[] {
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs <= 0) {
     throw new RangeError("pollIntervalMs must be a positive integer");
@@ -95,7 +114,11 @@ export function buildRepositorySupervisorRegistrations(
     .map(target => ({
       repositoryId: target.repository.id,
       root: target.serverLocator,
-      workflowDigest: repositoryWorkflowDigest(store, target.repository.id),
+      workflowDigest: repositoryWorkflowDigest(
+        store,
+        target.repository.id,
+        options?.onChangeBindings?.(target.repository.id) ?? []
+      ),
       pollIntervalMs
     }));
 }

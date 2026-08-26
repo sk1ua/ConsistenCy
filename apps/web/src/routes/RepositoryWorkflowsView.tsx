@@ -58,8 +58,8 @@ export function RepositoryWorkflowsView({
   };
 
   const toggleBinding = useMutation({
-    mutationFn: (input: { definitionId: string; enabled: boolean }) =>
-      api.setWorkflowRuntimeBinding(repositoryId, input.definitionId, input.enabled),
+    mutationFn: (input: { definitionId: string; enabled: boolean; triggerMode?: "manual" | "on_change" }) =>
+      api.setWorkflowRuntimeBinding(repositoryId, input.definitionId, input.enabled, input.triggerMode),
     onSuccess: () => void invalidate(),
     onError: (error: Error) => setActionError(error.message)
   });
@@ -151,6 +151,10 @@ export function RepositoryWorkflowsView({
                   setActionError(undefined);
                   toggleBinding.mutate({ definitionId: binding.definitionId, enabled });
                 }}
+                onSetMode={(triggerMode) => {
+                  setActionError(undefined);
+                  toggleBinding.mutate({ definitionId: binding.definitionId, enabled: binding.enabled, triggerMode });
+                }}
                 onTrigger={() => {
                   setActionError(undefined);
                   triggerRun.mutate(binding.definitionId);
@@ -241,7 +245,15 @@ export function RepositoryWorkflowsView({
                   <strong>{run.definitionId}</strong>
                   <span style={{ fontSize: "12px", color: "var(--muted)" }}>{run.revisionId.slice(0, 14)}…</span>
                 </span>
-                <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                <span style={{ fontSize: "12px", color: "var(--muted)", display: "inline-flex", gap: 8, alignItems: "center" }}>
+                  {run.trigger && (
+                    <span
+                      title={run.trigger.eventId}
+                      style={{ border: "1px solid var(--border)", borderRadius: "var(--ds-radius-sm)", padding: "1px 6px" }}
+                    >
+                      {run.trigger.source === "repository_change" ? (zh ? "变更触发" : "change") : zh ? "手动" : "manual"}
+                    </span>
+                  )}
                   {run.evidenceCount} ev · {run.findingCount} {zh ? "发现" : "findings"} · {new Date(run.createdAt).toLocaleString()}
                 </span>
               </button>
@@ -258,6 +270,11 @@ export function RepositoryWorkflowsView({
           </strong>
           <div style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "8px" }}>
             {activeRun.snapshot.repository} @ {activeRun.snapshot.headSha.slice(0, 12)}
+            {activeRun.trigger
+              ? activeRun.trigger.source === "repository_change"
+                ? ` · ${zh ? "变更触发" : "change-triggered"}${activeRun.trigger.eventId ? ` (${activeRun.trigger.eventId.slice(0, 22)}…)` : ""}`
+                : ` · ${zh ? "手动触发" : "manual"}`
+              : ""}
             {activeRun.miniReport ? ` · ${activeRun.miniReport.audit.allowed} allow / ${activeRun.miniReport.audit.denied} deny` : ""}
           </div>
           {activeRun.evidence.length > 0 && (
@@ -282,12 +299,14 @@ function BindingRow({
   zh,
   pending,
   onToggle,
+  onSetMode,
   onTrigger
 }: {
   binding: WorkflowRuntimeBinding;
   zh: boolean;
   pending: boolean;
   onToggle: (enabled: boolean) => void;
+  onSetMode: (triggerMode: "manual" | "on_change") => void;
   onTrigger: () => void;
 }) {
   const unavailable = binding.definition === null;
@@ -304,8 +323,28 @@ function BindingRow({
             ? zh ? "定义已删除（不可用）" : "definition deleted (unavailable)"
             : `${summary.origin === "builtin" ? (zh ? "内置" : "builtin") : zh ? "用户" : "user"}${summary.latestRevision !== null ? ` · r${summary.latestRevision} ${summary.status === "validated" ? "✓" : "!"}` : ""}`}
         </div>
+        {binding.enabled && binding.triggerMode === "on_change" && (
+          <div style={{ fontSize: "12px", color: "var(--muted)" }}>
+            {zh
+              ? "仓库变更事件将自动触发（每事件至多一次，钉定当时 HEAD）"
+              : "Repository change events trigger automatically (at most once per event, pinned to the HEAD at that time)"}
+          </div>
+        )}
       </div>
       <span style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+        <label style={{ fontSize: 12, color: "var(--muted)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span>{zh ? "触发" : "Trigger"}</span>
+          <select
+            aria-label={zh ? "触发模式" : "Trigger mode"}
+            value={binding.triggerMode}
+            disabled={pending || unavailable}
+            onChange={(event) => onSetMode(event.target.value as "manual" | "on_change")}
+            style={{ fontSize: 12, padding: "2px 4px", border: "1px solid var(--border)", borderRadius: "var(--ds-radius-sm)", background: "var(--surface)" }}
+          >
+            <option value="manual">{zh ? "手动" : "Manual"}</option>
+            <option value="on_change">{zh ? "变更时" : "On change"}</option>
+          </select>
+        </label>
         <span style={{ fontSize: 12, color: binding.enabled ? "var(--success, #22c55e)" : "var(--muted)" }}>
           {binding.enabled ? (zh ? "已启用" : "Enabled") : zh ? "已禁用" : "Disabled"}
         </span>

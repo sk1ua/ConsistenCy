@@ -300,6 +300,17 @@ export const workflowRuntimeTriggerRequestV2Schema = z.object({
   revisionId: nonEmpty.optional(),
 }).strict();
 
+/**
+ * How a run was created — pure observability provenance. A trigger source is
+ * never an authorization: every protected operation is authorized per-call by
+ * the Kernel regardless of how the run started.
+ */
+export const workflowRuntimeRunTriggerSchema = z.object({
+  source: z.enum(["manual", "repository_change"]),
+  /** Canonical repository event id for `repository_change` triggers. */
+  eventId: nonEmpty.optional(),
+}).strict();
+
 export const workflowRuntimeRunSummarySchema = z.object({
   runId: nonEmpty,
   definitionId: nonEmpty,
@@ -312,11 +323,14 @@ export const workflowRuntimeRunSummarySchema = z.object({
   findingCount: z.number().int().nonnegative(),
   evidenceCount: z.number().int().nonnegative(),
   error: nonEmpty.optional(),
+  /** How the run was created — observability data, never authority. */
+  trigger: workflowRuntimeRunTriggerSchema.optional(),
 }).strict();
 
 export const workflowRuntimeRunV2Schema = workflowRuntimeRunSchema.extend({
   revisionId: nonEmpty,
   origin: z.enum(["builtin", "user"]),
+  trigger: workflowRuntimeRunTriggerSchema.optional(),
 }).strict();
 
 export type WorkflowRuntimeDefinitionRevision = z.infer<typeof workflowRuntimeDefinitionRevisionSchema>;
@@ -333,6 +347,14 @@ export type WorkflowRuntimeRunV2 = z.infer<typeof workflowRuntimeRunV2Schema>;
 // ---------------------------------------------------------------------------
 
 /**
+ * How a binding may fire. `manual` (default) keeps CKPT3 behavior: only the
+ * explicit binding-gated trigger route executes it. `on_change` additionally
+ * lets persisted repository change events plan an automatic execution. The
+ * mode is DATA/intent — it never widens Kernel authorization.
+ */
+export const workflowRuntimeBindingTriggerModeSchema = z.enum(["manual", "on_change"]);
+
+/**
  * A binding is DATA (repository ↔ definition intent), never an
  * authorization: execution still resolves the latest validated revision and
  * authorizes every protected syscall per-call.
@@ -341,6 +363,7 @@ export const workflowRuntimeBindingSchema = z.object({
   repositoryId: nonEmpty,
   definitionId: workflowRuntimeDefinitionIdSchema,
   enabled: z.boolean(),
+  triggerMode: workflowRuntimeBindingTriggerModeSchema.default("manual"),
   /** Definition summary at read time; null when the definition was deleted. */
   definition: workflowRuntimeDefinitionSummarySchema.nullable(),
   createdAt: z.string().datetime(),
@@ -349,6 +372,7 @@ export const workflowRuntimeBindingSchema = z.object({
 
 export const workflowRuntimeSetBindingRequestSchema = z.object({
   enabled: z.boolean(),
+  triggerMode: workflowRuntimeBindingTriggerModeSchema.optional(),
 }).strict();
 
 /** POST /workflow-runtime/repositories/:id/runs — binding-gated manual trigger. */
@@ -359,3 +383,5 @@ export const workflowRuntimeRepositoryTriggerRequestSchema = z.object({
 export type WorkflowRuntimeBinding = z.infer<typeof workflowRuntimeBindingSchema>;
 export type WorkflowRuntimeSetBindingRequest = z.infer<typeof workflowRuntimeSetBindingRequestSchema>;
 export type WorkflowRuntimeRepositoryTriggerRequest = z.infer<typeof workflowRuntimeRepositoryTriggerRequestSchema>;
+export type WorkflowRuntimeBindingTriggerMode = z.infer<typeof workflowRuntimeBindingTriggerModeSchema>;
+export type WorkflowRuntimeRunTrigger = z.infer<typeof workflowRuntimeRunTriggerSchema>;
