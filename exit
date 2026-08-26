@@ -1,0 +1,42 @@
+[33mcommit a1dcff4188cf3915618589f29c346ef69d92935d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mv3[m[33m)[m
+Author: sk1ua <1585755328@qq.com>
+Date:   Tue Aug 25 13:41:28 2026 +0800
+
+    feat(v3): complete CKPT4 settings and acceptance verification
+
+ apps/api/src/github/auth.ts                        |  21 [32m++[m
+ apps/api/src/github/connectionTest.test.ts         | 249 [32m+++++++++++++++++[m
+ apps/api/src/github/connectionTest.ts              | 158 [32m+++++++++++[m
+ apps/api/src/http.test.ts                          | 138 [32m+++++++++[m[31m-[m
+ apps/api/src/http.ts                               |  39 [32m++[m[31m-[m
+ apps/api/src/server.ts                             |  14 [32m+[m[31m-[m
+ apps/desktop/src/main.cjs                          |  21 [32m++[m
+ apps/desktop/src/preload.cjs                       |   1 [32m+[m
+ apps/web/src/api/client.ts                         |  18 [32m++[m
+ apps/web/src/components/SettingsDialog.test.tsx    | 276 [32m++++++++++++++++++[m[31m-[m
+ apps/web/src/components/SettingsDialog.tsx         |  49 [32m+++[m[31m-[m
+ .../settings/AboutSettingsSection.test.tsx         | 296 [32m+++++++++++++++++++++[m
+ .../components/settings/AboutSettingsSection.tsx   | 100 [32m+++++++[m
+ .../settings/AppearanceSettingsSection.test.tsx    | 169 [32m++++++++++++[m
+ .../settings/AppearanceSettingsSection.tsx         |  29 [32m++[m
+ .../settings/DesktopSettingsSection.test.tsx       | 132 [32m+++++++++[m
+ .../components/settings/DesktopSettingsSection.tsx |  33 [32m+++[m
+ .../settings/GitHubSettingsSection.test.tsx        | 275 [32m+++++++++++++++++++[m
+ .../components/settings/GitHubSettingsSection.tsx  | 135 [32m++++++++[m[31m--[m
+ .../settings/ReviewsSettingsSection.test.tsx       | 229 [32m++++++++++++++++[m
+ .../components/settings/ReviewsSettingsSection.tsx |  78 [32m++++++[m
+ .../settings/RuntimeSettingsSection.test.tsx       | 287 [32m++++++++++++++++++++[m
+ .../components/settings/RuntimeSettingsSection.tsx |  54 [32m++++[m
+ apps/web/src/desktop.ts                            |  10 [32m+[m
+ apps/web/src/hooks/useSettingsForm.ts              |   6 [32m+[m[31m-[m
+ apps/web/src/i18n.tsx                              |  96 [32m++++++[m[31m-[m
+ apps/web/src/pages/SettingsPage.tsx                |  33 [32m++[m[31m-[m
+ apps/web/src/styles/settings.css                   |  14 [32m+[m
+ docs/api.md                                        |   1 [32m+[m
+ docs/desktop.md                                    |   5 [32m+[m[31m-[m
+ packages/schema/src/api.ts                         |  25 [32m++[m
+ scripts/capture-checkpoint2.mjs                    | 246 [32m+++++++++++++++++[m
+ scripts/capture-prototype-screenshots.mjs          | 165 [32m++++++++++++[m
+ tests/e2e-electron/security-boundary.spec.ts       |  31 [32m+++[m
+ tests/e2e-electron/smoke.spec.ts                   |   1 [32m+[m
+ 35 files changed, 3385 insertions(+), 49 deletions(-)

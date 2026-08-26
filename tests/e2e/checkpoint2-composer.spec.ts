@@ -139,6 +139,10 @@ async function installMatrix(page: Page, matrix: Matrix): Promise<void> {
       await route.fulfill({ json: { repositoryId, available: true, pullRequests: [] } });
       return;
     }
+    if (path === `/api/repositories/${repositoryId}/reviews` && request.method() === "GET") {
+      await route.fulfill({ json: { repositoryId, reviews: [] } });
+      return;
+    }
     if (path === "/api/jobs" && request.method() === "GET") {
       await route.fulfill({ json: { jobs: [] } });
       return;
