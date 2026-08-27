@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
+import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
@@ -1266,6 +1266,82 @@ describe("createApiServer", () => {
     const jsonBody = await postJson(port, "/settings/github/test-connection", {});
     expect(jsonBody.status).toBe(200);
     expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it("probes an unsaved draft token passed through the request schema without echoing it", async () => {
+    const probe = vi.fn(async (_input?: GitHubConnectionTestRequest): Promise<GitHubConnectionTestResponse> => ({
+      status: "invalid_credential",
+      testedAt: "2026-08-24T00:00:00.000Z"
+    }));
+    const server = createApiServer({ testGitHubConnection: probe });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await postJson(port, "/settings/github/test-connection", { publicReadToken: "ghp_draft_fake" });
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: "invalid_credential", testedAt: "2026-08-24T00:00:00.000Z" });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(probe.mock.calls[0]?.[0]).toEqual({ publicReadToken: "ghp_draft_fake" });
+    expect(JSON.stringify(response.body)).not.toContain("ghp_draft_fake");
+  });
+
+  it("keeps probing the ACTIVE credential for empty bodies and bodies without a draft field", async () => {
+    const probe = vi.fn(async (_input?: GitHubConnectionTestRequest): Promise<GitHubConnectionTestResponse> => ({
+      status: "not_configured",
+      testedAt: "2026-08-24T00:00:00.000Z"
+    }));
+    const server = createApiServer({ testGitHubConnection: probe });
+    servers.push(server);
+    const port = await listen(server);
+
+    const noBody = await httpJson(port, "POST", "/settings/github/test-connection");
+    expect(noBody.status).toBe(200);
+    const emptyObject = await postJson(port, "/settings/github/test-connection", {});
+    expect(emptyObject.status).toBe(200);
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(probe.mock.calls[0]?.[0]).toEqual({});
+    expect(probe.mock.calls[1]?.[0]).toEqual({});
+  });
+
+  it("rejects invalid or over-wide connection-test bodies before any probe runs", async () => {
+    const probe = vi.fn(async (): Promise<GitHubConnectionTestResponse> => ({
+      status: "connected",
+      mode: "pat",
+      testedAt: "2026-08-24T00:00:00.000Z"
+    }));
+    const server = createApiServer({ testGitHubConnection: probe });
+    servers.push(server);
+    const port = await listen(server);
+
+    const emptyToken = await postJson(port, "/settings/github/test-connection", { publicReadToken: "" });
+    expect(emptyToken.status).toBe(400);
+    expect((emptyToken.body as { error?: { code?: string } }).error?.code).toBe("INVALID_SETTINGS");
+
+    const unknownField = await postJson(port, "/settings/github/test-connection", {
+      publicReadToken: "ghp_draft_fake",
+      webhookUrl: "https://example.invalid/hook"
+    });
+    expect(unknownField.status).toBe(400);
+    expect((unknownField.body as { error?: { code?: string } }).error?.code).toBe("INVALID_SETTINGS");
+
+    expect(JSON.stringify(emptyToken.body) + JSON.stringify(unknownField.body)).not.toContain("ghp_draft_fake");
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes draft-probe crashes into a 502 without leaking the failed token", async () => {
+    const server = createApiServer({
+      testGitHubConnection: async () => {
+        throw new Error("probe crashed while using ghp_draft_fake");
+      }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const failed = await postJson(port, "/settings/github/test-connection", { publicReadToken: "ghp_draft_fake" });
+    expect(failed.status).toBe(502);
+    expect(failed.body).toMatchObject({ error: { code: "GITHUB_CONNECTION_TEST_FAILED" } });
+    expect(JSON.stringify(failed.body)).not.toContain("ghp_draft_fake");
+    expect(JSON.stringify(failed.body)).not.toContain("probe crashed");
   });
 
   it("returns not_configured as a 200 result and guards the probe behind the bearer token", async () => {

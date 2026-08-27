@@ -1,15 +1,25 @@
+// @vitest-environment happy-dom
+import { createElement } from "react";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { describe, expect, it } from "vitest";
-import type { HealthResponse, SettingsSnapshot } from "../api/client";
+import type { HealthResponse, SettingsPatch, SettingsSnapshot } from "../api/client";
+import type { ConsistencyDesktopBridge, DesktopCredentialKey, DesktopCredentialStatus } from "../desktop";
+import { I18nProvider } from "../i18n";
 import {
   buildSettingsPatch,
   computeReadiness,
   emptySecrets,
   keepSecrets,
+  publicPrAccessModeView,
   secretValue,
+  useSettingsForm,
   withDesktopCredentialStatus,
   type SecretDrafts,
   type ClearSecrets,
-  type SecretName
+  type SecretName,
+  type UseSettingsFormOptions,
+  type UseSettingsFormResult
 } from "./useSettingsForm";
 
 const baseSettings: SettingsSnapshot = {
@@ -138,5 +148,130 @@ describe("withDesktopCredentialStatus", () => {
     expect(result.github.privateKeyConfigured).toBe(true);
     expect(result.github.webhookSecretConfigured).toBe(true);
     expect(result.github.publicReadTokenConfigured).toBe(true);
+  });
+});
+
+const clearedStatus: DesktopCredentialStatus = {
+  DEEPSEEK_API_KEY: false,
+  OPENAI_API_KEY: false,
+  GITHUB_PRIVATE_KEY: false,
+  GITHUB_WEBHOOK_SECRET: false,
+  GITHUB_PUBLIC_READ_TOKEN: false
+};
+
+function makeBridge(writes: DesktopCredentialKey[]): ConsistencyDesktopBridge {
+  return {
+    appVersion: async () => "0.0.0",
+    selectRepository: async () => ({ canceled: true }),
+    credentialStatus: async () => clearedStatus,
+    setCredential: async key => {
+      writes.push(key);
+      return { ...clearedStatus, [key]: true };
+    },
+    showFromTray: async () => ({ visible: true })
+  };
+}
+
+interface HookHarness {
+  current: () => UseSettingsFormResult;
+  unmount: () => Promise<void>;
+}
+
+async function mountSettingsForm(options: UseSettingsFormOptions = {}): Promise<HookHarness> {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  let latest!: UseSettingsFormResult;
+  function Harness() {
+    latest = useSettingsForm(options);
+    return null;
+  }
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root: Root = createRoot(container);
+  await act(async () => {
+    root.render(createElement(I18nProvider, { initialLocale: "en-US", children: createElement(Harness) }));
+  });
+  return {
+    current: () => latest,
+    unmount: async () => {
+      await act(async () => { root.unmount(); });
+      document.body.removeChild(container);
+    }
+  };
+}
+
+describe("publicPrAccessModeView", () => {
+  it("maps every server mode onto a label key and ok state, treating unknown as disabled", () => {
+    expect(publicPrAccessModeView("pat")).toEqual({ labelKey: "PAT read", ok: true });
+    expect(publicPrAccessModeView("anonymous")).toEqual({ labelKey: "Anonymous read", ok: true });
+    expect(publicPrAccessModeView("disabled")).toEqual({ labelKey: "Disabled", ok: false });
+    // Legacy /health payloads predate the field entirely. The server derives
+    // the mode from the analysis flag, so an absent field cannot honestly
+    // claim anonymous read access — it must fail closed to "Disabled".
+    expect(publicPrAccessModeView(undefined)).toEqual({ labelKey: "Disabled", ok: false });
+  });
+});
+
+describe("save() restart honesty on the desktop bridge path", () => {
+  function bridgeDeps(options?: { restartRequired?: boolean; writes?: DesktopCredentialKey[] }) {
+    const patches: SettingsPatch[] = [];
+    return {
+      patches,
+      deps: {
+        fetchSettings: async () => baseSettings,
+        updateSettings: async (patch: SettingsPatch) => {
+          patches.push(patch);
+          return { ...baseSettings, restartRequired: options?.restartRequired ?? false };
+        },
+        bridge: makeBridge(options?.writes ?? [])
+      } satisfies UseSettingsFormOptions["deps"]
+    };
+  }
+
+  it("marks a local restart as needed after the bridge stored a changed credential", async () => {
+    const writes: DesktopCredentialKey[] = [];
+    const { deps, patches } = bridgeDeps({ writes });
+    const harness = await mountSettingsForm({ deps });
+
+    await act(async () => { harness.current().updateSecret(GH_KEY_TOKEN, "ghp_test_fake"); });
+    expect(harness.current().restartNeeded).toBe(false);
+
+    await act(async () => { await harness.current().save(); });
+
+    // The patch must still exclude secrets (bridge boundary), the bridge must
+    // have received exactly one write, and the local banner must appear even
+    // though the server never saw a persisted change of its own.
+    expect((patches[0]?.github as Record<string, unknown>)?.[GH_KEY_TOKEN]).toBeUndefined();
+    expect(writes).toEqual(["GITHUB_PUBLIC_READ_TOKEN"]);
+    expect(harness.current().restartNeeded).toBe(true);
+
+    await harness.unmount();
+  });
+
+  it("keeps reporting the server flag when the save changed no credential", async () => {
+    const writes: DesktopCredentialKey[] = [];
+    const { deps, patches } = bridgeDeps({ restartRequired: false, writes });
+    const harness = await mountSettingsForm({ deps });
+
+    await act(async () => { harness.current().updateGithub({ appId: "777777" }); });
+    await act(async () => { await harness.current().save(); });
+
+    expect(patches[0]?.github?.appId).toBe("777777");
+    expect(writes).toEqual([]);
+    expect(harness.current().restartNeeded).toBe(false);
+
+    await harness.unmount();
+  });
+
+  it("still surfaces a server-declared restart for non-credential saves through the bridge", async () => {
+    const writes: DesktopCredentialKey[] = [];
+    const { deps } = bridgeDeps({ restartRequired: true, writes });
+    const harness = await mountSettingsForm({ deps });
+
+    await act(async () => { await harness.current().save(); });
+
+    expect(writes).toEqual([]);
+    expect(harness.current().restartNeeded).toBe(true);
+
+    await harness.unmount();
   });
 });

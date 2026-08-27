@@ -110,7 +110,7 @@ function renderSection(options?: {
   );
 }
 
-async function mountSection(options?: { health?: HealthResponse; restartPending?: boolean }) {
+async function mountSection(options?: { health?: HealthResponse; restartPending?: boolean; secrets?: SecretDrafts }) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -156,6 +156,9 @@ describe("GitHubSettingsSection connection status rows", () => {
     expect(renderSection({ health })).toContain("PAT read");
     const disabled = { ...makeHealth(), publicPrAccessMode: "disabled" as const };
     expect(renderSection({ health: disabled })).toContain("Disabled");
+    // Legacy payloads without the field fail closed to "Disabled" as well.
+    const legacy = { ...makeHealth(), publicPrAccessMode: undefined };
+    expect(renderSection({ health: legacy })).toContain("Disabled");
   });
 
   it("hides the summary rows when health is absent but keeps the explicit test action", () => {
@@ -199,7 +202,7 @@ describe("GitHubSettingsSection Test Connection action", () => {
     const result = container.querySelector("#setting-github-status-result");
     expect(result?.textContent).toContain("Connected");
     expect(result?.innerHTML).toContain("badge-succeeded");
-    expect(container.innerHTML).not.toContain("Not tested yet");
+    expect(result?.innerHTML).not.toContain("Not tested yet");
 
     await act(async () => { root.unmount(); });
     document.body.removeChild(container);
@@ -243,6 +246,62 @@ describe("GitHubSettingsSection Test Connection action", () => {
   });
 });
 
+describe("GitHubSettingsSection unsaved draft token probe", () => {
+  it("keeps the draft-token probe disabled until a non-empty token draft exists", () => {
+    const idleHtml = renderSection({ health: makeHealth() });
+    const idleButton = idleHtml.match(/<button[^>]*id="setting-github-test-draft"[^>]*>/)?.[0] ?? "";
+    expect(idleButton).toContain("disabled");
+
+    const armedHtml = renderSection({
+      health: makeHealth(),
+      secrets: { ...emptySecrets, publicReadToken: "ghp_draft_fake" }
+    });
+    const armedButton = armedHtml.match(/<button[^>]*id="setting-github-test-draft"[^>]*>/)?.[0] ?? "";
+    expect(armedButton).not.toContain("disabled");
+  });
+
+  it("probes exactly one unsaved draft per click through the schema body and renders the sanitized result", async () => {
+    testConnectionMock.mockResolvedValue(connectedResult);
+    const { container, root } = await mountSection({
+      health: makeHealth(),
+      secrets: { ...emptySecrets, publicReadToken: "ghp_draft_fake" }
+    });
+
+    await act(async () => { click(container, "setting-github-test-draft"); });
+    await act(async () => { click(container, "setting-github-test-draft"); });
+
+    expect(testConnectionMock).toHaveBeenCalledTimes(2);
+    expect(testConnectionMock).toHaveBeenCalledWith(undefined, { publicReadToken: "ghp_draft_fake" });
+    const result = container.querySelector("#setting-github-draft-result");
+    expect(result?.textContent).toContain("Connected");
+    // The typed draft lives only in its own password input; the probe output
+    // must never echo the token back.
+    expect(result?.innerHTML).not.toContain("ghp_draft_fake");
+    const statusSection = container.innerHTML.slice(container.innerHTML.indexOf('aria-label="Connection status"'));
+    expect(statusSection).not.toContain("ghp_draft_fake");
+
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(container);
+  });
+
+  it("maps a failed draft probe to the generic unavailable message without echoing the token", async () => {
+    testConnectionMock.mockRejectedValueOnce(new Error("API request failed ghp_draft_fake"));
+    const { container, root } = await mountSection({
+      health: makeHealth(),
+      secrets: { ...emptySecrets, publicReadToken: "ghp_draft_fake" }
+    });
+
+    await act(async () => { click(container, "setting-github-test-draft"); });
+    const result = container.querySelector("#setting-github-draft-result");
+    expect(result?.textContent).toContain("Connection test unavailable");
+    expect(result?.innerHTML).not.toContain("ghp_draft_fake");
+    expect(container.innerHTML).not.toContain("API request failed");
+
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(container);
+  });
+});
+
 describe("GitHubSettingsSection security surface", () => {
   it("renders no secret values and no filesystem paths in the connection status output", () => {
     const html = renderSection({
@@ -267,9 +326,12 @@ describe("GitHubSettingsSection zh-CN coverage", () => {
     expect(html).toContain("匿名读取");
     expect(html).toContain("尚未测试");
     expect(html).toContain("测试连接");
+    expect(html).toContain("试连此令牌");
+    expect(html).toContain("仅对这条未保存的令牌发起一次只读请求；不会存储或回显该令牌。");
     expect(html).toContain("测试针对当前运行中的配置；重启后才会应用已保存的更改。");
     expect(html).not.toContain("Not tested yet");
     expect(html).not.toContain("Test Connection");
+    expect(html).not.toContain("Test this token");
     expect(html).not.toContain("Restart to apply saved changes");
   });
 });

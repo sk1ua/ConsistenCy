@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ReviewJob, ReviewJobStore } from "../jobQueue";
+import type { AuditDomainStore } from "../audit/store";
 
 export class WebhookError extends Error {
   constructor(
@@ -70,7 +71,8 @@ function enqueuePullRequest(
   payload: unknown,
   deliveryId: string,
   jobs: ReviewJobStore,
-  llmConfigured = true
+  llmConfigured = true,
+  repositoryStore?: Pick<AuditDomainStore, "findRepositoryByRemoteFullName">
 ): WebhookResult {
   const parseResult = pullRequestPayloadSchema.safeParse(payload);
   if (!parseResult.success) {
@@ -120,11 +122,17 @@ function enqueuePullRequest(
       : { status: "ignored", event: "pull_request", deliveryId, reason: "llm provider not configured" };
   }
 
+  // Resolve the canonical repository identity at intake (same lookup as the
+  // public-PR path): pure table lookup, never a network call, and unmatched
+  // remotes stay unassociated — no shadow repository records are created.
+  const canonicalRepository = repositoryStore?.findRepositoryByRemoteFullName(data.repository.full_name);
+
   const acceptance = jobs.acceptWebhookJob({
     delivery: { deliveryId, event: "pull_request", action: data.action },
     job: {
       kind: "pull_request",
       repository: data.repository.full_name,
+      ...(canonicalRepository === undefined ? {} : { repositoryId: canonicalRepository.id }),
       pullRequestNumber: data.pull_request.number,
       baseSha: data.pull_request.base.sha,
       headSha: data.pull_request.head.sha,
@@ -145,6 +153,7 @@ export function processGitHubWebhook(options: {
   secret: string;
   jobs: ReviewJobStore;
   llmConfigured?: boolean;
+  repositoryStore?: Pick<AuditDomainStore, "findRepositoryByRemoteFullName">;
 }): WebhookResult {
   const event = headerValue(options.headers, "x-github-event");
   const deliveryId = headerValue(options.headers, "x-github-delivery");
@@ -177,7 +186,7 @@ export function processGitHubWebhook(options: {
     }
 
     if (event === "pull_request") {
-      return enqueuePullRequest(payload, deliveryId, options.jobs, options.llmConfigured !== false);
+      return enqueuePullRequest(payload, deliveryId, options.jobs, options.llmConfigured !== false, options.repositoryStore);
     }
 
     if (event === "push") {

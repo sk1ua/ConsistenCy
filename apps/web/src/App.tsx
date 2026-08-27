@@ -87,7 +87,10 @@ export function App() {
     mutationFn: (url: string) => api.analyzePublicPr(url),
     onSuccess: result => {
       void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
-      navigate(`/runs/${encodeURIComponent(result.jobId)}/notebook?notebook=${encodeURIComponent(result.notebookId)}`);
+      // Always land on the report overview: it renders from the job report
+      // alone, while the Notebook sub-path needs CONSISTENCY_NOTEBOOK_ENABLED
+      // and would otherwise dead-end on NOTEBOOK_DISABLED/404 pages.
+      navigate(`/runs/${encodeURIComponent(result.jobId)}/overview`);
     }
   });
   const connectPublicRepository = useMutation({

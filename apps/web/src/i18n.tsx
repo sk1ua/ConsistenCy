@@ -491,6 +491,9 @@ const zh: Record<string, string> = {
   "Retry available in {minutes} min": "{minutes} 分钟后可重试",
   "Tests use the running configuration. Restart to apply saved changes.": "测试针对当前运行中的配置；重启后才会应用已保存的更改。",
   "Runs one read-only request against the credential the API is actually using. Saved changes apply only after a restart.": "仅发起一次只读请求，目标是 API 当前实际使用的凭据；已保存的更改需重启后才会生效。",
+  // Unsaved draft token probe (CKPT4 Phase 2C)
+  "Test this token": "试连此令牌",
+  "Runs one read-only request against this unsaved token without storing or displaying it.": "仅对这条未保存的令牌发起一次只读请求；不会存储或回显该令牌。",
   "Stored locally. Relative paths stay inside this project and are safest for a first setup.": "数据存储在本地。相对路径保留在项目内，最适合首次配置。",
   "Temporary review workspaces are created here. Keep the default unless you manage storage separately.": "临时审查工作区将在此创建；除非单独管理存储，否则保留默认值。",
   "Start with 1. Increase only after checking CPU, memory and provider rate limits.": "建议从 1 开始，仅在检查 CPU、内存和提供商限额后提高。",

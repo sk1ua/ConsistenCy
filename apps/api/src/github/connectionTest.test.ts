@@ -247,3 +247,90 @@ describe("testGitHubConnection", () => {
     expect(normalized.status).toBeUndefined();
   });
 });
+
+describe("testGitHubConnection unsaved draft PAT probe", () => {
+  it("probes only the draft token and short-circuits every ACTIVE candidate", async () => {
+    const probeToken = vi.fn(async () => undefined);
+    const probeApp = vi.fn(async () => true);
+    const probeAnonymous = vi.fn(async () => undefined);
+    const result = await testGitHubConnection(
+      {
+        draftPublicReadToken: "ghp_draft_fake",
+        publicReadToken: "ghp_test_fake",
+        appAuthenticator: fakeAuthenticator,
+        publicPrAnalysisEnabled: true
+      },
+      { probeToken, probeApp, probeAnonymous, now: fixedNow }
+    );
+    expect(result).toEqual({ status: "connected", mode: "pat", testedAt: "2026-08-24T00:00:00.000Z" });
+    expect(probeToken).toHaveBeenCalledTimes(1);
+    expect(probeToken).toHaveBeenCalledWith("ghp_draft_fake", undefined);
+    expect(probeApp).not.toHaveBeenCalled();
+    expect(probeAnonymous).not.toHaveBeenCalled();
+    expect(githubConnectionTestResponseSchema.parse(result)).toEqual(result);
+  });
+
+  it("probes the draft even when analysis is disabled and no ACTIVE credential exists", async () => {
+    // The not_configured early return must not swallow an explicitly
+    // requested draft probe.
+    const probeToken = vi.fn(async () => undefined);
+    const probeAnonymous = vi.fn();
+    const result = await testGitHubConnection(
+      { draftPublicReadToken: "ghp_draft_fake", publicPrAnalysisEnabled: false },
+      { probeToken, probeAnonymous, now: fixedNow }
+    );
+    expect(result).toEqual({ status: "connected", mode: "pat", testedAt: "2026-08-24T00:00:00.000Z" });
+    expect(probeToken).toHaveBeenCalledWith("ghp_draft_fake", undefined);
+    expect(probeAnonymous).not.toHaveBeenCalled();
+  });
+
+  it("maps a 401 draft rejection to invalid_credential", async () => {
+    const result = await testGitHubConnection(
+      { draftPublicReadToken: "ghp_draft_fake", publicPrAnalysisEnabled: true },
+      {
+        probeToken: vi.fn(async () => {
+          throw new GitHubApiError("GitHub request failed with status 401", 401);
+        }),
+        now: fixedNow
+      }
+    );
+    expect(result).toEqual({ status: "invalid_credential", testedAt: "2026-08-24T00:00:00.000Z" });
+  });
+
+  it("maps a rate-limited draft probe to rate_limited with bounded retry metadata", async () => {
+    const result = await testGitHubConnection(
+      { draftPublicReadToken: "ghp_draft_fake", publicPrAnalysisEnabled: false },
+      {
+        probeToken: vi.fn(async () => {
+          throw new GitHubApiError("GitHub request failed with status 429", 429, undefined, "30");
+        }),
+        now: fixedNow
+      }
+    );
+    expect(result).toEqual({ status: "rate_limited", retryAfterMs: 30_000, testedAt: "2026-08-24T00:00:00.000Z" });
+  });
+
+  it("falls back to the ACTIVE runtime credential when no draft is supplied", async () => {
+    const probeToken = vi.fn(async () => undefined);
+    const result = await testGitHubConnection(
+      { publicReadToken: "ghp_test_fake", publicPrAnalysisEnabled: true },
+      { probeToken, now: fixedNow }
+    );
+    expect(result).toEqual({ status: "connected", mode: "pat", testedAt: "2026-08-24T00:00:00.000Z" });
+    expect(probeToken).toHaveBeenCalledWith("ghp_test_fake", undefined);
+  });
+
+  it("sanitizes draft-probe crashes into unavailable and never echoes the draft", async () => {
+    const result = await testGitHubConnection(
+      { draftPublicReadToken: "ghp_draft_fake", publicPrAnalysisEnabled: false },
+      {
+        probeToken: vi.fn(async () => {
+          throw { unexpected: "ghp_draft_fake object failure" };
+        }),
+        now: fixedNow
+      }
+    );
+    expect(result).toEqual({ status: "unavailable", testedAt: "2026-08-24T00:00:00.000Z" });
+    expect(JSON.stringify(result)).not.toContain("ghp_draft_fake");
+  });
+});

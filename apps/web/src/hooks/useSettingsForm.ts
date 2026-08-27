@@ -159,6 +159,27 @@ export function computeReadiness(
   };
 }
 
+export type PublicPrAccessModeLabelKey = "PAT read" | "Anonymous read" | "Disabled";
+
+export interface PublicPrAccessModeView {
+  labelKey: PublicPrAccessModeLabelKey;
+  ok: boolean;
+}
+
+/**
+ * Single source of truth for rendering health.publicPrAccessMode. The server
+ * derives the field as: analysis disabled -> "disabled"; analysis enabled ->
+ * public read token present ? "pat" : "anonymous". An undefined field only
+ * comes from legacy /health payloads that predate it; consistent with the
+ * fail-closed posture (and with GitHubSettingsSection's existing mapping), it
+ * renders as "Disabled" instead of claiming anonymous read access.
+ */
+export function publicPrAccessModeView(mode: HealthResponse["publicPrAccessMode"]): PublicPrAccessModeView {
+  if (mode === "pat") return { labelKey: "PAT read", ok: true };
+  if (mode === "anonymous") return { labelKey: "Anonymous read", ok: true };
+  return { labelKey: "Disabled", ok: false };
+}
+
 export interface UseSettingsFormDeps {
   fetchSettings?: () => Promise<SettingsSnapshot>;
   updateSettings?: (patch: SettingsPatch) => Promise<SettingsSnapshot>;
@@ -267,6 +288,10 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
     setSaving(true);
     setMessage(undefined);
     const patch = buildSettingsPatch(draft, secrets, clearSecrets, Boolean(bridge));
+    // Bridge-written credentials land only in the OS credential store and take
+    // effect at the next runtime restart; the API never sees those writes, so
+    // its restartRequired flag alone would hide the pending-restart state.
+    let bridgeStoredCredential = false;
     try {
       const updatedSnapshot = await (deps.updateSettings ?? api.updateSettings)(patch);
       let updated = updatedSnapshot;
@@ -276,6 +301,7 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
           const value = secretValue(secrets[name], clearSecrets[name]);
           if (value === undefined) continue;
           status = await bridge.setCredential(desktopCredentialBySecret[name], value);
+          bridgeStoredCredential = true;
         }
         updated = withDesktopCredentialStatus(updatedSnapshot, status);
       }
@@ -283,7 +309,7 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
       setDraft(updated);
       setSecrets(emptySecrets);
       setClearSecrets(keepSecrets);
-      setRestartNeeded(updated.restartRequired);
+      setRestartNeeded(bridgeStoredCredential || updated.restartRequired);
       setMessage({ tone: "success", text: t("Settings saved.") });
     } catch (error) {
       setMessage({ tone: "error", text: formatSettingsError(error, t) });

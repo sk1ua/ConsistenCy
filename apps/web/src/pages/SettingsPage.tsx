@@ -10,7 +10,7 @@ import { DesktopSettingsSection } from "../components/settings/DesktopSettingsSe
 import { AboutSettingsSection } from "../components/settings/AboutSettingsSection";
 import { desktopBridge } from "../desktop";
 import { useI18n } from "../i18n";
-import { useSettingsForm } from "../hooks/useSettingsForm";
+import { publicPrAccessModeView, useSettingsForm } from "../hooks/useSettingsForm";
 
 function ConfigRow({ icon: Icon, label, value, ok }: { icon: typeof Github; label: string; value: string; ok?: boolean }) {
   return <div className="config-row"><Icon size={18} /><span><strong>{label}</strong><small>{value}</small></span>{ok === undefined ? null : ok ? <CheckCircle2 className="ok" size={18} /> : <XCircle className="bad" size={18} />}</div>;
@@ -141,7 +141,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       <div className="config-list">
         <ConfigRow icon={Github} label={t("GitHub App")} value={t(health.configuration.githubAppConfigured ? "Configured" : "Not configured")} ok={health.configuration.githubAppConfigured} />
         <ConfigRow icon={KeyRound} label={t("Webhook secret")} value={t(health.configuration.webhookSecretConfigured ? "Configured" : "Not configured")} ok={health.configuration.webhookSecretConfigured} />
-        <ConfigRow icon={Globe2} label={t("Public PR access")} value={health.publicPrAccessMode === "pat" ? t("PAT read") : health.publicPrAccessMode === "disabled" ? t("Disabled") : t("Anonymous read")} ok={health.publicPrAccessMode !== "disabled"} />
+        <ConfigRow icon={Globe2} label={t("Public PR access")} value={t(publicPrAccessModeView(health.publicPrAccessMode).labelKey)} ok={publicPrAccessModeView(health.publicPrAccessMode).ok} />
         <ConfigRow icon={KeyRound} label={t("Public read token")} value={t(health.configuration.publicReadTokenConfigured ? "Configured" : "Not configured")} ok={health.configuration.publicReadTokenConfigured} />
         <ConfigRow icon={ServerCog} label={t("LLM provider")} value={health.llmProvider} />
         <ConfigRow icon={ServerCog} label={t("Worker")} value={t(health.worker.running ? "Running · concurrency {count}" : "Stopped · concurrency {count}", { count: health.worker.concurrency })} ok={health.worker.running} />

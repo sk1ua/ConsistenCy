@@ -17,6 +17,7 @@ import {
   automationSchema,
   evolutionSnapshotSchema,
   githubConnectionTestResponseSchema,
+  type GitHubConnectionTestRequest,
   repositoryEventSchema,
   repositoryPulseSchema,
   repositorySchema,
@@ -391,10 +392,12 @@ export const api = {
   async updateSettings(patch: SettingsPatch): Promise<SettingsSnapshot> {
     return (await request("/settings", { method: "PUT", body: JSON.stringify(patch) }) as { settings: SettingsSnapshot }).settings;
   },
-  async testGitHubConnection(signal?: AbortSignal): Promise<GitHubConnectionTestResponse> {
+  async testGitHubConnection(signal?: AbortSignal, draft?: GitHubConnectionTestRequest): Promise<GitHubConnectionTestResponse> {
+    // draft carries one unsaved token to probe; without it the API targets the
+    // ACTIVE runtime credential. The API never echoes tokens in any response.
     return githubConnectionTestResponseSchema.parse(await request("/settings/github/test-connection", {
       method: "POST",
-      body: "{}",
+      body: JSON.stringify(draft ?? {}),
       signal
     }));
   },

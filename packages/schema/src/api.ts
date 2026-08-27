@@ -414,8 +414,20 @@ export const githubConnectionTestResponseSchema = z.object({
   testedAt: z.string().datetime()
 }).strict();
 
+/**
+ * Request body for POST /settings/github/test-connection (CKPT4 Phase 2C).
+ * An optional non-empty `publicReadToken` probes one UNSAVED draft PAT instead
+ * of the ACTIVE runtime credential; an empty body or a missing field keeps
+ * probing the ACTIVE credential. Draft tokens are never persisted, logged, or
+ * echoed back in any response.
+ */
+export const githubConnectionTestRequestSchema = z.object({
+  publicReadToken: z.string().min(1).optional()
+}).strict();
+
 export type GitHubConnectionTestStatus = z.infer<typeof githubConnectionTestStatusSchema>;
 export type GitHubConnectionTestResponse = z.infer<typeof githubConnectionTestResponseSchema>;
+export type GitHubConnectionTestRequest = z.infer<typeof githubConnectionTestRequestSchema>;
 
 export const reviewPreparationSourceWorkingTreeSchema = z.object({
   available: z.boolean(),

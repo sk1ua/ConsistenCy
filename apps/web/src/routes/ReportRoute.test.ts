@@ -1,6 +1,14 @@
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { runModeFromPath, matchJobRepositoryId } from "./ReportRoute";
+import { runModeFromPath, matchJobRepositoryId, ReportRoute } from "./ReportRoute";
+import type { HealthResponse } from "../api/client";
 import type { ReviewJob, Repository } from "@consistency/schema";
+import { I18nProvider } from "../i18n";
+import { createWorkspaceQueryClient } from "../query/client";
+import { testJobs } from "../test/testFixtures";
 
 describe("run route modes", () => {
   it("selects each canonical run workbench mode from the pathname", () => {
@@ -63,5 +71,60 @@ describe("matchJobRepositoryId", () => {
 
   it("returns undefined if job is undefined", () => {
     expect(matchJobRepositoryId(undefined, [repo1])).toBeUndefined();
+  });
+});
+
+describe("run mode tab visibility", () => {
+  const baseHealth: HealthResponse = {
+    ok: true,
+    service: "consistency-api",
+    database: { ok: true },
+    worker: { running: false, activeJobs: 0, concurrency: 1 },
+    llmProvider: "none",
+    configuration: {
+      githubAppConfigured: false,
+      webhookSecretConfigured: false,
+      publicReadTokenConfigured: false,
+      storage: { kind: "memory", configured: true },
+      workerConcurrency: 1
+    }
+  };
+
+  function renderRunRoute(health?: HealthResponse): string {
+    // Plain createElement calls: this suite stays a .ts file (no JSX transform).
+    const runPanelRoute = createElement(Route, {
+      path: "/runs/:runId/overview",
+      element: createElement(ReportRoute, {
+        jobs: testJobs,
+        reports: [],
+        repositories: [],
+        health,
+        jobsUnavailable: false,
+        reportsUnavailable: false
+      })
+    });
+    const tree = createElement(
+      QueryClientProvider,
+      { client: createWorkspaceQueryClient() },
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/runs/job_1/overview"] },
+        createElement(Routes, null, runPanelRoute)
+      )
+    );
+    return renderToString(createElement(I18nProvider, { initialLocale: "en-US", children: tree }));
+  }
+
+  it("hides the notebook tab when the runtime reports notebook disabled", () => {
+    const html = renderRunRoute({ ...baseHealth, notebook: false });
+    expect(html).toContain("Overview");
+    expect(html).toContain("Runtime");
+    expect(html).not.toContain(">Notebook</a>");
+  });
+
+  it("keeps the notebook tab when the notebook runtime is enabled or unreported", () => {
+    expect(renderRunRoute({ ...baseHealth, notebook: true })).toContain(">Notebook</a>");
+    // Legacy health payloads without the flag must not lose the tab.
+    expect(renderRunRoute(baseHealth)).toContain(">Notebook</a>");
   });
 });

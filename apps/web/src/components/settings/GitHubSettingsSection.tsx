@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { GitHubConnectionTestResponse, GitHubConnectionTestStatus } from "@consistency/schema";
 import { api, type HealthResponse, type SettingsSnapshot } from "../../api/client";
 import type { SecretDrafts, ClearSecrets, SecretName } from "../../hooks/useSettingsForm";
+import { publicPrAccessModeView } from "../../hooks/useSettingsForm";
 import { useI18n } from "../../i18n";
 import { SettingHelp, SETTING_HELP_LINKS } from "../SettingHelp";
 import { SecretField } from "./SecretField";
@@ -49,6 +50,16 @@ function connectionStatusBadgeClass(status: GitHubConnectionTestStatus): string 
   }
 }
 
+function ConnectionTestResult({ result }: { result: GitHubConnectionTestResponse }) {
+  const { t } = useI18n();
+  return <>
+    <span className={connectionStatusBadgeClass(result.status)}>{t(connectionStatusLabelKey(result.status))}</span>
+    {result.status === "rate_limited" && result.retryAfterMs !== undefined && (
+      <> {t("Retry available in {minutes} min", { minutes: Math.max(1, Math.ceil(result.retryAfterMs / 60_000)) })}</>
+    )}
+  </>;
+}
+
 export function GitHubSettingsSection({
   draft,
   secrets,
@@ -62,6 +73,11 @@ export function GitHubSettingsSection({
 }: GitHubSettingsSectionProps) {
   const { t } = useI18n();
   const [testState, setTestState] = useState<ConnectionTestState>({ phase: "idle" });
+  const [draftTestState, setDraftTestState] = useState<ConnectionTestState>({ phase: "idle" });
+  // The draft lives only in the pending-save secret field; an empty draft
+  // keeps the dedicated probe disabled so the ACTIVE credential is never
+  // probed by accident and no token text is ever rendered back.
+  const draftTokenEligible = secrets.publicReadToken.trim() !== "";
 
   // Explicit-only probe: no auto-run on mount (anonymous quota is shared and
   // bounded). Each click performs exactly one read-only request through the
@@ -76,11 +92,20 @@ export function GitHubSettingsSection({
     }
   }
 
-  const accessModeLabel = health?.publicPrAccessMode === "pat"
-    ? t("PAT read")
-    : health?.publicPrAccessMode === "anonymous"
-      ? t("Anonymous read")
-      : t("Disabled");
+  // Same discipline as the ACTIVE probe, aimed at the unsaved draft only:
+  // one bounded read-only request, sanitized statuses, never persisted.
+  async function runDraftConnectionTest(): Promise<void> {
+    if (!draftTokenEligible) return;
+    setDraftTestState({ phase: "testing" });
+    try {
+      const result = await api.testGitHubConnection(undefined, { publicReadToken: secrets.publicReadToken.trim() });
+      setDraftTestState({ phase: "done", result });
+    } catch {
+      setDraftTestState({ phase: "error" });
+    }
+  }
+
+  const accessMode = publicPrAccessModeView(health?.publicPrAccessMode);
 
   return <>
     <section className="settings-group section-block">
@@ -93,6 +118,26 @@ export function GitHubSettingsSection({
         </div>
         <div className="setting-field"><label htmlFor="setting-app-id">{t("GitHub App ID")}</label><input id="setting-app-id" aria-describedby="setting-app-id-help" value={draft.github.appId} onChange={event => updateGithub({ appId: event.target.value })} placeholder={t("Only for GitHub App mode")} /><SettingHelp id="setting-app-id-help" text="Find the numeric App ID on the GitHub App settings page. Skip this for anonymous or PAT read-only mode." href={SETTING_HELP_LINKS.githubApp} /></div>
         <SecretField name="publicReadToken" label="Public read token" configured={settings.github.publicReadTokenConfigured} value={secrets.publicReadToken} clear={clearSecrets.publicReadToken} help="Optional: use a fine-grained PAT limited to selected repositories and read-only contents/metadata permissions." helpHref={SETTING_HELP_LINKS.githubPat} onValue={updateSecret} onClear={updateClear} />
+        <div className="setting-field-wide github-draft-test">
+          <button
+            type="button"
+            id="setting-github-test-draft"
+            className="secondary-button"
+            aria-describedby="setting-publicReadToken-help"
+            disabled={!draftTokenEligible || draftTestState.phase === "testing"}
+            onClick={() => void runDraftConnectionTest()}
+          >
+            {draftTestState.phase === "testing" ? <LoaderCircle className="spinning" size={13} /> : <PlugZap size={13} />}
+            {t(draftTestState.phase === "testing" ? "Testing…" : "Test this token")}
+          </button>
+          <p id="setting-github-draft-result" role="status">
+            {draftTestState.phase === "idle" && t("Not tested yet")}
+            {draftTestState.phase === "testing" && t("Testing…")}
+            {draftTestState.phase === "error" && <span className="badge badge-failed">{t("Connection test unavailable")}</span>}
+            {draftTestState.phase === "done" && <ConnectionTestResult result={draftTestState.result} />}
+          </p>
+          <SettingHelp id="setting-github-test-draft-help" text="Runs one read-only request against this unsaved token without storing or displaying it." href={SETTING_HELP_LINKS.githubPat} />
+        </div>
         <SecretField name="webhookSecret" label="Webhook secret" configured={settings.github.webhookSecretConfigured} value={secrets.webhookSecret} clear={clearSecrets.webhookSecret} help="Create a random webhook secret in your GitHub App and enter the same value here." helpHref={SETTING_HELP_LINKS.githubWebhook} onValue={updateSecret} onClear={updateClear} />
         <div className="setting-field-wide"><SecretField name="privateKey" label="Private key" configured={settings.github.privateKeyConfigured} value={secrets.privateKey} clear={clearSecrets.privateKey} help="Paste the GitHub App PEM private key or a readable local file path. Never commit the PEM file." helpHref={SETTING_HELP_LINKS.githubPrivateKey} multiline onValue={updateSecret} onClear={updateClear} /></div>
       </div>
@@ -102,7 +147,7 @@ export function GitHubSettingsSection({
       <div className="settings-fields">
         {health && (
           <>
-            <div className="setting-field setting-note" id="setting-github-status-access"><Activity size={17} /><div><strong>{t("Public PR access")}</strong><p>{accessModeLabel}</p></div></div>
+            <div className="setting-field setting-note" id="setting-github-status-access"><Activity size={17} /><div><strong>{t("Public PR access")}</strong><p>{t(accessMode.labelKey)}</p></div></div>
             <div className="setting-field setting-note" id="setting-github-status-app"><Github size={17} /><div><strong>{t("GitHub App")}</strong><p>{t(health.configuration.githubAppConfigured ? "Configured" : "Not configured")}</p></div></div>
             <div className="setting-field setting-note" id="setting-github-status-webhook"><Webhook size={17} /><div><strong>{t("Webhook secret")}</strong><p>{t(health.configuration.webhookSecretConfigured ? "Configured" : "Not configured")}</p></div></div>
             <div className="setting-field setting-note" id="setting-github-status-token"><KeyRound size={17} /><div><strong>{t("Public read token")}</strong><p>{t(health.configuration.publicReadTokenConfigured ? "Configured" : "Not configured")}</p></div></div>
@@ -116,12 +161,7 @@ export function GitHubSettingsSection({
               {testState.phase === "idle" && t("Not tested yet")}
               {testState.phase === "testing" && t("Testing…")}
               {testState.phase === "error" && <span className="badge badge-failed">{t("Connection test unavailable")}</span>}
-              {testState.phase === "done" && <>
-                <span className={connectionStatusBadgeClass(testState.result.status)}>{t(connectionStatusLabelKey(testState.result.status))}</span>
-                {testState.result.status === "rate_limited" && testState.result.retryAfterMs !== undefined && (
-                  <> {t("Retry available in {minutes} min", { minutes: Math.max(1, Math.ceil(testState.result.retryAfterMs / 60_000)) })}</>
-                )}
-              </>}
+              {testState.phase === "done" && <ConnectionTestResult result={testState.result} />}
             </p>
             {restartPending && (
               <p className="github-restart-hint">{t("Tests use the running configuration. Restart to apply saved changes.")}</p>

@@ -14,6 +14,7 @@ import {
   createWorkflowRevisionRequestSchema,
   DEFAULT_SECURITY_GUARANTEES,
   evaluateAuditPolicy,
+  githubConnectionTestRequestSchema,
   githubConnectionTestResponseSchema,
   internalLocalRepositoryRegistrationRequestSchema,
   localReviewRequestSchema,
@@ -29,6 +30,7 @@ import {
   stepIdSchema,
   workflowSpecSchema,
   type GitRemoteInfo,
+  type GitHubConnectionTestRequest,
   type GitHubConnectionTestResponse,
   type ReviewModelOverride
 } from "@consistency/schema";
@@ -368,7 +370,7 @@ export type CreateApiServerOptions = {
   runtimeRegistry?: RuntimeRegistry;
   pullRequestService?: Pick<RepositoryPullRequestService, "list">;
   workflowRuntime?: WorkflowRuntimeHost;
-  testGitHubConnection?: () => Promise<GitHubConnectionTestResponse>;
+  testGitHubConnection?: (input?: GitHubConnectionTestRequest) => Promise<GitHubConnectionTestResponse>;
 };
 
 type RequestContext = {
@@ -1881,7 +1883,8 @@ const routes: Route[] = [
         body: await readBody(request),
         secret: githubWebhookSecret,
         jobs,
-        llmConfigured: options.llmProviderConfigured !== false
+        llmConfigured: options.llmProviderConfigured !== false,
+        repositoryStore: options.auditStore
       });
       sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
     }
@@ -2057,15 +2060,19 @@ const routes: Route[] = [
     path: "/settings/github/test-connection",
     auth: true,
     handler: async ({ request, response, allowedOrigins, options }) => {
-      // Body is accepted and ignored: the probe always targets the ACTIVE
-      // runtime credential, never unsaved Settings drafts.
-      await readJson(request);
+      // CKPT4 Phase 2C: a strict-schema body may carry one unsaved draft PAT
+      // to probe instead of the ACTIVE runtime credential; an empty body or a
+      // missing field keeps probing the ACTIVE credential. The draft exists
+      // only for this request and is never persisted, logged, or echoed back;
+      // every response still flows through the sanitized
+      // githubConnectionTestResponseSchema 502 path below.
+      const draft = githubConnectionTestRequestSchema.parse(await readJson(request));
       if (!options.testGitHubConnection) {
         throw new ApiError("GitHub connection test is unavailable", "GITHUB_CONNECTION_TEST_UNAVAILABLE", 503);
       }
       let result: GitHubConnectionTestResponse;
       try {
-        result = await options.testGitHubConnection();
+        result = await options.testGitHubConnection(draft);
       } catch {
         throw new ApiError("GitHub connection test is unavailable", "GITHUB_CONNECTION_TEST_FAILED", 502);
       }

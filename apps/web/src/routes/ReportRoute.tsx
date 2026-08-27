@@ -23,14 +23,17 @@ export function runModeFromPath(pathname: string): RunMode {
   return segment === "diff" || segment === "evidence" || segment === "notebook" || segment === "runtime" ? segment : "overview";
 }
 
-function RunModeTabs({ runId, mode, notebookId, zh, scope }: { runId: string; mode: RunMode; notebookId?: string; zh: boolean; scope: string }) {
+function RunModeTabs({ runId, mode, notebookId, zh, scope, notebookAvailable = true }: { runId: string; mode: RunMode; notebookId?: string; zh: boolean; scope: string; notebookAvailable?: boolean }) {
   const navigate = useNavigate();
   const suffix = notebookId ? `?notebook=${encodeURIComponent(notebookId)}` : "";
   const tabs: Array<{ id: RunMode; label: string }> = [
     { id: "overview", label: zh ? "概览" : "Overview" },
     { id: "diff", label: zh ? "差异" : "Diff" },
     { id: "evidence", label: zh ? "证据" : "Evidence" },
-    { id: "notebook", label: zh ? "笔记本" : "Notebook" },
+    // The Notebook sub-path only resolves when the runtime enabled it
+    // (health.notebook === false reports NOTEBOOK_DISABLED endpoints), so the
+    // tab must disappear instead of promising a dead end.
+    ...(notebookAvailable ? [{ id: "notebook" as RunMode, label: zh ? "笔记本" : "Notebook" }] : []),
     { id: "runtime", label: zh ? "运行" : "Runtime" }
   ];
   function destination(id: RunMode): string {
@@ -137,7 +140,7 @@ export function ReportRoute({ jobs, reports, repositories = [], health, jobsUnav
 
   return <>
     {errors.length > 0 && <div className="route-query-notice" role="status"><strong>{zh ? "部分审查数据暂不可用" : "Some review data is unavailable"}</strong><span>{[...new Set(errors)].join(" · ")}</span></div>}
-    {selectedRunId && <RunModeTabs runId={selectedRunId} mode={mode} notebookId={notebookId} zh={zh} scope={tabScope} />}
+    {selectedRunId && <RunModeTabs runId={selectedRunId} mode={mode} notebookId={notebookId} zh={zh} scope={tabScope} notebookAvailable={health?.notebook !== false} />}
     <div id={`${tabScope}-run-panel`} role="tabpanel" aria-labelledby={`${tabScope}-run-tab-${mode}`} tabIndex={0}>
       {mode === "overview" ? <ReportPage
         job={job}

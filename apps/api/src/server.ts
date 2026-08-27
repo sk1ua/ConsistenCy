@@ -337,12 +337,15 @@ export const server = createApiServer({
     authenticator,
     publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN
   }),
-  // Settings "Test Connection" probe: bounded, read-only, and always aimed at
-  // the ACTIVE process credential — never unsaved Settings drafts.
-  testGitHubConnection: () => testGitHubConnection({
+  // Settings "Test Connection" probe: bounded, read-only. Without a draft it
+  // targets the ACTIVE process credential; CKPT4 Phase 2C lets the caller
+  // probe one unsaved draft PAT in place of it — the draft exists only for the
+  // duration of a single request and is never persisted or logged here.
+  testGitHubConnection: draft => testGitHubConnection({
     publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,
     appAuthenticator: authenticator,
-    publicPrAnalysisEnabled: config.publicPrAnalysisEnabled
+    publicPrAnalysisEnabled: config.publicPrAnalysisEnabled,
+    ...(draft?.publicReadToken === undefined ? {} : { draftPublicReadToken: draft.publicReadToken })
   }),
   publicPr: (url, modelOverride) => enqueuePublicPrReview({
     url,

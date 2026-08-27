@@ -8,6 +8,8 @@ const PROBE_TIMEOUT_MS = 8_000;
 
 export interface GitHubConnectionTestInput {
   readonly publicReadToken?: string;
+  /** Unsaved draft PAT (CKPT4 Phase 2C): when set, only this token is probed. */
+  readonly draftPublicReadToken?: string;
   readonly appAuthenticator?: GitHubAppAuthenticator;
   readonly publicPrAnalysisEnabled: boolean;
   readonly signal?: AbortSignal;
@@ -51,8 +53,11 @@ function rateLimitedResult(error: GitHubApiError, nowMs: number, testedAt: strin
 }
 
 /**
- * Truthful single-probe connection test for the ACTIVE runtime credential
- * (process configuration at boot — never unsaved Settings drafts).
+ * Truthful single-probe connection test. With no draft token the probe targets
+ * the ACTIVE runtime credential (process configuration at boot). CKPT4 Phase
+ * 2C adds an explicit opt-in: a non-empty `draftPublicReadToken` probes only
+ * that unsaved draft instead — the caller receives it in-memory for the
+ * duration of one probe; it is never persisted, logged, or echoed back.
  *
  * Priority order mirrors the read-access truth: public-read PAT, then the
  * GitHub App JWT, then one anonymous GET /rate_limit. Exactly one outbound
@@ -85,6 +90,12 @@ async function runSingleProbe(
   const testedAtDate = now();
   const testedAt = testedAtDate.toISOString();
 
+  // An explicitly requested draft short-circuits every ACTIVE candidate:
+  // exactly one outbound call, aimed only at the unsaved draft.
+  if (input.draftPublicReadToken !== undefined && input.draftPublicReadToken !== "") {
+    return probePatCredential(input, deps, input.draftPublicReadToken, testedAtDate);
+  }
+
   if (
     (input.publicReadToken === undefined || input.publicReadToken === "")
     && input.appAuthenticator === undefined
@@ -93,22 +104,11 @@ async function runSingleProbe(
     return { status: "not_configured", testedAt };
   }
 
-  const probeToken = deps.probeToken ?? ((token, signal) => rateLimitCall(deps, token, signal));
-  const probeAnonymous = deps.probeAnonymous ?? (signal => rateLimitCall(deps, undefined, signal));
-  const probeApp = deps.probeApp ?? ((authenticator, signal) => authenticator.verifyAppCredentials(probeSignal(signal)));
-
   if (input.publicReadToken !== undefined && input.publicReadToken !== "") {
-    try {
-      await probeToken(input.publicReadToken, input.signal);
-      return { status: "connected", mode: "pat", testedAt };
-    } catch (error) {
-      const apiError = toGitHubApiError(error);
-      const failure = classifyGitHubApiError(apiError);
-      if (failure === "rate_limited") return rateLimitedResult(apiError, testedAtDate.getTime(), testedAt);
-      if (failure === "access_denied") return { status: "invalid_credential", testedAt };
-      return { status: "unavailable", testedAt };
-    }
+    return probePatCredential(input, deps, input.publicReadToken, testedAtDate);
   }
+
+  const probeApp = deps.probeApp ?? ((authenticator, signal) => authenticator.verifyAppCredentials(probeSignal(signal)));
 
   if (input.appAuthenticator !== undefined) {
     try {
@@ -126,13 +126,38 @@ async function runSingleProbe(
   }
 
   try {
-    await probeAnonymous(input.signal);
+    await (deps.probeAnonymous ?? (signal => rateLimitCall(deps, undefined, signal)))(input.signal);
     return { status: "anonymous_available", mode: "anonymous", testedAt };
   } catch (error) {
     const apiError = toGitHubApiError(error);
     if (classifyGitHubApiError(apiError) === "rate_limited") {
       return rateLimitedResult(apiError, testedAtDate.getTime(), testedAt);
     }
+    return { status: "unavailable", testedAt };
+  }
+}
+
+/**
+ * Shared PAT probe branch used by both the ACTIVE-credential path and the
+ * unsaved-draft path (CKPT4 Phase 2C). Exactly one /rate_limit call; failures
+ * map through the shared classification kernel into sanitized statuses that
+ * never echo the token.
+ */
+async function probePatCredential(
+  input: GitHubConnectionTestInput,
+  deps: GitHubConnectionTestDeps,
+  token: string,
+  testedAtDate: Date
+): Promise<GitHubConnectionTestResponse> {
+  const testedAt = testedAtDate.toISOString();
+  try {
+    await (deps.probeToken ?? ((tokenProbe, signal) => rateLimitCall(deps, tokenProbe, signal)))(token, input.signal);
+    return { status: "connected", mode: "pat", testedAt };
+  } catch (error) {
+    const apiError = toGitHubApiError(error);
+    const failure = classifyGitHubApiError(apiError);
+    if (failure === "rate_limited") return rateLimitedResult(apiError, testedAtDate.getTime(), testedAt);
+    if (failure === "access_denied") return { status: "invalid_credential", testedAt };
     return { status: "unavailable", testedAt };
   }
 }
