@@ -59,6 +59,7 @@ x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
 | `PUT` | `/workflow-runtime/repositories/:id/bindings/:definitionId` | Idempotently enable/disable a binding; optional `triggerMode` (`manual` default / `on_change` automatic change trigger — CKPT5) | Authenticated |
 | `POST` | `/workflow-runtime/repositories/:id/runs` | Binding-gated manual trigger (latest validated revision; fail-closed 404/409) | Authenticated |
 | `GET` | `/workflow-runtime/repositories/:id/runs` | Bounded per-repository run history (canonical repositoryId join; optional trigger provenance) | Authenticated |
+| `POST` | `/workflow-runtime/copilot/proposal` | Generate a structured WorkflowPatch proposal from natural language (zero persistence, zero side effects; sanitized fail-closed errors) | Authenticated (Real LLM Required) |
 | `GET` | `/settings` | Get sanitized runtime configuration snapshot | Authenticated |
 | `PUT` | `/settings` | Update editable runtime settings (dev / desktop mode) | Authenticated |
 | `POST` | `/settings/github/test-connection` | Single bounded read-only GitHub connection probe: targets the ACTIVE runtime credential by default, or one unsaved draft PAT supplied as `{"publicReadToken": "..."}` (probe only; never persisted, logged, or echoed). Sanitized status enum + bounded retry metadata only (CKPT4 Slice 2, Phase 2C) | Authenticated |
@@ -171,3 +172,122 @@ Response (`201 Created`):
 *(The local filesystem path is verified and retained internally; it is never echoed in the public Repository DTO).*
 
 Registration also inspects Git metadata without executing repository code. A recognized github.com `origin` fetch URL is preferred, followed by the first recognized non-origin fetch remote in deterministic name order. Push-only URLs never define canonical identity. `defaultBranch` is persisted only when the selected remote has a resolvable local symbolic `refs/remotes/<remote>/HEAD` whose target ref exists; registration performs no network fetch and never falls back to local `main`, `master`, or the current branch. Local branch discovery is fill-only: a non-null stored branch is preserved across repeated local registration, and provider metadata takes precedence when a provider row is converted to a local checkout. Re-registering the same path may enrich an empty remote identity or repeat the same case-insensitive identity while preserving the opaque ID. A changed same-path identity, a remote already assigned to another local checkout, or separate local and GitHub rows requiring a reference-preserving merge returns `REPOSITORY_RECONCILIATION_CONFLICT` without mutating either row. Missing, malformed, non-GitHub, or unreadable remotes do not prevent otherwise-valid local registration and do not produce a guessed identity. `git://` and GitHub Enterprise hosts are unsupported in this phase.
+
+## 10. Audit Control Plane (runs, capabilities, events, export)
+
+The audit domain (draft planning → executor bridging) exposes the following routes, all authenticated:
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/audit/capabilities` | Computed capability truth: `persistence`, `automationScheduling`, `auditExecution` (executor armed), `auditRunEvents`, `auditExport`, and friends |
+| `GET` | `/audit-runs` | List audit runs (optional `?repositoryId=` filter) |
+| `POST` | `/audit-runs` | Create a durable draft run (still reports a draft-only `execution` block) |
+| `GET` | `/audit-runs/:id` | One run with lifecycle status, `workflowRuntimeRunId` link, and `executionError` when failed |
+| `POST` | `/audit-runs/:id/cancel` | Cancel a created/queued run |
+| `GET` | `/audit-runs/:id/steps` | Run step artifacts |
+| `GET` | `/audit-runs/:id/report` | V2 run report payload when present (`AUDIT_REPORT_NOT_FOUND` otherwise) |
+| `GET` | `/audit-runs/:id/events` | Append-only lifecycle events `{ events: [...] }`; every event includes positive per-run `seq` allocated from 1 and returned in stable ascending `seq` order; unknown run → 404 `AUDIT_RUN_NOT_FOUND` |
+| `GET`/`POST` | `/audit-runs/:id/export` | Durable export document (schema v1): run fields + event sequence + automation summary (when planned by one) + linked workflow-runtime run summary (when executed); identical read-only payload for both verbs |
+
+Export document shape (declared once in `@consistency/schema`, see
+docs/output_schema.md contract notes):
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-27T00:00:00.000Z",
+  "run": { "id": "auditrun_...", "status": "succeeded", "workflowRuntimeRunId": "wfrun_...", "...": "..." },
+  "events": [{ "id": "runevt_...", "auditRunId": "auditrun_...", "seq": 1, "eventType": "run_queued", "payload": {}, "createdAt": "..." }],
+  "automation": { "id": "automation_...", "runtimeDefinitionId": "def-..." },
+  "workflowRuntimeRun": { "runId": "wfrun_...", "status": "succeeded", "findingCount": 2 }
+}
+```
+
+`automation` is present only when the run references a persisted automation;
+`workflowRuntimeRun` only when the executor bridged it. Local filesystem
+locators never appear in any exported surface.
+
+**Execution availability semantics:** planning responses
+(`POST /automations/:id/run`) compute `execution.available` as: audit
+executor armed ∧ automation mapped to a workflow-runtime definition ∧
+repository locally monitored. Unavailable results carry one of these reasons:
+"disabled in this deployment" / "no workflow runtime definition mapping" /
+"limited to locally monitored repositories". See
+docs/workflow-runtime.md ("Appendix: audit execution bridge") for the full
+decision record.
+
+---
+
+## 11. Workflow Copilot Proposal (CKPT6 Phase 3)
+
+`POST /workflow-runtime/copilot/proposal` turns one natural-language
+instruction into a structured `WorkflowPatch` proposal (SPEC §18.2/§18.3/§36).
+The endpoint is a pure advisor: it never persists anything, never triggers a
+run or dry-load, and never mutates a definition. The only path to a persisted
+change is a human Apply in the Workflow Studio, which translates the proposal
+into Studio reducer actions and then walks the canonical validate →
+save-revision gate chain; the Copilot can never bypass the compiler.
+
+Request (exactly one of `definition` / `definitionId` — sending both is a 400;
+`definitionId` resolves to the definition's latest persisted revision). Inline
+definition:
+
+```json
+{
+  "instruction": "add a secret scan before the synthesizer",
+  "definition": {
+    "id": "my-flow",
+    "version": 1,
+    "nodes": [{ "id": "analyze", "type": "analyzer.deterministic-evidence", "serviceRef": "deterministic-evidence.analyzer", "parameters": {}, "failurePolicy": "fail-closed" }],
+    "edges": []
+  }
+}
+```
+
+or, to patch the latest persisted revision of an already saved definition:
+
+```json
+{
+  "instruction": "add a secret scan before the synthesizer",
+  "definitionId": "my-flow"
+}
+```
+
+Response:
+
+```json
+{
+  "proposal": {
+    "patch": [
+      { "op": "ADD_NODE", "nodeId": "secret-scan", "serviceRef": "deterministic-evidence.analyzer" },
+      { "op": "ADD_EDGE", "from": "analyze", "to": "secret-scan" }
+    ],
+    "rationale": "…",
+    "basis": { "definitionFingerprint": "sha256-… of the definition the patch was computed against" }
+  }
+}
+```
+
+The v1 patch vocabulary is `ADD_NODE` and `ADD_EDGE` only. `ADD_EDGE`
+deliberately carries no `condition` field: the current edge schema supports
+`{ from, to }` only, and this contract does not invent capability the graph
+schema cannot represent (conditions can be enabled when the edge schema grows
+them). `ADD_NODE.name` is a descriptive label suggestion; the definition schema
+has no name field, so it is never persisted.
+
+Generation uses the configured real LLM (DeepSeek/OpenAI) with a server-built
+prompt whose node-type whitelist comes from the runtime Node Registry
+(`listWorkflowNodeTypes()`); client-supplied registries are never trusted.
+After generation the server fail-closed validates the proposal and compiles
+"current definition + patch" with zero side effects before responding.
+
+Error codes (fail-closed, sanitized):
+
+| Status | Code | Meaning |
+|---|---|---|
+| 400 | `WORKFLOW_PATCH_INVALID` | Malformed request, unknown `serviceRef` (hallucination detection against the server-owned registry), edge endpoints missing after the patch, duplicate `ADD_EDGE` (already in the definition or repeated within the patch), or failed compile precheck; `details.issues` carries sanitized issues |
+| 404 | `WORKFLOW_DEFINITION_NOT_FOUND` | Unknown `definitionId` |
+| 400 | `INVALID_REVIEW_MODEL` | Unsupported provider/model override |
+| 502 | `WORKFLOW_PATCH_GENERATION_FAILED` | The LLM failed to produce schema-valid output (after the provider's own repair attempt) or the provider call failed; the raw LLM output is never echoed |
+| 503 | `LLM_NOT_CONFIGURED` / `LLM_PROVIDER_NOT_CONFIGURED` | No real LLM provider configured |
+| 503 | `WORKFLOW_RUNTIME_UNAVAILABLE` | Workflow runtime host is not wired |

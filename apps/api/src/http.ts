@@ -6,6 +6,8 @@ import {
   auditIssueActionRequestSchema,
   auditIssueActionSchema,
   auditIssueStateSchema,
+  auditRunEventsResponseSchema,
+  auditRunExportSchema,
   createAuditIssueRequestSchema,
   createAuditRunRequestSchema,
   createAutomationRequestSchema,
@@ -69,7 +71,7 @@ import { buildHealthPayload } from "./health";
 import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
 import { LocalTriggerError } from "./trigger/local";
 import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
-import { sanitizePublicError } from "./security/redact";
+import { sanitizeExecutionError, sanitizePublicError, sanitizeValidationIssues, sanitizeStructuredData } from "./security/redact";
 import { settingsPatchSchema, toRendererSettings, type SettingsSnapshot } from "./config/settings";
 import type { RealDataSnapshot } from "./data/realData";
 import { PublicPrError } from "./review/publicPr";
@@ -81,6 +83,11 @@ import { JobDiffError, type JobDiffResult } from "./review/jobDiff";
 import { AuditDomainError, type AuditDomainStore } from "./audit/store";
 import { validateLocalRepositoryRegistration } from "./audit/localRegistration";
 import { AuditRunPlanner } from "./audit/planner";
+import {
+  AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON,
+  AUDIT_EXECUTION_DISABLED_REASON,
+  AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON
+} from "./audit/executor";
 import { RuntimeRegistry } from "./review/runtimeRegistry";
 import {
   WorkflowRuntimeHost,
@@ -88,15 +95,33 @@ import {
   WorkflowSnapshotUnavailableError,
   WorkflowDefinitionNotFoundError,
   WorkflowDefinitionNotExecutableError,
+  WorkflowDefinitionInvalidError,
   WorkflowRuntimePersistenceError,
 } from "./workflow-runtime/host";
 import { WorkflowRuntimeStoreError } from "./workflow-runtime/store";
 import { compileWorkflowRuntimeDefinition } from "./workflow-runtime/compile";
+import { listWorkflowNodeTypes } from "./workflow-runtime/registry";
+import type { LLMProvider } from "./review/llm/types";
+import {
+  workflowRuntimeCopilotProposalRequestSchema,
+  workflowRuntimeCopilotProposalResponseSchema,
+  workflowRuntimeCopilotProposalSchema,
+  type WorkflowRuntimeCopilotAddEdgeOperation,
+  type WorkflowRuntimeCopilotProposal,
+  type WorkflowRuntimeDefinition,
+  type WorkflowRuntimeNodeType,
+} from "@consistency/schema";
 import {
   workflowRuntimeSaveDefinitionRequestSchema,
   workflowRuntimeSetBindingRequestSchema,
   workflowRuntimeRepositoryTriggerRequestSchema,
   workflowRuntimeTriggerRequestV2Schema,
+} from "@consistency/schema";
+import { buildEngineAllowlistCatalog, buildKernelSyscallCatalog, buildReviewPipelineCatalog } from "./catalog/catalog";
+import {
+  engineAllowlistCatalogResponseSchema,
+  kernelSyscallCatalogResponseSchema,
+  reviewPipelineCatalogResponseSchema
 } from "@consistency/schema";
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -113,7 +138,15 @@ function mapWorkflowRuntimeError(error: unknown): unknown {
     return new ApiError("Workflow definition not found", "WORKFLOW_DEFINITION_NOT_FOUND", 404);
   }
   if (error instanceof WorkflowDefinitionNotExecutableError) {
-    return new ApiError(error.message, "WORKFLOW_DEFINITION_NOT_EXECUTABLE", 409);
+    return new ApiError(sanitizePublicError(error.message), "WORKFLOW_DEFINITION_NOT_EXECUTABLE", 409);
+  }
+  if (error instanceof WorkflowDefinitionInvalidError) {
+    return new ApiError(
+      "Workflow definition failed canonical runtime validation",
+      "WORKFLOW_DEFINITION_INVALID",
+      400,
+      { issues: sanitizeValidationIssues(error.issues) }
+    );
   }
   if (error instanceof WorkflowRuntimePersistenceError) {
     return new ApiError("Workflow runtime persistence is unavailable", "WORKFLOW_RUNTIME_STORE_UNAVAILABLE", 503);
@@ -128,6 +161,146 @@ export class ApiError extends Error {
   constructor(message: string, readonly code: string, readonly statusCode = 500, readonly details?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
+  }
+}
+
+/**
+ * CKPT6 Phase 3 — Workflow Copilot proposal support (SPEC §18.2/§18.3/§36).
+ * The endpoint is a pure advisor: zero persistence, zero run/dry-load side
+ * effects, and the only path to a persisted change is a human Apply through
+ * the Studio reducer and the canonical validate → save-revision gates. The
+ * LLM can never bypass the compiler.
+ */
+
+/** Deterministic JSON with recursively sorted object keys (fingerprint input only). */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function buildWorkflowCopilotPrompt(input: {
+  instruction: string;
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): { systemPrompt: string; userPrompt: string } {
+  const registryLines = input.nodeTypes.map(nodeType => {
+    const fields = nodeType.parameterSchema.fields
+      .map(field => `${field.name}:${field.type}${field.required ? "(required)" : ""}${field.enumValues ? `(${field.enumValues.join("|")})` : ""}`)
+      .join(", ") || "none";
+    return `- type=${nodeType.type} serviceRef=${nodeType.serviceRef} role=${nodeType.role} parameters: ${fields}`;
+  }).join("\n");
+  const systemPrompt = [
+    "You are the ConsistenCy Workflow Copilot. You translate one natural-language instruction into a structured WorkflowPatch proposal for the Workflow Studio execution graph.",
+    "Hard rules:",
+    "- Output ONLY a JSON object that satisfies the provided schema. No prose, no markdown fences.",
+    "- Every ADD_NODE.serviceRef MUST be copied verbatim from the registry whitelist below. Never invent node types, serviceRefs, or capabilities.",
+    "- Every ADD_EDGE.from/to MUST reference a node id that exists in the current definition OR is introduced by an ADD_NODE operation in the same patch.",
+    "- The patch vocabulary is ADD_NODE and ADD_EDGE only; never remove or modify existing nodes or edges.",
+    "- Edge conditions do not exist in this contract version; never emit a condition field.",
+    "- Parameters must follow the registry parameter descriptors; prefer omitting parameters over guessing values.",
+    "- failurePolicy is always fail-closed and cannot be changed.",
+    "",
+    "Registry whitelist (the only allowed node types / serviceRefs):",
+    registryLines,
+    "",
+    "Current definition:",
+    JSON.stringify(input.definition)
+  ].join("\n");
+  return { systemPrompt, userPrompt: `Instruction:\n${input.instruction}\n\nReturn the WorkflowPatch JSON object only.` };
+}
+
+async function generateWorkflowCopilotProposal(provider: LLMProvider, input: {
+  instruction: string;
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): Promise<WorkflowRuntimeCopilotProposal> {
+  const { systemPrompt, userPrompt } = buildWorkflowCopilotPrompt(input);
+  try {
+    const result = await provider.invokeWithSchema({
+      schema: workflowRuntimeCopilotProposalSchema,
+      schemaName: "workflow-copilot-proposal",
+      systemPrompt,
+      userPrompt
+    });
+    return result.data;
+  } catch {
+    // One sanitized 502 for EVERY generation failure (schema-invalid output
+    // after the provider's own repair attempt included). The raw LLM output,
+    // provider errors, and prompts are never echoed back or logged.
+    throw new ApiError("The configured LLM failed to produce a schema-valid workflow proposal", "WORKFLOW_PATCH_GENERATION_FAILED", 502);
+  }
+}
+
+/**
+ * Fail-closed post-generation validation (hallucination detection):
+ * 1. registry serviceRef whitelist against the server-owned registry;
+ * 2. ADD_EDGE endpoint existence, counting nodes the patch itself adds;
+ * 3. ADD_EDGE duplication — an edge that already exists in the definition or
+ *    was added earlier in the same patch is rejected (fail-closed: the reducer
+ *    would otherwise silently skip it at Apply time);
+ * 4. zero-side-effect compile of "current definition + patch applied".
+ * Any violation throws the sanitized 400 WORKFLOW_PATCH_INVALID.
+ */
+function validateWorkflowCopilotProposal(input: {
+  proposal: WorkflowRuntimeCopilotProposal;
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): void {
+  const issues: Array<{ code: string; path: (string | number)[]; message: string }> = [];
+  const registryByRef = new Map(input.nodeTypes.map(nodeType => [nodeType.serviceRef, nodeType]));
+  const existingIds = new Set(input.definition.nodes.map(node => node.id));
+  const addedIds = new Set<string>();
+  const knownEdges = new Set(input.definition.edges.map(edge => `${edge.from}\0${edge.to}`));
+  for (const [index, operation] of input.proposal.patch.entries()) {
+    if (operation.op === "ADD_NODE") {
+      if (!registryByRef.has(operation.serviceRef)) {
+        issues.push({ code: "unknown_service_ref", path: ["patch", index, "serviceRef"], message: `serviceRef '${operation.serviceRef}' is not registered in the runtime Node Registry` });
+        continue;
+      }
+      if (existingIds.has(operation.nodeId) || addedIds.has(operation.nodeId)) {
+        issues.push({ code: "duplicate_node_id", path: ["patch", index, "nodeId"], message: `Node id '${operation.nodeId}' already exists` });
+        continue;
+      }
+      addedIds.add(operation.nodeId);
+      continue;
+    }
+    const edgeKey = `${operation.from}\0${operation.to}`;
+    if (knownEdges.has(edgeKey)) {
+      issues.push({ code: "duplicate_edge", path: ["patch", index], message: `Edge '${operation.from}' → '${operation.to}' is a duplicate edge (already present in the definition or added earlier in this patch)` });
+      continue;
+    }
+    for (const [key, endpoint] of [["from", operation.from], ["to", operation.to]] as const) {
+      if (!existingIds.has(endpoint) && !addedIds.has(endpoint)) {
+        issues.push({ code: "unknown_node_reference", path: ["patch", index, key], message: `Edge ${key} references unknown node '${endpoint}'` });
+      }
+    }
+    knownEdges.add(edgeKey);
+  }
+  if (issues.length > 0) {
+    throw new ApiError("Workflow copilot proposal references unknown registry services or nodes", "WORKFLOW_PATCH_INVALID", 400, { issues: sanitizeValidationIssues(issues) });
+  }
+  const nodes = [...input.definition.nodes];
+  for (const operation of input.proposal.patch) {
+    if (operation.op !== "ADD_NODE") continue;
+    const nodeType = registryByRef.get(operation.serviceRef)!;
+    nodes.push({ id: operation.nodeId, type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: operation.parameters ?? {}, failurePolicy: "fail-closed" });
+  }
+  const candidate: WorkflowRuntimeDefinition = {
+    ...input.definition,
+    nodes,
+    edges: [
+      ...input.definition.edges,
+      ...input.proposal.patch
+        .filter((operation): operation is WorkflowRuntimeCopilotAddEdgeOperation => operation.op === "ADD_EDGE")
+        .map(operation => ({ from: operation.from, to: operation.to }))
+    ]
+  };
+  const compilation = compileWorkflowRuntimeDefinition(candidate);
+  if (!compilation.ok) {
+    throw new ApiError("Workflow copilot proposal failed canonical runtime compilation", "WORKFLOW_PATCH_INVALID", 400, { issues: sanitizeValidationIssues(compilation.errors) });
   }
 }
 
@@ -208,19 +381,80 @@ function auditInputWithPathId(value: unknown, field: "workflowId" | "policyId", 
   return { ...(value as Record<string, unknown>), [field]: id };
 }
 
-function auditCapabilityUnavailable(capability: string): never {
-  throw new ApiError(
-    `Audit capability '${capability}' is not wired yet`,
-    "AUDIT_CAPABILITY_UNAVAILABLE",
-    501,
-    { capability }
-  );
-}
-
 function requireAuditPlanner(options: CreateApiServerOptions): AuditRunPlanner {
   if (options.auditPlanner) return options.auditPlanner;
   if (options.auditStore) return new AuditRunPlanner(options.auditStore);
   throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+}
+
+/**
+ * Durable run export document (GET/POST /audit-runs/:id/export). The shape is
+ * declared once in @consistency/schema (docs/output_schema.md contract) and
+ * re-validated at this boundary; an unknown run keeps the canonical
+ * AUDIT_RUN_NOT_FOUND 404. Counts mirror the workflow-runtime summary logic
+ * without leaking evidence payloads or absolute paths.
+ */
+function auditExecutionForDraft(options: CreateApiServerOptions, run: Pick<import("@consistency/schema").AuditRun, "repositoryId" | "automationId">) {
+  if (options.auditExecution?.enabled !== true) {
+    return { available: false, reason: AUDIT_EXECUTION_DISABLED_REASON } as const;
+  }
+  const automation = run.automationId === undefined ? undefined : options.auditStore?.getAutomation(run.automationId);
+  if (automation?.runtimeDefinitionId === undefined) {
+    return { available: false, reason: AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON } as const;
+  }
+  const repository = options.auditStore?.getRepository(run.repositoryId);
+  if (repository?.source !== "local_git") {
+    return { available: false, reason: AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON } as const;
+  }
+  return { available: true } as const;
+}
+
+function buildAuditRunExport(options: CreateApiServerOptions, auditRunId: string) {
+  const store = options.auditStore;
+  if (!store) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+  const run = store.getAuditRun(auditRunId);
+  if (!run) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+  const safeRun = {
+    ...run,
+    ...(run.error === undefined ? {} : { error: sanitizeExecutionError(run.error) }),
+    ...(run.executionError === undefined ? {} : { executionError: sanitizeExecutionError(run.executionError) })
+  };
+  const automation = run.automationId === undefined ? undefined : store.getAutomation(run.automationId);
+  const detail = run.workflowRuntimeRunId === undefined
+    ? undefined
+    : options.workflowRuntime?.getRun(run.workflowRuntimeRunId);
+  const miniReport = detail?.miniReport as { findings?: unknown[]; evidenceCount?: number } | undefined;
+  return auditRunExportSchema.parse(sanitizeStructuredData({
+    schemaVersion: 1 as const,
+    // A run export is a deterministic projection: repeated GET/POST requests
+    // for the same durable run have identical bytes.
+    generatedAt: run.createdAt,
+    run: safeRun,
+    events: store.listRunEvents(run.id).map(event => ({
+      ...event,
+      payload: Object.fromEntries(Object.entries(event.payload).map(([key, value]) => [
+        key,
+          typeof value === "string" ? sanitizeExecutionError(value) : value
+      ]))
+    })),
+    ...(automation === undefined ? {} : { automation }),
+    ...(detail === undefined ? {} : {
+      workflowRuntimeRun: {
+        runId: detail.runId,
+        definitionId: detail.definitionId,
+        revisionId: detail.revisionId,
+        status: detail.status,
+        createdAt: detail.createdAt,
+        ...(detail.finishedAt === undefined ? {} : { finishedAt: detail.finishedAt }),
+        repository: detail.snapshot.repository,
+        headSha: detail.snapshot.headSha,
+        findingCount: Array.isArray(miniReport?.findings) ? miniReport.findings.length : 0,
+        evidenceCount: typeof miniReport?.evidenceCount === "number" ? miniReport.evidenceCount : 0,
+        ...(detail.error === undefined ? {} : { error: sanitizeExecutionError(detail.error) }),
+        ...(detail.trigger === undefined ? {} : { trigger: detail.trigger })
+      }
+    })
+  }));
 }
 
 function sendError(request: IncomingMessage, response: ServerResponse, error: unknown, allowedOrigins: string[]): void {
@@ -355,6 +589,8 @@ export type CreateApiServerOptions = {
   auditStore?: AuditDomainStore;
   auditPlanner?: AuditRunPlanner;
   automationScheduler?: { available: boolean };
+  /** Executor-slice arm state from the composition root (audit execution bridge). */
+  auditExecution?: { enabled: boolean };
   onAuditRepositoriesChanged?: () => Promise<void> | void;
   /** CKPT5: binding changes (enable/mode) re-arm repository supervision. */
   onWorkflowBindingsChanged?: () => Promise<void> | void;
@@ -370,6 +606,8 @@ export type CreateApiServerOptions = {
   runtimeRegistry?: RuntimeRegistry;
   pullRequestService?: Pick<RepositoryPullRequestService, "list">;
   workflowRuntime?: WorkflowRuntimeHost;
+  /** CKPT6 Phase 3: LLM provider channel for POST /workflow-runtime/copilot/proposal. */
+  copilotProvider?: (resolved?: ResolvedReviewModel) => LLMProvider | undefined;
   testGitHubConnection?: (input?: GitHubConnectionTestRequest) => Promise<GitHubConnectionTestResponse>;
 };
 
@@ -402,6 +640,10 @@ const routes: Route[] = [
     auth: true,
     handler: ({ request, response, allowedOrigins, options }) => {
       const persistence = options.auditStore !== undefined;
+      // Executor-slice truth: computed from process wiring (executor armed ×
+      // persistence), never a hard-coded promise.
+      const auditExecutionAvailable = persistence
+        && options.auditExecution?.enabled === true;
       sendJson(request, response, 200, auditCapabilitiesSchema.parse({
         domainVersion: 2,
         persistence,
@@ -414,11 +656,11 @@ const routes: Route[] = [
         automationScheduling: persistence && options.automationScheduler?.available === true,
         automationHistory: persistence,
         auditRunDrafts: persistence,
-        auditExecution: false,
+        auditExecution: auditExecutionAvailable,
         auditRunArtifacts: persistence,
-        auditRunEvents: false,
+        auditRunEvents: persistence,
         auditReports: persistence,
-        auditExport: false,
+        auditExport: persistence,
         issueTriage: persistence,
         evolutionPersistence: persistence,
         policyEvaluation: true
@@ -539,7 +781,7 @@ const routes: Route[] = [
         request,
         response,
         200,
-        { ok: compilation.ok, errors: compilation.errors, ...(compilation.plan === undefined ? {} : { plan: compilation.plan }) },
+        { ok: compilation.ok, errors: sanitizeValidationIssues(compilation.errors), ...(compilation.plan === undefined ? {} : { plan: compilation.plan }) },
         allowedOrigins
       );
     }
@@ -563,9 +805,17 @@ const routes: Route[] = [
     auth: true,
     handler: async ({ request, response, allowedOrigins, options }) => {
       if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
-      const input = parseAuditInput(workflowRuntimeSaveDefinitionRequestSchema, await readJson(request));
+      const parsed = workflowRuntimeSaveDefinitionRequestSchema.safeParse(await readJson(request));
+      if (!parsed.success) {
+        throw new ApiError(
+          "Workflow definition request is invalid",
+          "WORKFLOW_DEFINITION_INVALID",
+          400,
+          { issues: sanitizeValidationIssues(parsed.error.issues.map(issue => ({ code: "schema_invalid", path: issue.path, message: issue.message }))) }
+        );
+      }
       try {
-        const revision = options.workflowRuntime.saveDefinition(input);
+        const revision = options.workflowRuntime.saveDefinition(parsed.data);
         sendJson(request, response, 201, { revision }, allowedOrigins);
       } catch (error) {
         throw mapWorkflowRuntimeError(error);
@@ -732,6 +982,78 @@ const routes: Route[] = [
       } catch (error) {
         throw mapWorkflowRuntimeError(error);
       }
+    }
+  },
+  {
+    // CKPT6 Phase 3: Workflow Copilot proposal (structured WorkflowPatch).
+    // Pure advisor: zero persistence, zero run/dry-load side effects, zero
+    // authorization. Human Apply goes through the Studio reducer + canonical
+    // validate → save-revision gates; the LLM can never bypass the compiler.
+    method: "POST",
+    path: "/workflow-runtime/copilot/proposal",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      if (options.llmProviderConfigured === false) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const parsed = workflowRuntimeCopilotProposalRequestSchema.safeParse(await readJson(request));
+      if (!parsed.success) {
+        throw new ApiError("Workflow copilot proposal request is invalid", "WORKFLOW_PATCH_INVALID", 400, {
+          issues: sanitizeValidationIssues(parsed.error.issues.map(issue => ({ code: "schema_invalid", path: issue.path, message: issue.message })))
+        });
+      }
+      // Base definition: inline body XOR the latest persisted revision of a
+      // definitionId; host/store failures keep their sanitized mapping.
+      let baseDefinition: WorkflowRuntimeDefinition;
+      try {
+        if (parsed.data.definition) {
+          baseDefinition = parsed.data.definition;
+        } else if (parsed.data.definitionId) {
+          const summary = options.workflowRuntime.listDefinitions().find(item => item.definitionId === parsed.data.definitionId);
+          if (!summary?.latestRevisionId) throw new ApiError("Workflow definition not found", "WORKFLOW_DEFINITION_NOT_FOUND", 404);
+          baseDefinition = options.workflowRuntime.getDefinitionRevision(parsed.data.definitionId, summary.latestRevisionId).definition;
+        } else {
+          throw new ApiError("Workflow copilot proposal request is invalid", "WORKFLOW_PATCH_INVALID", 400);
+        }
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel();
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, error.code === "INVALID_REVIEW_MODEL" ? 400 : 503);
+          }
+          throw error;
+        }
+      }
+      const provider = options.copilotProvider?.(resolvedModel);
+      if (!provider) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const nodeTypes = listWorkflowNodeTypes();
+      const proposal = await generateWorkflowCopilotProposal(provider, {
+        instruction: parsed.data.instruction,
+        definition: baseDefinition,
+        nodeTypes
+      });
+      // Fail-closed hallucination detection BEFORE anything reaches the client.
+      validateWorkflowCopilotProposal({ proposal, definition: baseDefinition, nodeTypes });
+      const definitionFingerprint = createHash("sha256").update(canonicalJson(baseDefinition)).digest("hex");
+      sendJson(request, response, 200, workflowRuntimeCopilotProposalResponseSchema.parse({
+        proposal: { ...proposal, basis: { definitionFingerprint } }
+      }), allowedOrigins);
     }
   },
   {
@@ -1470,7 +1792,7 @@ const routes: Route[] = [
       );
       sendJson(request, response, 201, {
         auditRun,
-        execution: { available: false, reason: "Audit execution is not wired to the v2 domain yet" }
+        execution: auditExecutionForDraft(options, auditRun)
       }, allowedOrigins);
     }
   },
@@ -1504,11 +1826,15 @@ const routes: Route[] = [
     method: "GET",
     path: /^\/audit-runs\/([^/]+)\/events$/,
     auth: true,
-    handler: ({ options, match }) => {
+    handler: ({ request, response, allowedOrigins, options, match }) => {
       if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
       const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      // listRunEvents asserts run existence; the explicit check keeps the
+      // canonical AUDIT_RUN_NOT_FOUND semantics identical across audit routes.
       if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
-      auditCapabilityUnavailable("auditRunEvents");
+      sendJson(request, response, 200, auditRunEventsResponseSchema.parse({
+        events: options.auditStore.listRunEvents(auditRunId)
+      }), allowedOrigins);
     }
   },
   {
@@ -1525,22 +1851,17 @@ const routes: Route[] = [
     method: "GET",
     path: /^\/audit-runs\/([^/]+)\/export$/,
     auth: true,
-    handler: ({ options, match }) => {
-      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
-      const auditRunId = decodeURIComponent(match?.[1] ?? "");
-      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
-      auditCapabilityUnavailable("auditExport");
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      sendJson(request, response, 200, buildAuditRunExport(options, decodeURIComponent(match?.[1] ?? "")), allowedOrigins);
     }
   },
   {
     method: "POST",
     path: /^\/audit-runs\/([^/]+)\/export$/,
     auth: true,
-    handler: ({ options, match }) => {
-      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
-      const auditRunId = decodeURIComponent(match?.[1] ?? "");
-      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
-      auditCapabilityUnavailable("auditExport");
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      // Export is read-only; POST exists for clients that must fetch via POST.
+      sendJson(request, response, 200, buildAuditRunExport(options, decodeURIComponent(match?.[1] ?? "")), allowedOrigins);
     }
   },
   {
@@ -2085,6 +2406,47 @@ const routes: Route[] = [
         );
       }
       sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/catalog/review-pipeline",
+    auth: true,
+    handler: ({ request, response, allowedOrigins }) => {
+      sendJson(request, response, 200, reviewPipelineCatalogResponseSchema.parse({
+        pipeline: buildReviewPipelineCatalog()
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/catalog/kernel-syscalls",
+    auth: true,
+    handler: ({ request, response, allowedOrigins }) => {
+      sendJson(request, response, 200, kernelSyscallCatalogResponseSchema.parse({
+        catalog: buildKernelSyscallCatalog()
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/catalog/engine-allowlist",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (options.workflows) {
+        const builtin = options.workflows.list()
+          .filter(summary => summary.source === "builtin")
+          .map(summary => ({ name: summary.name, ...(summary.description === undefined ? {} : { description: summary.description }) }));
+        sendJson(request, response, 200, engineAllowlistCatalogResponseSchema.parse({
+          catalog: buildEngineAllowlistCatalog(builtin, { runtimeVerification: options.workflowRuntime?.hasVerificationReceipt.bind(options.workflowRuntime) })
+        }), allowedOrigins);
+        return;
+      }
+      // Workflow store unconfigured: the static allowlist stays truthful while
+      // the builtin workflow names are reported as unavailable — never guessed.
+      sendJson(request, response, 200, engineAllowlistCatalogResponseSchema.parse({
+        catalog: buildEngineAllowlistCatalog([], { builtinWorkflowsUnavailable: true, runtimeVerification: options.workflowRuntime?.hasVerificationReceipt.bind(options.workflowRuntime) })
+      }), allowedOrigins);
     }
   },
   {

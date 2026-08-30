@@ -27,6 +27,7 @@ export interface WorkflowNodeService {
   readonly capabilityRequirements: readonly string[];
   /** Harness services that must be available for the node to activate. */
   readonly coeffects: readonly string[];
+  readonly parameterSchema: WorkflowRuntimeNodeType["parameterSchema"];
 }
 
 /**
@@ -43,6 +44,7 @@ export const WORKFLOW_NODE_SERVICES: Readonly<Record<string, WorkflowNodeService
       "from the pinned snapshot; persists Evidence through evidence.write.",
     capabilityRequirements: ["repo.read", "evidence.write"],
     coeffects: ["admission", "repository-snapshot", "evidence-store"],
+    parameterSchema: { fields: [{ name: "analyzers", label: "Analyzers", type: "string[]" as const, required: false, enumValues: ["style", "secret"], default: ["style", "secret"] }] },
   }),
   "verifier.persisted-evidence": Object.freeze({
     type: "verifier.persisted-evidence",
@@ -53,6 +55,7 @@ export const WORKFLOW_NODE_SERVICES: Readonly<Record<string, WorkflowNodeService
       "evidence.read and checks provenance against the pinned snapshot SHA.",
     capabilityRequirements: ["evidence.read"],
     coeffects: ["admission", "evidence-store"],
+    parameterSchema: { fields: [] },
   }),
 });
 
@@ -75,6 +78,24 @@ export function getWorkflowServiceByRef(serviceRef: string): WorkflowNodeService
   return Object.values(WORKFLOW_NODE_SERVICES).find((service) => service.serviceRef === serviceRef);
 }
 
+/** Validate only configuration understood by the real deterministic runner. */
+export function validateWorkflowNodeParameters(type: string, parameters: Readonly<Record<string, unknown>>): string | undefined {
+  const keys = Object.keys(parameters);
+  if (type !== "analyzer.deterministic-evidence") {
+    return keys.length === 0 ? undefined : "Verifier parameters must be an empty object";
+  }
+  if (keys.some(key => key !== "analyzers")) {
+    return "Analyzer parameters only support the 'analyzers' field";
+  }
+  const analyzers = parameters.analyzers;
+  if (analyzers === undefined) return undefined;
+  if (!Array.isArray(analyzers) || analyzers.length === 0 || analyzers.some(value => value !== "style" && value !== "secret")) {
+    return "analyzers must be a non-empty array containing only style or secret";
+  }
+  if (new Set(analyzers).size !== analyzers.length) return "analyzers must not contain duplicates";
+  return undefined;
+}
+
 /** True when the action is a registered Kernel syscall (requirement is nameable). */
 export function isRegisteredSyscallAction(action: string): boolean {
   return getSyscallDefinition(action as never) !== undefined;
@@ -89,5 +110,6 @@ export function listWorkflowNodeTypes(): WorkflowRuntimeNodeType[] {
     description: service.description,
     capabilityRequirements: [...service.capabilityRequirements],
     coeffects: [...service.coeffects],
+    parameterSchema: { fields: service.parameterSchema.fields.map(field => ({ ...field, ...(field.enumValues ? { enumValues: [...field.enumValues] } : {}) })) },
   }));
 }

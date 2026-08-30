@@ -18,6 +18,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { ConsistencyDatabase } from "../db/connection";
+import { containsSensitiveData, sanitizeExecutionError, sanitizeStructuredData, sanitizeValidationIssues } from "../security/redact";
 import {
   workflowRuntimeDefinitionSchema,
   type WorkflowRuntimeDefinition,
@@ -63,6 +64,7 @@ export class WorkflowRuntimeStoreError extends Error {
 /** Bounded runs list — follows the repositoryPulses bounded-LIMIT convention. */
 export const DEFAULT_RUNS_LIMIT = 50;
 export const MAX_RUNS_LIMIT = 200;
+const TRUSTED_BUILTIN_SEED = Symbol("trusted-builtin-seed");
 /** Append-only guard: revisions kept per definition (oldest pruned never —
  * append-only is absolute; the cap guards runaway growth at SAVE time). */
 export const MAX_DEFINITIONS = 100;
@@ -126,7 +128,7 @@ function revisionFromRow(row: RevisionRow): WorkflowRuntimeDefinitionRevision {
     revision: row.revision,
     status: row.status,
     definition: parseDefinition(row.definition_json, row.definition_id),
-    validationIssues: JSON.parse(row.validation_issues_json) as WorkflowRuntimeValidationIssue[],
+    validationIssues: sanitizeValidationIssues(JSON.parse(row.validation_issues_json) as WorkflowRuntimeValidationIssue[]) as WorkflowRuntimeValidationIssue[],
     createdAt: row.created_at,
   };
 }
@@ -238,7 +240,17 @@ export class WorkflowRuntimeStore {
     status: "validated" | "draft_with_issues";
     validationIssues: WorkflowRuntimeValidationIssue[];
     origin?: "builtin" | "user";
+    /** Stable id used only by immutable runtime-native built-in seeds. */
+    revisionId?: string;
+    [TRUSTED_BUILTIN_SEED]?: true;
   }): WorkflowRuntimeDefinitionRevision {
+    if (input.origin === "builtin" && input[TRUSTED_BUILTIN_SEED] !== true) {
+      throw new WorkflowRuntimeStoreError(
+        "Builtin definitions can only be seeded through the trusted host seed API",
+        "WORKFLOW_BUILTIN_SEED_FORBIDDEN",
+        403,
+      );
+    }
     if (input.definition.id !== input.definitionId) {
       throw new WorkflowRuntimeStoreError(
         "definition.id does not match the target definitionId",
@@ -246,6 +258,16 @@ export class WorkflowRuntimeStore {
         400,
       );
     }
+    // User definitions are executable semantics: never sanitize them before
+    // persistence. Reject sensitive keys/values and local paths instead.
+    if (input[TRUSTED_BUILTIN_SEED] !== true && containsSensitiveData(input.definition)) {
+      throw new WorkflowRuntimeStoreError(
+        "Workflow definition contains sensitive data or a local absolute path",
+        "WORKFLOW_DEFINITION_SENSITIVE_DATA",
+        400,
+      );
+    }
+    const persistedValidationIssues = sanitizeValidationIssues(input.validationIssues);
     const now = new Date().toISOString();
     const append = this.#database.transaction(() => {
       const existing = this.#database
@@ -285,7 +307,7 @@ export class WorkflowRuntimeStore {
         .prepare("SELECT MAX(revision) AS max FROM workflow_runtime_revisions WHERE definition_id = ?")
         .get(input.definitionId) as { max: number | null };
       const revision = (latest.max ?? 0) + 1;
-      const revisionId = `wfrev_${randomUUID()}`;
+      const revisionId = input.revisionId ?? `wfrev_${randomUUID()}`;
       this.#database
         .prepare(
           `INSERT INTO workflow_runtime_revisions
@@ -298,7 +320,7 @@ export class WorkflowRuntimeStore {
           revision,
           input.status,
           JSON.stringify(input.definition),
-          JSON.stringify(input.validationIssues),
+          JSON.stringify(persistedValidationIssues),
           now,
         );
       return {
@@ -317,6 +339,20 @@ export class WorkflowRuntimeStore {
       if (error instanceof WorkflowRuntimeStoreError) throw error;
       throw new WorkflowRuntimeStoreError("Failed to persist workflow definition", "WORKFLOW_RUNTIME_STORE_UNAVAILABLE", 503);
     }
+  }
+
+  /** Trusted-only immutable builtin seed entry point. */
+  appendBuiltinRevision(input: {
+    definitionId: string;
+    definition: WorkflowRuntimeDefinition;
+    status: "validated" | "draft_with_issues";
+    validationIssues: WorkflowRuntimeValidationIssue[];
+    revisionId: string;
+  }): WorkflowRuntimeDefinitionRevision {
+    if (input.definition.id !== input.definitionId || input.status !== "validated") {
+      throw new WorkflowRuntimeStoreError("Invalid builtin seed", "WORKFLOW_BUILTIN_SEED_INVALID", 500);
+    }
+    return this.appendRevision({ ...input, origin: "builtin", [TRUSTED_BUILTIN_SEED]: true });
   }
 
   /**
@@ -346,6 +382,9 @@ export class WorkflowRuntimeStore {
           409,
         );
       }
+      // Keep repository bindings as durable intent records so the UI can show
+      // an honest unavailable definition after deletion; triggerBinding still
+      // fails closed on the missing definition revision.
       this.#database.prepare("DELETE FROM workflow_runtime_revisions WHERE definition_id = ?").run(definitionId);
       this.#database.prepare("DELETE FROM workflow_runtime_definitions WHERE definition_id = ?").run(definitionId);
       return { deleted: true };
@@ -381,9 +420,9 @@ export class WorkflowRuntimeStore {
         input.headSha,
         input.createdAt,
         input.finishedAt ?? null,
-        JSON.stringify(input.evidence),
-        input.miniReport === undefined ? null : JSON.stringify(input.miniReport),
-        input.error ?? null,
+        JSON.stringify(sanitizeStructuredData(input.evidence)),
+        input.miniReport === undefined ? null : JSON.stringify(sanitizeStructuredData(input.miniReport)),
+        input.error === undefined ? null : sanitizeExecutionError(input.error),
         input.trigger?.source ?? null,
         input.trigger?.eventId ?? null,
       );
@@ -406,9 +445,9 @@ export class WorkflowRuntimeStore {
       .run(
         input.status,
         input.finishedAt,
-        JSON.stringify(input.evidence),
-        input.miniReport === undefined ? null : JSON.stringify(input.miniReport),
-        input.error ?? null,
+        JSON.stringify(sanitizeStructuredData(input.evidence)),
+        input.miniReport === undefined ? null : JSON.stringify(sanitizeStructuredData(input.miniReport)),
+        input.error === undefined ? null : sanitizeExecutionError(input.error),
         input.runId,
       );
     if (result.changes !== 1) {
@@ -443,8 +482,8 @@ export class WorkflowRuntimeStore {
       .prepare("SELECT * FROM workflow_runtime_runs WHERE id = ?")
       .get(runId) as RunRow | undefined;
     if (!row) return undefined;
-    const evidence = JSON.parse(row.evidence_json) as unknown[];
-    const miniReport = row.mini_report_json === null ? undefined : JSON.parse(row.mini_report_json);
+    const evidence = sanitizeStructuredData(JSON.parse(row.evidence_json) as unknown[]) as unknown[];
+    const miniReport = row.mini_report_json === null ? undefined : sanitizeStructuredData(JSON.parse(row.mini_report_json));
     const trigger = runTriggerFromRow(row);
     return {
       runId: row.id,
@@ -458,7 +497,7 @@ export class WorkflowRuntimeStore {
       ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
       evidence,
       ...(miniReport === undefined ? {} : { miniReport }),
-      ...(row.error === null ? {} : { error: row.error }),
+      ...(row.error === null ? {} : { error: sanitizeExecutionError(row.error) }),
       ...(trigger === undefined ? {} : { trigger }),
       run: {
         runId: row.id,
@@ -471,7 +510,7 @@ export class WorkflowRuntimeStore {
         ...(row.finished_at === null ? {} : { finishedAt: row.finished_at }),
         evidence,
         ...(miniReport === undefined ? {} : { miniReport }),
-        ...(row.error === null ? {} : { error: row.error }),
+        ...(row.error === null ? {} : { error: sanitizeExecutionError(row.error) }),
         ...(trigger === undefined ? {} : { trigger }),
       },
     };
@@ -487,7 +526,7 @@ export class WorkflowRuntimeStore {
       )
       .all(normalized) as (Omit<RunRow, "evidence_json"> & { mini_report_json: string | null })[];
     return rows.map((row) => {
-      const report = row.mini_report_json === null ? null : (JSON.parse(row.mini_report_json) as { findings?: unknown[]; evidenceCount?: number });
+      const report = row.mini_report_json === null ? null : (sanitizeStructuredData(JSON.parse(row.mini_report_json)) as { findings?: unknown[]; evidenceCount?: number });
       const trigger = runTriggerFromRow(row);
       return {
         runId: row.id,
@@ -500,17 +539,35 @@ export class WorkflowRuntimeStore {
         headSha: row.head_sha,
         findingCount: report?.findings?.length ?? 0,
         evidenceCount: report?.evidenceCount ?? 0,
-        ...(row.error === null ? {} : { error: row.error }),
+        ...(row.error === null ? {} : { error: sanitizeExecutionError(row.error) }),
         ...(trigger === undefined ? {} : { trigger }),
       };
     });
   }
 
   countRunsForDefinition(definitionId: string): number {
-    const row = this.#database
-      .prepare("SELECT COUNT(*) AS n FROM workflow_runtime_runs WHERE definition_id = ?")
-      .get(definitionId) as { n: number };
+    const row = this.#database.prepare("SELECT COUNT(*) AS n FROM workflow_runtime_runs WHERE definition_id = ?").get(definitionId) as { n: number };
     return row.n;
+  }
+
+  /** A catalog verification receipt is derived only from a successful persisted run. */
+  getLatestVerificationReceipt(definitionId: string, revisionId: string, checksum: string): { verified: true } | undefined {
+    const rows = this.#database.prepare("SELECT revision_id, evidence_json, mini_report_json FROM workflow_runtime_runs WHERE definition_id = ? AND revision_id = ? AND status = 'succeeded' ORDER BY finished_at DESC").all(definitionId, revisionId) as Array<{ revision_id: string; evidence_json: string; mini_report_json: string | null }>;
+    for (const row of rows) {
+      try {
+        const evidence = JSON.parse(row.evidence_json) as Array<{ id?: string; fingerprint?: string }>;
+        const persistedEvidenceIds = new Set(evidence.map(item => item.id).filter((id): id is string => typeof id === "string" && id.length > 0));
+        const report = row.mini_report_json ? JSON.parse(row.mini_report_json) as { status?: string; verifiedEvidenceCount?: number; findings?: Array<{ verified?: boolean; evidenceIds?: string[] }> } : undefined;
+        const findings = report?.findings ?? [];
+        const findingsGroundedInThisRun = findings.length > 0 && findings.every(finding =>
+          finding.verified === true &&
+          (finding.evidenceIds?.length ?? 0) > 0 &&
+          finding.evidenceIds!.every(evidenceId => persistedEvidenceIds.has(evidenceId))
+        );
+        if (row.revision_id === revisionId && checksum.length === 64 && evidence.length > 0 && persistedEvidenceIds.size === evidence.length && evidence.every(item => Boolean(item.fingerprint)) && report?.status === "succeeded" && (report.verifiedEvidenceCount ?? 0) >= evidence.length && findingsGroundedInThisRun) return { verified: true };
+      } catch { /* corrupt run is not evidence */ }
+    }
+    return undefined;
   }
 
   // -------------------------------------------------------------------------
@@ -604,7 +661,7 @@ export class WorkflowRuntimeStore {
       )
       .all(repositoryId, normalized) as Array<Omit<RunRow, "evidence_json"> & { mini_report_json: string | null }>;
     return rows.map((row) => {
-      const report = row.mini_report_json === null ? null : (JSON.parse(row.mini_report_json) as { findings?: unknown[]; evidenceCount?: number });
+      const report = row.mini_report_json === null ? null : (sanitizeStructuredData(JSON.parse(row.mini_report_json)) as { findings?: unknown[]; evidenceCount?: number });
       const trigger = runTriggerFromRow(row);
       return {
         runId: row.id,
@@ -617,7 +674,7 @@ export class WorkflowRuntimeStore {
         headSha: row.head_sha,
         findingCount: report?.findings?.length ?? 0,
         evidenceCount: report?.evidenceCount ?? 0,
-        ...(row.error === null ? {} : { error: row.error }),
+        ...(row.error === null ? {} : { error: sanitizeExecutionError(row.error) }),
         ...(trigger === undefined ? {} : { trigger }),
       };
     });
@@ -667,7 +724,7 @@ export class WorkflowRuntimeStore {
       sourceEventId: row.source_event_id,
       status: row.status,
       ...(row.run_id === null ? {} : { runId: row.run_id }),
-      ...(row.error === null ? {} : { error: row.error }),
+      ...(row.error === null ? {} : { error: sanitizeExecutionError(row.error) }),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -723,7 +780,7 @@ export class WorkflowRuntimeStore {
          SET status = ?, run_id = ?, error = ?, updated_at = ?
          WHERE id = ? AND status = 'executing'`,
       )
-      .run(input.status, input.runId ?? null, input.error ?? null, now, input.id);
+      .run(input.status, input.runId ?? null, input.error == null ? null : sanitizeExecutionError(input.error), now, input.id);
     if (result.changes !== 1) return undefined;
     return this.getTriggerPlanById(input.id);
   }

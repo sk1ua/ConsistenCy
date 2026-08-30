@@ -28,6 +28,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createApiServer } from "../http";
 import { openDatabase } from "../db/connection";
 import { migrations, runMigrations } from "../db/migrations";
+import { sanitizeExecutionError } from "../security/redact";
 import { WorkflowRuntimeHost, type WorkflowRepositoryResolver } from "./host";
 import { WorkflowRuntimeStore, WorkflowRuntimeStoreError } from "./store";
 import {
@@ -162,7 +163,7 @@ describe("CKPT5 Slice 1 — trigger contract", () => {
           'test/repo-a', 'repo-a', 'head1', '2026-08-01T00:00:00Z', '2026-08-01T00:00:01Z', '[]', NULL, NULL)
       `).run();
 
-      expect(runMigrations(database, migrations)).toEqual(["0020_workflow_runtime_triggers"]);
+      expect(runMigrations(database, migrations)).toEqual(["0020_workflow_runtime_triggers", "0021_audit_execution_bridge", "0022_audit_runtime_only_runs"]);
       const binding = database
         .prepare("SELECT trigger_mode FROM workflow_runtime_bindings WHERE repository_id = 'repo-a'")
         .get() as { trigger_mode: string };
@@ -299,6 +300,65 @@ describe("CKPT5 Slice 1 — trigger contract", () => {
       // Only the never-claimed plan remains pending; claimed/completed/recovered
       // ones never reappear.
       expect(store.listPendingTriggerPlans().map((plan) => plan.id)).toEqual([other.plan.id]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("T4a completeTriggerPlan sanitizes malicious errors at the persistence boundary", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database);
+      const store = new WorkflowRuntimeStore(database);
+      const inserted = store.insertTriggerPlan({
+        repositoryId: "repo-a",
+        definitionId: "verified-mini-review",
+        dedupeKey: "repository-supervisor:malicious-error",
+        sourceEventId: "repository_event_malicious-error",
+      });
+      expect(store.claimTriggerPlan(inserted.plan.id)?.status).toBe("executing");
+
+      const maliciousError = [
+        "failed at C:\\\\Users\\\\alice\\\\secret.ts",
+        "also /home/alice/private/repo/src/index.ts",
+        "ghp_123456789012345678901234567890123456",
+        "Authorization: Bearer super-secret-token-value",
+        "Error: boom",
+        "    at run (C:\\\\Users\\\\alice\\\\secret.ts:12:3)",
+      ].join("\n");
+      const completed = store.completeTriggerPlan({
+        id: inserted.plan.id,
+        status: "failed",
+        error: maliciousError,
+      });
+
+      const raw = database
+        .prepare("SELECT error FROM workflow_runtime_trigger_plans WHERE id = ?")
+        .get(inserted.plan.id) as { error: string | null };
+      expect(raw.error).toBe(sanitizeExecutionError(maliciousError));
+      expect(raw.error).not.toContain("C:\\\\Users");
+      expect(raw.error).not.toContain("/home/alice");
+      expect(raw.error).not.toContain("ghp_123456789012345678901234567890123456");
+      expect(raw.error).not.toContain("super-secret-token-value");
+      expect(raw.error).not.toContain("\n");
+
+      expect(completed?.error).toBe(raw.error);
+      expect(store.getTriggerPlanById(inserted.plan.id)?.error).toBe(raw.error);
+
+      for (const error of [undefined, null]) {
+        const noError = store.insertTriggerPlan({
+          repositoryId: "repo-a",
+          definitionId: "verified-mini-review",
+          dedupeKey: `repository-supervisor:no-error-${String(error)}`,
+          sourceEventId: `repository_event_no-error-${String(error)}`,
+        });
+        store.claimTriggerPlan(noError.plan.id);
+        store.completeTriggerPlan({ id: noError.plan.id, status: "failed", error: error as string | undefined });
+        const noErrorRaw = database
+          .prepare("SELECT error FROM workflow_runtime_trigger_plans WHERE id = ?")
+          .get(noError.plan.id) as { error: string | null };
+        expect(noErrorRaw.error).toBeNull();
+      }
     } finally {
       database.close();
     }

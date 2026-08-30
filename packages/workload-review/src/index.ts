@@ -45,9 +45,15 @@ export { CapabilityBoundRepoFacade } from "./facades/repo-facade.js";
 
 // Deterministic grounding internals (tests / future workloads)
 export { DeterministicEvidenceRunner } from "./context/evidence-runner.js";
-export { buildReviewBaseContext } from "./context/review-context.js";
+export { buildReviewBaseContext, REVIEW_DIFF_MAX_CHARS } from "./context/review-context.js";
 export { groundReviewFindings, buildGroundingContext, changedLineRanges } from "./agents/grounding.js";
 export type { GroundingContext, GroundingResult } from "./agents/grounding.js";
-export { buildAgentPrompt, reportLanguageInstruction } from "./agents/prompts.js";
+export {
+  buildAgentPrompt,
+  reportLanguageInstruction,
+  REVIEW_KERNEL_EVIDENCE_MAX_ENTRIES,
+  REVIEW_FILE_CONTENTS_MAX_CHARS,
+  REVIEW_PROJECT_METADATA_MAX_CHARS,
+} from "./agents/prompts.js";
 export { deduplicateAndSortFindings, buildReviewReport } from "./synthesis/report.js";
 export { buildComposeReviewFileResults } from "./synthesis/compose.js";

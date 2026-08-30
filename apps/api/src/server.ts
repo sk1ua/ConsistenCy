@@ -29,9 +29,16 @@ import { enqueuePublicPrReview } from "./review/publicPr";
 import { WorkflowStore } from "./workflows/store";
 import { resolveJobDiff } from "./review/jobDiff";
 import { SQLiteAuditDomainStore } from "./audit/store";
+import type { AuditExecutionAvailability } from "./audit/store";
 import { buildRepositorySupervisorRegistrations } from "./audit/repositorySupervision";
 import { AuditRunPlanner } from "./audit/planner";
 import { AutomationScheduler } from "./audit/scheduler";
+import {
+  AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON,
+  AUDIT_EXECUTION_DISABLED_REASON,
+  AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON,
+  AuditRunExecutor
+} from "./audit/executor";
 import { RuntimeRegistry } from "./review/runtimeRegistry";
 import { WorkflowRuntimeHost } from "./workflow-runtime/host";
 import { WorkflowTriggerExecutor, WorkflowTriggerPlanner } from "./workflow-runtime/triggers";
@@ -41,7 +48,37 @@ const { config, store: settingsStore } = loadRuntimeConfig();
 const database = openDatabase(config.databasePath);
 runMigrations(database);
 const jobs = new SQLiteJobStore(database);
-const auditStore = new SQLiteAuditDomainStore(database);
+// Construct the runtime store before the audit store so runtime-mapped
+// automation CRUD is gated by the canonical definition/revision persistence.
+const workflowRuntimeStore = new WorkflowRuntimeStore(database);
+
+/**
+ * Executor-slice availability computation: armed executor × automation mapped
+ * to a runtime definition × locally monitored repository. Lazy by design — it
+ * reads the store only when a planning result is actually produced.
+ */
+function auditExecutionAvailability(subject: {
+  repositoryId: string;
+  automationId: string;
+}): AuditExecutionAvailability {
+  if (!config.auditExecutionEnabled) {
+    return { available: false, reason: AUDIT_EXECUTION_DISABLED_REASON };
+  }
+  const automation = auditStore.getAutomation(subject.automationId);
+  if (automation === undefined || automation.runtimeDefinitionId === undefined) {
+    return { available: false, reason: AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON };
+  }
+  const repository = auditStore.getRepository(subject.repositoryId);
+  if (repository === undefined || repository.source !== "local_git") {
+    return { available: false, reason: AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON };
+  }
+  return { available: true };
+}
+
+const auditStore = new SQLiteAuditDomainStore(database, {
+  workflowRuntime: workflowRuntimeStore,
+  resolveExecutionAvailability: auditExecutionAvailability
+});
 const notebookStore = new SQLiteNotebookStore(database);
 const recoveredJobs = jobs.recoverStaleRunningJobs(new Date(Date.now() - 15 * 60 * 1_000));
 if (recoveredJobs > 0) {
@@ -79,7 +116,6 @@ const notebookGraph = new NotebookGraph({
 
 export const workflows = new WorkflowStore();
 export const runtimeRegistry = new RuntimeRegistry();
-const workflowRuntimeStore = new WorkflowRuntimeStore(database);
 export const workflowRuntimeHost = new WorkflowRuntimeHost({
   store: workflowRuntimeStore,
   // Canonical repository resolution: opaque repositoryId → registered local
@@ -247,6 +283,32 @@ export const workflowTriggerExecutor = new WorkflowTriggerExecutor({
 export const workflowTriggerPlanner = new WorkflowTriggerPlanner({
   store: workflowRuntimeStore
 });
+/**
+ * Audit execution bridge: drains durable audit-run drafts whose automation
+ * maps a workflow-runtime definition through the SAME canonical host path as
+ * manual triggers, then mirrors the linked run's terminal outcome. Same
+ * single-flight discipline as the CKPT5 trigger executor above.
+ */
+export const auditRunExecutor = new AuditRunExecutor({
+  store: auditStore,
+  launch: input => workflowRuntimeHost.launchDefinitionRun(input),
+  getWorkflowRuntimeRun: runId => {
+    const found = workflowRuntimeStore.getRun(runId);
+    return found === undefined
+      ? undefined
+      : { status: found.status, ...(found.error === undefined ? {} : { error: found.error }) };
+  },
+  pollIntervalMs: config.CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS,
+  onError: failure => {
+    logger.warn({
+      runId: failure.runId,
+      phase: failure.phase,
+      error: sanitizePublicError(
+        failure.error instanceof Error ? failure.error.message : "Unknown audit run execution error"
+      )
+    }, "Audit run execution failed");
+  }
+});
 export const automationScheduler = new AutomationScheduler(auditStore, auditRunPlanner, {
   pollIntervalMs: config.CONSISTENCY_AUTOMATION_SCHEDULER_INTERVAL_MS,
   onError: failure => {
@@ -356,6 +418,10 @@ export const server = createApiServer({
     llmModel: modelOverride?.model
   }),
   llmProviderConfigured: Boolean(provider),
+  // CKPT6 Phase 3: provider channel for the workflow copilot proposal route.
+  // Model resolution stays behind options.resolveReviewModel; this factory only
+  // materializes the per-request provider (deepseek/openai) for invokeWithSchema.
+  copilotProvider: resolved => createReviewLLMProvider(config, resolved),
   // Fail-closed: without explicit CONSISTENCY_LOCAL_REVIEW_ROOTS the legacy
   // endpoint stays disabled entirely — http.ts reports a missing localReview
   // dependency as LOCAL_REVIEW_UNAVAILABLE (503) instead of falling back to
@@ -389,6 +455,7 @@ export const server = createApiServer({
   auditStore,
   auditPlanner: auditRunPlanner,
   automationScheduler,
+  auditExecution: { enabled: config.auditExecutionEnabled },
   onAuditRepositoriesChanged: reconcileRepositorySupervisor,
   onWorkflowBindingsChanged: reconcileRepositorySupervisor,
   workflows,
@@ -456,6 +523,11 @@ export async function shutdownApplication(): Promise<void> {
       workflowTriggerExecutor.stop();
     } catch (err) {
       logger.error({ error: err }, "Error stopping workflow trigger executor during shutdown");
+    }
+    try {
+      auditRunExecutor.stop();
+    } catch (err) {
+      logger.error({ error: err }, "Error stopping audit run executor during shutdown");
     }
     try {
       automationScheduler.stop();
@@ -527,6 +599,19 @@ if (process.env.NODE_ENV !== "test") {
   automationScheduler.start();
   if (config.workflowTriggersEnabled) {
     workflowTriggerExecutor.start();
+  }
+  if (config.auditExecutionEnabled) {
+    // Order matters: the workflow host already marked ITS interrupted runs
+    // failed above, so linked audit runs resolve to a terminal outcome here
+    // and restart honesty mirrors real history instead of inventing one.
+    const reconciledAuditRuns = auditRunExecutor.reconcileInterruptedRuns();
+    if (reconciledAuditRuns > 0) {
+      logger.warn(
+        { interruptedAuditRuns: reconciledAuditRuns },
+        "Reconciled audit runs left active by the previous process"
+      );
+    }
+    auditRunExecutor.start();
   }
   void repositorySupervisor.start().catch(error => {
     logger.error({

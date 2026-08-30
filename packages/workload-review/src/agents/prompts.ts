@@ -5,7 +5,15 @@
 
 import type { DomainAnalyzeSuccess, PRReviewContext, RelevantContext } from "@consistency/schema";
 import type { EvidenceSnapshot } from "@consistency/kernel";
+import { REVIEW_DIFF_MAX_CHARS } from "../context/review-context.js";
 import type { ReviewAgentName } from "../workload/types.js";
+
+/** Max Kernel evidence lines rendered into the additive evidence section. */
+export const REVIEW_KERNEL_EVIDENCE_MAX_ENTRIES = 40;
+/** Max characters of full file content admitted into the agent prompt. */
+export const REVIEW_FILE_CONTENTS_MAX_CHARS = 140_000;
+/** Max characters of project metadata admitted into the agent prompt. */
+export const REVIEW_PROJECT_METADATA_MAX_CHARS = 30_000;
 
 const AGENT_FOCUS: Record<ReviewAgentName, string> = {
   Security: "webhook validation, leaked credentials, path traversal, command injection, CORS, authorization, arbitrary file reads, and GitHub token misuse",
@@ -37,7 +45,7 @@ function buildEvidenceSection(evidence: readonly EvidenceSnapshot[]): string {
   }
   return [
     "=== BEGIN KERNEL EVIDENCE (deterministic, corroborating signals) ===",
-    lines.slice(0, 40).join("\n"),
+    lines.slice(0, REVIEW_KERNEL_EVIDENCE_MAX_ENTRIES).join("\n"),
     "=== END KERNEL EVIDENCE ==="
   ].join("\n");
 }
@@ -94,11 +102,11 @@ export function buildAgentPrompt(
   const files = Object.entries(context.fileContents)
     .map(([path, content]) => `FILE ${path}\n${numbered(content)}`)
     .join("\n\n")
-    .slice(0, 140_000);
+    .slice(0, REVIEW_FILE_CONTENTS_MAX_CHARS);
   const metadata = Object.entries(context.projectMetadata)
     .map(([path, content]) => `METADATA ${path}\n${content}`)
     .join("\n\n")
-    .slice(0, 30_000);
+    .slice(0, REVIEW_PROJECT_METADATA_MAX_CHARS);
 
   let staticEvidenceSection = "";
   if (deterministicResult?.files && deterministicResult.files.length > 0) {
@@ -139,7 +147,7 @@ export function buildAgentPrompt(
     staticEvidenceSection,
     buildEvidenceSection(evidence),
     buildHistorySection(relevantContext),
-    `DIFF\n${context.diff.slice(0, 80_000)}`,
+    `DIFF\n${context.diff.slice(0, REVIEW_DIFF_MAX_CHARS)}`,
     files,
     metadata
   ].filter(Boolean);

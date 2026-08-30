@@ -33,14 +33,17 @@ import { request } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   workflowRuntimeRunV2Schema,
+  workflowRuntimeOverviewSchema,
+  workflowRuntimeValidationResultSchema,
   type WorkflowRuntimeDefinition,
 } from "@consistency/schema";
+import { listWorkflowNodeTypes } from "./registry";
 import { createApiServer } from "../http";
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
 import { WorkflowRuntimeHost, type WorkflowRepositoryResolver } from "./host";
 import { WorkflowRuntimeStore } from "./store";
-import { VERIFIED_MINI_REVIEW_DEFINITION } from "./definition";
+import { VERIFIED_MINI_REVIEW_DEFINITION, runtimeBuiltinChecksum } from "./definition";
 
 const TMP_DIRS: string[] = [];
 afterEach(() => {
@@ -116,7 +119,7 @@ function makeApi(options: { repoPath: string; database?: ReturnType<typeof openD
 
 function httpJson(
   port: number,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   pathName: string,
   payload?: unknown,
 ): Promise<{ status: number; body: unknown }> {
@@ -188,6 +191,17 @@ function userDefinition(id: string): WorkflowRuntimeDefinition {
   };
 }
 
+describe("Registry/schema contract", () => {
+  it("real registry DTO and overview DTO parse through the shared schema", async () => {
+    const fixture = makeFixtureRepo();
+    const rig = await makeApi({ repoPath: fixture.repoPath });
+    try {
+      expect(() => workflowRuntimeOverviewSchema.parse(rig.host.overview())).not.toThrow();
+      expect(() => workflowRuntimeOverviewSchema.parse({ definition: VERIFIED_MINI_REVIEW_DEFINITION, nodeTypes: listWorkflowNodeTypes() })).not.toThrow();
+    } finally { rig.server.close(); rig.database.close(); }
+  });
+});
+
 describe("Unchanged endpoints (Phase 1 regression)", () => {
   it("GET /workflow-runtime/overview returns the built-in definition and registry node types", async () => {
     const fixture = makeFixtureRepo();
@@ -213,13 +227,24 @@ describe("Unchanged endpoints (Phase 1 regression)", () => {
     try {
       const ok = await httpJson(rig.port, "POST", "/workflow-runtime/validate", { definition: VERIFIED_MINI_REVIEW_DEFINITION });
       expect(ok.status).toBe(200);
-      expect((ok.body as { ok: boolean }).ok).toBe(true);
+      const canonical = workflowRuntimeValidationResultSchema.parse(ok.body);
+      const bareOk = await httpJson(rig.port, "POST", "/workflow-runtime/validate", VERIFIED_MINI_REVIEW_DEFINITION);
+      expect(workflowRuntimeValidationResultSchema.parse(bareOk.body).ok).toBe(true);
+      expect(canonical.ok).toBe(true);
+      if (canonical.ok) {
+        expect(canonical.plan.definitionId).toBe(VERIFIED_MINI_REVIEW_DEFINITION.id);
+        expect(canonical.plan.agentSpecs).toHaveLength(VERIFIED_MINI_REVIEW_DEFINITION.nodes.length);
+      }
 
       const broken = await httpJson(rig.port, "POST", "/workflow-runtime/validate", {
         definition: { ...VERIFIED_MINI_REVIEW_DEFINITION, nodes: [{ ...VERIFIED_MINI_REVIEW_DEFINITION.nodes[0]!, type: "analyzer.not-registered" }, VERIFIED_MINI_REVIEW_DEFINITION.nodes[1]!] },
       });
-      expect((broken.body as { ok: boolean }).ok).toBe(false);
-      expect((broken.body as { errors: { code: string }[] }).errors.some((issue) => issue.code === "unknown_node_type")).toBe(true);
+      const failed = workflowRuntimeValidationResultSchema.parse(broken.body);
+      expect(failed.ok).toBe(false);
+      const bareFailed = await httpJson(rig.port, "POST", "/workflow-runtime/validate", { ...VERIFIED_MINI_REVIEW_DEFINITION, nodes: [{ ...VERIFIED_MINI_REVIEW_DEFINITION.nodes[0]!, type: "analyzer.not-registered" }, VERIFIED_MINI_REVIEW_DEFINITION.nodes[1]!] });
+      expect(workflowRuntimeValidationResultSchema.parse(bareFailed.body).ok).toBe(false);
+      expect("plan" in failed).toBe(false);
+      expect(failed.errors.some((issue) => issue.code === "unknown_node_type")).toBe(true);
     } finally {
       rig.server.close();
       rig.database.close();
@@ -242,6 +267,17 @@ describe("Unchanged endpoints (Phase 1 regression)", () => {
       rig.server.close();
       rig.database.close();
     }
+  });
+});
+
+describe("Builtin revision fail-closed", () => {
+  it("does not synthesize a revision when canonical builtin metadata is missing", async () => {
+    const fixture = makeFixtureRepo();
+    const rig = await makeApi({ repoPath: fixture.repoPath });
+    try {
+      rig.database.prepare("DELETE FROM workflow_runtime_revisions WHERE definition_id = ?").run("verified-mini-review");
+      await expect(rig.host.trigger({ repositoryId: "repo-fixture" })).rejects.toThrow(/persistence/i);
+    } finally { rig.server.close(); rig.database.close(); }
   });
 });
 
@@ -292,7 +328,7 @@ describe("TEST H carry-over — canonical snapshot binding (Phase 2 trigger cont
 });
 
 describe("TEST J — definition lifecycle", () => {
-  it("draft → schema-invalid 400 (nothing saved) → graph-invalid saved-but-not-executable → fixed revision executable; builtin immutable", async () => {
+  it("schema-invalid and graph-invalid definitions fail closed without persistence; fixed revision executable; builtin immutable", async () => {
     const fixture = makeFixtureRepo();
     const rig = await makeApi({ repoPath: fixture.repoPath });
     try {
@@ -302,11 +338,12 @@ describe("TEST J — definition lifecycle", () => {
       });
       expect(invalid.status).toBe(400);
       const afterInvalid = await httpJson(rig.port, "GET", "/workflow-runtime/definitions");
-      expect((afterInvalid.body as { definitions: { definitionId: string }[] }).definitions.map((d) => d.definitionId)).toEqual([
-        "verified-mini-review",
+      expect((afterInvalid.body as { definitions: { definitionId: string }[] }).definitions.map((d) => d.definitionId).sort()).toEqual([
+        "architectural-drift", "pr-review", "pr-sanity-verification", "security-hardening", "verified-mini-review", "vibe-safety",
       ]);
 
-      // (b) Graph-invalid draft (cycle) → saved with issues, not executable.
+      // (b) Graph-invalid definitions are rejected before append, with stable
+      // issue code/path and no definition row or revision persisted.
       const cyclic: WorkflowRuntimeDefinition = {
         ...userDefinition("my-review"),
         edges: [
@@ -314,31 +351,21 @@ describe("TEST J — definition lifecycle", () => {
           { from: "verify", to: "analyze" },
         ],
       };
-      const savedDraft = await httpJson(rig.port, "POST", "/workflow-runtime/definitions", { definition: cyclic });
-      expect(savedDraft.status).toBe(201);
-      const draftRevision = (savedDraft.body as { revision: { revisionId: string; revision: number; status: string; validationIssues: { code: string }[] } }).revision;
-      expect(draftRevision.status).toBe("draft_with_issues");
-      expect(draftRevision.validationIssues.some((issue) => issue.code === "graph_cycle")).toBe(true);
+      const rejectedDraft = await httpJson(rig.port, "POST", "/workflow-runtime/definitions", { definition: cyclic });
+      expect(rejectedDraft.status).toBe(400);
+      expect((rejectedDraft.body as { error: { code: string; details?: { issues?: { code: string; path: unknown[] }[] } } }).error.code).toBe("WORKFLOW_DEFINITION_INVALID");
+      expect((rejectedDraft.body as { error: { details?: { issues?: { code: string }[] } } }).error.details?.issues?.some((issue) => issue.code === "graph_cycle")).toBe(true);
+      const afterRejected = await httpJson(rig.port, "GET", "/workflow-runtime/definitions");
+      expect((afterRejected.body as { definitions: { definitionId: string }[] }).definitions.some((d) => d.definitionId === "my-review")).toBe(false);
 
-      // Triggering the graph-invalid revision → 409 fail-closed, no run.
-      const refused = await httpJson(rig.port, "POST", "/workflow-runtime/runs", {
-        repositoryId: "repo-fixture",
-        definitionId: "my-review",
-        revisionId: draftRevision.revisionId,
-      });
-      expect(refused.status).toBe(409);
-      expect((refused.body as { error: { code: string } }).error.code).toBe("WORKFLOW_DEFINITION_NOT_EXECUTABLE");
-      const runsAfterRefusal = await httpJson(rig.port, "GET", "/workflow-runtime/runs");
-      expect((runsAfterRefusal.body as { runs: unknown[] }).runs).toHaveLength(0);
-
-      // (c) Fixed definition → revision 2, validated, executable.
+      // (c) Fixed definition → revision 1, validated, executable.
       const fixed = await httpJson(rig.port, "POST", "/workflow-runtime/definitions", {
         definitionId: "my-review",
         definition: userDefinition("my-review"),
       });
       expect(fixed.status).toBe(201);
       const fixedRevision = (fixed.body as { revision: { revisionId: string; revision: number; status: string } }).revision;
-      expect(fixedRevision.revision).toBe(2);
+      expect(fixedRevision.revision).toBe(1);
       expect(fixedRevision.status).toBe("validated");
 
       const done = await triggerAndWait(rig, {
@@ -352,12 +379,7 @@ describe("TEST J — definition lifecycle", () => {
       expect(run.revisionId).toBe(fixedRevision.revisionId);
       expect(run.origin).toBe("user");
 
-      // (d) The old draft revision is still readable (append-only).
-      const oldRevision = await httpJson(rig.port, "GET", "/workflow-runtime/definitions/my-review/revisions/" + draftRevision.revisionId);
-      expect(oldRevision.status).toBe(200);
-      expect((oldRevision.body as { revision: { revision: number } }).revision.revision).toBe(1);
-
-      // (e) Builtin is immutable: save → 409, delete → 409.
+      // (d) Builtin is immutable: save → 409, delete → 409.
       const builtinSave = await httpJson(rig.port, "POST", "/workflow-runtime/definitions", {
         definition: { ...VERIFIED_MINI_REVIEW_DEFINITION, nodes: [VERIFIED_MINI_REVIEW_DEFINITION.nodes[0]!] },
       });
@@ -409,6 +431,75 @@ describe("TEST K — run persistence survives restart", () => {
     }
   });
 
+  it("requires verified finding evidence ids to belong to the persisted run", async () => {
+    const fixture = makeFixtureRepo();
+    const rig = await makeApi({ repoPath: fixture.repoPath });
+    try {
+      const definitionId = "verified-mini-review";
+      const revisionId = "wfrev_builtin_verified-mini-review_v1";
+      const checksum = runtimeBuiltinChecksum(VERIFIED_MINI_REVIEW_DEFINITION);
+      expect(rig.host.hasVerificationReceipt(definitionId, revisionId, checksum)).toBe(false);
+
+      const report = {
+        status: "succeeded",
+        verifiedEvidenceCount: 1,
+        findings: [{ verified: true, evidenceIds: ["ev-local"] }],
+      };
+      rig.store.insertRun({
+        runId: "wfrun_membership",
+        definitionId,
+        revisionId,
+        origin: "builtin",
+        status: "succeeded",
+        repository: "test/fixture-canonical",
+        headSha: fixture.headSha,
+        createdAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        evidence: [{ id: "ev-local", fingerprint: "a" }],
+        miniReport: report,
+      });
+      expect(rig.host.hasVerificationReceipt(definitionId, revisionId, checksum)).toBe(true);
+      rig.database.prepare("DELETE FROM workflow_runtime_runs WHERE id = ?").run("wfrun_membership");
+      expect(rig.host.hasVerificationReceipt(definitionId, revisionId, checksum)).toBe(false);
+      expect(rig.host.hasVerificationReceipt(definitionId, "old-revision", checksum)).toBe(false);
+      expect(rig.host.hasVerificationReceipt(definitionId, revisionId, "0".repeat(64))).toBe(false);
+
+      rig.store.insertRun({
+        runId: "wfrun_foreign_membership",
+        definitionId,
+        revisionId,
+        origin: "builtin",
+        status: "succeeded",
+        repository: "test/fixture-canonical",
+        headSha: fixture.headSha,
+        createdAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        evidence: [{ id: "ev-local", fingerprint: "a" }],
+        miniReport: { ...report, findings: [{ verified: true, evidenceIds: ["ev-foreign"] }] },
+      });
+      expect(rig.host.hasVerificationReceipt(definitionId, revisionId, checksum)).toBe(false);
+      rig.database.prepare("DELETE FROM workflow_runtime_runs WHERE id = ?").run("wfrun_foreign_membership");
+
+      rig.store.insertRun({
+        runId: "wfrun_empty_membership",
+        definitionId,
+        revisionId,
+        origin: "builtin",
+        status: "succeeded",
+        repository: "test/fixture-canonical",
+        headSha: fixture.headSha,
+        createdAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        evidence: [{ id: "ev-local", fingerprint: "a" }],
+        miniReport: { ...report, findings: [{ verified: true, evidenceIds: [] }] },
+      });
+      expect(rig.host.hasVerificationReceipt(definitionId, revisionId, checksum)).toBe(false);
+    } finally {
+      rig.server.close();
+      rig.database.close();
+    }
+  });
+
   it("a run still marked running at restart is honestly marked failed (never succeeded)", async () => {
     const fixture = makeFixtureRepo();
     const database = openDatabase(":memory:");
@@ -417,7 +508,7 @@ describe("TEST K — run persistence survives restart", () => {
     store.insertRun({
       runId: "wfrun_interrupted",
       definitionId: "verified-mini-review",
-      revisionId: "builtin-seed",
+      revisionId: "wfrev_builtin_verified-mini-review_v1",
       origin: "builtin",
       status: "running",
       repository: "test/fixture-canonical",
@@ -436,6 +527,53 @@ describe("TEST K — run persistence survives restart", () => {
     } finally {
       rig.server.close();
       database.close();
+    }
+  });
+
+  it("sanitizes runtime failure before persistence and across every public run DTO", async () => {
+    const fixture = makeFixtureRepo();
+    const rig = await makeApi({ repoPath: fixture.repoPath });
+    const hostile = "failed at C:\\\\secret\\\\repo\\\\file.ts and /home/alice/repo/file.ts\\nstack\\nAuthorization: Bearer abc.def.ghi ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+    try {
+      rig.store.insertRun({
+        runId: "wfrun_hostile",
+        definitionId: "verified-mini-review",
+        revisionId: "wfrev_builtin_verified-mini-review_v1",
+        origin: "builtin",
+        status: "running",
+        repository: "test/fixture-canonical",
+        repositoryOpaqueId: "repo-fixture",
+        headSha: fixture.headSha,
+        createdAt: new Date().toISOString(),
+        evidence: [],
+      });
+      rig.store.updateRunTerminal({
+        runId: "wfrun_hostile",
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+        evidence: [],
+        error: hostile,
+      });
+      const persisted = rig.database.prepare("SELECT error FROM workflow_runtime_runs WHERE id = 'wfrun_hostile'").get() as { error: string };
+      const detail = rig.host.getRun("wfrun_hostile");
+      const list = rig.host.listRuns();
+      const repositoryList = rig.host.listRunsForRepository("repo-fixture");
+      const httpDetail = await httpJson(rig.port, "GET", "/workflow-runtime/runs/wfrun_hostile");
+      const exposed = [persisted.error, detail?.error, list[0]?.error, repositoryList[0]?.error, (httpDetail.body as { error?: string }).error];
+      for (const value of exposed) {
+        expect(value).toBeDefined();
+        expect(value).not.toContain("C:\\\\secret");
+        expect(value).not.toContain("/home/alice");
+        expect(value).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
+        expect(value).not.toContain("Authorization: Bearer");
+      }
+      // The sanitized value contains both approved path and secret markers;
+      // assert hygiene rather than coupling to their exact ordering/count.
+      expect(exposed.some((value) => value?.includes("PATH_REDACTED"))).toBe(true);
+      expect(exposed.some((value) => value?.includes("[REDACTED]"))).toBe(true);
+    } finally {
+      rig.server.close();
+      rig.database.close();
     }
   });
 });
@@ -472,18 +610,9 @@ describe("TEST L — dry-load truth", () => {
           ],
         },
       });
-      const brokenRevisionId = (brokenSaved.body as { revision: { revisionId: string } }).revision.revisionId;
-      const broken = await httpJson(rig.port, "GET", "/workflow-runtime/definitions/dry-load-broken/revisions/" + brokenRevisionId + "/dry-load");
-      const brokenBody = broken.body as {
-        overall: string;
-        nodes: { nodeId: string; nodeTypeRegistered: boolean; issues: { code: string; message: string }[] }[];
-      };
-      expect(brokenBody.overall).toBe("not-feasible");
-      const badNode = brokenBody.nodes.find((node) => node.nodeId === "analyze")!;
-      expect(badNode.nodeTypeRegistered).toBe(false);
-      expect(badNode.issues.some((issue) => issue.code === "unknown_node_type")).toBe(true);
-      // Sanitized reason: no internal paths/stack traces.
-      expect(JSON.stringify(brokenBody)).not.toMatch(/[A-Za-z]:\\/);
+      expect(brokenSaved.status).toBe(400);
+      expect((brokenSaved.body as { error: { code: string; details?: { issues?: { code: string }[] } } }).error.code).toBe("WORKFLOW_DEFINITION_INVALID");
+      expect((brokenSaved.body as { error: { details?: { issues?: { code: string }[] } } }).error.details?.issues?.some((issue) => issue.code === "unknown_node_type")).toBe(true);
 
       // Unknown revision → sanitized 404.
       const missing = await httpJson(rig.port, "GET", "/workflow-runtime/definitions/dry-load-ok/revisions/wfrev_missing/dry-load");
@@ -570,6 +699,84 @@ describe("TEST N — public DTO hygiene", () => {
       expect(surfaces).not.toMatch(/"handle"|capabilityHandle/i);
       expect(surfaces).not.toContain("workflow-runtime/inline-input");
       expect(surfaces).not.toContain(fixture.repoPath.replace(/\\/g, "/"));
+    } finally {
+      rig.server.close();
+      rig.database.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Executor slice: internal shared launch entry
+// ---------------------------------------------------------------------------
+
+describe("launchDefinitionRun — internal shared launch entry", () => {
+  it("launches the latest validated revision with full provenance and no binding requirement", async () => {
+    const fixture = makeFixtureRepo();
+    const rig = await makeApi({ repoPath: fixture.repoPath });
+    try {
+      const saved = await httpJson(rig.port, "POST", "/workflow-runtime/definitions", { definition: userDefinition("bridge-launch") });
+      const revisionId = (saved.body as { revision: { revisionId: string } }).revision.revisionId;
+
+      // No binding exists yet: triggerBinding must refuse while the internal
+      // launch entry (audit executor path) proceeds through the SAME gates
+      // that come after binding intent.
+      const bindingRefused = await httpJson(rig.port, "POST", "/workflow-runtime/repositories/repo-fixture/runs", { definitionId: "bridge-launch" });
+      expect(bindingRefused.status).toBe(404);
+
+      const launched = await rig.host.launchDefinitionRun({
+        repositoryId: "repo-fixture",
+        definitionId: "bridge-launch",
+        trigger: { source: "repository_change", eventId: "repository_event_bridge" }
+      });
+      expect(launched.status).toBe("running");
+      expect(launched.revisionId).toBe(revisionId);
+      expect(launched.runId).toMatch(/^wfrun_/);
+
+      const detail = await httpJson(rig.port, "GET", `/workflow-runtime/runs/${launched.runId}`);
+      const body = detail.body as { status: string; definitionId: string; revisionId: string; trigger?: { source: string; eventId?: string } };
+      expect(body.status === "running" || body.status === "succeeded").toBe(true);
+      expect(body.definitionId).toBe("bridge-launch");
+      expect(body.revisionId).toBe(revisionId);
+      expect(body.trigger).toEqual({ source: "repository_change", eventId: "repository_event_bridge" });
+
+      // The manual route still enforces its binding gate afterwards: enabled
+      // now, a retry on the same pair resolves through the canonical path.
+      const enable = await httpJson(rig.port, "PUT", `/workflow-runtime/repositories/repo-fixture/bindings/bridge-launch`, { enabled: true });
+      expect(enable.status).toBe(200);
+      const boundTrigger = await httpJson(rig.port, "POST", "/workflow-runtime/repositories/repo-fixture/runs", {
+        definitionId: "bridge-launch"
+      });
+      expect(boundTrigger.status).toBe(201);
+    } finally {
+      rig.server.close();
+      rig.database.close();
+    }
+  });
+
+  it("fails closed identically for unknown definitions and non-executable drafts", async () => {
+    const fixture = makeFixtureRepo();
+    const rig = await makeApi({ repoPath: fixture.repoPath });
+    try {
+      await expect(rig.host.launchDefinitionRun({ repositoryId: "repo-fixture", definitionId: "missing-def" }))
+        .rejects.toThrowError(/not found/i);
+
+      // Invalid runtime configuration is rejected before persistence.
+      const broken = {
+        id: "draft-only",
+        version: 1,
+        nodes: [
+          { id: "analyze", type: "analyzer.deterministic-evidence", serviceRef: "deterministic-evidence.analyzer", parameters: {}, failurePolicy: "fail-closed" },
+          { id: "verify", type: "verifier.persisted-evidence", serviceRef: "persisted-evidence.verifier", parameters: {}, failurePolicy: "fail-closed" },
+          { id: "verify2", type: "verifier.persisted-evidence", serviceRef: "wrong.ref", parameters: {}, failurePolicy: "fail-closed" },
+        ],
+        edges: [{ from: "analyze", to: "verify" }],
+      } satisfies WorkflowRuntimeDefinition;
+      const saved = await httpJson(rig.port, "POST", "/workflow-runtime/definitions", { definition: broken });
+      expect(saved.status).toBe(400);
+      expect((saved.body as { error: { code: string } }).error.code).toBe("WORKFLOW_DEFINITION_INVALID");
+      await expect(rig.host.launchDefinitionRun({ repositoryId: "repo-fixture", definitionId: "draft-only" }))
+        .rejects.toThrowError(/not found/i);
     } finally {
       rig.server.close();
       rig.database.close();

@@ -5,13 +5,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
+import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeDefinitionsResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
 import type { SettingsSnapshot } from "./config/settings";
 import type { RepositoryPullRequestRequest } from "./github/pullRequestReader";
 import { AuditDomainError, type AuditDomainStore } from "./audit/store";
+import { openDatabase } from "./db/connection";
+import { runMigrations } from "./db/migrations";
+import { WorkflowRuntimeHost } from "./workflow-runtime/host";
+import { WorkflowRuntimeStore } from "./workflow-runtime/store";
+import { StructuredOutputError } from "./review/llm/provider";
+import type { FindingGenerationRequest, LLMProvider, LLMStreamRequest, StructuredInvocation, StructuredResult } from "./review/llm/types";
 
 const validAnalysisResult = {
   risk_score: 0.1,
@@ -193,7 +199,9 @@ class TestAuditStore implements AuditDomainStore {
   getAutomation(): never { throw new Error("Not implemented in HTTP route tests"); }
   createAutomation(): never { throw new Error("Not implemented in HTTP route tests"); }
   setAutomationEnabled(): never { throw new Error("Not implemented in HTTP route tests"); }
+  updateAutomation(): never { throw new Error("Not implemented in HTTP route tests"); }
   listAuditRuns(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listRecoverableAuditRuns(): never { throw new Error("Not implemented in HTTP route tests"); }
   getAuditRun(): never { throw new Error("Not implemented in HTTP route tests"); }
   createAuditRunDraft(): never { throw new Error("Not implemented in HTTP route tests"); }
   listAuditRunPlanningReceipts(): never { throw new Error("Not implemented in HTTP route tests"); }
@@ -202,6 +210,11 @@ class TestAuditStore implements AuditDomainStore {
   ensureAutomationScheduleState(): never { throw new Error("Not implemented in HTTP route tests"); }
   listAutomationScheduleWindows(): never { throw new Error("Not implemented in HTTP route tests"); }
   completeAutomationScheduleWindow(): never { throw new Error("Not implemented in HTTP route tests"); }
+  markRunQueued(): never { throw new Error("Not implemented in HTTP route tests"); }
+  markRunRunning(): never { throw new Error("Not implemented in HTTP route tests"); }
+  markRunTerminal(): never { throw new Error("Not implemented in HTTP route tests"); }
+  markRunFailedFromQueued(): never { throw new Error("Not implemented in HTTP route tests"); }
+  listRunEvents(): never { throw new Error("Not implemented in HTTP route tests"); }
   cancelAuditRun(): never { throw new Error("Not implemented in HTTP route tests"); }
   listRunStepArtifacts(): never { throw new Error("Not implemented in HTTP route tests"); }
   saveRunStepArtifact(): never { throw new Error("Not implemented in HTTP route tests"); }
@@ -1747,5 +1760,243 @@ describe("createApiServer", () => {
     // 5. Unknown repository ID
     const unknownRepoRes = await postJson(port, `/repositories/repo_nonexistent/actions/set-monitoring`, { enabled: true });
     expect(unknownRepoRes.status).toBe(404);
+  });
+});
+
+/**
+ * Test-only LLM stub (product code never mocks): implements the provider
+ * contract by validating a fixed payload against the exact zod schema the
+ * route hands it, mirroring BaseLLMProvider.invokeWithSchema.
+ */
+class StubCopilotProvider implements LLMProvider {
+  readonly name = "openai" as const;
+  lastInvocation?: { systemPrompt: string; userPrompt: string; schemaName: string };
+
+  constructor(private readonly respond: () => unknown) {}
+
+  async invokeWithSchema<T>(request: StructuredInvocation<T>): Promise<StructuredResult<T>> {
+    this.lastInvocation = { systemPrompt: request.systemPrompt, userPrompt: request.userPrompt, schemaName: request.schemaName };
+    return { data: request.schema.parse(this.respond()) as T };
+  }
+
+  generateStructuredFinding(): Promise<StructuredResult<never[]>> {
+    throw new Error("not used by the copilot route");
+  }
+
+  generateAgentRun(): Promise<StructuredResult<{ findings: never[] }>> {
+    throw new Error("not used by the copilot route");
+  }
+
+  generateSummary(): Promise<StructuredResult<{ summary: string }>> {
+    throw new Error("not used by the copilot route");
+  }
+
+  stream(): AsyncIterable<never> {
+    throw new Error("not used by the copilot route");
+  }
+}
+
+describe("workflow copilot proposal endpoint (CKPT6 Phase 3)", () => {
+  const servers: ReturnType<typeof createApiServer>[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      servers.map(
+        server =>
+          new Promise<void>(resolve => {
+            server.close(() => resolve());
+          })
+      )
+    );
+    servers.length = 0;
+  });
+
+  const copilotDefinition = {
+    id: "copilot-flow",
+    version: 1 as const,
+    nodes: [{ id: "analyze", type: "analyzer.deterministic-evidence", serviceRef: "deterministic-evidence.analyzer", parameters: { analyzers: ["style"] }, failurePolicy: "fail-closed" as const }],
+    edges: [] as Array<{ from: string; to: string }>
+  };
+
+  async function copilotRig(provider?: LLMProvider, extra: Parameters<typeof createApiServer>[0] = {}) {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const host = new WorkflowRuntimeHost({ store: new WorkflowRuntimeStore(database) });
+    host.initialize();
+    const server = createApiServer({
+      workflowRuntime: host,
+      llmProviderConfigured: provider !== undefined,
+      ...(provider ? { copilotProvider: () => provider } : {}),
+      ...extra
+    });
+    servers.push(server);
+    const port = await listen(server);
+    return { port, database };
+  }
+
+  it("rejects proposal generation with 503 LLM_NOT_CONFIGURED when no LLM is configured", async () => {
+    const { port } = await copilotRig(undefined, { llmProviderConfigured: false });
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "add a secret scan", definition: copilotDefinition });
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: { code: "LLM_NOT_CONFIGURED" } });
+  });
+
+  it("returns 400 WORKFLOW_PATCH_INVALID for a request without exactly one definition source", async () => {
+    const provider = new StubCopilotProvider(() => ({}));
+    const { port } = await copilotRig(provider);
+    for (const body of [{ instruction: "add a secret scan" }, { instruction: "add a secret scan", definition: copilotDefinition, definitionId: "copilot-flow" }, { instruction: "", definition: copilotDefinition }]) {
+      const res = await postJson(port, "/workflow-runtime/copilot/proposal", body);
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    }
+  });
+
+  it("rejects hallucinated serviceRef values against the server-owned registry whitelist", async () => {
+    const provider = new StubCopilotProvider(() => ({
+      patch: [{ op: "ADD_NODE", nodeId: "autoscaler", serviceRef: "auto-scaling.prophet" }],
+      rationale: "adds a fake autoscaler"
+    }));
+    const { port } = await copilotRig(provider);
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "add an autoscaler", definition: copilotDefinition });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    const issues = (res.body as { error: { details: { issues: Array<{ message: string }> } } }).error.details.issues;
+    expect(JSON.stringify(issues)).toContain("auto-scaling.prophet");
+    expect(JSON.stringify(issues)).not.toMatch(/[A-Za-z]:[\\/]/);
+  });
+
+  it("rejects ADD_EDGE endpoints that do not exist after the patch is applied", async () => {
+    const provider = new StubCopilotProvider(() => ({
+      patch: [{ op: "ADD_EDGE", from: "analyze", to: "ghost-node" }],
+      rationale: "edges to nowhere"
+    }));
+    const { port } = await copilotRig(provider);
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "wire the analyzer", definition: copilotDefinition });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    expect(JSON.stringify((res.body as { error: { details: { issues: unknown[] } } }).error.details.issues)).toContain("ghost-node");
+  });
+
+  it("rejects duplicate ADD_EDGE operations (existing edge or duplicated within the patch)", async () => {
+    const { port } = await copilotRig(new StubCopilotProvider(() => ({
+      patch: [{ op: "ADD_EDGE", from: "analyze", to: "verify" }],
+      rationale: "re-wires an edge that already exists"
+    })));
+    // The base definition already carries analyze → verify.
+    const definition = {
+      ...copilotDefinition,
+      nodes: [...copilotDefinition.nodes, { id: "verify", type: "verifier.persisted-evidence", serviceRef: "persisted-evidence.verifier", parameters: {}, failurePolicy: "fail-closed" as const }],
+      edges: [{ from: "analyze", to: "verify" }]
+    };
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "wire the verifier again", definition });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    const issues = (res.body as { error: { details: { issues: Array<{ code: string; message: string }> } } }).error.details.issues;
+    expect(issues.some(issue => issue.code === "duplicate_edge" && issue.message.includes("analyze"))).toBe(true);
+
+    // The same edge proposed twice within one patch is rejected identically,
+    // so Apply can never silently skip an operation.
+    const intraPatchProvider = new StubCopilotProvider(() => ({
+      patch: [
+        { op: "ADD_NODE", nodeId: "secret-scan", serviceRef: "deterministic-evidence.analyzer" },
+        { op: "ADD_EDGE", from: "analyze", to: "secret-scan" },
+        { op: "ADD_EDGE", from: "analyze", to: "secret-scan" }
+      ],
+      rationale: "wires the same edge twice"
+    }));
+    const rerig = await copilotRig(intraPatchProvider);
+    const res2 = await postJson(rerig.port, "/workflow-runtime/copilot/proposal", { instruction: "wire twice", definition: copilotDefinition });
+    expect(res2.status).toBe(400);
+    expect(res2.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    expect((res2.body as { error: { details: { issues: Array<{ code: string }> } } }).error.details.issues.some(issue => issue.code === "duplicate_edge")).toBe(true);
+  });
+
+  it("fails the zero-side-effect compile precheck with sanitized issues", async () => {
+    const provider = new StubCopilotProvider(() => ({
+      patch: [
+        { op: "ADD_NODE", nodeId: "recheck", serviceRef: "deterministic-evidence.analyzer" },
+        { op: "ADD_EDGE", from: "analyze", to: "recheck" },
+        { op: "ADD_EDGE", from: "recheck", to: "analyze" }
+      ],
+      rationale: "introduces a cycle"
+    }));
+    const { port } = await copilotRig(provider);
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "double check everything", definition: copilotDefinition });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    const issues = (res.body as { error: { details: { issues: Array<{ code: string; message: string }> } } }).error.details.issues;
+    expect(issues.some(issue => issue.code === "graph_cycle")).toBe(true);
+    expect(JSON.stringify(res.body)).not.toMatch(/[A-Za-z]:[\\/]/);
+  });
+
+  it("returns a zod-valid proposal with zero persistence side effects on the happy path", async () => {
+    const provider = new StubCopilotProvider(() => ({
+      patch: [
+        { op: "ADD_NODE", nodeId: "secret-scan", serviceRef: "deterministic-evidence.analyzer", parameters: { analyzers: ["secret"] } },
+        { op: "ADD_EDGE", from: "analyze", to: "secret-scan" }
+      ],
+      rationale: "adds a secret scan fed by the analyzer"
+    }));
+    const { port, database } = await copilotRig(provider);
+    const before = await getJson(port, "/workflow-runtime/definitions");
+    expect(before.status).toBe(200);
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "add a secret scan", definition: copilotDefinition });
+    expect(res.status).toBe(200);
+    const parsed = workflowRuntimeCopilotProposalResponseSchema.parse(res.body);
+    expect(parsed.proposal.patch).toHaveLength(2);
+    expect(parsed.proposal.rationale).toBe("adds a secret scan fed by the analyzer");
+    expect(parsed.proposal.basis?.definitionFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    // The prompt was built server-side: registry whitelist + current definition summary.
+    expect(provider.lastInvocation?.schemaName).toBe("workflow-copilot-proposal");
+    expect(provider.lastInvocation?.systemPrompt).toContain("deterministic-evidence.analyzer");
+    expect(provider.lastInvocation?.systemPrompt).toContain("Registry whitelist");
+    expect(provider.lastInvocation?.userPrompt).toContain("add a secret scan");
+    // Zero side effects: identical definitions listing before/after (the
+    // builtin library stays seeded; no revision is appended for the inline
+    // definition and no run/dry-load happens).
+    const after = await getJson(port, "/workflow-runtime/definitions");
+    expect(after.status).toBe(200);
+    expect(after.body).toEqual(before.body);
+    expect(workflowRuntimeDefinitionsResponseSchema.parse(after.body).definitions.some(item => item.definitionId === "copilot-flow")).toBe(false);
+    database.close();
+  });
+
+  it("resolves the base definition from definitionId's latest revision", async () => {
+    const provider = new StubCopilotProvider(() => ({
+      patch: [{ op: "ADD_EDGE", from: "analyze", to: "analyze-2" }],
+      rationale: "wires the forked analyzer"
+    }));
+    const { port } = await copilotRig(provider);
+    const definition = {
+      ...copilotDefinition,
+      id: "copilot-flow-user",
+      nodes: [
+        ...copilotDefinition.nodes,
+        { id: "analyze-2", type: "analyzer.deterministic-evidence", serviceRef: "deterministic-evidence.analyzer", parameters: {}, failurePolicy: "fail-closed" as const }
+      ]
+    };
+    const saved = await postJson(port, "/workflow-runtime/definitions", { definitionId: "copilot-flow-user", definition });
+    expect(saved.status).toBe(201);
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "wire both analyzers", definitionId: "copilot-flow-user" });
+    expect(res.status).toBe(200);
+    const parsed = workflowRuntimeCopilotProposalResponseSchema.parse(res.body);
+    expect(parsed.proposal.patch).toEqual([{ op: "ADD_EDGE", from: "analyze", to: "analyze-2" }]);
+    const unknown = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "x", definitionId: "missing-flow" });
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toMatchObject({ error: { code: "WORKFLOW_DEFINITION_NOT_FOUND" } });
+  });
+
+  it("maps schema-invalid generation failures to a sanitized 502", async () => {
+    const provider = new StubCopilotProvider(() => {
+      throw new StructuredOutputError('Provider openai failed schema workflow-copilot-proposal after one repair attempt: raw junk {"patch": "nope"}');
+    });
+    const { port } = await copilotRig(provider);
+    const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "add a secret scan", definition: copilotDefinition });
+    expect(res.status).toBe(502);
+    expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_GENERATION_FAILED" } });
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toContain("raw junk");
+    expect(serialized).not.toContain("repair attempt");
+    expect(serialized).not.toContain("openai");
   });
 });

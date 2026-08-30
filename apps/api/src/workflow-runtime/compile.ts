@@ -18,9 +18,13 @@ import type {
   WorkflowRuntimeValidationIssue,
 } from "@consistency/schema";
 import {
+  workflowRuntimePublicParameterSchema,
+} from "@consistency/schema";
+import {
   AVAILABLE_WORKFLOW_SERVICES,
   getWorkflowNodeService,
   isRegisteredSyscallAction,
+  validateWorkflowNodeParameters,
 } from "./registry";
 import {
   topologicalNodeOrder,
@@ -48,6 +52,7 @@ export function compileWorkflowRuntimeDefinition(input: unknown): WorkflowCompil
   }
   const definition = validation.definition;
   const errors: WorkflowRuntimeValidationIssue[] = [];
+  const publicParameters = new Map<string, Record<string, unknown>>();
 
   for (const [index, node] of definition.nodes.entries()) {
     const service = getWorkflowNodeService(node.type);
@@ -66,6 +71,16 @@ export function compileWorkflowRuntimeDefinition(input: unknown): WorkflowCompil
         message: `serviceRef '${node.serviceRef}' does not match registered service '${service.serviceRef}' for type '${node.type}'`,
       });
       continue;
+    }
+    const parameterIssue = validateWorkflowNodeParameters(node.type, node.parameters);
+    if (parameterIssue) {
+      errors.push({ code: "schema_invalid", path: ["nodes", index, "parameters"], message: parameterIssue });
+    }
+    const publicParameterResult = workflowRuntimePublicParameterSchema.safeParse(node.parameters);
+    if (!publicParameterResult.success) {
+      errors.push({ code: "schema_invalid", path: ["nodes", index, "parameters"], message: "parameters contain non-public values (paths, secrets, or handles)" });
+    } else {
+      publicParameters.set(node.id, publicParameterResult.data);
     }
     for (const action of service.capabilityRequirements) {
       if (!isRegisteredSyscallAction(action)) {
@@ -103,6 +118,7 @@ export function compileWorkflowRuntimeDefinition(input: unknown): WorkflowCompil
         order: index,
         coeffects: [...service.coeffects],
         capabilityRequirements: [...service.capabilityRequirements],
+        parameters: publicParameters.get(node.id) ?? {},
       };
     }),
   };

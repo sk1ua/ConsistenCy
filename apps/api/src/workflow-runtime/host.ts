@@ -37,10 +37,16 @@ import type { EvidenceSnapshot } from "@consistency/kernel";
 import { RepositorySnapshot } from "@consistency/repository";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { detectLanguage } from "@consistency/plugins-builtin";
-import { VERIFIED_MINI_REVIEW_DEFINITION } from "./definition";
+import {
+  VERIFIED_MINI_REVIEW_DEFINITION,
+  WORKFLOW_RUNTIME_BUILTIN_DEFINITIONS,
+  WORKFLOW_RUNTIME_BUILTIN_METADATA,
+  runtimeBuiltinChecksum,
+} from "./definition";
 import { compileWorkflowRuntimeDefinition } from "./compile";
 import { listWorkflowNodeTypes, getWorkflowNodeService, isRegisteredSyscallAction, AVAILABLE_WORKFLOW_SERVICES } from "./registry";
 import { executeWorkflowPlan } from "./executor";
+import { sanitizeExecutionError } from "../security/redact";
 import { WorkflowRuntimeStore, WorkflowRuntimeStoreError } from "./store";
 
 /** Deterministic, bounded file selection for the mini-review slice. */
@@ -76,6 +82,16 @@ export class WorkflowDefinitionNotExecutableError extends Error {
   constructor(reason: string) {
     super(reason);
     this.name = "WorkflowDefinitionNotExecutableError";
+  }
+}
+
+/** User definitions are persisted only after the complete runtime compiler passes. */
+export class WorkflowDefinitionInvalidError extends Error {
+  readonly issues: WorkflowRuntimeValidationIssue[];
+  constructor(issues: WorkflowRuntimeValidationIssue[]) {
+    super("Workflow definition failed canonical runtime validation");
+    this.name = "WorkflowDefinitionInvalidError";
+    this.issues = issues;
   }
 }
 
@@ -134,58 +150,71 @@ function nodeFeasibility(definition: WorkflowRuntimeDefinition): {
   result: WorkflowRuntimeDryLoadResult;
   executable: boolean;
 } {
-  const nodes: WorkflowRuntimeNodeFeasibility[] = definition.nodes.map((node) => {
+  // Compile exactly once. Canonical validation issues are then attributed to
+  // their node, while dry-load adds only the feasibility-specific flags/issues.
+  const compilation = compileWorkflowRuntimeDefinition(definition);
+  const canonicalIssues = compilation.errors.filter(
+    (issue) => issue.code !== "capability_requirement_unsatisfiable" && issue.code !== "coeffect_unavailable",
+  );
+  const issueKey = (issue: WorkflowRuntimeValidationIssue) => `${issue.code}|${JSON.stringify(issue.path)}|${issue.message}`;
+  const uniqueIssues = (issues: readonly WorkflowRuntimeValidationIssue[]) =>
+    [...new Map(issues.map((issue) => [issueKey(issue), issue])).values()];
+
+  const nodes: WorkflowRuntimeNodeFeasibility[] = definition.nodes.map((node, index) => {
     const service = getWorkflowNodeService(node.type);
-    const issues: WorkflowRuntimeValidationIssue[] = [];
-    let serviceRef: string | null = null;
-    let serviceRefMatches = false;
-    if (!service) {
-      issues.push({
-        code: "unknown_node_type",
-        path: ["nodes"],
-        message: `Node type '${node.type}' is not registered in the runtime Node Registry`,
-      });
-    } else {
-      serviceRef = service.serviceRef;
-      serviceRefMatches = service.serviceRef === node.serviceRef;
-      if (!serviceRefMatches) {
-        issues.push({
-          code: "service_ref_mismatch",
-          path: ["nodes"],
-          message: `serviceRef '${node.serviceRef}' does not match registered service '${service.serviceRef}'`,
-        });
-      }
-    }
+    const serviceRef = service?.serviceRef ?? null;
+    const serviceRefMatches = service?.serviceRef === node.serviceRef;
+    const coeffects = (service?.coeffects ?? []).map((name) => ({
+      name,
+      available: AVAILABLE_WORKFLOW_SERVICES.has(name),
+    }));
+    const capabilityRequirements = (service?.capabilityRequirements ?? []).map((action) => ({
+      action,
+      satisfiable: isRegisteredSyscallAction(action),
+    }));
+    const dryLoadIssues: WorkflowRuntimeValidationIssue[] = [
+      ...coeffects.filter((coeffect) => !coeffect.available).map((coeffect) => ({
+        code: "coeffect_unavailable" as const,
+        path: ["nodes", index, "type"] as (string | number)[],
+        message: `Required coeffect service '${coeffect.name}' is unavailable in this runtime`,
+      })),
+      ...capabilityRequirements.filter((requirement) => !requirement.satisfiable).map((requirement) => ({
+        code: "capability_requirement_unsatisfiable" as const,
+        path: ["nodes", index, "type"] as (string | number)[],
+        message: `Capability requirement '${requirement.action}' is not a registered Kernel syscall`,
+      })),
+    ];
+    const attributedCanonical = canonicalIssues.filter(
+      (issue) => issue.path[0] === "nodes" && issue.path[1] === index,
+    );
     return {
       nodeId: node.id,
       nodeType: node.type,
       serviceRef,
       nodeTypeRegistered: service !== undefined,
       serviceRefMatches,
-      coeffects: (service?.coeffects ?? []).map((name) => ({
-        name,
-        available: AVAILABLE_WORKFLOW_SERVICES.has(name),
-      })),
-      capabilityRequirements: (service?.capabilityRequirements ?? []).map((action) => ({
-        action,
-        satisfiable: isRegisteredSyscallAction(action),
-      })),
-      issues,
+      coeffects,
+      capabilityRequirements,
+      issues: uniqueIssues([...attributedCanonical, ...dryLoadIssues]),
     };
   });
 
-  const graphIssues = compileWorkflowRuntimeDefinition(definition).errors;
-  const allIssues = [...nodes.flatMap((node) => node.issues), ...graphIssues];
-  const feasible =
-    nodes.length > 0 &&
-    allIssues.length === 0 &&
-    nodes.every(
-      (node) =>
-        node.nodeTypeRegistered &&
-        node.serviceRefMatches &&
-        node.coeffects.every((coeffect) => coeffect.available) &&
-        node.capabilityRequirements.every((requirement) => requirement.satisfiable),
-    );
+  // Graph-level canonical errors have no node path. Keep them once by
+  // attributing them to the first node; persisted revisions normally cannot
+  // reach this branch because save-time compilation rejects them.
+  const graphIssues = canonicalIssues.filter((issue) => issue.path[0] !== "nodes");
+  if (graphIssues.length > 0 && nodes[0]) {
+    nodes[0].issues = uniqueIssues([...nodes[0].issues, ...graphIssues]);
+  }
+  const allIssues = uniqueIssues([
+    ...canonicalIssues,
+    ...nodes.flatMap((node) => node.issues.filter((issue) => issue.code === "capability_requirement_unsatisfiable" || issue.code === "coeffect_unavailable")),
+  ]);
+  const feasible = nodes.length > 0 && allIssues.length === 0 && compilation.ok && nodes.every(
+    (node) => node.nodeTypeRegistered && node.serviceRefMatches &&
+      node.coeffects.every((coeffect) => coeffect.available) &&
+      node.capabilityRequirements.every((requirement) => requirement.satisfiable),
+  );
 
   return {
     result: {
@@ -225,14 +254,24 @@ export class WorkflowRuntimeHost {
   initialize(): { seeded: boolean; interruptedRunsRecovered: number; interruptedTriggerPlansRecovered: number } {
     if (!this.#store) return { seeded: false, interruptedRunsRecovered: 0, interruptedTriggerPlansRecovered: 0 };
     let seeded = false;
-    if (!this.#store.definitionExists(BUILTIN_DEFINITION_ID)) {
-      const validation = compileWorkflowRuntimeDefinition(VERIFIED_MINI_REVIEW_DEFINITION);
-      this.#store.appendRevision({
-        definitionId: BUILTIN_DEFINITION_ID,
-        definition: VERIFIED_MINI_REVIEW_DEFINITION,
-        status: validation.ok ? "validated" : "draft_with_issues",
-        validationIssues: validation.errors,
-        origin: "builtin",
+    for (const definition of Object.values(WORKFLOW_RUNTIME_BUILTIN_DEFINITIONS)) {
+      const expected = WORKFLOW_RUNTIME_BUILTIN_METADATA[definition.id]!;
+      const existing = this.#store.getLatestRevision(definition.id);
+      if (existing) {
+        if (existing.revisionId !== expected.revisionId || existing.revision !== expected.revision || runtimeBuiltinChecksum(existing.definition) !== expected.checksum || JSON.stringify(existing.definition) !== JSON.stringify(definition) || existing.status !== "validated") {
+          throw new WorkflowRuntimePersistenceError();
+        }
+        continue;
+      }
+      if (this.#store.definitionExists(definition.id)) throw new WorkflowRuntimePersistenceError();
+      const validation = compileWorkflowRuntimeDefinition(definition);
+      if (!validation.ok) throw new WorkflowRuntimePersistenceError();
+      this.#store.appendBuiltinRevision({
+        definitionId: definition.id,
+        definition,
+        status: "validated",
+        validationIssues: [],
+        revisionId: expected.revisionId,
       });
       seeded = true;
     }
@@ -254,6 +293,11 @@ export class WorkflowRuntimeHost {
     return this.#persist().listDefinitions();
   }
 
+  hasVerificationReceipt(definitionId: string, revisionId: string, checksum: string): boolean {
+    const revision = this.#persist().getRevision(revisionId);
+    return revision?.definitionId === definitionId && runtimeBuiltinChecksum(revision.definition) === checksum && this.#persist().getLatestVerificationReceipt(definitionId, revisionId, checksum) !== undefined;
+  }
+
   getDefinitionRevision(definitionId: string, revisionId: string): WorkflowRuntimeDefinitionRevision {
     if (definitionId !== BUILTIN_DEFINITION_ID) {
       this.#requireDefinition(definitionId);
@@ -266,9 +310,9 @@ export class WorkflowRuntimeHost {
   }
 
   /**
-   * Append a new revision. Schema-invalid bodies are rejected by the caller's
-   * zod parse (400, nothing saved). Graph-invalid drafts are SAVED with
-   * status draft_with_issues + recorded issues but remain non-executable.
+   * Append a new revision only after the complete runtime compiler passes.
+   * Invalid schema, graph, registry, serviceRef, and parameter definitions are
+   * rejected before any definition or revision row is created.
    */
   saveDefinition(input: {
     definitionId?: string;
@@ -279,12 +323,12 @@ export class WorkflowRuntimeHost {
       throw new WorkflowRuntimeStoreError("The built-in definition is immutable", "WORKFLOW_DEFINITION_IMMUTABLE", 409);
     }
     const compilation = compileWorkflowRuntimeDefinition(input.definition);
-    const executable = compilation.ok;
+    if (!compilation.ok) throw new WorkflowDefinitionInvalidError(compilation.errors);
     return this.#persist().appendRevision({
       definitionId: targetId,
       definition: input.definition,
-      status: executable ? "validated" : "draft_with_issues",
-      validationIssues: compilation.errors,
+      status: "validated",
+      validationIssues: [],
     });
   }
 
@@ -310,7 +354,10 @@ export class WorkflowRuntimeHost {
   // -------------------------------------------------------------------------
 
   listRuns(limit?: number): WorkflowRuntimeRunSummary[] {
-    return this.#persist().listRuns(limit);
+    return this.#persist().listRuns(limit).map((run) => ({
+      ...run,
+      ...(run.error === undefined ? {} : { error: sanitizeExecutionError(run.error) }),
+    }));
   }
 
   getRun(runId: string): WorkflowRuntimeRunV2 | undefined {
@@ -327,7 +374,7 @@ export class WorkflowRuntimeHost {
       snapshot: { repository: record.repository, headSha: record.headSha },
       evidence: record.evidence as WorkflowRuntimeRunV2["evidence"],
       ...(record.miniReport === undefined ? {} : { miniReport: record.miniReport as WorkflowRuntimeRunV2["miniReport"] }),
-      ...(record.error === undefined ? {} : { error: record.error }),
+      ...(record.error === undefined ? {} : { error: sanitizeExecutionError(record.error) }),
       ...(record.trigger === undefined ? {} : { trigger: record.trigger }),
     };
   }
@@ -348,7 +395,10 @@ export class WorkflowRuntimeHost {
     if (input.definitionId === undefined && input.revisionId === undefined) {
       definition = VERIFIED_MINI_REVIEW_DEFINITION;
       const latest = this.#store?.getLatestRevision(BUILTIN_DEFINITION_ID);
-      revisionId = latest?.revisionId ?? "builtin-seed";
+      if (!latest || latest.revisionId !== WORKFLOW_RUNTIME_BUILTIN_METADATA[BUILTIN_DEFINITION_ID]!.revisionId || runtimeBuiltinChecksum(latest.definition) !== WORKFLOW_RUNTIME_BUILTIN_METADATA[BUILTIN_DEFINITION_ID]!.checksum) {
+        throw new WorkflowRuntimePersistenceError();
+      }
+      revisionId = latest.revisionId;
     } else {
       if (!input.definitionId || !input.revisionId) {
         throw new WorkflowDefinitionNotFoundError("definitionId and revisionId must be provided together");
@@ -511,6 +561,26 @@ export class WorkflowRuntimeHost {
     if (!binding.enabled) {
       throw new WorkflowRuntimeStoreError("Workflow binding is disabled for this repository", "WORKFLOW_BINDING_DISABLED", 409);
     }
+    return this.launchDefinitionRun({
+      repositoryId: input.repositoryId,
+      definitionId: input.definitionId,
+      ...(input.trigger === undefined ? {} : { trigger: input.trigger }),
+    });
+  }
+
+  /**
+   * Internal launch entry shared by every intent carrier that has ALREADY
+   * cleared its own intent gate (an enabled binding for triggerBinding; a
+   * runtime-mapped automation for the audit run executor). Resolves the
+   * definition gates — definition still exists → latest VALIDATED revision —
+   * then reuses the canonical pinned-snapshot trigger path byte-for-byte.
+   * Deliberately NOT an HTTP route: callers must prove their own intent.
+   */
+  async launchDefinitionRun(
+    input: { repositoryId: string; definitionId: string } & {
+      trigger?: { source: "manual" | "repository_change"; eventId?: string };
+    },
+  ): Promise<{ runId: string; status: "running"; revisionId: string }> {
     const revision = this.#persist().getLatestValidatedRevision(input.definitionId);
     if (!revision) {
       // Definition deleted (no revisions at all) or nothing validated.
@@ -532,7 +602,10 @@ export class WorkflowRuntimeHost {
   /** Per-repository run history (canonical opaque-id join). */
   listRunsForRepository(repositoryId: string, limit?: number) {
     this.#requireKnownRepository(repositoryId);
-    return this.#persist().listRunsForRepository(repositoryId, limit);
+    return this.#persist().listRunsForRepository(repositoryId, limit).map((run) => ({
+      ...run,
+      ...(run.error === undefined ? {} : { error: sanitizeExecutionError(run.error) }),
+    }));
   }
 
   #requireKnownRepository(repositoryId: string): void {

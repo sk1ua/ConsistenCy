@@ -26,6 +26,7 @@ export class DeterministicEvidenceRunner {
     readonly repository: string;
     readonly headSha: string;
     readonly files: readonly EvidenceRunnerFiles[];
+    readonly analyzers?: readonly ("style" | "secret")[];
   }): Promise<EvidenceInput[]> {
     const supported = input.files.filter((file) => detectLanguage(file.path) !== undefined);
     const allFiles = input.files;
@@ -39,22 +40,19 @@ export class DeterministicEvidenceRunner {
       treeSitter: this.#treeSitter,
     };
 
-    const styleEvidence = await this.#style.analyze(
-      {
-        repository: input.repository,
-        headSha: input.headSha,
-        files: supported.map((f) => f.path).sort(),
-      },
-      deps,
-    );
-    const secretEvidence = await this.#secret.analyze(
-      {
-        repository: input.repository,
-        headSha: input.headSha,
-        files: allFiles.map((f) => f.path).sort(),
-      },
-      deps,
-    );
+    const selected = new Set(input.analyzers ?? ["style", "secret"]);
+    const styleEvidence = selected.has("style")
+      ? await this.#style.analyze(
+          { repository: input.repository, headSha: input.headSha, files: supported.map((f) => f.path).sort() },
+          deps,
+        )
+      : [];
+    const secretEvidence = selected.has("secret")
+      ? await this.#secret.analyze(
+          { repository: input.repository, headSha: input.headSha, files: allFiles.map((f) => f.path).sort() },
+          deps,
+        )
+      : [];
 
     return [...styleEvidence, ...secretEvidence];
   }

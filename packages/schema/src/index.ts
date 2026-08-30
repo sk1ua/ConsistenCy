@@ -1,5 +1,6 @@
 export * from "./api";
 export * from "./audit";
+export * from "./catalog";
 export * from "./context";
 export * from "./heartbeat";
 export * from "./job";

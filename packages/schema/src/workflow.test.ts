@@ -6,6 +6,7 @@ import {
   workflowEvidenceItemSchema,
   workflowSpecSchema
 } from "./workflow";
+import { MAX_PUBLIC_PARAMETER_DEPTH, workflowRuntimeCopilotProposalRequestSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeCopilotProposalSchema, workflowRuntimeDefinitionSchema, workflowRuntimeExecutablePlanSchema, workflowRuntimeParameterSchemaDescriptorSchema, workflowRuntimePublicParameterSchema, workflowRuntimeSaveDefinitionRequestSchema, workflowRuntimeValidationResultSchema } from "./workflow-runtime";
 
 const validSpec = {
   version: 2,
@@ -126,6 +127,89 @@ describe("workflow execution artifacts", () => {
   });
 });
 
+describe("runtime definition identity", () => {
+  const definition = { id: "review_1", version: 1 as const, nodes: [{ id: "scan", type: "review", serviceRef: "review", parameters: {}, failurePolicy: "fail-closed" as const }], edges: [] };
+  it("uses canonical ids for definitions and nested save requests", () => {
+    expect(workflowRuntimeDefinitionSchema.parse(definition).id).toBe("review_1");
+    for (const id of ["../../Bearer SECRET", "", "bad/id", "Aupper", "a".repeat(300)]) {
+      expect(() => workflowRuntimeDefinitionSchema.parse({ ...definition, id })).toThrow();
+    }
+    expect(workflowRuntimeSaveDefinitionRequestSchema.parse({ definition }).definition.id).toBe("review_1");
+    expect(() => workflowRuntimeSaveDefinitionRequestSchema.parse({ definitionId: "other", definition })).toThrow();
+  });
+});
+
+describe("runtime parameter descriptors", () => {
+  it("accepts string[] enumValues and validates every default element", () => {
+    const field = workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "analyzers", label: "Analyzers", type: "string[]", required: false, enumValues: ["style", "secret"], default: ["style"] }] }).fields[0]!;
+    expect(field.enumValues).toEqual(["style", "secret"]);
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "analyzers", label: "Analyzers", type: "string[]", required: false, enumValues: ["style", "secret"], default: ["unknown"] }] })).toThrow();
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "analyzers", label: "Analyzers", type: "string[]", required: false, enumValues: ["style"], default: "style" }] })).toThrow();
+  });
+
+  it("rejects missing enum values, mismatched defaults, and illegal enumValues", () => {
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "mode", label: "Mode", type: "enum", required: true }] })).toThrow();
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "x", label: "X", type: "number", required: false, default: "bad" }] })).toThrow();
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "x", label: "X", type: "string", required: false, enumValues: ["x"] }] })).toThrow();
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "x", label: "X", type: "string", required: false }, { name: "x", label: "X2", type: "string", required: false }] })).toThrow();
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "mode", label: "Mode", type: "enum", required: true, enumValues: ["a", "a"] }] })).toThrow();
+    expect(() => workflowRuntimeParameterSchemaDescriptorSchema.parse({ fields: [{ name: "modes", label: "Modes", type: "string[]", required: false, enumValues: ["a", "b"], default: ["a", "a"] }] })).toThrow();
+  });
+});
+
+describe("workflow runtime validation result", () => {
+  const plan = {
+    definitionId: "review_1",
+    definitionVersion: 1 as const,
+    agentSpecs: [{ nodeId: "scan", serviceRef: "review", order: 0, coeffects: [], capabilityRequirements: [], parameters: { analyzers: ["style"] } }],
+  };
+
+  it("enforces success/failure cross-field invariants and strict fields", () => {
+    expect(workflowRuntimeValidationResultSchema.parse({ ok: true, errors: [], plan })).toEqual({ ok: true, errors: [], plan });
+    expect(workflowRuntimeValidationResultSchema.parse({ ok: false, errors: [{ code: "schema_invalid", path: [], message: "bad" }] })).toMatchObject({ ok: false });
+    for (const value of [
+      { ok: true, errors: [{ code: "schema_invalid", path: [], message: "bad" }], plan },
+      { ok: true, errors: [] },
+      { ok: false, errors: [] },
+      { ok: false, errors: [{ code: "schema_invalid", path: [], message: "bad" }], plan },
+      { ok: true, errors: [], plan, extra: true },
+    ]) expect(() => workflowRuntimeValidationResultSchema.parse(value)).toThrow();
+  });
+
+  it("uses canonical plan ids and excludes paths, secrets, and handles", () => {
+    expect(workflowRuntimeExecutablePlanSchema.parse(plan).definitionId).toBe("review_1");
+    for (const id of ["../escape", "Aupper", "1leading", "a".repeat(129)]) {
+      expect(() => workflowRuntimeExecutablePlanSchema.parse({ ...plan, definitionId: id })).toThrow();
+    }
+    for (const parameters of [
+      { path: "/etc/passwd" },
+      { rootPath: "C:\\\\repo" },
+      { apiToken: "secret" },
+      { nested: { handle: "raw-capability" } },
+      { value: "file:///tmp/private" },
+      { value: "FiLe://C:/private" },
+      { value: "file%3A%2F%2F%2Ftmp%2Fprivate" },
+    ]) expect(() => workflowRuntimePublicParameterSchema.parse(parameters)).toThrow();
+    expect(workflowRuntimePublicParameterSchema.parse({
+      http: "https://example.test/a/b",
+      relative: "./src/index.ts",
+      encodedRelative: "%2E%2Fsrc%2Findex.ts",
+    })).toEqual({ http: "https://example.test/a/b", relative: "./src/index.ts", encodedRelative: "%2E%2Fsrc%2Findex.ts" });
+    expect(workflowRuntimePublicParameterSchema.parse({ analyzers: ["style"], enabled: true, count: 2, nested: { ok: null } })).toEqual({ analyzers: ["style"], enabled: true, count: 2, nested: { ok: null } });
+  });
+
+  it("fails closed at the bounded recursive depth without overflowing on wide arrays", () => {
+    const nested = (depth: number): unknown => {
+      let value: unknown = "ok";
+      for (let index = 0; index < depth; index += 1) value = { child: value };
+      return { value };
+    };
+    expect(() => workflowRuntimePublicParameterSchema.parse(nested(MAX_PUBLIC_PARAMETER_DEPTH))).not.toThrow();
+    expect(() => workflowRuntimePublicParameterSchema.parse(nested(MAX_PUBLIC_PARAMETER_DEPTH + 1))).toThrow();
+    expect(() => workflowRuntimePublicParameterSchema.parse({ values: Array.from({ length: 10_000 }, () => "ok") })).not.toThrow();
+  });
+});
+
 describe("workflow evidence", () => {
   it("requires line bounds to be paired and ordered", () => {
     expect(workflowEvidenceItemSchema.parse({
@@ -145,5 +229,73 @@ describe("workflow evidence", () => {
       startLine: 20,
       endLine: 10
     })).toThrow();
+  });
+});
+
+describe("workflow copilot proposal (CKPT6 Phase 3 WorkflowPatch)", () => {
+  const addNode = { op: "ADD_NODE" as const, nodeId: "secret-scan", serviceRef: "deterministic-evidence.analyzer" };
+  const definition = {
+    id: "flow-1",
+    version: 1 as const,
+    nodes: [{ id: "analyze", type: "analyzer.deterministic-evidence", serviceRef: "deterministic-evidence.analyzer", parameters: {}, failurePolicy: "fail-closed" as const }],
+    edges: [],
+  };
+
+  it("parses a legal proposal with ADD_NODE and ADD_EDGE operations", () => {
+    const proposal = {
+      patch: [addNode, { op: "ADD_EDGE", from: "analyze", to: "secret-scan" }],
+      rationale: "adds a scan node between analyze and the synthesizer",
+    };
+    expect(workflowRuntimeCopilotProposalSchema.parse(proposal)).toEqual(proposal);
+    expect(workflowRuntimeCopilotProposalResponseSchema.parse({ proposal }).proposal.rationale).toBe(proposal.rationale);
+  });
+
+  it("accepts the optional descriptive name, parameters, and basis fingerprint", () => {
+    const proposal = {
+      patch: [{ ...addNode, name: "Secret Scan", parameters: { analyzers: ["style"] } }],
+      rationale: "r",
+      basis: { definitionFingerprint: "abc123" },
+    };
+    expect(workflowRuntimeCopilotProposalSchema.parse(proposal)).toEqual(proposal);
+  });
+
+  it("rejects unknown operations, unknown fields, and malformed node ids", () => {
+    for (const patch of [
+      [{ op: "REMOVE_NODE", nodeId: "analyze" }],
+      [{ ...addNode, condition: "severity >= high" }],
+      [{ op: "ADD_EDGE", from: "analyze", to: "secret-scan", condition: "severity >= high" }],
+      [{ ...addNode, nodeId: "Bad_Upper" }],
+      [{ ...addNode, extra: true }],
+    ]) {
+      expect(() => workflowRuntimeCopilotProposalSchema.parse({ patch, rationale: "r" })).toThrow();
+    }
+    // Registry whitelist and edge-endpoint existence are SERVER-side fail-closed
+    // checks (the shared schema cannot encode the runtime registry); the schema
+    // layer only enforces shape.
+    expect(workflowRuntimeCopilotProposalSchema.parse({
+      patch: [{ ...addNode, serviceRef: "not-in-registry.service" }, { op: "ADD_EDGE", from: "analyze", to: "ghost" }],
+      rationale: "r",
+    }).patch).toHaveLength(2);
+  });
+
+  it("rejects an empty patch and an overlong rationale", () => {
+    expect(() => workflowRuntimeCopilotProposalSchema.parse({ patch: [], rationale: "r" })).toThrow();
+    expect(() => workflowRuntimeCopilotProposalSchema.parse({ patch: [addNode], rationale: "" })).toThrow();
+    expect(() => workflowRuntimeCopilotProposalSchema.parse({ patch: [addNode], rationale: "x".repeat(2001) })).toThrow();
+    expect(() => workflowRuntimeCopilotProposalSchema.parse({ patch: Array.from({ length: 33 }, () => addNode), rationale: "r" })).toThrow();
+    expect(workflowRuntimeCopilotProposalSchema.parse({ patch: Array.from({ length: 32 }, () => addNode), rationale: "r" }).patch).toHaveLength(32);
+  });
+
+  it("requires exactly one of definition or definitionId on the request", () => {
+    expect(workflowRuntimeCopilotProposalRequestSchema.parse({ instruction: "add a scan", definition })).toMatchObject({ instruction: "add a scan" });
+    expect(workflowRuntimeCopilotProposalRequestSchema.parse({ instruction: "add a scan", definitionId: "flow-1" })).toMatchObject({ instruction: "add a scan" });
+    for (const request of [
+      { instruction: "add a scan" },
+      { instruction: "add a scan", definition, definitionId: "flow-1" },
+      { instruction: "", definition },
+      { instruction: "x".repeat(2001), definition },
+      { instruction: "add a scan", definition: { ...definition, nodes: [] } },
+      { instruction: "add a scan", definition, extra: true },
+    ]) expect(() => workflowRuntimeCopilotProposalRequestSchema.parse(request)).toThrow();
   });
 });

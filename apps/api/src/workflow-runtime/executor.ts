@@ -119,6 +119,7 @@ export interface WorkflowExecutionResult {
 interface AgentRuntime {
   readonly nodeId: string;
   readonly serviceRef: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
   readonly acbId: ReturnType<typeof asAgentId>;
   readonly facades: WorkflowAgentFacades;
   readonly handles: Map<string, CapabilityHandle>;
@@ -270,6 +271,7 @@ export async function executeWorkflowPlan(
         snapshot: input.snapshot,
         evidenceStore,
         contextImage: agentImage,
+        parameters: spec.parameters,
       });
 
       scheduler.ready(runtime.acbId);
@@ -350,6 +352,7 @@ function registerWorkflowAgent(input: {
   readonly nodeId: string;
   readonly serviceRef: string;
   readonly capabilityRequirements: readonly string[];
+  readonly parameters: Readonly<Record<string, unknown>>;
   readonly repository: string;
   readonly snapshot: WorkflowPinnedSnapshot;
   readonly evidenceStore: EvidenceStore;
@@ -419,7 +422,7 @@ function registerWorkflowAgent(input: {
   });
 
   const fiber = input.bridge.attach(principal, acbId);
-  return { nodeId: input.nodeId, serviceRef: input.serviceRef, acbId, facades, handles, fiber };
+  return { nodeId: input.nodeId, serviceRef: input.serviceRef, parameters: input.parameters, acbId, facades, handles, fiber };
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +447,7 @@ async function executeAgentBody(body: AgentBodyInput): Promise<{ findings: Workf
     return { findings: [] };
   }
   if (body.runtime.serviceRef === "persisted-evidence.verifier") {
+    if (Object.keys(body.runtime.parameters).length !== 0) throw new Error("verifier parameters must be an empty object");
     return verifyAgentBody(body);
   }
   throw new Error("no executor service registered for serviceRef '" + body.runtime.serviceRef + "'");
@@ -471,6 +475,7 @@ async function analyzeAgentBody(body: AgentBodyInput): Promise<void> {
       repository: input.repository,
       headSha: input.headSha,
       files,
+      analyzers: normalizeAnalyzerProfile(body.runtime.parameters),
     });
   } finally {
     scheduler.wake(runtime.acbId);
@@ -530,6 +535,17 @@ async function verifyAgentBody(body: AgentBodyInput): Promise<{ findings: Workfl
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function normalizeAnalyzerProfile(parameters: Readonly<Record<string, unknown>>): readonly ("style" | "secret")[] {
+  const keys = Object.keys(parameters);
+  if (keys.some(key => key !== "analyzers")) throw new Error("analyzer parameters contain unknown fields");
+  const value = parameters.analyzers;
+  if (value === undefined) return ["style", "secret"];
+  if (!Array.isArray(value) || value.length === 0 || value.some(item => item !== "style" && item !== "secret") || new Set(value).size !== value.length) {
+    throw new Error("analyzer parameters contain an invalid analyzers profile");
+  }
+  return value as readonly ("style" | "secret")[];
+}
 
 function cleanupOnFailure(scheduler: KernelScheduler, acbId: AgentRuntime["acbId"]): void {
   const current = scheduler.getAgent(acbId);

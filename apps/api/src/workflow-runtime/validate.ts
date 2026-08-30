@@ -11,12 +11,13 @@ import {
   workflowRuntimeDefinitionSchema,
   type WorkflowRuntimeDefinition,
   type WorkflowRuntimeValidationIssue,
-  type WorkflowRuntimeValidationResult,
 } from "@consistency/schema";
 
-export function validateWorkflowRuntimeDefinitionInput(
-  input: unknown,
-): WorkflowRuntimeValidationResult & { definition?: WorkflowRuntimeDefinition } {
+type DefinitionValidation =
+  | { readonly ok: true; readonly errors: []; readonly definition: WorkflowRuntimeDefinition }
+  | { readonly ok: false; readonly errors: WorkflowRuntimeValidationIssue[] };
+
+export function validateWorkflowRuntimeDefinitionInput(input: unknown): DefinitionValidation {
   const parsed = workflowRuntimeDefinitionSchema.safeParse(input);
   if (!parsed.success) {
     return {

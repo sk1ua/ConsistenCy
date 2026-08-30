@@ -18,7 +18,7 @@ describe("TEST A — workflow definition validation", () => {
     const result = validateWorkflowRuntimeDefinitionInput(VERIFIED_MINI_REVIEW_DEFINITION);
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(result.definition?.id).toBe("verified-mini-review");
+    if (result.ok) expect(result.definition.id).toBe("verified-mini-review");
   });
 
   it("an invalid graph fails BEFORE execution with structured errors", () => {
@@ -89,6 +89,37 @@ describe("Compilation — capability requirement / feasibility check", () => {
     });
     expect(compilation.ok).toBe(false);
     expect(compilation.errors.some((issue) => issue.code === "unknown_node_type")).toBe(true);
+  });
+
+  it("fails closed on unknown analyzer config, analyzer names, wrong types, and verifier extras", () => {
+    const base = { ...VERIFIED_MINI_REVIEW_DEFINITION, nodes: [...VERIFIED_MINI_REVIEW_DEFINITION.nodes] };
+    for (const parameters of [{ analyzers: ["style"], inventedCapability: true }, { analyzers: ["made-up"] }, { analyzers: "style" }]) {
+      const result = compileWorkflowRuntimeDefinition({ ...base, nodes: [{ ...base.nodes[0]!, parameters }, base.nodes[1]!] });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some(issue => issue.path.includes("parameters"))).toBe(true);
+    }
+    const verifier = compileWorkflowRuntimeDefinition({ ...base, nodes: [base.nodes[0]!, { ...base.nodes[1]!, parameters: { extra: true } }] });
+    expect(verifier.ok).toBe(false);
+  });
+
+  it("deep-freezes builtin graph data and keeps its checksum stable", () => {
+    const definition = VERIFIED_MINI_REVIEW_DEFINITION;
+    const checksum = JSON.stringify(definition);
+    expect(() => (definition.nodes as unknown as unknown[]).push({})).toThrow();
+    expect(() => ((definition.nodes[0]!.parameters as Record<string, unknown>).analyzers = ["secret"])).toThrow();
+    expect(JSON.stringify(definition)).toBe(checksum);
+  });
+
+  it("rejects file URLs and excessive public parameter nesting before building a plan", () => {
+    const base = VERIFIED_MINI_REVIEW_DEFINITION;
+    for (const value of ["file:///tmp/private", "FILE://C:/private", "file%3A%2F%2F%2Ftmp%2Fprivate"]) {
+      const result = compileWorkflowRuntimeDefinition({
+        ...base,
+        nodes: [{ ...base.nodes[0]!, parameters: { analyzers: ["style"], note: value } }, base.nodes[1]!],
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((issue) => issue.path.includes("parameters"))).toBe(true);
+    }
   });
 
   it("rejects serviceRef that does not match the registered service", () => {

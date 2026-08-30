@@ -294,16 +294,17 @@ describe("TEST Q — isolation & enforcement", () => {
       const doomedTrigger = await httpJson(rig.port, "POST", "/workflow-runtime/repositories/repo-a/runs", { definitionId: "doomed" });
       expect([404, 409]).toContain(doomedTrigger.status);
 
-      // Definition with NO validated revision (draft only) → 409 not-executable.
-      const draft = {
-        ...userDefinition("draft-only"),
-        edges: [
-          { from: "analyze", to: "verify" },
-          { from: "verify", to: "analyze" },
-        ],
-      };
-      await httpJson(rig.port, "POST", "/workflow-runtime/definitions", { definition: draft });
-      await httpJson(rig.port, "PUT", A_BINDINGS + "/draft-only", { enabled: true });
+      // A canonical definition can exist as a persisted draft (for example,
+      // imported legacy data) without a validated revision. Seed it through
+      // the real save route, then transition only its revision status for this
+      // fixture; assert both setup writes succeed before exercising the 409.
+      const draftSaved = await httpJson(rig.port, "POST", "/workflow-runtime/definitions", { definition: userDefinition("draft-only") });
+      expect(draftSaved.status).toBe(201);
+      const draftRevisionId = (draftSaved.body as { revision: { revisionId: string } }).revision.revisionId;
+      rig.database.prepare("UPDATE workflow_runtime_revisions SET status = 'draft_with_issues', validation_issues_json = ? WHERE id = ?")
+        .run(JSON.stringify([{ code: "fixture_draft", path: [], message: "fixture draft" }]), draftRevisionId);
+      const draftBinding = await httpJson(rig.port, "PUT", A_BINDINGS + "/draft-only", { enabled: true });
+      expect(draftBinding.status).toBe(200);
       const draftTrigger = await httpJson(rig.port, "POST", "/workflow-runtime/repositories/repo-a/runs", { definitionId: "draft-only" });
       expect(draftTrigger.status).toBe(409);
       expect((draftTrigger.body as { error: { code: string } }).error.code).toBe("WORKFLOW_DEFINITION_NOT_EXECUTABLE");

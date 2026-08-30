@@ -30,6 +30,9 @@ export const workflowRuntimeNodeIdSchema = z
   .trim()
   .regex(/^[a-z][a-z0-9_-]*$/, "Node id must start with a letter and use only [a-z0-9_-]");
 
+/** Definition ids use the same canonical engine-safe alphabet as node ids. */
+export const workflowRuntimeDefinitionIdSchema = workflowRuntimeNodeIdSchema.max(128, "Definition id is too long");
+
 export const workflowRuntimeFailurePolicySchema = z.literal("fail-closed");
 
 export const workflowRuntimeNodeSchema = z.object({
@@ -44,16 +47,59 @@ export const workflowRuntimeNodeSchema = z.object({
   failurePolicy: workflowRuntimeFailurePolicySchema,
 }).strict();
 
+export const workflowRuntimeParameterFieldSchema = z.object({
+  name: nonEmpty,
+  label: nonEmpty,
+  type: z.enum(["string", "number", "boolean", "enum", "string[]"]),
+  required: z.boolean(),
+  enumValues: z.array(nonEmpty).min(1).optional(),
+  default: z.unknown().optional(),
+}).strict().superRefine((field, ctx) => {
+  if (field.type === "enum" && (!field.enumValues || field.enumValues.length === 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "enum fields require enumValues" });
+  }
+  if (!["enum", "string[]"].includes(field.type) && field.enumValues !== undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "enumValues are only valid for enum and string[] fields" });
+  }
+  if (field.enumValues !== undefined) {
+    if (field.enumValues.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "enumValues must be non-empty" });
+    }
+    if (new Set(field.enumValues).size !== field.enumValues.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "enumValues must be unique" });
+    }
+  }
+  if (field.default !== undefined) {
+    const valid = field.type === "string" ? typeof field.default === "string"
+      : field.type === "number" ? typeof field.default === "number" && Number.isFinite(field.default)
+      : field.type === "boolean" ? typeof field.default === "boolean"
+      : field.type === "string[]" ? Array.isArray(field.default) && field.default.every(item => typeof item === "string") && new Set(field.default).size === field.default.length && (field.enumValues === undefined || field.default.every(item => field.enumValues!.includes(item)))
+      : typeof field.default === "string" && field.enumValues?.includes(field.default);
+    if (!valid) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "default does not match field type, enumValues, or uniqueness contract" });
+  }
+});
+
+export const workflowRuntimeParameterSchemaDescriptorSchema = z.object({
+  fields: z.array(workflowRuntimeParameterFieldSchema),
+}).strict().superRefine((descriptor, ctx) => {
+  const names = new Set<string>();
+  descriptor.fields.forEach((field, index) => {
+    if (names.has(field.name)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fields", index, "name"], message: "field names must be unique" });
+    names.add(field.name);
+  });
+});
+
 export const workflowRuntimeEdgeSchema = z.object({
   from: workflowRuntimeNodeIdSchema,
   to: workflowRuntimeNodeIdSchema,
 }).strict();
 
 export const workflowRuntimeDefinitionSchema = z.object({
-  id: nonEmpty,
+  id: workflowRuntimeDefinitionIdSchema,
   version: z.literal(1),
   nodes: z.array(workflowRuntimeNodeSchema).min(1),
   edges: z.array(workflowRuntimeEdgeSchema).default([]),
+  metadata: z.object({ purpose: z.string().trim().max(500).optional() }).strict().optional(),
 }).strict();
 
 export const workflowRuntimeValidationErrorCodeSchema = z.enum([
@@ -74,16 +120,81 @@ export const workflowRuntimeValidationIssueSchema = z.object({
   message: z.string(),
 }).strict();
 
-export const workflowRuntimeValidationResultSchema = z.object({
-  ok: z.boolean(),
-  errors: z.array(workflowRuntimeValidationIssueSchema).default([]),
-}).strict();
-
 /**
  * One planned agent. Purely descriptive: no credential, no raw handle, no
  * authorization decision — `capabilityRequirements` names the actions the
  * runtime would have to issue for the agent, checked for FEASIBILITY only.
  */
+/** Maximum nested container depth accepted in public parameter JSON. */
+export const MAX_PUBLIC_PARAMETER_DEPTH = 12;
+const PUBLIC_SENSITIVE_KEY = /(secret|token|password|passwd|credential|authorization|api[_-]?key|private[_-]?key|handle|path)/i;
+
+function decodePublicParameterString(value: string): string {
+  let decoded = value;
+  // Decode a small, bounded number of layers so encoded schemes/paths cannot
+  // evade the public boundary without making validation unbounded.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  return decoded;
+}
+
+function isPublicParameterString(value: string): boolean {
+  const decoded = decodePublicParameterString(value).trim();
+  return !/^file:\/\//i.test(decoded)
+    && !/^(?:[A-Za-z]:[\\/]|[\\/]|\\\\)/.test(decoded);
+}
+
+/** Iterative fail-closed walk; avoids recursive parser stack overflow. */
+function isPublicParameterValue(value: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const seen = new WeakSet<object>();
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    const item = current.value;
+    if (typeof item === "string") {
+      if (!isPublicParameterString(item)) return false;
+      continue;
+    }
+    if (item === null || typeof item === "number" || typeof item === "boolean") {
+      if (typeof item === "number" && !Number.isFinite(item)) return false;
+      continue;
+    }
+    if (typeof item !== "object" || current.depth > MAX_PUBLIC_PARAMETER_DEPTH) return false;
+    const prototype = Object.getPrototypeOf(item);
+    if (prototype !== Object.prototype && prototype !== null && !Array.isArray(item)) return false;
+    if (seen.has(item)) return false;
+    seen.add(item);
+    if (Array.isArray(item)) {
+      for (const child of item) pending.push({ value: child, depth: current.depth + 1 });
+    } else {
+      for (const [key, child] of Object.entries(item as Record<string, unknown>)) {
+        if (PUBLIC_SENSITIVE_KEY.test(key)) return false;
+        pending.push({ value: child, depth: current.depth + 1 });
+      }
+    }
+  }
+  return true;
+}
+
+/** JSON data that is safe to expose in a descriptive executable plan. */
+export const workflowRuntimePublicParameterValueSchema: z.ZodType<unknown> = z.custom<unknown>(
+  isPublicParameterValue,
+  { message: "value is not a public parameter (paths, secrets, handles, or excessive nesting)" },
+);
+
+export const workflowRuntimePublicParameterSchema = z.record(z.unknown()).superRefine((value, ctx) => {
+  if (!isPublicParameterValue(value)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "parameters contain non-public values (paths, secrets, handles, or excessive nesting)" });
+  }
+});
+
 export const workflowRuntimeAgentSpecSchema = z.object({
   nodeId: workflowRuntimeNodeIdSchema,
   serviceRef: nonEmpty,
@@ -91,13 +202,25 @@ export const workflowRuntimeAgentSpecSchema = z.object({
   order: z.number().int().nonnegative(),
   coeffects: z.array(nonEmpty).default([]),
   capabilityRequirements: z.array(nonEmpty).default([]),
+  /** Validated, public-safe runtime service parameters copied from the definition node. */
+  parameters: workflowRuntimePublicParameterSchema.default({}),
 }).strict();
 
 export const workflowRuntimeExecutablePlanSchema = z.object({
-  definitionId: nonEmpty,
+  definitionId: workflowRuntimeDefinitionIdSchema,
   definitionVersion: z.literal(1),
   agentSpecs: z.array(workflowRuntimeAgentSpecSchema).min(1),
 }).strict();
+
+/**
+ * Public result for POST /workflow-runtime/validate. A successful compile
+ * includes the descriptive executable plan returned by the canonical server;
+ * it is data only and never an authorization grant.
+ */
+export const workflowRuntimeValidationResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), errors: z.tuple([]), plan: workflowRuntimeExecutablePlanSchema }).strict(),
+  z.object({ ok: z.literal(false), errors: z.array(workflowRuntimeValidationIssueSchema).min(1) }).strict(),
+]);
 
 /** Node Registry DTO — the runtime-owned truth about executable node types. */
 export const workflowRuntimeNodeTypeSchema = z.object({
@@ -107,6 +230,7 @@ export const workflowRuntimeNodeTypeSchema = z.object({
   description: z.string(),
   capabilityRequirements: z.array(nonEmpty),
   coeffects: z.array(nonEmpty),
+  parameterSchema: workflowRuntimeParameterSchemaDescriptorSchema,
 }).strict();
 
 export const workflowRuntimeRunStatusSchema = z.enum(["running", "succeeded", "failed"]);
@@ -202,6 +326,8 @@ export type WorkflowRuntimeValidationIssue = z.infer<typeof workflowRuntimeValid
 export type WorkflowRuntimeValidationResult = z.infer<typeof workflowRuntimeValidationResultSchema>;
 export type WorkflowRuntimeAgentSpec = z.infer<typeof workflowRuntimeAgentSpecSchema>;
 export type WorkflowRuntimeExecutablePlan = z.infer<typeof workflowRuntimeExecutablePlanSchema>;
+export type WorkflowRuntimeParameterField = z.infer<typeof workflowRuntimeParameterFieldSchema>;
+export type WorkflowRuntimeParameterSchemaDescriptor = z.infer<typeof workflowRuntimeParameterSchemaDescriptorSchema>;
 export type WorkflowRuntimeNodeType = z.infer<typeof workflowRuntimeNodeTypeSchema>;
 export type WorkflowRuntimeRunStatus = z.infer<typeof workflowRuntimeRunStatusSchema>;
 export type WorkflowRuntimeEvidenceSummary = z.infer<typeof workflowRuntimeEvidenceSummarySchema>;
@@ -214,9 +340,6 @@ export type WorkflowRuntimeTriggerRequest = z.infer<typeof workflowRuntimeTrigge
 // ---------------------------------------------------------------------------
 // Phase 2: persisted definition lifecycle, run history, dry-load feasibility
 // ---------------------------------------------------------------------------
-
-/** Definition ids share the engine-safe alphabet ([a-z][a-z0-9_-]*). */
-export const workflowRuntimeDefinitionIdSchema = workflowRuntimeNodeIdSchema;
 
 export const workflowRuntimeDefinitionStatusSchema = z.enum([
   /** Schema-parseable AND compiles (executable). */
@@ -255,7 +378,11 @@ export const workflowRuntimeSaveDefinitionRequestSchema = z.object({
   /** Required for create; must match the body definition.id on update. */
   definitionId: workflowRuntimeDefinitionIdSchema.optional(),
   definition: workflowRuntimeDefinitionSchema,
-}).strict();
+}).strict().superRefine((request, ctx) => {
+  if (request.definitionId !== undefined && request.definitionId !== request.definition.id) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["definitionId"], message: "definitionId must match definition.id" });
+  }
+});
 
 /** Dry-load per-node feasibility — REUSES compile output; never a judgment. */
 export const workflowRuntimeNodeFeasibilitySchema = z.object({
@@ -333,6 +460,18 @@ export const workflowRuntimeRunV2Schema = workflowRuntimeRunSchema.extend({
   trigger: workflowRuntimeRunTriggerSchema.optional(),
 }).strict();
 
+export const workflowRuntimeOverviewSchema = z.object({
+  definition: workflowRuntimeDefinitionSchema,
+  nodeTypes: z.array(workflowRuntimeNodeTypeSchema),
+}).strict();
+
+export const workflowRuntimeDefinitionsResponseSchema = z.object({ definitions: z.array(workflowRuntimeDefinitionSummarySchema) }).strict();
+export const workflowRuntimeRevisionResponseSchema = z.object({ revision: workflowRuntimeDefinitionRevisionSchema }).strict();
+export const workflowRuntimeDryLoadResponseSchema = workflowRuntimeDryLoadResultSchema;
+export const workflowRuntimeTriggerResponseSchema = z.object({ runId: nonEmpty, status: nonEmpty, revisionId: nonEmpty }).strict();
+export const workflowRuntimeRunsResponseSchema = z.object({ runs: z.array(workflowRuntimeRunSummarySchema) }).strict();
+export const workflowRuntimeRunResponseSchema = workflowRuntimeRunV2Schema;
+
 export type WorkflowRuntimeDefinitionRevision = z.infer<typeof workflowRuntimeDefinitionRevisionSchema>;
 export type WorkflowRuntimeDefinitionSummary = z.infer<typeof workflowRuntimeDefinitionSummarySchema>;
 export type WorkflowRuntimeSaveDefinitionRequest = z.infer<typeof workflowRuntimeSaveDefinitionRequestSchema>;
@@ -385,3 +524,85 @@ export type WorkflowRuntimeSetBindingRequest = z.infer<typeof workflowRuntimeSet
 export type WorkflowRuntimeRepositoryTriggerRequest = z.infer<typeof workflowRuntimeRepositoryTriggerRequestSchema>;
 export type WorkflowRuntimeBindingTriggerMode = z.infer<typeof workflowRuntimeBindingTriggerModeSchema>;
 export type WorkflowRuntimeRunTrigger = z.infer<typeof workflowRuntimeRunTriggerSchema>;
+
+// ---------------------------------------------------------------------------
+// CKPT6 Phase 3: Workflow Copilot proposal (structured WorkflowPatch, §18.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * One proposed operation (§18.3 ADD_NODE / ADD_EDGE vocabulary). A proposal is
+ * DATA only: it never mutates a definition, never creates a Run, and never
+ * grants authorization. The only path to a persisted change is a human Apply
+ * that translates the patch into Studio reducer actions and then walks the
+ * existing validate → save-revision gate chain (§36: the Copilot can never
+ * bypass the compiler).
+ */
+export const workflowRuntimeCopilotAddNodeOperationSchema = z.object({
+  op: z.literal("ADD_NODE"),
+  nodeId: workflowRuntimeNodeIdSchema,
+  /**
+   * MUST be a serviceRef from the runtime Node Registry. The API verifies the
+   * value against the server-owned registry (`listWorkflowNodeTypes()`);
+   * client-supplied registries are never trusted.
+   */
+  serviceRef: nonEmpty,
+  /** Descriptive label suggestion only — the definition schema has no name field. */
+  name: z.string().trim().min(1).max(120).optional(),
+  /** Proposed node parameters; validated against the registry descriptor server-side. */
+  parameters: z.record(z.unknown()).optional(),
+}).strict();
+
+/**
+ * ADD_EDGE deliberately carries NO `condition` field: the current
+ * `workflowRuntimeEdgeSchema` supports `{ from, to }` only, and this contract
+ * must not invent capability the graph schema cannot represent. Conditions can
+ * be added when the edge schema grows them (documented in docs/workflow-runtime.md).
+ */
+export const workflowRuntimeCopilotAddEdgeOperationSchema = z.object({
+  op: z.literal("ADD_EDGE"),
+  /** Both endpoints MUST exist once the proposal is applied (server-verified). */
+  from: workflowRuntimeNodeIdSchema,
+  to: workflowRuntimeNodeIdSchema,
+}).strict();
+
+export const workflowRuntimeCopilotPatchOperationSchema = z.discriminatedUnion("op", [
+  workflowRuntimeCopilotAddNodeOperationSchema,
+  workflowRuntimeCopilotAddEdgeOperationSchema,
+]);
+
+export const workflowRuntimeCopilotProposalSchema = z.object({
+  /** Bounded operation list, applied strictly in order. */
+  patch: z.array(workflowRuntimeCopilotPatchOperationSchema).min(1).max(32),
+  rationale: z.string().trim().min(1).max(2000),
+  /** Provenance: which definition the proposal was computed against. */
+  basis: z.object({
+    definitionFingerprint: nonEmpty.optional(),
+  }).strict().optional(),
+}).strict();
+
+export const workflowRuntimeCopilotProposalResponseSchema = z.object({
+  proposal: workflowRuntimeCopilotProposalSchema,
+}).strict();
+
+export const workflowRuntimeCopilotProposalRequestSchema = z.object({
+  instruction: z.string().trim().min(1).max(2000),
+  /** Inline definition to patch — XOR `definitionId`. */
+  definition: workflowRuntimeDefinitionSchema.optional(),
+  /** Persisted definition whose latest revision should be patched — XOR `definition`. */
+  definitionId: workflowRuntimeDefinitionIdSchema.optional(),
+}).strict().superRefine((request, ctx) => {
+  if ((request.definition === undefined) === (request.definitionId === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [request.definition === undefined ? "definition" : "definitionId"],
+      message: "exactly one of definition or definitionId is required",
+    });
+  }
+});
+
+export type WorkflowRuntimeCopilotAddNodeOperation = z.infer<typeof workflowRuntimeCopilotAddNodeOperationSchema>;
+export type WorkflowRuntimeCopilotAddEdgeOperation = z.infer<typeof workflowRuntimeCopilotAddEdgeOperationSchema>;
+export type WorkflowRuntimeCopilotPatchOperation = z.infer<typeof workflowRuntimeCopilotPatchOperationSchema>;
+export type WorkflowRuntimeCopilotProposal = z.infer<typeof workflowRuntimeCopilotProposalSchema>;
+export type WorkflowRuntimeCopilotProposalResponse = z.infer<typeof workflowRuntimeCopilotProposalResponseSchema>;
+export type WorkflowRuntimeCopilotProposalRequest = z.infer<typeof workflowRuntimeCopilotProposalRequestSchema>;

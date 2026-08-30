@@ -33,6 +33,9 @@ export interface ReviewContextBuildResult {
   readonly sourcePages: ReadonlyMap<string, string>; // path → page id
 }
 
+/** Max diff characters admitted into the pinned diff context page. */
+export const REVIEW_DIFF_MAX_CHARS = 80_000;
+
 function pageId(prefix: string, jobId: string, suffix: string): ContextPageId {
   return asContextPageId(`${prefix}_${jobId}_${suffix}`);
 }
@@ -83,7 +86,7 @@ export function buildReviewBaseContext(
   const diffPage = manager.createPage({
     id: pageId("diff", input.jobId, "review"),
     kind: "diff",
-    text: input.context.diff.slice(0, 80_000),
+    text: input.context.diff.slice(0, REVIEW_DIFF_MAX_CHARS),
     estimatedTokens: 2000,
     provenance: { repository: input.repositoryFullName, sha: input.headSha, producer: "context-builder", producerVersion: "1.0.0" },
   });

@@ -1,7 +1,8 @@
 # Workflow Runtime（CKPT3 — Verified Workflow Runtime）
 
 Status: Phase 1 vertical slice + Phase 1.1 canonical snapshot remediation
-ACCEPTED (2026-08-23); Phase 2 productization increment (persisted
+ACCEPTED (2026-08-23); CKPT6 Phase 1 runtime-native built-in library
+(2026-08-27); Phase 2 productization increment (persisted
 definitions with append-only revisions, persisted run history, dry-load
 feasibility panel) shipped the same day. CKPT5 (2026-08-25) adds automatic
 change-triggered execution for `on_change` bindings (see below).
@@ -38,8 +39,21 @@ false` truthfully; nothing in CKPT5 changes legacy-side behavior.
 
 ## What the runtime is
 
-The built-in seed `verified-mini-review` (immutable; revision 1 seeded at
-server startup) plus USER definitions execute this chain:
+The compatibility seed `verified-mini-review` (immutable; revision 1 seeded at
+server startup) plus five immutable runtime-native built-ins and USER
+definitions execute this chain. The five CKPT6 built-ins are `pr-review`,
+`pr-sanity-verification`, `security-hardening`, `architectural-drift`, and
+`vibe-safety`. Their definitions live in `apps/api/src/workflow-runtime/definition.ts`,
+use only the real `analyzer.deterministic-evidence` and
+`verifier.persisted-evidence` services. Profiles are contracts, not labels:
+style-only, secret-only, combined style+secret, and an explicit fan-out graph
+are represented in the definitions. The five runtime signatures are: `pr-review`
+combined analyzer → verifier; `pr-sanity-verification` style analyzer →
+verifier; `security-hardening` secret analyzer → verifier;
+`architectural-drift` independent style/secret fan-out → verifier fan-in; and
+`vibe-safety` sequential style → secret → verifier, with the second analyzer
+appending to the same run-scoped `EvidenceStore`. No legacy YAML is converted
+or executed by this library.
 
 ```
 Pinned repository HEAD snapshot
@@ -53,14 +67,35 @@ Every stage runs on the same Kernel/Harness primitives as the authoritative
 review runtime (see the execution-chain reference below — unchanged since
 Phase 1). No LLM anywhere in this workflow.
 
+### CKPT6 verification matrix
+
+Each of the five names has an independent test row in
+`apps/api/src/workflow-runtime/builtins.test.ts`. The rows assert schema parse,
+DAG compilation and registry/coeffect/capability feasibility, then run against
+a temporary pinned Git snapshot and assert persisted Evidence fingerprints,
+pinned SHA provenance, verifier-backed findings and deterministic output. The
+host/SQLite matrix is seed → revision/checksum pin → validated dry-load →
+pinned snapshot run → persisted terminal run/evidence/verifier result; each
+built-in also has a deterministic failure path. Catalog `verificationStatus` is
+`unverified` on a fresh install and becomes `verified` only from a matching
+successful persisted run with evidence and verified findings. The
+`verified-mini-review` seed remains an immutable compatibility seed.
+
 ## Definition lifecycle (Phase 2)
 
 - Definitions persist in SQLite (migration `0017`) as **append-only
   revisions**; runs pin `definitionId + revisionId` and history stays
   traceable forever.
-- Saving requires a schema-parseable body (400 otherwise, nothing saved).
-  Graph-invalid drafts save with status `draft_with_issues` + recorded
-  issues but are REFUSED at trigger (409 fail-closed, no Run created).
+- “Strict config” applies to workflow node configuration: node objects and
+  analyzer/verifier parameters are fail-closed and reject unknown fields,
+  unknown analyzer names, and wrong types. Process environment input remains
+  tolerant by design because real OS environments contain keys such as `PATH`
+  and `HOME`; those unknown keys are ignored and never enter `AppConfig`.
+- Saving is a Validate → Save gate: schema, graph, registry, serviceRef, and
+  descriptor parameter validation must all pass. Any invalid definition is
+  rejected with 400 `WORKFLOW_DEFINITION_INVALID` (stable issue code/path,
+  sanitized message) before a definition or revision row is created; invalid
+  drafts are not persisted in this phase.
 - The builtin definition is immutable (save/delete → 409).
 - Delete semantics (no prior convention existed, chosen conservatively):
   deleting a definition WITH run history is refused (409) — history
@@ -172,8 +207,16 @@ run is authorized per-call by the Kernel (`repo.read`, `evidence.write`,
 All routes are auth-gated and additive (legacy `/workflows*` untouched):
 
 - `GET /workflow-runtime/overview` — seed definition + registry node types.
+- `GET /catalog/engine-allowlist` — legacy `engineLegacyBuiltins` (and
+  compatibility `builtinWorkflows`) comes only from the frozen WorkflowStore;
+  `runtimeVerifiedBuiltins` is a separate workflow-runtime projection carrying
+  id, namespace, revision, checksum, real node types, purpose, verification
+  contract/matrix version, availability, and evidence-derived verification status. The API never joins the two worlds by matching names.
 - `POST /workflow-runtime/validate` — validate + compile a definition body
-  (creates nothing).
+  (creates nothing). A successful response is `{ ok: true, errors: [], plan }`,
+  where `plan` is the strict shared `WorkflowRuntimeExecutablePlan` DTO. Failed
+  responses contain only `{ ok: false, errors }`; unknown response fields fail
+  closed in the API client.
 - `GET /workflow-runtime/definitions` — persisted definition summaries
   (origin builtin/user, latest revision + status).
 - `POST /workflow-runtime/definitions` — append a revision (schema-invalid
@@ -218,13 +261,14 @@ a sanitized error. No third snapshot representation exists.
 ## Web UI
 
 The Workflows page's "已验证运行时 / Verified runtime" tab covers the full
-Phase 2 loop: persisted definitions list (builtin + user drafts), JSON
-editor, validate (both outcome states), save-revision, dry-load panel (✓/✗
+Phase 2 loop: persisted definitions list (builtin + validated user
+revisions), JSON editor, validate (both outcome states), save-revision,
+dry-load panel (✓/✗
 + disclaimer), revision-pinned trigger bound to a registered repository
 (opaque ids; honest EMPTY ≠ UNAVAILABLE), live run detail (pinned revision,
 snapshot identity, evidence, findings, audit counts), and persisted run
 history with refresh. Registry node types come from the API — the UI never
-invents executable node types. No canvas, no redesign.
+invents executable node types. The legacy workflow builder is frozen; the runtime-native graph Studio is a separate Phase 2 surface and does not redesign that builder.
 
 CKPT5: the Repository Workflows view adds a per-binding trigger-mode
 selector (手动 Manual / 变更时 On change) with an automatic-trigger hint for
@@ -259,7 +303,7 @@ host-side (like the canonical report boundary — there is deliberately no
 | Failure | Behavior |
 |---|---|
 | Definition body schema-invalid | 400 sanitized; nothing saved |
-| Graph-invalid draft | saved with issues; trigger refused 409, no Run |
+| Graph-invalid draft | 400 `WORKFLOW_DEFINITION_INVALID`; no definition/revision persisted |
 | Unknown definitionId/revisionId | 404 sanitized; no Run, no authorization events |
 | Store read/write failure | 503 sanitized; never masquerade as persistence truth |
 | Run `running` at restart | honestly `failed("run interrupted by API restart")` |
@@ -283,3 +327,105 @@ provider for review grounding and stays frozen (zero-touch, zero-migration).
 The Cordis-native contract is deliberately separate: conflating the two
 would create a second analyzer execution world, which the Master Spec
 forbids. See "Dual-schema positioning" above.
+
+## Appendix: audit execution bridge (executor slice, 2026-08-27)
+
+Decision-record addendum for the slice that lifted `auditExecution` from a
+hard-coded capability lie into computed truth.
+
+**Incremental mapping, not convergence.** The bridge changes nothing on the
+frozen engine-legacy side and nothing in the runtime freeze surface
+(registry, node types, builtin definitions untouched). Automatic audit
+execution does NOT execute legacy WorkflowSpecs; it drains durable audit-run
+drafts whose automation carries an explicit `runtimeDefinitionId` mapping and
+launches them through `WorkflowRuntimeHost.launchDefinitionRun` — a new
+internal entry shared with `triggerBinding`, containing everything AFTER the
+binding gate (definition exists → latest VALIDATED revision → canonical
+pinned-snapshot trigger path). No second execution world exists. The full
+legacy-surface convergence/retirement decision remains deferred exactly as
+recorded above; this slice does not reopen it.
+
+**Scope: locally monitored repositories only.** Drafts for non-local
+repositories are permanently excluded: they terminate as `failed` with the
+honest reason "Audit execution is limited to locally monitored repositories"
+— never silently skipped, never executed remotely.
+
+**Single-flight discipline (same as CKPT5 triggers).** One executor instance
+per process claims each draft by the fenced `created→queued` store transition
+(a transition conflict simply means another worker won), attempts one launch
+per run (no retry), mirrors the linked `workflow_runtime_run` terminal
+outcome (`run_succeeded` / `run_failed` + reason) onto the audit run, and can
+never throw into the process. On startup (after the host recovered ITS
+interrupted runs) legacy queued/running rows are reconciled honestly:
+terminal-linked rows mirror their real outcome; linkless or unresolvable-link
+rows fail with "audit run interrupted by API restart…" reasons while keeping
+the immutable link written.
+
+**Capabilities semantics.** `/audit/capabilities` now reports computed values:
+`auditExecution` = persistence ∧ executor armed
+(`CONSISTENCY_AUDIT_EXECUTION_ENABLED`, default true, kill-switch false);
+`auditRunEvents` / `auditExport` reflect their now-real routes. Planning
+results compute `execution.available` per subject: executor armed ∧
+automation mapped to a runtime definition ∧ repository local. Unavailable
+results always carry the specific reason (disabled / no runtime definition
+mapping / non-local).
+
+**Kill switch:** `CONSISTENCY_AUDIT_EXECUTION_ENABLED=false` stops the loop,
+skips restart reconciliation, and flips the capability + planning reasons to
+"disabled". Poll interval: `CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS`.
+The durable draft inventory remains fully intact across disable/enable.
+
+
+## CKPT6 Phase 2 Runtime Studio
+
+Runtime Studio is the runtime-native execution graph workbench at `/workflows?tab=studio`; it is distinct from the frozen legacy builder, Pipeline Inspector (流水线检查器), and review wizard surfaces. The node palette and inspector are driven exclusively by `/workflow-runtime/overview` registry DTOs, including service references, capabilities, coeffects, and strict parameter descriptors.
+
+Studio drafts keep an immutable persisted baseline separate from a dirty draft. Nodes and edges are serialized deterministically and checked for unique ids, existing endpoints, no self-edges, registered node types, matching service references, and registry-approved parameters. Builtin seeds are fork-only; user saves append a revision.
+
+The human gate is explicit: Validate draft (client graph checks plus server canonical validation) → Save revision → Dry-load persisted revision → Run. Dry-load is compile-time feasibility only and never grants syscall authorization. Run is restricted to a registered local repository; no public repository is treated as an executable normal path.
+
+## CKPT6 Phase 3 — Workflow Copilot (structured WorkflowPatch proposals)
+
+The Studio's right column carries a Workflow Copilot panel (SPEC §18.2: it is
+NOT a chat; it produces a structured `WorkflowPatch`). The panel submits one
+natural-language instruction to `POST /workflow-runtime/copilot/proposal`
+(see docs/api.md §11) and renders the returned proposal as an operation list
+(`ADD_NODE serviceRef`, `ADD_EDGE from → to`) plus the model's rationale.
+
+Safety contract (SPEC §36):
+
+- The endpoint is a pure advisor — zero persistence, zero run/dry-load side
+  effects, zero authorization. It never publishes, patches, or executes code.
+- The generation prompt's node-type whitelist is built server-side from the
+  runtime Node Registry (`listWorkflowNodeTypes()`); client-supplied
+  registries are never trusted. Post-generation, the server fail-closed
+  validates every `serviceRef` against the registry, checks that every
+  `ADD_EDGE` endpoint exists once the patch is applied and that no `ADD_EDGE`
+  duplicates an edge already in the definition or added earlier in the same
+  patch (a duplicate would otherwise be silently skipped by the reducer at
+  Apply time), and compiles "current definition + patch" with zero side
+  effects. Violations return the sanitized 400 `WORKFLOW_PATCH_INVALID`;
+  generation failures return the sanitized 502
+  `WORKFLOW_PATCH_GENERATION_FAILED` (the raw LLM output is never echoed or
+  logged).
+- The v1 patch vocabulary is `ADD_NODE` / `ADD_EDGE` only, and `ADD_EDGE` has
+  no `condition` field — the current `workflowRuntimeEdgeSchema` supports
+  `{ from, to }` only and the contract does not invent capability the graph
+  schema cannot represent. Conditions can be enabled once the edge schema
+  grows them.
+- The proposal is preview-only: the Studio renders proposed nodes/edges in a
+  dashed `.is-proposed` highlight over a preview graph computed from
+  "draft + patch" without touching draft state, and lists the operations with
+  the rationale.
+- Apply is human and explicit. The Studio translates the patch into existing
+  reducer actions (`add-node`, `update-params` when the proposal carries
+  parameters, `connect`) dispatched one by one — never a direct draft-JSON
+  write — so the result flows through the canonical validate → save-revision
+  gate chain like any manual edit (fingerprint invalidation included). Reject
+  clears the preview. Any manual draft edit during preview immediately
+  invalidates it (`studioDefinitionFingerprint` comparison), and a proposal
+  whose base draft changed while the request was in flight is discarded.
+- Builtin seeds stay fork-only: an `ADD_NODE` proposal against an unforked
+  builtin seed disables Apply with an explicit fork hint (mirroring the
+  reducer's add-node guard); edge-only patches follow the same rules as the
+  manual connect control.
