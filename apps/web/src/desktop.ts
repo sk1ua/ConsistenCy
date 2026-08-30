@@ -21,6 +21,19 @@ export type DesktopBuildInfo = {
   buildMode: "packaged" | "development" | "manual" | "release";
 };
 
+/** Desktop host behavior preferences owned by the Electron main process
+ *  (desktop-preferences.json). Defaults: closeToTray on, trayEnabled on,
+ *  launchAtLogin off. */
+export type DesktopPreferenceKey = "closeToTray" | "trayEnabled" | "launchAtLogin";
+
+export type DesktopPreferences = Readonly<{
+  closeToTray: boolean;
+  trayEnabled: boolean;
+  launchAtLogin: boolean;
+}>;
+
+export type DesktopPreferencesPatch = Partial<Record<DesktopPreferenceKey, boolean>>;
+
 /** Identity-only projection of DesktopBuildInfo consumed by renderer surfaces
  *  (About rows, settings badge) that do not care about buildMode. */
 export type BuildInfoSummary = {
@@ -35,6 +48,13 @@ export type ConsistencyDesktopBridge = {
   credentialStatus: () => Promise<DesktopCredentialStatus>;
   setCredential: (key: DesktopCredentialKey, value: string | null) => Promise<DesktopCredentialStatus>;
   showFromTray: () => Promise<{ visible: boolean }>;
+  /** Desktop behavior preferences. The main process validates the patch and
+   *  applies the OS side effects (tray lifecycle, login item); only boolean
+   *  values for the three known keys cross the bridge. */
+  preferences?: {
+    get: () => Promise<DesktopPreferences>;
+    set: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>;
+  };
   restartRuntime?: () => Promise<{ ok: boolean; error?: string }>;
   /** Semantic desktop action: opens the host's own logs folder. Zero arguments,
    *  boolean-only result — the renderer never supplies or learns a path. */

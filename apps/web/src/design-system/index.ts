@@ -7,5 +7,6 @@ export * from "./Tabs";
 export * from "./Badge";
 export * from "./Breadcrumb";
 export * from "./Dialog";
+export * from "./SelectMenu";
 export * from "./SectionHeader";
 export * from "./EmptyState";

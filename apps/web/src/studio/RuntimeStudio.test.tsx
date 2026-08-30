@@ -27,12 +27,23 @@ afterEach(async () => { if (root) await act(async () => { root!.unmount(); }); r
 function gateRow(host: HTMLElement, key: string) { return host.querySelector<HTMLElement>(`.studio-rail-gate[data-gate="${key}"]`)!; }
 function gateAction(host: HTMLElement, key: string) { return gateRow(host, key).querySelector<HTMLButtonElement>("button")!; }
 function primaryActions(host: HTMLElement) { return [...host.querySelectorAll<HTMLButtonElement>(".studio-gate-action.primary-button")]; }
-function definitionSelect(host: HTMLElement) { return host.querySelector<HTMLSelectElement>("select[aria-label='Definition']")!; }
-function repositorySelect(host: HTMLElement) { return host.querySelector<HTMLSelectElement>(".studio-repo select")!; }
-async function choose(select: HTMLSelectElement, value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value); select.dispatchEvent(new Event("change", { bubbles: true })); }); }
+function definitionTrigger(host: HTMLElement) { return host.querySelector<HTMLButtonElement>("button[aria-label='Definition']")!; }
+function repositoryTrigger(host: HTMLElement) { return host.querySelector<HTMLButtonElement>(".studio-repo button[aria-label='Local repository']")!; }
+async function choose(trigger: HTMLButtonElement, value: string) {
+  await act(async () => { trigger.click(); });
+  const list = trigger.closest(".ds-select-menu")!;
+  await act(async () => { list.querySelector<HTMLLIElement>(`.ds-select-menu-option[data-value='${value}']`)!.click(); });
+}
+async function menuValues(trigger: HTMLButtonElement): Promise<string[]> {
+  await act(async () => { trigger.click(); });
+  const menu = trigger.closest(".ds-select-menu")!;
+  const values = [...menu.querySelectorAll<HTMLLIElement>(".ds-select-menu-option")].map(option => option.dataset.value ?? "");
+  await act(async () => { trigger.click(); });
+  return values;
+}
 async function editPurpose(host: HTMLElement, value: string) { const purpose = host.querySelector<HTMLInputElement>("[aria-label='Purpose']")!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(purpose, value); purpose.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function renderStudio(): Promise<HTMLElement> { const host = render(); await act(async () => { root!.render(<RuntimeStudio />); }); await settle(); return host; }
-async function renderGatedStudio({ withRepository = true, overall = "feasible" }: { withRepository?: boolean; overall?: "feasible" | "not-feasible" } = {}): Promise<HTMLElement> { vi.mocked(api.workflowRuntimeDryLoad).mockResolvedValue(dryResult(overall)); const host = await renderStudio(); await act(async () => { gateAction(host, "validate").click(); }); await settle(); await act(async () => { gateAction(host, "dry").click(); }); await settle(); if (withRepository) await choose(repositorySelect(host), "repo-local"); return host; }
+async function renderGatedStudio({ withRepository = true, overall = "feasible" }: { withRepository?: boolean; overall?: "feasible" | "not-feasible" } = {}): Promise<HTMLElement> { vi.mocked(api.workflowRuntimeDryLoad).mockResolvedValue(dryResult(overall)); const host = await renderStudio(); await act(async () => { gateAction(host, "validate").click(); }); await settle(); await act(async () => { gateAction(host, "dry").click(); }); await settle(); if (withRepository) await choose(repositoryTrigger(host), "repo-local"); return host; }
 
 describe("RuntimeStudio executable component contract", () => {
   it("has exact zh-CN parity for every Studio translation key", () => { for (const key of RUNTIME_STUDIO_I18N_KEYS) expect(zh[key]).toBeTruthy(); });
@@ -80,14 +91,17 @@ describe("RuntimeStudio executable component contract", () => {
     expect(node.textContent).toContain("analyze");
     expect(node.textContent).toContain(nodeType.type);
   });
-  it("uses the definition select as the real library and shows forked drafts as drafts", async () => {
+  it("uses the definition menu as the real library and shows forked drafts as drafts", async () => {
     const host = await renderStudio();
-    const select = definitionSelect(host);
-    expect([...select.options].map(option => option.value)).toEqual(["verified-mini-review"]);
+    const trigger = definitionTrigger(host);
+    expect(await menuValues(trigger)).toEqual(["verified-mini-review"]);
     await act(async () => { host.querySelector<HTMLButtonElement>(".studio-rail-head button.icon-button")!.click(); });
     expect(host.textContent).toContain("new-definition");
-    expect(definitionSelect(host).value).toBe("new-definition");
-    expect(definitionSelect(host).options[0]!.textContent).toContain("Draft");
+    expect(definitionTrigger(host).textContent).toContain("new-definition");
+    await act(async () => { definitionTrigger(host).click(); });
+    const firstOption = host.querySelector<HTMLLIElement>(".ds-select-menu-option")!;
+    expect(firstOption.dataset.value).toBe("new-definition");
+    expect(firstOption.textContent).toContain("Draft");
   });
   it("keeps the latest definition selection current and aborts superseded in-flight opens", async () => {
     const definitionA = { ...definition, id: "definition-a", nodes: [{ ...definition.nodes[0]!, id: "node-a" }] };
@@ -114,9 +128,9 @@ describe("RuntimeStudio executable component contract", () => {
     resolveInitial(revisionA);
     await settle();
     expect(host.textContent).toContain("node-a");
-    const select = definitionSelect(host);
-    expect([...select.options].map(option => option.value)).toEqual(["definition-a", "definition-b"]);
-    await choose(select, "definition-b");
+    const trigger = definitionTrigger(host);
+    expect(await menuValues(trigger)).toEqual(["definition-a", "definition-b"]);
+    await choose(trigger, "definition-b");
     expect(host.textContent).not.toContain("node-b"); // opening replaces the surface while in flight
     resolveB(revisionB);
     await settle();
@@ -125,7 +139,7 @@ describe("RuntimeStudio executable component contract", () => {
     expect(signalB.aborted).toBe(false);
     // Reselecting A starts a fresh open; while it is unresolved the surface
     // stays on the loading state and the stale response can never leak in.
-    await choose(definitionSelect(host), "definition-a");
+    await choose(definitionTrigger(host), "definition-a");
     expect(signalReopenA).toBeDefined();
     expect(signalReopenA!.aborted).toBe(false);
     expect(host.textContent).not.toContain("node-a");
@@ -381,7 +395,7 @@ describe("RuntimeStudio executable component contract", () => {
     expect(gateAction(host, "dry").classList.contains("is-current-action")).toBe(true);
     await act(async () => { gateAction(host, "dry").click(); }); await settle();
     expect(host.querySelectorAll(".studio-gate-action.is-current-action")).toHaveLength(0);
-    await choose(repositorySelect(host), "repo-local");
+    await choose(repositoryTrigger(host), "repo-local");
     expect(host.querySelector(".studio-run-button")?.classList.contains("is-current-action")).toBe(true);
   });
 
@@ -404,7 +418,7 @@ describe("RuntimeStudio executable component contract", () => {
     await act(async () => { runButton.click(); });
     await settle();
     expect(api.triggerWorkflowRuntime).not.toHaveBeenCalled();
-    await choose(repositorySelect(host), "repo-local");
+    await choose(repositoryTrigger(host), "repo-local");
     expect(gateRow(host, "run").className).toContain("gate-current");
     expect(runButton.disabled).toBe(false);
     expect(primaryActions(host)).toHaveLength(1);
@@ -444,9 +458,11 @@ describe("RuntimeStudio executable component contract", () => {
     await act(async () => { [...host.querySelectorAll<HTMLButtonElement>(".studio-rail-head button")].find(button => button.textContent === "Fork")!.click(); });
     await act(async () => { gateAction(host, "validate").click(); }); await settle();
     await act(async () => { gateAction(host, "persist").click(); }); await settle();
-    const select = definitionSelect(host);
-    expect(select.value).toBe("saved-definition");
-    expect([...select.options].map(option => option.value)).toContain("saved-definition");
+    const trigger = definitionTrigger(host);
+    expect(trigger.textContent).toContain("saved-definition");
+    await act(async () => { trigger.click(); });
+    expect([...host.querySelectorAll<HTMLLIElement>(".ds-select-menu-option")].map(option => option.dataset.value)).toContain("saved-definition");
+    await act(async () => { trigger.click(); });
     expect(host.textContent).toContain("saved; library refresh failed");
   });
   it("announces first validation and later fingerprint changes with distinct reasons", async () => {

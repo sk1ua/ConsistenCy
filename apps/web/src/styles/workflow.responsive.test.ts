@@ -132,9 +132,10 @@ describe("Runtime Studio responsive CSS contract", () => {
     expect(workflowCss).toContain(".studio-rail-gate .studio-gate-action.is-current-action { display:inline-flex; }");
     expect(workflowCss).not.toContain(".studio-gate-action:not(:disabled)");
     expect(workflowCss).toContain(".studio-gate-action { justify-content:center; min-height:40px; }");
-    expect(workflowCss).toContain(".studio-defselect select { min-height:40px; }");
+    expect(workflowCss).not.toContain(".studio-defselect select");
     expect(workflowCss).toContain(".studio-canvas-toolbar input { width:100%; min-width:0; min-height:44px; }");
-    expect(workflowCss).toContain(".studio-palette button, .studio-connect button, .studio-connect select { min-height:44px; }");
+    expect(workflowCss).toContain(".studio-palette button, .studio-connect button { min-height:44px; }");
+    expect(workflowCss).not.toContain(".studio-connect select");
     expect(workflowCss).not.toMatch(/grid-template-columns:repeat\((?:3|4|5),\s*minmax\(0,\s*1fr\)\)[^}]*studio/);
   });
 

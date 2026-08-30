@@ -112,11 +112,11 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
           ))}
         </nav>
         <div className="settings-dialog-content">
-          {/* Appearance, Desktop and About are renderer-local read-only
-              status sections (theme + locale apply immediately; the desktop
-              rows describe fixed Electron behavior; About mirrors buildInfo
-              and /health), so they render without waiting for the settings
-              snapshot. */}
+          {/* Appearance, Desktop and About are renderer-local sections that
+              render without waiting for the settings snapshot: theme + locale
+              apply immediately, the desktop rows are real toggles persisted by
+              the Electron main process through the preferences bridge, and
+              About mirrors buildInfo and /health. */}
           {activeSection === "appearance" ? (
             <AppearanceSettingsSection />
           ) : activeSection === "desktop" ? (

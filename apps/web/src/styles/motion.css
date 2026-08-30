@@ -18,8 +18,7 @@ button,
 .secondary-button,
 .primary-button,
 .icon-button,
-.menu-button,
-.workflow-node {
+.menu-button {
   transition:
     background-color var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),

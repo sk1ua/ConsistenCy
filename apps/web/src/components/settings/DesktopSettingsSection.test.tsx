@@ -1,14 +1,13 @@
 /**
- * Shared DesktopSettingsSection contract tests for CKPT4 Slice 4.
+ * Shared DesktopSettingsSection contract tests.
  *
- * The section is a READ_ONLY_STATUS presentation of the Electron host's
- * fixed, documented behaviors: close hides to an always-present tray,
- * startup-at-login stays off under the current security model, and no
- * notification system exists. These tests pin the stable element ids, the
- * absence of ANY interactive control (no fake toggles), the truthful
- * browser-mode degradation (no desktop bridge in the default test
- * environment), the bridge-present variant, and zh-CN coverage for every
- * user-visible string.
+ * Close behavior, tray visibility and login launch are REAL toggles: each
+ * change is applied immediately through the desktop preferences bridge and
+ * persisted by the Electron main process. These tests pin the stable element
+ * ids, the switch semantics (disabled without a preferences bridge, enabled
+ * after it reports state, revert on rejection), the notifications row staying
+ * an honest informational status (no fake toggle), the truthful browser-mode
+ * degradation, and zh-CN coverage for every user-visible string.
  */
 // @vitest-environment happy-dom
 import { renderToStaticMarkup } from "react-dom/server";
@@ -17,6 +16,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "../../i18n";
 import { DesktopSettingsSection } from "./DesktopSettingsSection";
+import type { DesktopPreferences, DesktopPreferencesPatch } from "../../desktop";
 
 // The default test environment exposes no window.consistencyDesktop, so the
 // section renders its browser-mode degradation by default.
@@ -28,11 +28,52 @@ function renderSection(locale: "en-US" | "zh-CN" = "en-US"): string {
   );
 }
 
-function installBridge() {
-  // The section only checks bridge presence (it calls no bridge method), so a
-  // presence-only stub stands in for the preload surface; the unknown cast
-  // keeps the global ConsistencyDesktopBridge type out of this contract test.
-  (window as unknown as { consistencyDesktop?: unknown }).consistencyDesktop = {};
+type PreferencesBridgeStub = {
+  get: () => Promise<DesktopPreferences>;
+  set: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>;
+};
+
+const DEFAULTS: DesktopPreferences = { closeToTray: true, trayEnabled: true, launchAtLogin: false };
+
+function installBridge(options: { get?: () => Promise<DesktopPreferences>; set?: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences> } = {}) {
+  const setCalls: DesktopPreferencesPatch[] = [];
+  const bridge: PreferencesBridgeStub = {
+    get: options.get ?? (async () => ({ ...DEFAULTS })),
+    set: options.set ?? (async patch => {
+      setCalls.push(patch);
+      return { ...DEFAULTS, ...patch };
+    })
+  };
+  (window as unknown as { consistencyDesktop?: unknown }).consistencyDesktop = { preferences: bridge };
+  return { setCalls };
+}
+
+async function mountSection(): Promise<{ container: HTMLDivElement; unmount: () => Promise<void> }> {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root: Root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <I18nProvider initialLocale="en-US">
+        <DesktopSettingsSection />
+      </I18nProvider>
+    );
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+  return {
+    container,
+    unmount: async () => {
+      await act(async () => { root.unmount(); });
+      document.body.removeChild(container);
+    }
+  };
+}
+
+function switches(container: HTMLElement): HTMLButtonElement[] {
+  return [...container.querySelectorAll<HTMLButtonElement>('[role="switch"]')];
 }
 
 afterEach(() => {
@@ -51,43 +92,76 @@ describe("DesktopSettingsSection structure", () => {
     expect(html).toContain('id="setting-desktop-browser-note"');
   });
 
-  it("exposes zero interactive controls — read-only status, no fake toggles", async () => {
-    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root: Root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <I18nProvider initialLocale="en-US">
-          <DesktopSettingsSection />
-        </I18nProvider>
-      );
-    });
-
-    expect(container.querySelectorAll("select")).toHaveLength(0);
-    expect(container.querySelectorAll("input")).toHaveLength(0);
-    expect(container.querySelectorAll("button")).toHaveLength(0);
-    expect(container.querySelectorAll("textarea")).toHaveLength(0);
-    // The whole section is note rows only.
+  it("renders disabled switches in browser mode and keeps notifications as an honest status row", async () => {
+    const { container, unmount } = await mountSection();
+    // Three real switches (close, tray, login) but no switch for notifications.
+    expect(switches(container)).toHaveLength(3);
+    for (const element of switches(container)) {
+      expect(element.disabled).toBe(true);
+    }
+    expect(container.querySelector("#setting-desktop-notifications [role=\"switch\"]")).toBeNull();
+    expect(container.querySelector("#setting-desktop-notifications")).toBeTruthy();
     expect(container.querySelectorAll(".setting-field")).toHaveLength(5);
-    expect(container.querySelectorAll(".setting-field.setting-note")).toHaveLength(5);
-
-    await act(async () => { root.unmount(); });
-    document.body.removeChild(container);
+    await unmount();
   });
 });
 
-describe("DesktopSettingsSection truthful fixed behavior", () => {
-  it("describes close-to-tray, the always-present tray, autostart off and no notifications", () => {
+describe("DesktopSettingsSection real toggles", () => {
+  it("enables the switches and reports defaults once the bridge answers", async () => {
+    installBridge();
+    const { container, unmount } = await mountSection();
+    for (const element of switches(container)) {
+      expect(element.disabled).toBe(false);
+    }
+    expect(container.querySelector<HTMLButtonElement>("#setting-desktop-close-switch")?.getAttribute("aria-checked")).toBe("true");
+    expect(container.querySelector<HTMLButtonElement>("#setting-desktop-tray-switch")?.getAttribute("aria-checked")).toBe("true");
+    expect(container.querySelector<HTMLButtonElement>("#setting-desktop-autostart-switch")?.getAttribute("aria-checked")).toBe("false");
+    await unmount();
+  });
+
+  it("applies a toggle immediately through the preferences bridge", async () => {
+    const { setCalls } = installBridge();
+    const { container, unmount } = await mountSection();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>("#setting-desktop-autostart-switch")?.click();
+      await Promise.resolve();
+    });
+    expect(setCalls).toEqual([{ launchAtLogin: true }]);
+    expect(container.querySelector<HTMLButtonElement>("#setting-desktop-autostart-switch")?.getAttribute("aria-checked")).toBe("true");
+    expect(container.querySelector("#setting-desktop-autostart-error")).toBeNull();
+    await unmount();
+  });
+
+  it("reverts the optimistic state and surfaces an error when the host rejects the patch", async () => {
+    installBridge({ set: async () => { throw new Error("rejected"); } });
+    const { container, unmount } = await mountSection();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>("#setting-desktop-tray-switch")?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(container.querySelector<HTMLButtonElement>("#setting-desktop-tray-switch")?.getAttribute("aria-checked")).toBe("true");
+    expect(container.querySelector("#setting-desktop-trayEnabled-error")).toBeTruthy();
+    await unmount();
+  });
+
+  it("keeps the switches disabled when the host never reports preferences", async () => {
+    installBridge({ get: async () => { throw new Error("unavailable"); } });
+    const { container, unmount } = await mountSection();
+    for (const element of switches(container)) {
+      expect(element.disabled).toBe(true);
+    }
+    expect(container.querySelector("#setting-desktop-load-error")).toBeTruthy();
+    await unmount();
+  });
+});
+
+describe("DesktopSettingsSection truthful presentation", () => {
+  it("describes the toggle rows and the honest notifications row", () => {
     const html = renderSection();
     expect(html).toContain("Close behavior");
-    expect(html).toContain("Stays resident in the system tray when the window closes");
-    expect(html).toContain("Quit completely through the tray menu.");
     expect(html).toContain("System tray");
-    expect(html).toContain("Always present");
     expect(html).toContain("Start on login");
-    expect(html).toContain("Not enabled");
-    expect(html).toContain("Deliberately kept off under the current security model.");
     expect(html).toContain("Notifications");
     expect(html).toContain("Not available yet");
     expect(html).toContain("No desktop notification system exists yet, so no option is offered.");
@@ -99,13 +173,11 @@ describe("DesktopSettingsSection truthful fixed behavior", () => {
     expect(html).toContain("Browser mode: these rows describe the desktop app and only apply when running inside it.");
   });
 
-  it("hides the browser-mode note but keeps the fixed rows when a desktop bridge exists", () => {
+  it("hides the browser-mode note but keeps the rows when a desktop bridge exists", () => {
     installBridge();
     const html = renderSection();
     expect(html).not.toContain('id="setting-desktop-browser-note"');
-    expect(html).toContain("Stays resident in the system tray when the window closes");
-    expect(html).toContain("Always present");
-    expect(html).toContain("Not enabled");
+    expect(html).toContain("Close behavior");
     expect(html).toContain("Not available yet");
   });
 });
@@ -115,18 +187,18 @@ describe("DesktopSettingsSection zh-CN coverage", () => {
     const html = renderSection("zh-CN");
     expect(html).toContain("05 · 桌面端");
     expect(html).toContain("桌面端行为");
+    // Default state: close-to-tray on, tray on, login launch off.
     expect(html).toContain("关闭窗口时驻留系统托盘");
-    expect(html).toContain("如需完全退出，请通过托盘菜单操作。");
+    expect(html).toContain("托盘图标及“打开/退出”菜单可用");
+    expect(html).toContain("未向操作系统注册登录启动");
+    expect(html).toContain("关闭行为");
     expect(html).toContain("系统托盘");
-    expect(html).toContain("常驻");
-    expect(html).toContain("未启用");
+    expect(html).toContain("开机自启");
     expect(html).toContain("通知");
     expect(html).toContain("暂未提供");
     expect(html).toContain("浏览器模式：以上条目描述桌面端应用的固定行为，仅在桌面端运行时生效。");
     expect(html).not.toContain("Close behavior");
-    expect(html).not.toContain("Always present");
-    expect(html).not.toContain("Not enabled");
-    expect(html).not.toContain("Not available yet");
     expect(html).not.toContain("Browser mode:");
+    expect(html).not.toContain("Not available yet");
   });
 });

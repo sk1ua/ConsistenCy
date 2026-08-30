@@ -288,7 +288,7 @@ describe("SettingsDialog", () => {
     document.body.removeChild(container);
   });
 
-  it("renders the read-only Desktop section when the Desktop nav item is clicked (browser mode)", async () => {
+  it("renders the Desktop section with disabled real switches when the Desktop nav item is clicked (browser mode)", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const settingsSpy = vi.spyOn(api, "settings").mockResolvedValue(configuredSettings);
     const container = document.createElement("div");
@@ -317,9 +317,14 @@ describe("SettingsDialog", () => {
     expect(container.querySelector("#setting-desktop-tray")).toBeTruthy();
     expect(container.querySelector("#setting-desktop-autostart")).toBeTruthy();
     expect(container.querySelector("#setting-desktop-notifications")).toBeTruthy();
-    // No desktop bridge in the test environment → browser-mode note renders.
+    // No desktop bridge in the test environment → browser-mode note renders
+    // and the real switches stay disabled; notifications has no switch at all.
     expect(container.querySelector("#setting-desktop-browser-note")).toBeTruthy();
-    // Read-only status: no interactive control inside the section.
+    expect(container.querySelectorAll('.settings-dialog-content [role="switch"]')).toHaveLength(3);
+    for (const element of container.querySelectorAll<HTMLButtonElement>('.settings-dialog-content [role="switch"]')) {
+      expect(element.disabled).toBe(true);
+    }
+    expect(container.querySelector('#setting-desktop-notifications [role="switch"]')).toBeNull();
     expect(container.querySelectorAll(".settings-dialog-content select, .settings-dialog-content input, .settings-dialog-content textarea")).toHaveLength(0);
     expect(container.querySelector(".settings-dialog-content .empty-state")).toBeNull();
 

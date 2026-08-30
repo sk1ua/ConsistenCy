@@ -6,8 +6,6 @@ import {
   statsResponseSchema,
   notebookResponseSchema,
   notebookSourcesResponseSchema,
-  workflowListResponseSchema,
-  workflowResponseSchema,
   jobDiffResponseSchema,
   heartbeatPulseSchema,
   heartbeatStreamEventSchema,
@@ -51,9 +49,6 @@ import {
   type StatsResponse,
   type HeartbeatPulse,
   type HeartbeatStreamEvent,
-  type WorkflowResponse,
-  type WorkflowSpec,
-  type WorkflowSummary,
   type WorkflowRuntimeDefinition,
   type WorkflowRuntimeNodeType,
   type WorkflowRuntimeDefinitionSummary,
@@ -442,21 +437,6 @@ export const api = {
   async *streamNotebookCard(id: string, kind: NotebookCardKind, sourceJobIds: string[], signal?: AbortSignal): AsyncIterable<NotebookStreamEvent> {
     const response = await openSse(`/notebooks/${encodeURIComponent(id)}/cards`, { kind, sourceJobIds }, signal);
     yield* readSse(response);
-  },
-  async workflows(): Promise<WorkflowSummary[]> {
-    return workflowListResponseSchema.parse(await request("/workflows")).workflows;
-  },
-  async workflow(name: string): Promise<WorkflowResponse> {
-    return workflowResponseSchema.parse(await request(`/workflows/${encodeURIComponent(name)}`));
-  },
-  async saveWorkflow(spec: WorkflowSpec): Promise<WorkflowResponse> {
-    return workflowResponseSchema.parse(await request(`/workflows/${encodeURIComponent(spec.name)}`, {
-      method: "PUT",
-      body: JSON.stringify(spec)
-    }));
-  },
-  async deleteWorkflow(name: string): Promise<void> {
-    await request(`/workflows/${encodeURIComponent(name)}`, { method: "DELETE" });
   },
   async runtimeRuns(): Promise<RuntimeRunsResponse> {
     return runtimeRunsResponseSchema.parse(await request("/runtime/runs"));

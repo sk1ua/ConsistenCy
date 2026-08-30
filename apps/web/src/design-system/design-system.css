@@ -655,6 +655,117 @@
   to { transform: rotate(360deg); }
 }
 
+/* SelectMenu: controlled custom dropdown replacing native <select> where the
+   popup must be styleable. Trigger mirrors .ds-select geometry; the popover
+   rides surface/border/shadow tokens, the selected option gets the primary
+   wash, and hover/active options get surface-subtle. */
+.ds-select-menu {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.ds-select-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--ds-control-height-md);
+  box-sizing: border-box;
+  padding: 0 10px;
+  font-family: var(--ds-font-sans);
+  font-size: 13px;
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius-md);
+  cursor: pointer;
+  text-align: left;
+  outline: none;
+  transition: border-color var(--ds-transition-fast), box-shadow var(--ds-transition-fast), background var(--ds-transition-fast);
+}
+
+.ds-select-menu-trigger:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.ds-select-menu-trigger:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-wash);
+}
+
+.ds-select-menu-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ds-select-menu-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-select-menu-trigger > svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform var(--ds-transition-fast);
+}
+
+.ds-select-menu.is-open .ds-select-menu-trigger > svg {
+  transform: rotate(180deg);
+}
+
+.ds-select-menu-list {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-width: 360px;
+  max-height: 264px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--ds-radius-md);
+  box-shadow: 0 8px 24px var(--shadow-card);
+}
+
+/* Not enough room below the trigger: SelectMenu sets data-direction="up"
+   on open and the popup flips above the trigger instead. */
+.ds-select-menu-list[data-direction="up"] {
+  bottom: calc(100% + 4px);
+  top: auto;
+}
+
+.ds-select-menu-option {
+  display: flex;
+  align-items: center;
+  padding: 6px 9px;
+  border-radius: var(--ds-radius-sm);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--foreground);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.ds-select-menu-option.is-active {
+  background: var(--surface-subtle);
+}
+
+.ds-select-menu-option.is-selected {
+  background: var(--primary-wash);
+  color: var(--primary-strong);
+  font-weight: 600;
+}
+
 /* ===== Shared page vocabulary (v3 style convergence) =====
  * Locked contract consumed by route surfaces (workflow runtime/triggers,
  * runs, repositories, findings, inbox, X-Ray). Everything derives from
@@ -1092,4 +1203,161 @@
    needs more width than the 520px default; stays scrollable at 390px. */
 .ds-dialog.ds-dialog--workflow-editor {
   max-width: min(680px, 94vw);
+}
+
+/* ===== Settings dialog visual redesign (dialog scope only) =====
+ * The full SettingsPage keeps its page-level section-card layout; inside the
+ * modal, sections drop the .section-block bordered-box chrome and land
+ * directly on the dialog surface: kicker/title header, a 1px divider, then
+ * full-width field rows in a label-left / control-right rhythm (stacking
+ * vertically below 680px). Inputs use the quiet --surface-subtle fill plus a
+ * focus ring instead of heavy borders. No settings logic is touched here. */
+.ds-dialog--settings .settings-group.section-block {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+/* When a section renders more than one settings-group (e.g. GitHub), the
+   groups separate on a 1px divider instead of boxed cards. */
+.ds-dialog--settings .settings-group + .settings-group {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 14px;
+}
+
+.ds-dialog--settings .settings-group-title {
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+}
+
+.ds-dialog--settings .settings-group-title h3 {
+  margin: 2px 0 4px;
+  font-size: 15px;
+}
+
+.ds-dialog--settings .settings-group-title p {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* Field rows: stacked full width, label left / control right. */
+.ds-dialog--settings .settings-fields {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  align-content: start;
+}
+
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 6px 18px;
+  padding: 9px 0;
+}
+
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > label:first-child {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+/* Everything outside the label/control pair (help text, danger zone)
+   spans the full row width below it. */
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > :not(label:first-child):not(input):not(select):not(textarea) {
+  grid-column: 1 / -1;
+}
+
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > input:not([type="checkbox"]),
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > select,
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea {
+  grid-column: 2;
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-md);
+  background: var(--surface-subtle);
+  color: var(--foreground);
+  font: 13px/1.5 var(--font-mono);
+  outline: none;
+  transition: border-color var(--ds-transition-fast), box-shadow var(--ds-transition-fast), background var(--ds-transition-fast);
+}
+
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > input:not([type="checkbox"]):focus,
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > select:focus,
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea:focus {
+  border-color: var(--primary);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--primary-wash);
+  outline: 0;
+}
+
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > input:not([type="checkbox"]):disabled,
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea:disabled {
+  background: var(--surface-muted);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* Informational note rows become quiet wash panels without the dashed
+   border; consecutive notes keep a small breathing gap. */
+.ds-dialog--settings .setting-field.setting-note {
+  min-height: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--ds-radius-md);
+  background: var(--surface-subtle);
+}
+
+.ds-dialog--settings .setting-field.setting-note + .setting-field.setting-note {
+  margin-top: 8px;
+}
+
+.ds-dialog--settings .source-mode-guide {
+  margin-bottom: 8px;
+}
+
+.ds-dialog--settings .github-draft-test {
+  display: grid;
+  gap: 6px;
+  padding: 9px 0;
+}
+
+/* Danger zone (remove a stored secret): red text, no box. */
+.ds-dialog--settings .clear-secret {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+}
+
+/* Narrow dialogs: the label/control pair stacks vertically. */
+@media (max-width: 680px) {
+  .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > input:not([type="checkbox"]),
+  .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > select,
+  .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea {
+    grid-column: 1;
+  }
 }

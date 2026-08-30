@@ -6,28 +6,16 @@ test.describe("Module 5 feature suite", () => {
     await page.addInitScript(() => window.localStorage.setItem("consistency.locale.v1", "en-US"));
   });
 
-  test("workflow builder lists builtins, creates a draft, and deletes it", async ({ page }) => {
-    const draftName = `e2e-draft-${Date.now()}`;
-
-    // The workflows IA defaults to Runtime Studio; the legacy builder lives on
-    // its definition tab (deep-linkable as ?tab=definition since the rework).
+  test("legacy workflow builder is removed and its deep link redirects to Runtime Studio", async ({ page }) => {
+    // The definition builder was deleted (Owner decision, overriding the D3
+    // freeze): no builder chrome may render anywhere, and the historic
+    // ?tab=definition deep link must land on the Studio tab.
     await page.goto("/#/workflows?tab=definition");
-    await expect(page).toHaveURL(/#\/workflows\?tab=definition$/);
-    await expect(page.getByRole("heading", { name: "Workflows", exact: true })).toBeVisible();
-    const workflows = page.getByRole("complementary", { name: "Workflows", exact: true });
-    await expect(workflows.getByRole("button", { name: /pr-review/ })).toBeVisible();
-
-    await page.locator(".workflows-toolbar").getByRole("button", { name: "New draft", exact: true }).click();
-    await page.locator(".workflow-name-input").fill(draftName);
-    await page.locator(".workflows-toolbar").getByRole("button", { name: "Save draft", exact: true }).click();
-    await expect(workflows.getByRole("button", { name: new RegExp(draftName) })).toBeVisible();
-
-    await workflows.getByRole("button", { name: new RegExp(draftName) }).click();
-    await expect(page.locator(".workflow-name-input")).toHaveValue(draftName);
-    await expect(page.locator(".workflow-node").first()).toBeVisible();
-
-    await page.getByRole("button", { name: "Delete draft", exact: true }).click();
-    await expect(workflows.getByRole("button", { name: new RegExp(draftName) })).toHaveCount(0);
+    await expect(page).toHaveURL(/#\/workflows\?tab=studio$/);
+    await expect(page.getByRole("tab", { name: "Runtime Studio" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: /Definitions|工作流定义/ })).toHaveCount(0);
+    await expect(page.locator(".runtime-studio")).toBeVisible();
+    await expect(page.locator(".workflows-toolbar, .workflows-layout")).toHaveCount(0);
   });
 
   test("run Diff tab shows an annotated diff for a local review", async ({ page, request }) => {

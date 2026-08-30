@@ -3713,3 +3713,90 @@ body,
     transition: none;
   }
 }
+
+/* ===== Shell Sidebar Collapse + Resize (>= 980px, see useSidebarLayout) ===== */
+/* Collapsed rail: mirrors the <= 680px icon-only behavior on demand. Text is
+   hidden via CSS so navigation links and the repository selector logic stay
+   untouched; tooltips come from the rows' own title attributes. */
+.repo-first-sidebar.shell-sidebar-collapsed > div:first-child > div > span,
+.repo-first-sidebar.shell-sidebar-collapsed > div:nth-child(2) > div:first-child > span,
+.repo-first-sidebar.shell-sidebar-collapsed > div:nth-child(2) > div:last-child,
+.repo-first-sidebar.shell-sidebar-collapsed > div:nth-child(2) > button,
+.repo-first-sidebar.shell-sidebar-collapsed .ds-sidebar-row > div > span:last-child,
+.repo-first-sidebar.shell-sidebar-collapsed .ds-sidebar-row > div + div,
+.repo-first-sidebar.shell-sidebar-collapsed > div:last-child > div,
+.repo-first-sidebar.shell-sidebar-collapsed > div:last-child > .ds-badge {
+  display: none !important;
+}
+
+.repo-first-sidebar.shell-sidebar-collapsed > div:first-child {
+  justify-content: center !important;
+  padding: 0 6px !important;
+}
+
+.repo-first-sidebar.shell-sidebar-collapsed > div:nth-child(2) {
+  padding: 8px 6px !important;
+}
+
+.repo-first-sidebar.shell-sidebar-collapsed > div:nth-child(2) > div:first-child {
+  justify-content: center;
+}
+
+.repo-first-sidebar.shell-sidebar-collapsed .ds-sidebar-row {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.repo-first-sidebar.shell-sidebar-collapsed .ds-sidebar-row > div {
+  justify-content: center;
+}
+
+.repo-first-sidebar.shell-sidebar-collapsed > div:last-child {
+  justify-content: center;
+  padding: 8px 6px !important;
+}
+
+/* Drag handle on the sidebar's right edge: 6px hit area, hairline highlight
+   on hover/focus, keyboard resizable via the AppShell arrow-key handler. */
+.shell-sidebar-resize-handle {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.shell-sidebar-resize-handle::after {
+  content: "";
+  width: 1px;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  background: transparent;
+  transition: background var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.shell-sidebar-resize-handle:hover::after,
+.shell-sidebar-resize-handle:focus-visible::after {
+  background: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-wash);
+}
+
+.shell-sidebar-resize-handle:focus-visible {
+  outline: 0;
+}
+
+body.shell-sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-sidebar-resize-handle::after {
+    transition: none;
+  }
+}

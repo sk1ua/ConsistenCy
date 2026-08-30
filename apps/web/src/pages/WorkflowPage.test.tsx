@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useSearchParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkflowRuntimeDefinitionRevision, WorkflowRuntimeDefinitionSummary, WorkflowSummary } from "@consistency/schema";
+import type { WorkflowRuntimeDefinitionRevision, WorkflowRuntimeDefinitionSummary } from "@consistency/schema";
 import { api } from "../api/client";
 import { I18nProvider, useI18n } from "../i18n";
 import { WorkflowPage } from "./WorkflowPage";
@@ -24,13 +24,17 @@ function LocaleToggle() {
   return <button type="button" aria-label="toggle locale" onClick={() => setLocale("zh-CN")}>Switch locale</button>;
 }
 
+function SearchProbe() {
+  const [searchParams] = useSearchParams();
+  return <span data-testid="search-probe" data-search={searchParams.toString()} />;
+}
+
 beforeEach(() => {
   Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
     configurable: true,
     writable: true,
     value: true
   });
-  vi.spyOn(api, "workflows").mockReturnValue(new Promise<WorkflowSummary[]>(() => undefined));
   originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
   originalLocalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
   Object.defineProperty(window, "localStorage", {
@@ -70,6 +74,7 @@ async function render(initialEntry: string, withLocaleToggle = false) {
       <I18nProvider initialLocale="en-US">
         <MemoryRouter initialEntries={[initialEntry]}>
           <WorkflowPage />
+          <SearchProbe />
           {withLocaleToggle && <LocaleToggle />}
         </MemoryRouter>
       </I18nProvider>
@@ -186,25 +191,30 @@ describe("WorkflowPage information architecture", () => {
     expect(host.querySelector("[data-testid=runtime-studio-panel]")).toBeTruthy();
   });
 
-  it("orders the tabs studio → verified runtime → triggers → pipeline inspector → definitions", async () => {
+  it("orders the four tabs studio → verified runtime → triggers → pipeline inspector", async () => {
     const host = await render("/workflows");
     const labels = [...host.querySelectorAll<HTMLButtonElement>("[role=tab]")].map(button => button.textContent ?? "");
 
-    expect(labels).toHaveLength(5);
+    expect(labels).toHaveLength(4);
     expect(labels[0]).toContain("Runtime Studio");
     expect(labels[1]).toContain("Verified runtime");
     expect(labels[2]).toContain("Triggers");
     expect(labels[3]).toContain("Pipeline Inspector");
-    expect(labels[4]).toContain("Definitions");
   });
 
-  it("keeps the ?tab=definition deep link working and marks the builder as legacy read-only", async () => {
+  it("redirects the removed legacy definition deep link to Runtime Studio and never renders the builder", async () => {
     const host = await render("/workflows?tab=definition");
-    const selected = tab(host, "Definitions");
+    // The redirect runs in an effect; flush it before asserting the URL.
+    await act(async () => { await new Promise(resolve => { setTimeout(resolve, 0); }); });
 
+    const selected = tab(host, "Runtime Studio");
     expect(selected.getAttribute("aria-selected")).toBe("true");
-    expect(selected.textContent).toContain("Legacy · read-only");
-    expect(host.querySelector(".workflows-toolbar")).toBeTruthy();
+    expect(host.querySelector("[data-testid=search-probe]")?.getAttribute("data-search")).toBe("tab=studio");
+    // The legacy builder surface is gone: no toolbar, no builder tab badge.
+    expect(host.querySelector(".workflows-toolbar")).toBeNull();
+    expect(host.querySelector(".workflows-layout")).toBeNull();
+    expect([...host.querySelectorAll<HTMLButtonElement>("[role=tab]")].some(button => button.textContent?.includes("Definitions"))).toBe(false);
+    expect(host.querySelector("[data-testid=runtime-studio-panel]")).toBeTruthy();
   });
 });
 

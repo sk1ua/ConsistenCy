@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   FolderGit2,
   PlayCircle,
@@ -19,7 +19,9 @@ import {
   ChevronDown,
   CheckCircle2,
   AlertCircle,
-  X
+  X,
+  PanelLeftClose,
+  PanelLeftOpen
 } from "lucide-react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type {
@@ -44,6 +46,7 @@ import { Breadcrumb, type BreadcrumbItem } from "../design-system/Breadcrumb";
 import { Dialog } from "../design-system/Dialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { desktopBridge, type DesktopBuildInfo } from "../desktop";
+import { useSidebarLayout, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH_BOUNDS } from "./useSidebarLayout";
 
 export type DataNotice = {
   id: string;
@@ -145,6 +148,50 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [commandQuery, setCommandQuery] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [buildInfo, setBuildInfo] = useState<DesktopBuildInfo | null>(null);
+
+  // Collapsible + resizable left navigation rail (>= 980px only; below that
+  // the pre-existing responsive behavior is untouched). The collapsed and
+  // expanded widths are persisted under the v3-prefixed localStorage key.
+  const sidebar = useSidebarLayout();
+  const sidebarCollapsed = sidebar.isWideViewport && sidebar.collapsed;
+  const sidebarDrag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+
+  const handleSidebarResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || sidebarCollapsed || !sidebar.isWideViewport) return;
+    event.preventDefault();
+    sidebarDrag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebar.width };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add("shell-sidebar-resizing");
+  };
+
+  const handleSidebarResizeMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = sidebarDrag.current;
+    if (!drag) return;
+    sidebar.setWidth(drag.startWidth + (event.clientX - drag.startX));
+  };
+
+  const handleSidebarResizeEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!sidebarDrag.current) return;
+    sidebarDrag.current = null;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // The pointer capture may already be gone; the drag still ends.
+    }
+    document.body.classList.remove("shell-sidebar-resizing");
+  };
+
+  const handleSidebarResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (sidebarCollapsed || !sidebar.isWideViewport) return;
+    const step = event.shiftKey ? 48 : 16;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      sidebar.setWidth(sidebar.width - step);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      sidebar.setWidth(sidebar.width + step);
+    }
+  };
 
   // Keyboard shortcut listener
   useEffect(() => {
@@ -311,9 +358,12 @@ export const AppShell: React.FC<AppShellProps> = ({
         {/* SINGLE PERSISTENT SIDEBAR */}
         <nav
           aria-label="Application Navigation"
-          className="repo-first-sidebar"
+          className={`repo-first-sidebar${sidebarCollapsed ? " shell-sidebar-collapsed" : ""}`}
           style={{
-            width: "var(--ds-sidebar-width)",
+            width: sidebar.isWideViewport
+              ? (sidebarCollapsed ? `${SIDEBAR_COLLAPSED_WIDTH}px` : `${sidebar.width}px`)
+              : "var(--ds-sidebar-width)",
+            position: "relative",
             background: "var(--surface)",
             borderRight: "1px solid var(--border)",
             display: "flex",
@@ -330,10 +380,11 @@ export const AppShell: React.FC<AppShellProps> = ({
               borderBottom: "1px solid var(--border)",
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between"
+              justifyContent: "space-between",
+              gap: "6px"
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
               <div
                 style={{
                   width: "20px",
@@ -345,7 +396,8 @@ export const AppShell: React.FC<AppShellProps> = ({
                   justifyContent: "center",
                   color: "#ffffff",
                   fontWeight: 700,
-                  fontSize: "12px"
+                  fontSize: "12px",
+                  flexShrink: 0
                 }}
               >
                 C
@@ -357,6 +409,16 @@ export const AppShell: React.FC<AppShellProps> = ({
                 v3
               </Badge>
             </div>
+            {sidebar.isWideViewport && (
+              <IconButton
+                className="shell-sidebar-collapse-button"
+                icon={sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+                label={sidebarCollapsed ? (zh ? "展开侧栏" : "Expand sidebar") : (zh ? "折叠侧栏" : "Collapse sidebar")}
+                size="sm"
+                variant="ghost"
+                onClick={() => sidebar.setCollapsed(!sidebarCollapsed)}
+              />
+            )}
           </div>
 
           {/* Active Repository Card */}
@@ -476,6 +538,27 @@ export const AppShell: React.FC<AppShellProps> = ({
               </Badge>
             )}
           </div>
+
+          {/* Sidebar resize handle: pointer drag or Left/Right arrow keys.
+              Hidden while collapsed — expansion restores the ability. */}
+          {sidebar.isWideViewport && !sidebarCollapsed && (
+            <div
+              role="separator"
+              className="shell-sidebar-resize-handle"
+              aria-orientation="vertical"
+              aria-label={zh ? "调整侧栏宽度" : "Adjust sidebar width"}
+              aria-valuemin={SIDEBAR_WIDTH_BOUNDS.min}
+              aria-valuemax={SIDEBAR_WIDTH_BOUNDS.max}
+              aria-valuenow={sidebar.width}
+              aria-valuetext={`${sidebar.width}px`}
+              tabIndex={0}
+              onPointerDown={handleSidebarResizeStart}
+              onPointerMove={handleSidebarResizeMove}
+              onPointerUp={handleSidebarResizeEnd}
+              onPointerCancel={handleSidebarResizeEnd}
+              onKeyDown={handleSidebarResizeKeyDown}
+            />
+          )}
         </nav>
 
         {/* Workspace Body Area */}
