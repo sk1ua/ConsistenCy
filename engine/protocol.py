@@ -10,9 +10,19 @@ def normalise_protocol_strings(value: Any) -> Any:
     encoder cannot represent lone surrogates, so normalising them once at the
     untrusted JSON boundary keeps the deterministic engine total without
     allowing invalid text to poison stdout or parser inputs.
+
+    The common case is a string that contains no surrogates at all, so the
+    check first runs at C speed (`str.isascii`, then a strict UTF-8 encode)
+    and only falls back to the per-character rewrite when encoding fails.
     """
     if isinstance(value, str):
-        return "".join("\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char for char in value)
+        if value.isascii():
+            return value
+        try:
+            value.encode("utf-8")
+            return value
+        except UnicodeEncodeError:
+            return "".join("\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char for char in value)
     if isinstance(value, list):
         return [normalise_protocol_strings(item) for item in value]
     if isinstance(value, dict):

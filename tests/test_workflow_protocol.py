@@ -145,6 +145,87 @@ class RunWorkflowBridgeTest(unittest.TestCase):
         self.assertEqual(len(digests.pop()), 64)
 
 
+# Python source may legally contain the escape text `\udc80` inside a string
+# literal (the repo's own surrogate tests do), and `ast.parse` materialises
+# that escape into a lone surrogate constant. A lone surrogate can never ride
+# the wire as a raw character (strict UTF-8 JSON forbids it), so this crash
+# family is born inside the engine, not in the payload. The workflow must
+# stay total over such input instead of failing the step — the real-world
+# crash was pr-review `semantics` failing with `UnicodeEncodeError` from
+# SemanticAgent subtree fingerprinting.
+_SURROGATE_ESCAPE_SOURCE = r"value = '\udc80'"
+
+_SEMANTICS_ONLY_SPEC = {
+    "version": 2,
+    "name": "semantic-surrogate",
+    "nodes": [{"id": "semantics", "uses": "engine.semantic", "timeoutMs": 120000}],
+    "verifiers": [],
+    "synthesizer": {"needs": ["semantics"], "timeoutMs": 120000},
+}
+
+
+class SurrogateResilienceBridgeTest(unittest.TestCase):
+    """Lone-surrogate input degrades honestly instead of killing a step."""
+
+    def _run(self, files):
+        payload = _request(spec=_SEMANTICS_ONLY_SPEC, files=files)
+        response = run_workflow_request(RunWorkflowRequest.from_dict(payload))
+        self.assertTrue(response.ok, response.error)
+        artifacts = {
+            artifact["stepId"]: artifact for artifact in response.run["artifacts"]
+        }
+        evidence_items = [
+            item
+            for artifact in response.run["artifacts"]
+            for item in (artifact.get("evidence") or {}).get("items", [])
+        ]
+        return response, artifacts, evidence_items
+
+    def test_semantics_step_survives_a_lone_surrogate_escape_in_analyzed_source(self):
+        response, artifacts, _ = self._run([
+            {
+                "path": "good.py",
+                "content": "def alpha():\n    return 1\n",
+                "baseline": "def alpha():\n    return 2\n",
+            },
+            {
+                "path": "escape.py",
+                "content": _SURROGATE_ESCAPE_SOURCE + "\n",
+                "baseline": _SURROGATE_ESCAPE_SOURCE + "\n",
+            },
+        ])
+
+        self.assertEqual(response.run["status"], "succeeded")
+        self.assertEqual(artifacts["semantics"]["status"], "succeeded")
+        self.assertNotIn("UnicodeEncodeError", json.dumps(response.run))
+
+    def test_bridge_normalises_a_lone_surrogate_in_the_file_payload(self):
+        # Direct bridge callers bypass the stdio normalisation, so the bridge
+        # must sanitise assembled step inputs itself: a raw U+DC80 character
+        # in the content must neither crash nor mark the file unparseable.
+        response, artifacts, evidence_items = self._run([
+            {
+                "path": "raw.py",
+                "content": "value = '" + chr(0xDC80) + "'\n",
+                "baseline": "value = ''\n",
+            },
+            {
+                "path": "good.py",
+                "content": "def alpha():\n    return 1\n",
+                "baseline": "def alpha():\n    return 2\n",
+            },
+        ])
+
+        self.assertEqual(response.run["status"], "succeeded")
+        self.assertEqual(artifacts["semantics"]["status"], "succeeded")
+        self.assertNotIn("UnicodeEncodeError", json.dumps(response.run))
+        degraded = [
+            item for item in evidence_items
+            if item["file"] == "raw.py" and "error" in (item.get("rule") or "")
+        ]
+        self.assertEqual(degraded, [])
+
+
 class RunWorkflowStdioTest(unittest.TestCase):
     """Drives the real stdio loop the TypeScript bridge speaks to."""
 

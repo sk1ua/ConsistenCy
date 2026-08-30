@@ -61,6 +61,7 @@ class EngineAgentPlugin(BaseAnalyzerPlugin):
         parser = ParserAgent()
         evidence: list[EvidenceItem] = []
         scored_files = 0
+        degraded_files = 0
 
         for path, content in sorted(context.files.items()):
             if not path.endswith(".py"):
@@ -81,7 +82,20 @@ class EngineAgentPlugin(BaseAnalyzerPlugin):
                 ))
                 continue
 
-            result = agent.analyze(snapshot, baseline)
+            try:
+                result = agent.analyze(snapshot, baseline)
+            except Exception as error:  # noqa: BLE001 - one pathological file must not fail the step
+                # Honest degradation: record the failure against this file and
+                # keep scoring the rest. A single malformed or adversarial file
+                # must never terminate the whole analysis step.
+                degraded_files += 1
+                evidence.append(EvidenceItem(
+                    file=path,
+                    excerpt=f"Analysis failed for {manifest.display_name}: {error}",
+                    rule=f"{self.kind}.analysis_error",
+                    severity="info",
+                ))
+                continue
             scored_files += 1
             if result.score <= 0:
                 continue
@@ -94,9 +108,16 @@ class EngineAgentPlugin(BaseAnalyzerPlugin):
                     metadata={"score": round(result.score, 4), "agent": manifest.display_name},
                 ))
 
+        summary = (
+            f"{manifest.display_name} scored {scored_files} file(s), "
+            f"{len(evidence)} observation(s)"
+        )
+        if degraded_files:
+            summary += f", {degraded_files} file(s) skipped on analysis errors"
+
         return PluginReport(
             evidence=tuple(evidence),
-            summary=f"{manifest.display_name} scored {scored_files} file(s), {len(evidence)} observation(s)",
+            summary=summary,
         )
 
 

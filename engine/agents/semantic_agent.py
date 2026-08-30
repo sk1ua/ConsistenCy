@@ -60,7 +60,13 @@ def _subtree_fingerprints(tree: ast.AST) -> set[str]:
             parts = f"arg:{node.arg}|{','.join(child_hashes)}"
         else:
             parts = f"{type(node).__name__}|{','.join(child_hashes)}"
-        h = hashlib.md5(parts.encode()).hexdigest()
+        # `ast.parse` materialises legal `\\uXXXX` escape sequences inside
+        # string literals (e.g. `value = '\udc80'`) into lone surrogate code
+        # points, which strict UTF-8 encoding rejects. Fingerprints are
+        # internal equality tokens that are never serialised as text, so the
+        # encoding must be total and deterministic; `surrogatepass` keeps
+        # distinct surrogates distinct instead of masking them.
+        h = hashlib.md5(parts.encode("utf-8", "surrogatepass")).hexdigest()
         fingerprints.add(h)
         return h
 

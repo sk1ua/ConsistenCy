@@ -2,7 +2,7 @@
 """Adapter between the stdio protocol and the DAG workflow engine."""
 from __future__ import annotations
 
-from ..protocol import RunWorkflowRequest, RunWorkflowResponse
+from ..protocol import RunWorkflowRequest, RunWorkflowResponse, normalise_protocol_strings
 from .builtins import register_builtin_plugins
 from .plugins import AnalysisContext, BaseAnalyzerPlugin, PluginReport
 from .runner import run_workflow_sync
@@ -72,14 +72,23 @@ def run_workflow_request(request: RunWorkflowRequest) -> RunWorkflowResponse:
                 error=f"Unknown or invalid workflow '{request.workflow}': {error}",
             )
 
-    files = {file_input.path: file_input.content for file_input in request.files}
+    # Boundary sanitisation: the stdio entrypoint already normalises the raw
+    # JSON, but the bridge is also called directly (tests, embedders), so the
+    # step inputs are normalised here as well. Lone surrogates reaching the
+    # parsers would otherwise poison every downstream UTF-8 encoding.
+    files = {
+        normalise_protocol_strings(file_input.path): normalise_protocol_strings(file_input.content)
+        for file_input in request.files
+    }
     baselines = {
-        file_input.path: file_input.baseline
+        normalise_protocol_strings(file_input.path): normalise_protocol_strings(file_input.baseline)
         for file_input in request.files
         if file_input.baseline
     }
     diff_hunks = {
-        file_input.path: tuple(file_input.diff_hunks or ())
+        normalise_protocol_strings(file_input.path): tuple(
+            normalise_protocol_strings(hunk) for hunk in (file_input.diff_hunks or ())
+        )
         for file_input in request.files
         if file_input.diff_hunks
     }

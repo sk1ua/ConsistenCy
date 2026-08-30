@@ -3,10 +3,13 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from engine.agents.base_agent import AgentBase, AgentResult
 from engine.workflow.artifacts import STATUS_SKIPPED, STATUS_SUCCEEDED
+from engine.workflow import builtins as workflow_builtins
 from engine.workflow.builtins import (
     BuildVerifier,
     DependencyGraphPlugin,
+    EngineAgentPlugin,
     GroundingSanityVerifier,
     SchemaDriftPlugin,
     SyntaxVerifier,
@@ -48,6 +51,50 @@ class ShippedWorkflowCoverageTest(unittest.TestCase):
                     continue
                 with self.subTest(workflow=name, step=step.step_id):
                     self.assertIsNotNone(resolve_plugin(step))
+
+
+class EngineAgentPluginFileIsolationTest(unittest.IsolatedAsyncioTestCase):
+    """A pathological file must degrade honestly, not fail the whole step.
+
+    The real-world trigger: `ast.parse` materialises legal `\\uXXXX` escape
+    sequences inside analyzed source into lone surrogate constants, and any
+    agent that hashes those values used to raise UnicodeEncodeError, which
+    failed the entire `semantics` step and every dependent with it.
+    """
+
+    async def test_one_unanalyzable_file_does_not_fail_the_step(self):
+        class ExplodingAgent(AgentBase):
+            @property
+            def name(self):
+                return "ExplodingAgent"
+
+            def analyze(self, snapshot, baseline):
+                if "BOOM" in (snapshot.get("source") or ""):
+                    raise UnicodeEncodeError(
+                        "utf-8", "Const:str:...", 19, 20, "surrogates not allowed"
+                    )
+                return AgentResult(agent_name=self.name, score=0.0, details={}, evidence=[])
+
+        class ExplodingManifest:
+            display_name = "ExplodingAgent"
+
+            def create(self):
+                return ExplodingAgent()
+
+        plugin = EngineAgentPlugin("engine.semantic", "semantic", {})
+        with patch.object(workflow_builtins, "AGENT_REGISTRY", {"semantic": ExplodingManifest()}):
+            report = await plugin.analyze(AnalysisContext(files={
+                "bad.py": "x = 'BOOM'\n",
+                "ok.py": "y = 1\n",
+            }))
+
+        by_file_and_rule = {(item.file, item.rule) for item in report.evidence}
+        self.assertIn(("bad.py", "engine.semantic.analysis_error"), by_file_and_rule)
+        self.assertNotIn(("ok.py", "engine.semantic.analysis_error"), by_file_and_rule)
+        # The healthy file was still scored; the broken one is honestly
+        # accounted for in the summary instead of aborting the plugin.
+        self.assertIn("scored 1 file(s)", report.summary)
+        self.assertIn("1 file(s) skipped on analysis errors", report.summary)
 
 
 class DependencyGraphPluginTest(unittest.IsolatedAsyncioTestCase):
