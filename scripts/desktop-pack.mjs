@@ -7,6 +7,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -98,14 +99,24 @@ cpSync(join(root, "engine"), join(staged, "engine"), {
 const runtime = join(staged, "runtime");
 mkdirSync(runtime, { recursive: true });
 
-// The API is bundled except for the native SQLite module. It is installed
-// under Node 22, not rebuilt for Electron's embedded Node ABI.
+// The API is bundled except for the native SQLite module and the tree-sitter
+// assets. They are installed under Node 22, not rebuilt for Electron's
+// embedded Node ABI.
 const apiManifest = JSON.parse(readFileSync(join(root, "apps", "api", "package.json"), "utf8"));
+const pluginsManifest = JSON.parse(readFileSync(join(root, "packages", "plugins-builtin", "package.json"), "utf8"));
 writeFileSync(join(runtime, "package.json"), JSON.stringify({
   name: "consistency-desktop-runtime",
   version: "0.1.0",
   private: true,
-  dependencies: { "better-sqlite3": apiManifest.dependencies["better-sqlite3"] }
+  dependencies: {
+    "better-sqlite3": apiManifest.dependencies["better-sqlite3"],
+    // TreeSitterService resolves these two at runtime: the wasm runtime and
+    // the grammar files are data assets that esbuild cannot inline, so the
+    // bundled server.cjs still require.resolve()es them from node_modules.
+    // Pin the exact versions locked in @consistency/plugins-builtin.
+    "web-tree-sitter": pluginsManifest.dependencies["web-tree-sitter"],
+    "tree-sitter-wasms": pluginsManifest.dependencies["tree-sitter-wasms"]
+  }
 }, null, 2));
 runNpm(["install", "--omit=dev", "--no-audit", "--no-fund"], runtime, {
   npm_config_engine_strict: "true"
@@ -140,6 +151,20 @@ cpSync(pythonRoot, join(runtime, "python"), {
   recursive: true,
   filter: source => !source.includes("__pycache__")
 });
+
+// The bundled interpreter is an embeddable distribution: its *._pth file
+// enables isolated mode, so PYTHONPATH (set by the deterministic analyzer)
+// is ignored and `python -m engine` cannot locate staged/engine. Put the
+// staged root — the parent of the engine package, two levels above the
+// interpreter — on the interpreter's default sys.path so `import engine`
+// works without relying on environment variables.
+const stagedPython = join(runtime, "python");
+const pthFiles = readdirSync(stagedPython).filter(name => name.toLowerCase().endsWith("._pth"));
+if (pthFiles.length !== 1) {
+  throw new Error(`Bundled Python must ship exactly one *._pth file: ${stagedPython}`);
+}
+const pthPath = join(stagedPython, pthFiles[0]);
+writeFileSync(pthPath, `${readFileSync(pthPath, "utf8").trimEnd()}\n# ConsistenCy staged root (parent of the engine package)\n..\\..\n`);
 
 console.log("Running electron-builder (Windows targets) ...");
 console.log(releaseMode

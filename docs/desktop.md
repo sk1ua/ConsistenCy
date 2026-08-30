@@ -68,6 +68,11 @@ Output is written to `apps/desktop/release/`:
 - `release/win-unpacked/ConsistenCy.exe`: Runnable unpacked application.
 - `release/ConsistenCy-Setup-0.1.0-x64.exe`: Full Windows NSIS installer.
 
+### Bundled Runtime Contract
+`CONSISTENCY_PYTHON_BUNDLE_ROOT` must point at a redistributable Python 3.12 **embeddable** runtime that already contains the deterministic engine's third-party dependencies in its `Lib/site-packages`. Because an embeddable distribution runs in isolated mode (its `*._pth` file makes the interpreter ignore `PYTHONPATH`), `scripts/desktop-pack.mjs` appends `..\..` — the staged root, i.e. the parent of the staged `engine` package — to the bundled `*._pth` so `import engine` works from the interpreter's default `sys.path`.
+
+The staged Node runtime installs `better-sqlite3` (native module) plus `web-tree-sitter` and `tree-sitter-wasms` (pinned to the versions in `packages/plugins-builtin/package.json`). The tree-sitter runtime wasm and grammar wasm files are data assets that esbuild cannot inline, so the bundled API `require.resolve`es them from the staged `node_modules` at runtime.
+
 ### Packaged Data Location
 The packaged application persists all mutable data strictly under the user data directory (`app.getPath("userData")`):
 - Database: `<userData>/consistency.db`
