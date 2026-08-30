@@ -225,6 +225,89 @@ function updatePreferencesPath() {
   return path.join(app.getPath("userData"), "desktop-preferences.json");
 }
 
+// Desktop behavior preferences owned by the main process and stored next to
+// the update channel in desktop-preferences.json. Defaults preserve the
+// shipped behavior: the window closes into the tray, the tray exists, and
+// login launch stays off under the current security model.
+const DESKTOP_PREFERENCE_DEFAULTS = Object.freeze({
+  closeToTray: true,
+  trayEnabled: true,
+  launchAtLogin: false
+});
+const DESKTOP_PREFERENCE_KEYS = Object.freeze(Object.keys(DESKTOP_PREFERENCE_DEFAULTS));
+
+function readDesktopPreferences() {
+  const preferences = { ...DESKTOP_PREFERENCE_DEFAULTS };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(updatePreferencesPath(), "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const key of DESKTOP_PREFERENCE_KEYS) {
+        if (typeof parsed[key] === "boolean") preferences[key] = parsed[key];
+      }
+    }
+  } catch {
+    // Missing or unreadable preferences fall back to the shipped defaults.
+  }
+  return preferences;
+}
+
+function applyLoginItemPreference(enabled) {
+  try {
+    app.setLoginItemSettings({ openAtLogin: enabled === true });
+  } catch (error) {
+    log(`main: login item update failed: ${error && error.message ? error.message : "unknown"}`);
+  }
+}
+
+function destroyTray() {
+  if (!tray) return;
+  try {
+    tray.destroy();
+  } catch {
+    // The tray may already be destroyed during shutdown.
+  }
+  tray = null;
+}
+
+function applyTrayPreference(enabled) {
+  if (!enabled) {
+    destroyTray();
+    return;
+  }
+  if (!tray) createTray();
+}
+
+// Resolves the packaged application icon next to main.cjs's resources
+// folder. app.getAppPath() is the asar root when packaged and apps/desktop
+// during development, so one expression covers both; the remaining entries
+// are development-only fallbacks to the existing web logo asset.
+function trayIconPath() {
+  const candidates = [
+    path.join(app.getAppPath(), "resources", "consistency.png"),
+    path.join(stagedRoot(), "apps", "web", "dist", "consistency-logo.png"),
+    path.resolve(__dirname, "..", "..", "web", "public", "consistency-logo.png")
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return undefined;
+}
+
+function trayIconImage() {
+  const iconPath = trayIconPath();
+  if (!iconPath) {
+    log("main: tray icon resource is missing");
+    return nativeImage.createEmpty();
+  }
+  const image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) log("main: tray icon resource could not be decoded");
+  return image;
+}
+
 function readDesktopReleaseMetadata() {
   try {
     const manifest = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), "package.json"), "utf8"));
@@ -267,6 +350,39 @@ async function writeUpdateChannel(channel) {
     mode: 0o600
   });
   await fs.promises.rename(temporary, target);
+}
+
+// Persists a validated desktop preference patch and applies its OS side
+// effects. Only known keys with boolean values cross the boundary; unknown
+// keys are ignored and invalid values throw before anything is written.
+async function writeDesktopPreferences(patch) {
+  const normalized = {};
+  for (const key of DESKTOP_PREFERENCE_KEYS) {
+    if (patch[key] === undefined) continue;
+    if (typeof patch[key] !== "boolean") {
+      throw new Error(`Preference ${key} must be a boolean`);
+    }
+    normalized[key] = patch[key];
+  }
+  const target = updatePreferencesPath();
+  const temporary = `${target}.${process.pid}.tmp`;
+  let stored = {};
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(target, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) stored = parsed;
+  } catch {
+    // A new preferences file is expected on first use.
+  }
+  await fs.promises.mkdir(path.dirname(target), { recursive: true });
+  await fs.promises.writeFile(temporary, `${JSON.stringify({ ...stored, ...normalized }, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
+  await fs.promises.rename(temporary, target);
+  const preferences = readDesktopPreferences();
+  applyTrayPreference(preferences.trayEnabled);
+  applyLoginItemPreference(preferences.launchAtLogin);
+  return preferences;
 }
 
 function broadcastUpdateState(state) {
@@ -600,6 +716,17 @@ function registerIpc() {
     showWindow();
     return { visible: true };
   });
+  ipcMain.handle("preferences:get", event => {
+    assertTrustedSender(event);
+    return readDesktopPreferences();
+  });
+  ipcMain.handle("preferences:set", async (event, patch) => {
+    assertTrustedSender(event);
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+      throw new Error("Preference patch is invalid");
+    }
+    return writeDesktopPreferences(patch);
+  });
   ipcMain.handle("runtime:restart", async event => {
     assertTrustedSender(event);
     return restartApi();
@@ -667,6 +794,7 @@ function hardenSession() {
 }
 
 function createWindow() {
+  const iconPath = trayIconPath();
   const window = new BrowserWindow({
     width: 1500,
     height: 960,
@@ -676,6 +804,7 @@ function createWindow() {
     autoHideMenuBar: true,
     title: "ConsistenCy",
     show: false,
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -701,8 +830,17 @@ function createWindow() {
   });
   window.on("close", event => {
     if (quitting) return;
-    event.preventDefault();
-    window.hide();
+    // Hiding into the tray requires an existing tray: without it the window
+    // would be unreachable, so the close falls through to a normal exit.
+    if (readDesktopPreferences().closeToTray && tray) {
+      event.preventDefault();
+      window.hide();
+      return;
+    }
+    // Otherwise closing the window exits the application and tears down the
+    // local audit service.
+    quitting = true;
+    app.quit();
   });
   window.once("ready-to-show", () => window.show());
   window.webContents.on("did-finish-load", () => {
@@ -720,9 +858,15 @@ function showWindow() {
 }
 
 function createTray() {
+  if (tray) return;
   try {
-    const icon = nativeImage.createFromPath(process.execPath).resize({ width: 16, height: 16 });
-    tray = new Tray(icon);
+    const icon = trayIconImage();
+    if (icon.isEmpty()) {
+      // closeToTray must never hide the window into an invisible tray slot.
+      log("main: tray icon resource is empty; refusing to create the tray");
+      return;
+    }
+    tray = new Tray(icon.resize({ width: 16, height: 16 }));
     tray.setToolTip("ConsistenCy audit supervisor");
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Open ConsistenCy", click: showWindow },
@@ -731,6 +875,7 @@ function createTray() {
     ]));
     tray.on("double-click", showWindow);
   } catch (error) {
+    tray = null;
     log(`main: tray unavailable: ${error && error.message ? error.message : "unknown"}`);
   }
 }
@@ -765,8 +910,10 @@ if (!hasSingleInstanceLock) {
       if (!await waitForHealth(30_000)) {
         throw new Error("The audit service did not become healthy within 30 seconds");
       }
-      createTray();
       createWindow();
+      const desktopPreferences = readDesktopPreferences();
+      if (desktopPreferences.trayEnabled) createTray();
+      applyLoginItemPreference(desktopPreferences.launchAtLogin);
       if (updateCoordinator.getState().mode === "automatic") {
         const coordinator = updateCoordinator;
         const updateCheckTimer = setTimeout(() => {

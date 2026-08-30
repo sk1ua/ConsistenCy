@@ -29,6 +29,21 @@ export type DesktopUpdateActionResult = Readonly<{
   message?: string;
 }>;
 
+export type DesktopPreferenceKey = "closeToTray" | "trayEnabled" | "launchAtLogin";
+
+export type DesktopPreferences = Readonly<{
+  closeToTray: boolean;
+  trayEnabled: boolean;
+  launchAtLogin: boolean;
+}>;
+
+export type DesktopPreferencesPatch = Partial<Record<DesktopPreferenceKey, boolean>>;
+
+export type DesktopPreferencesBridge = Readonly<{
+  get: () => Promise<DesktopPreferences>;
+  set: (patch: DesktopPreferencesPatch) => Promise<DesktopPreferences>;
+}>;
+
 export type DesktopUpdateBridge = Readonly<{
   getState: () => Promise<DesktopUpdateState>;
   setChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateActionResult>;

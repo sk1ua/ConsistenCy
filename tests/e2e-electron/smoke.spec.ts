@@ -54,6 +54,10 @@ test.describe("desktop shell", () => {
               canceled: boolean;
               repository?: { id: string };
             }>;
+            preferences?: {
+              get: () => Promise<Record<string, unknown>>;
+              set: (patch: unknown) => Promise<Record<string, unknown>>;
+            };
             updates?: { getState: () => Promise<Record<string, unknown>> };
           } & Record<string, unknown>;
         }).consistencyDesktop;
@@ -62,6 +66,16 @@ test.describe("desktop shell", () => {
         const selection = desktop?.selectRepository ? await desktop.selectRepository() : null;
         const repositoryId = selection?.repository?.id;
         if (!repositoryId) throw new Error("Expected the desktop host to register its local repository");
+
+        const desktopPreferences = desktop?.preferences ? await desktop.preferences.get() : null;
+        let invalidPreferencePatchRejected = false;
+        if (desktop?.preferences) {
+          try {
+            await desktop.preferences.set({ closeToTray: "renderer-must-not-write-strings" });
+          } catch {
+            invalidPreferencePatchRejected = true;
+          }
+        }
 
         const settingsUpdate = await fetch("/api/settings", {
           method: "PUT",
@@ -101,6 +115,8 @@ test.describe("desktop shell", () => {
           localReviewStatus: localReview.status,
           localReviewBody,
           buildInfo,
+          desktopPreferences,
+          invalidPreferencePatchRejected,
           methods: desktop ? Object.keys(desktop).sort() : [],
           updateMethods: updates ? Object.keys(updates).sort() : [],
           updateState: updates ? await updates.getState() : null,
@@ -120,6 +136,12 @@ test.describe("desktop shell", () => {
         version: "0.1.1",
         buildMode: "development"
       });
+      expect(boundary.desktopPreferences).toEqual({
+        closeToTray: true,
+        trayEnabled: true,
+        launchAtLogin: false
+      });
+      expect(boundary.invalidPreferencePatchRejected).toBe(true);
       expect(boundary.hasRawUserDataPath).toBe(false);
       expect(boundary.hasRawIpc).toBe(false);
       expect(boundary.methods).toEqual([
@@ -127,6 +149,7 @@ test.describe("desktop shell", () => {
         "buildInfo",
         "credentialStatus",
         "openLogsFolder",
+        "preferences",
         "restartRuntime",
         "selectRepository",
         "setCredential",
