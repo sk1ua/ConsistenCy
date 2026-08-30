@@ -235,6 +235,7 @@ export function App() {
         <Route path="/workflows" element={<WorkflowPage
           automations={automations}
           repositories={repositories}
+          jobs={jobs}
           capabilities={queries.auditCapabilities.data}
           actionError={setAutomationEnabled.error ? safeRequestError(setAutomationEnabled.error) : undefined}
           changingAutomationId={setAutomationEnabled.variables?.automationId}

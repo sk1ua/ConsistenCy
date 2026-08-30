@@ -31,51 +31,52 @@ export function FindingsPage({ reports, reportsUnavailable }: { reports: ReviewR
   }, [allFindings, search, severityFilter]);
 
   return (
-    <div className="findings-route page-stack">
+    <div className="ds-page pw-page page-stack">
       {/* 1. Clean Developer Header */}
-      <section className="section-block findings-header-strip">
-        <div className="findings-title-wrap">
-          <FileSearch2 size={20} className="findings-icon-main" />
-          <div>
-            <h2>{zh ? "发现索引" : "Findings Index"}</h2>
-            <p>{zh ? "跨所有代码仓库与审查聚合的静态及语义分析发现。" : "Aggregated static and semantic findings across all reviewed repositories."}</p>
-          </div>
+      <section className="ds-hero">
+        <div className="ds-hero-icon"><FileSearch2 size={18} /></div>
+        <div className="ds-hero-body">
+          <h2 className="ds-hero-title">{zh ? "发现索引" : "Findings Index"}</h2>
+          <p className="ds-hero-description">{zh ? "跨所有代码仓库与审查聚合的静态及语义分析发现。" : "Aggregated static and semantic findings across all reviewed repositories."}</p>
         </div>
 
-        <div className="findings-filter-bar">
-          <div className="search-input-wrap">
-            <Search size={14} className="search-icon" />
-            <input
-              type="text"
-              placeholder={zh ? "搜索发现、文件或仓库..." : "Search findings, files..."}
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
+        <div className="ds-hero-actions">
+          <div className="pw-hero-tools">
+            <div className="pw-search">
+              <Search size={14} className="ds-input-prefix" />
+              <input
+                className="ds-input ds-input--has-prefix"
+                type="text"
+                placeholder={zh ? "搜索发现、文件或仓库..." : "Search findings, files..."}
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
 
-          <select
-            value={severityFilter}
-            onChange={e => setSeverityFilter(e.target.value)}
-            className="filter-select"
-            aria-label={zh ? "严重度筛选" : "Severity filter"}
-          >
-            <option value="all">{zh ? "全部严重度" : "All severities"}</option>
-            <option value="critical">{zh ? "严重 (Critical)" : "Critical"}</option>
-            <option value="high">{zh ? "高危 (High)" : "High"}</option>
-            <option value="medium">{zh ? "中危 (Medium)" : "Medium"}</option>
-            <option value="low">{zh ? "低危 (Low)" : "Low"}</option>
-          </select>
+            <select
+              value={severityFilter}
+              onChange={e => setSeverityFilter(e.target.value)}
+              className="ds-select pw-select"
+              aria-label={zh ? "严重度筛选" : "Severity filter"}
+            >
+              <option value="all">{zh ? "全部严重度" : "All severities"}</option>
+              <option value="critical">{zh ? "严重 (Critical)" : "Critical"}</option>
+              <option value="high">{zh ? "高危 (High)" : "High"}</option>
+              <option value="medium">{zh ? "中危 (Medium)" : "Medium"}</option>
+              <option value="low">{zh ? "低危 (Low)" : "Low"}</option>
+            </select>
+          </div>
         </div>
       </section>
 
       {/* 2. Findings List */}
-      <section className="section-block findings-catalog">
-        <div className="panel-title">
-          <div>
-            <span className="panel-kicker">{zh ? "发现列表" : "Findings List"}</span>
-            <h2>{zh ? "代码缺陷与安全建议" : "Code Issues & Recommendations"}</h2>
+      <section className="ds-section">
+        <div className="ds-section-header">
+          <div className="ds-section-heading">
+            <span className="ds-section-kicker">{zh ? "发现列表" : "Findings List"}</span>
+            <h2 className="ds-section-title">{zh ? "代码缺陷与安全建议" : "Code Issues & Recommendations"}</h2>
           </div>
-          <strong>{filtered.length} {zh ? "项" : "items"}</strong>
+          <strong className="ds-chip ds-chip--muted">{filtered.length} {zh ? "项" : "items"}</strong>
         </div>
 
         {reportsUnavailable && allFindings.length === 0 ? (
@@ -87,9 +88,9 @@ export function FindingsPage({ reports, reportsUnavailable }: { reports: ReviewR
             </div>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="clean-inline-status">
-            <ShieldCheck size={18} className="icon-success" />
-            <span>{zh ? "当前无匹配的审查发现。" : "No matching findings in reviewed reports."}</span>
+          <div className="ds-empty ds-empty--slim">
+            <ShieldCheck size={18} className="ds-empty-icon ds-empty-icon--ok" />
+            <span className="ds-empty-text">{zh ? "当前无匹配的审查发现。" : "No matching findings in reviewed reports."}</span>
           </div>
         ) : (
           <div className="findings-catalog-list">
@@ -101,7 +102,7 @@ export function FindingsPage({ reports, reportsUnavailable }: { reports: ReviewR
                     <div className="source-left">
                       <strong>{report.repositoryFullName}</strong>
                       <small>{report.pullRequestNumber ? `PR #${report.pullRequestNumber}` : (zh ? "本地审查" : "Local review")}</small>
-                      {isDemo && <span className="provenance-pill demo-provenance">{zh ? "演示数据" : "FIXTURE"}</span>}
+                      {isDemo && <span className="ds-chip ds-chip--warn">{zh ? "演示数据" : "FIXTURE"}</span>}
                     </div>
                     <Link to={`/runs/${encodeURIComponent(report.jobId)}/diff`} className="text-link">
                       {zh ? "查看代码差异" : "View Diff"} →

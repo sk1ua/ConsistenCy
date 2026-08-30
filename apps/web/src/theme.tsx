@@ -26,9 +26,21 @@ const fallback: ThemeValue = {
 };
 
 export function readThemePreference(storage?: Pick<Storage, "getItem">): ThemePreference {
-  const source = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
-  const saved = source?.getItem(STORAGE_KEY);
-  if (saved === "dark" || saved === "light" || saved === "system") return saved;
+  let source = storage;
+  if (source === undefined && typeof window !== "undefined") {
+    try {
+      source = window.localStorage;
+    } catch {
+      return "system";
+    }
+  }
+  if (!source || typeof source.getItem !== "function") return "system";
+  try {
+    const saved = source.getItem(STORAGE_KEY);
+    if (saved === "dark" || saved === "light" || saved === "system") return saved;
+  } catch {
+    return "system";
+  }
   return "system";
 }
 
@@ -42,22 +54,41 @@ const ThemeContext = createContext<ThemeValue>(fallback);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>(defaultPreference);
   const [systemDark, setSystemDark] = useState<boolean>(() =>
-    typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+      : false
   );
   const resolved = resolveTheme(preference, systemDark);
 
   useEffect(() => {
     document.documentElement.dataset.theme = resolved;
     document.documentElement.style.colorScheme = resolved;
-    window.localStorage.setItem(STORAGE_KEY, preference);
+    if (typeof window === "undefined") return;
+    let storage: Storage | undefined;
+    try {
+      storage = window.localStorage;
+    } catch {
+      return;
+    }
+    if (!storage || typeof storage.setItem !== "function") return;
+    try {
+      storage.setItem(STORAGE_KEY, preference);
+    } catch {
+      // Storage is optional; the resolved theme remains active in memory.
+    }
   }, [resolved, preference]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", onChange);
+      return () => media.removeEventListener("change", onChange);
+    }
+    const legacy = media as MediaQueryList & { addListener?: (listener: (event: MediaQueryListEvent) => void) => void; removeListener?: (listener: (event: MediaQueryListEvent) => void) => void };
+    legacy.addListener?.(onChange);
+    return () => legacy.removeListener?.(onChange);
   }, []);
 
   const setPreference = useCallback((next: ThemePreference) => setPreferenceState(next), []);

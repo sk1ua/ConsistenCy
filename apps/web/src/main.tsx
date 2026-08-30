@@ -21,6 +21,8 @@ import "./styles/workflow.css";
 import "./styles/diff.css";
 import "./styles/motion.css";
 import "./styles/workbench-shell.css";
+import "./styles/pages-workspace.css";
+import "./styles/pages-xray.css";
 
 const root = document.getElementById("root");
 

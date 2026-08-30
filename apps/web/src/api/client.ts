@@ -12,6 +12,9 @@ import {
   heartbeatPulseSchema,
   heartbeatStreamEventSchema,
   auditCapabilitiesSchema,
+  reviewPipelineCatalogResponseSchema,
+  kernelSyscallCatalogResponseSchema,
+  engineAllowlistCatalogResponseSchema,
   auditIssueSchema,
   auditRunSchema,
   automationSchema,
@@ -61,6 +64,19 @@ import {
   type WorkflowRuntimeRunSummary,
   type WorkflowRuntimeRunV2,
   type WorkflowRuntimeValidationResult,
+  type WorkflowRuntimeCopilotProposalResponse,
+  workflowRuntimeOverviewSchema,
+  workflowRuntimeCopilotProposalResponseSchema,
+  workflowRuntimeDefinitionsResponseSchema,
+  workflowRuntimeRevisionResponseSchema,
+  workflowRuntimeDryLoadResponseSchema,
+  workflowRuntimeTriggerResponseSchema,
+  workflowRuntimeRunsResponseSchema,
+  workflowRuntimeRunResponseSchema,
+  workflowRuntimeValidationResultSchema,
+  type ReviewPipelineCatalogResponse,
+  type KernelSyscallCatalogResponse,
+  type EngineAllowlistCatalogResponse,
   type JobDiffResponse,
   type AuditCapabilities,
   type Automation,
@@ -449,29 +465,31 @@ export const api = {
     return runRuntimeSnapshotSchema.parse(await request(`/runtime/runs/${encodeURIComponent(runId)}`, { signal }));
   },
   async workflowRuntimeOverview(signal?: AbortSignal): Promise<{ definition: WorkflowRuntimeDefinition; nodeTypes: WorkflowRuntimeNodeType[] }> {
-    return request("/workflow-runtime/overview", { signal }) as Promise<{ definition: WorkflowRuntimeDefinition; nodeTypes: WorkflowRuntimeNodeType[] }>;
+    return workflowRuntimeOverviewSchema.parse(await request("/workflow-runtime/overview", { signal }));
   },
-  async validateWorkflowRuntime(definition: unknown, signal?: AbortSignal): Promise<WorkflowRuntimeValidationResult & { plan?: unknown }> {
-    return request("/workflow-runtime/validate", {
+  async validateWorkflowRuntime(definition: unknown, signal?: AbortSignal): Promise<WorkflowRuntimeValidationResult> {
+    const payload = await request("/workflow-runtime/validate", {
       method: "POST",
       body: JSON.stringify({ definition }),
       signal
-    }) as Promise<WorkflowRuntimeValidationResult & { plan?: unknown }>;
+    });
+    return workflowRuntimeValidationResultSchema.parse(payload);
   },
-  async triggerWorkflowRuntime(repositoryId: string, pin?: { definitionId: string; revisionId: string }): Promise<{ runId: string; status: string; revisionId: string }> {
-    return request("/workflow-runtime/runs", {
+  async triggerWorkflowRuntime(repositoryId: string, pin?: { definitionId: string; revisionId: string }, signal?: AbortSignal): Promise<{ runId: string; status: string; revisionId: string }> {
+    return workflowRuntimeTriggerResponseSchema.parse(await request("/workflow-runtime/runs", {
       method: "POST",
-      body: JSON.stringify({ repositoryId, ...(pin ?? {}) })
-    }) as Promise<{ runId: string; status: string; revisionId: string }>;
+      body: JSON.stringify({ repositoryId, ...(pin ?? {}) }),
+      signal
+    }));
   },
   async workflowRuntimeDefinitions(signal?: AbortSignal): Promise<WorkflowRuntimeDefinitionSummary[]> {
-    const payload = await request("/workflow-runtime/definitions", { signal }) as { definitions: WorkflowRuntimeDefinitionSummary[] };
-    return payload.definitions;
+    return workflowRuntimeDefinitionsResponseSchema.parse(await request("/workflow-runtime/definitions", { signal })).definitions;
   },
-  async saveWorkflowRuntimeDefinition(input: { definitionId?: string; definition: unknown }): Promise<WorkflowRuntimeDefinitionRevision> {
+  async saveWorkflowRuntimeDefinition(input: { definitionId?: string; definition: unknown }, signal?: AbortSignal): Promise<WorkflowRuntimeDefinitionRevision> {
     const payload = await request("/workflow-runtime/definitions", {
       method: "POST",
-      body: JSON.stringify(input)
+      body: JSON.stringify(input),
+      signal
     }) as { revision: WorkflowRuntimeDefinitionRevision };
     return payload.revision;
   },
@@ -479,24 +497,29 @@ export const api = {
     await request(`/workflow-runtime/definitions/${encodeURIComponent(definitionId)}`, { method: "DELETE" });
   },
   async workflowRuntimeRevision(definitionId: string, revisionId: string, signal?: AbortSignal): Promise<WorkflowRuntimeDefinitionRevision> {
-    const payload = await request(
+    return workflowRuntimeRevisionResponseSchema.parse(await request(
       `/workflow-runtime/definitions/${encodeURIComponent(definitionId)}/revisions/${encodeURIComponent(revisionId)}`,
       { signal }
-    ) as { revision: WorkflowRuntimeDefinitionRevision };
-    return payload.revision;
+    )).revision;
   },
   async workflowRuntimeDryLoad(definitionId: string, revisionId: string, signal?: AbortSignal): Promise<WorkflowRuntimeDryLoadResult> {
-    return request(
+    return workflowRuntimeDryLoadResponseSchema.parse(await request(
       `/workflow-runtime/definitions/${encodeURIComponent(definitionId)}/revisions/${encodeURIComponent(revisionId)}/dry-load`,
       { signal }
-    ) as Promise<WorkflowRuntimeDryLoadResult>;
+    ));
+  },
+  async proposeWorkflowRuntimeCopilotPatch(input: { instruction: string; definition?: unknown; definitionId?: string }, signal?: AbortSignal): Promise<WorkflowRuntimeCopilotProposalResponse> {
+    return workflowRuntimeCopilotProposalResponseSchema.parse(await request("/workflow-runtime/copilot/proposal", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal
+    }));
   },
   async workflowRuntimeRuns(limit = 20, signal?: AbortSignal): Promise<WorkflowRuntimeRunSummary[]> {
-    const payload = await request(`/workflow-runtime/runs?limit=${limit}`, { signal }) as { runs: WorkflowRuntimeRunSummary[] };
-    return payload.runs;
+    return workflowRuntimeRunsResponseSchema.parse(await request(`/workflow-runtime/runs?limit=${limit}`, { signal })).runs;
   },
   async workflowRuntimeRunV2(runId: string, signal?: AbortSignal): Promise<WorkflowRuntimeRunV2> {
-    return request(`/workflow-runtime/runs/${encodeURIComponent(runId)}`, { signal }) as Promise<WorkflowRuntimeRunV2>;
+    return workflowRuntimeRunResponseSchema.parse(await request(`/workflow-runtime/runs/${encodeURIComponent(runId)}`, { signal }));
   },
   async workflowRuntimeBindings(repositoryId: string, signal?: AbortSignal): Promise<WorkflowRuntimeBinding[]> {
     const payload = await request(
@@ -538,5 +561,14 @@ export const api = {
   },
   async workflowRuntimeRun(runId: string, signal?: AbortSignal): Promise<WorkflowRuntimeRun> {
     return request(`/workflow-runtime/runs/${encodeURIComponent(runId)}`, { signal }) as Promise<WorkflowRuntimeRun>;
+  },
+  async reviewPipelineCatalog(signal?: AbortSignal): Promise<ReviewPipelineCatalogResponse> {
+    return reviewPipelineCatalogResponseSchema.parse(await request("/catalog/review-pipeline", { signal }));
+  },
+  async kernelSyscallCatalog(signal?: AbortSignal): Promise<KernelSyscallCatalogResponse> {
+    return kernelSyscallCatalogResponseSchema.parse(await request("/catalog/kernel-syscalls", { signal }));
+  },
+  async engineAllowlistCatalog(signal?: AbortSignal): Promise<EngineAllowlistCatalogResponse> {
+    return engineAllowlistCatalogResponseSchema.parse(await request("/catalog/engine-allowlist", { signal }));
   }
 };

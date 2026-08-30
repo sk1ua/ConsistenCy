@@ -14,6 +14,7 @@ import {
   Activity,
   GitBranch,
   Cpu,
+  Languages,
   Layers,
   ChevronDown,
   CheckCircle2,
@@ -481,6 +482,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         <div style={{ display: "flex", flex: 1, minWidth: 0, flexDirection: "column" }}>
           {/* TOP LOCATION BAR */}
           <header
+            className="shell-topbar"
             style={{
               height: "var(--ds-topbar-height)",
               padding: "0 14px",
@@ -496,11 +498,13 @@ export const AppShell: React.FC<AppShellProps> = ({
             <Breadcrumb items={breadcrumbs} />
 
             {/* Global Actions */}
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <div className="shell-topbar-actions" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <Button
+                className="shell-search-button"
                 variant="outline"
                 size="sm"
                 icon={<Search size={12} />}
+                aria-label={zh ? "搜索" : "Search"}
                 onClick={() => setIsCommandOpen(true)}
               >
                 <span>{zh ? "搜索" : "Search"}</span>
@@ -519,12 +523,15 @@ export const AppShell: React.FC<AppShellProps> = ({
               </Button>
 
               <Button
+                className="shell-locale-button"
                 variant="ghost"
                 size="sm"
+                icon={<Languages size={12} aria-hidden="true" />}
+                aria-label={locale === "zh-CN" ? "Switch to English" : "切换到中文"}
                 onClick={() => setLocale(locale === "zh-CN" ? "en-US" : "zh-CN")}
                 style={{ fontSize: "11px", padding: "0 6px" }}
               >
-                {locale === "zh-CN" ? "中文" : "English"}
+                <span>{locale === "zh-CN" ? "中文" : "English"}</span>
               </Button>
 
               <div role="group" aria-label={zh ? "主题设置" : "Theme settings"} style={{ display: "flex", alignItems: "center", gap: "2px" }}>

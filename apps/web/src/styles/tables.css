@@ -272,12 +272,8 @@
 .jobs-table .table-row strong, .jobs-table .table-row small {
   display: block;
 }
-.jobs-table .semantic-row-open strong,
-.jobs-table .semantic-row-open small {
-  display: block;
-}
-.jobs-table .semantic-row-open strong { font-size: 13px; }
-.jobs-table .semantic-row-open small { margin-top: 3px; color: var(--muted); font-size: 12px; }
+/* The former `.jobs-table .semantic-row-open` orphan typography moved to the
+   ds-table cell mode: styles/pages-workspace.css (.pw-runs-table scope). */
 .jobs-table .table-row strong {
   font-size: 13px;
 }

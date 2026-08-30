@@ -2,6 +2,7 @@ import type { HeartbeatPulse, ReviewJob, ReviewReport, StatsResponse } from "@co
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, Clock3, FolderGit2, History, Inbox, Layers, Play, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo } from "react";
 import { StatusBadge } from "../components/StatusBadge";
+import { Button } from "../design-system/Button";
 import { useI18n } from "../i18n";
 import { Link } from "react-router-dom";
 
@@ -81,41 +82,37 @@ export function DashboardPage({
   const formatDate = (value: string) => new Date(value).toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
   return (
-    <div className="inbox-page page-stack">
+    <div className="ds-page pw-page page-stack">
       {/* 1. Concise Header */}
-      <section className="section-block inbox-header-strip">
-        <div className="inbox-title-group">
-          <Inbox size={20} className="inbox-header-icon" />
-          <div>
-            <h2>{zh ? "收件箱" : "Inbox"}</h2>
-            <p>{zh ? "聚焦当前需要关注的审查任务、活跃执行与最新结论。" : "Items requiring operator attention, active reviews, and recent conclusions."}</p>
-          </div>
+      <section className="ds-hero">
+        <div className="ds-hero-icon"><Inbox size={18} /></div>
+        <div className="ds-hero-body">
+          <h2 className="ds-hero-title">{zh ? "收件箱" : "Inbox"}</h2>
+          <p className="ds-hero-description">{zh ? "聚焦当前需要关注的审查任务、活跃执行与最新结论。" : "Items requiring operator attention, active reviews, and recent conclusions."}</p>
         </div>
 
         {/* Compact summary metric line */}
-        <div className="inbox-summary-line">
-          <span><strong>{model.decisions.length}</strong> {zh ? "项待决策" : "needs decision"}</span>
-          <span className="summary-sep">·</span>
-          <span className={model.degradedRuns.length > 0 ? "degraded-tag" : ""}><strong>{model.degradedRuns.length}</strong> {zh ? "项异常" : "degraded"}</span>
-          <span className="summary-sep">·</span>
-          <span><strong>{model.activeRuns.length}</strong> {zh ? "项活跃运行" : "active"}</span>
+        <div className="ds-chip-row">
+          <span className="ds-chip ds-chip--muted"><strong>{model.decisions.length}</strong> {zh ? "项待决策" : "needs decision"}</span>
+          <span className={model.degradedRuns.length > 0 ? "ds-chip ds-chip--danger" : "ds-chip ds-chip--muted"}><strong>{model.degradedRuns.length}</strong> {zh ? "项异常" : "degraded"}</span>
+          <span className="ds-chip ds-chip--muted"><strong>{model.activeRuns.length}</strong> {zh ? "项活跃运行" : "active"}</span>
         </div>
       </section>
 
       {/* 2. Needs Attention (Decisions + Failed Runs) */}
-      <section className="section-block inbox-section">
-        <div className="panel-title">
-          <div>
-            <span className="panel-kicker">{zh ? "待处理事项" : "Action Required"}</span>
-            <h2>{zh ? "需要关注的审查" : "Needs Attention"}</h2>
+      <section className="ds-section">
+        <div className="ds-section-header">
+          <div className="ds-section-heading">
+            <span className="ds-section-kicker">{zh ? "待处理事项" : "Action Required"}</span>
+            <h2 className="ds-section-title">{zh ? "需要关注的审查" : "Needs Attention"}</h2>
           </div>
-          <strong>{model.attentionItems.length}</strong>
+          <strong className="ds-chip ds-chip--muted">{model.attentionItems.length}</strong>
         </div>
 
         {model.attentionItems.length === 0 ? (
-          <div className="clean-inline-status">
-            <CheckCircle2 size={18} className="icon-success" />
-            <span>{zh ? "暂无需要人工处置或处理异常的审查任务。" : "No reviews requiring attention or disposition."}</span>
+          <div className="ds-empty ds-empty--slim">
+            <CheckCircle2 size={18} className="ds-empty-icon ds-empty-icon--ok" />
+            <span className="ds-empty-text">{zh ? "暂无需要人工处置或处理异常的审查任务。" : "No reviews requiring attention or disposition."}</span>
           </div>
         ) : (
           <div className="inbox-item-list" role="list">
@@ -151,13 +148,13 @@ export function DashboardPage({
 
       {/* 3. Active Running Reviews */}
       {model.activeRuns.length > 0 && (
-        <section className="section-block inbox-section">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "实时执行" : "Live Execution"}</span>
-              <h2>{zh ? "当前运行中的审查" : "Active Reviews"}</h2>
+        <section className="ds-section">
+          <div className="ds-section-header">
+            <div className="ds-section-heading">
+              <span className="ds-section-kicker">{zh ? "实时执行" : "Live Execution"}</span>
+              <h2 className="ds-section-title">{zh ? "当前运行中的审查" : "Active Reviews"}</h2>
             </div>
-            <span className="status-pill telemetry-live">{model.activeRuns.length} {zh ? "运行中" : "running"}</span>
+            <span className="ds-chip ds-chip--ok">{model.activeRuns.length} {zh ? "运行中" : "running"}</span>
           </div>
 
           <div className="inbox-item-list" role="list">
@@ -184,19 +181,19 @@ export function DashboardPage({
       )}
 
       {/* 4. Recent Reviews List */}
-      <section className="section-block inbox-section">
-        <div className="panel-title">
-          <div>
-            <span className="panel-kicker">{zh ? "审查历史" : "Review History"}</span>
-            <h2>{zh ? "最近完成的审查" : "Recent Reviews"}</h2>
+      <section className="ds-section">
+        <div className="ds-section-header">
+          <div className="ds-section-heading">
+            <span className="ds-section-kicker">{zh ? "审查历史" : "Review History"}</span>
+            <h2 className="ds-section-title">{zh ? "最近完成的审查" : "Recent Reviews"}</h2>
           </div>
-          <button type="button" className="text-link" onClick={onOpenJobs}>
+          <Button type="button" variant="ghost" size="sm" onClick={onOpenJobs}>
             {zh ? "查看全部运行" : "All Runs"} →
-          </button>
+          </Button>
         </div>
 
         {model.recentJobs.length === 0 ? (
-          <div className="empty-inline-compact">{zh ? "尚未记录任何审查运行。" : "No review runs recorded."}</div>
+          <div className="ds-empty ds-empty--slim"><p className="ds-empty-text">{zh ? "尚未记录任何审查运行。" : "No review runs recorded."}</p></div>
         ) : (
           <div className="inbox-recent-table" role="table">
             <div className="table-header-row" role="row">

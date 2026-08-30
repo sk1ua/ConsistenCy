@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 
 export interface SidebarRowProps {
   to: string;
-  label: React.ReactNode;
+  label: string;
   icon: React.ReactNode;
   badge?: React.ReactNode;
   active?: boolean;
@@ -22,6 +22,8 @@ export const SidebarRow: React.FC<SidebarRowProps> = ({
   return (
     <NavLink
       to={to}
+      aria-label={label}
+      title={label}
       onClick={onClick}
       className={({ isActive }) =>
         `ds-sidebar-row ${isActive ? "ds-sidebar-row--active" : ""} ${className}`.trim()

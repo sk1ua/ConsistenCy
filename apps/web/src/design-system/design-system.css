@@ -524,27 +524,58 @@
   gap: 8px;
 }
 
-/* Section Header */
+/* Section Header (v3 unified vocabulary: kicker + title + actions) */
 .ds-section-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: var(--space-sm);
   margin-bottom: 10px;
 }
 
+.ds-section-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ds-section-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-strong);
+}
+
 .ds-section-title {
-  font-size: 14px;
+  font-size: var(--font-size-lg);
   font-weight: 600;
+  line-height: 1.3;
   color: var(--foreground);
   margin: 0;
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ds-section-description {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--muted);
 }
 
 .ds-section-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -615,4 +646,443 @@
 @keyframes ds-scale-in {
   from { opacity: 0; transform: scale(0.97); }
   to { opacity: 1; transform: scale(1); }
+}
+
+/* ===== Shared page vocabulary (v3 style convergence) =====
+ * Locked contract consumed by route surfaces (workflow runtime/triggers,
+ * runs, repositories, findings, inbox, X-Ray). Everything derives from
+ * design tokens; page CSS must not hardcode colors or magic spacing.
+ * Section card / chips / controls / table / hero / empty / row list.
+ */
+:root {
+  --ds-content-max: 1200px;
+}
+
+/* Page shell: centered, constrained main column */
+.ds-page {
+  width: 100%;
+  max-width: var(--ds-content-max);
+  margin: 0 auto;
+  min-width: 0;
+}
+
+/* Section card: kicker + title + actions + content */
+.ds-section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 0 var(--shadow-soft);
+}
+
+.ds-section > .ds-section-header {
+  margin-bottom: 0;
+}
+
+/* Chips: capability and status pills (ok / muted / warn / danger) */
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--muted-strong);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.ds-chip--mono {
+  font-family: var(--ds-font-mono);
+}
+
+.ds-chip > i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ds-chip svg {
+  flex: 0 0 auto;
+}
+
+.ds-chip--ok {
+  background: var(--success-soft);
+  border-color: var(--success-faint);
+  color: var(--success-strong);
+}
+
+.ds-chip--muted {
+  background: var(--surface-subtle);
+  border-color: var(--border);
+  color: var(--muted-strong);
+}
+
+.ds-chip--warn {
+  background: var(--warning-soft);
+  border-color: var(--warning-faint);
+  color: var(--warning-strong);
+}
+
+.ds-chip--danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-faint);
+  color: var(--danger-strong);
+}
+
+.ds-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+/* Row list: stacked rows inside section cards */
+.ds-row-list {
+  min-width: 0;
+  display: grid;
+}
+
+.ds-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ds-row:last-child {
+  border-bottom: 0;
+}
+
+.ds-row-main {
+  min-width: 0;
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ds-row-title {
+  min-width: 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-row-sub {
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-row-sub--mono {
+  font-family: var(--ds-font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.ds-row-meta {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-size-sm);
+  color: var(--muted-strong);
+  overflow-wrap: anywhere;
+}
+
+.ds-row-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Hero: page header card with icon slot, title, description, and actions */
+.ds-hero {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 0 var(--shadow-soft);
+}
+
+.ds-hero-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--primary-faint);
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.ds-hero-body {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.ds-hero-title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--foreground);
+}
+
+.ds-hero-description {
+  margin: 0;
+  max-width: 78ch;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.ds-hero-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* 680px: global stacked-breakpoint scale (680 / 430) */
+@media (max-width: 680px) {
+  .ds-hero {
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .ds-hero-actions {
+    width: 100%;
+  }
+}
+
+/* Unified form controls — textarea matches .ds-input / .ds-select */
+.ds-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 88px;
+  padding: 7px 10px;
+  font-family: var(--ds-font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius-md);
+  outline: none;
+  resize: vertical;
+  transition: border-color var(--ds-transition-fast), box-shadow var(--ds-transition-fast);
+}
+
+.ds-textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-wash);
+}
+
+.ds-textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ds-field-stack {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.ds-field-label {
+  display: grid;
+  gap: 5px;
+  font-size: var(--font-size-sm);
+  color: var(--muted-strong);
+}
+
+/* Empty state: icon + one muted line, centered */
+.ds-empty {
+  min-width: 0;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-md) var(--space-sm);
+  text-align: center;
+  color: var(--muted);
+}
+
+.ds-empty--slim {
+  min-height: 88px;
+}
+
+.ds-empty-icon {
+  display: inline-flex;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+/* Success ("all clear") empty-state variant: restores green semantics for
+   positive empty states (dashboard attention clear, findings all clear). */
+.ds-empty-icon--ok {
+  color: var(--success-strong);
+  opacity: 1;
+}
+
+.ds-empty-text {
+  margin: 0;
+  max-width: 52ch;
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+}
+
+/* Data table: muted header, row rules, hover */
+.ds-table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.ds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-md);
+  color: var(--foreground);
+}
+
+.ds-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.ds-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+  min-width: 0;
+}
+
+.ds-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ds-table tbody tr:hover {
+  background: var(--surface-subtle);
+}
+
+/* Review wizard: step rail, footer, and close button on the shared modal
+   shell (scoped so other modal consumers keep their current presentation) */
+.review-wizard-dialog .wizard-steps {
+  margin: 0;
+  padding: 10px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.review-wizard-dialog .wizard-step {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.review-wizard-dialog .wizard-step.active {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.review-wizard-dialog .wizard-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+
+.review-wizard-dialog label {
+  display: grid;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--muted-strong);
+}
+
+.review-wizard-dialog .drawer-close-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius-md);
+  background: var(--surface);
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+
+.review-wizard-dialog .drawer-close-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+
+/* Muted explanatory scale for wizard notes (repository hint, trigger
+   explanation, run snapshot line, error line). */
+.review-wizard-dialog .muted-note {
+  margin: 0 0 var(--space-sm);
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* Sizing variant for workflow management dialogs: the JSON definition editor
+   needs more width than the 520px default; stays scrollable at 390px. */
+.ds-dialog.ds-dialog--workflow-editor {
+  max-width: min(680px, 94vw);
 }

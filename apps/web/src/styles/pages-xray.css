@@ -1,0 +1,254 @@
+/* ===== Agent X-Ray page (slot C) =====
+   Consumes the ds-* shared vocabulary (ds-hero / ds-section / ds-chip /
+   ds-chip-row / ds-empty / ds-select) from the design system; it never defines
+   a ds-* class
+   itself. A few page-scoped descendant rules adjust how ds-chip/code content
+   behaves inside this page's rows and at 390px (bare code inside chips, chip
+   wrapping) — the ds vocabulary itself is not re-themed. All values derive
+   from design tokens — no hardcoded colors, no magic spacing. Global
+   breakpoint scale: 680px / 430px. */
+
+/* --- Page-level text rhythm (scoped to the X-Ray page only) --- */
+.workflow-xray-view .muted-note {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* One code-token scale for every code line on the page (registry rows,
+   budgets, plan fields, recorded node executions). */
+.workflow-xray-view code {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  padding: 1px 6px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+
+/* Code inside chips stays bare — the chip already provides the pill. */
+.workflow-xray-view .ds-chip code {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+}
+
+/* --- Hero tools: run-overlay pickers --- */
+.xray-overlay-picker {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.xray-overlay-picker .ds-select {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+/* --- Pipeline stage nodes (interaction semantics unchanged: aria-pressed) --- */
+.xray-node-row {
+  display: flex;
+  min-width: 0;
+}
+
+.xray-node-row .xray-node {
+  width: min(100%, 320px);
+}
+
+.xray-agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.xray-node {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.xray-node:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+}
+
+.xray-node:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.xray-node--active,
+.xray-node--active:hover {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 1px var(--primary-line);
+}
+
+.xray-node-head {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-size-md);
+}
+
+.xray-node-head strong {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.xray-node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.xray-node-meta .ds-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Agent detail section --- */
+.xray-subheading {
+  margin: 2px 0 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted-strong);
+}
+
+ul.xray-budgets {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.xray-intent-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+/* --- Kernel syscall registry / builtin workflow rows --- */
+.xray-syscall-groups {
+  gap: var(--space-md);
+}
+
+.xray-list {
+  display: grid;
+  min-width: 0;
+}
+
+.xray-row {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.xray-row:last-child {
+  border-bottom: 0;
+}
+
+.xray-row > code {
+  flex: 0 1 auto;
+}
+
+.xray-row > small {
+  flex: 1 1 220px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.xray-row > strong {
+  font-size: var(--font-size-md);
+  overflow-wrap: anywhere;
+}
+
+.xray-row > .ds-chip {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.xray-intent-row {
+  border-left: 3px solid var(--warning-faint);
+  padding-left: 10px;
+}
+
+.xray-group-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 0;
+}
+
+/* --- Responsive — 680px (global breakpoint scale) --- */
+@media (max-width: 680px) {
+  .xray-overlay-picker .ds-select {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .xray-agent-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+
+  .xray-intent-row {
+    border-left-width: 2px;
+    padding-left: 8px;
+  }
+}
+
+/* --- Responsive — 430px (390px phones) --- */
+@media (max-width: 430px) {
+  .xray-agent-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .xray-node-row .xray-node {
+    width: 100%;
+  }
+
+  .xray-row > small {
+    flex-basis: 100%;
+  }
+
+  .workflow-xray-view .ds-chip {
+    white-space: normal;
+  }
+}

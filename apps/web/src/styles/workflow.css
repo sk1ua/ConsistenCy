@@ -1,7 +1,13 @@
-/* ===== Workflow builder ===== */
+/* ===== Workflow builder (legacy definition tab) ===== */
+/* Light token alignment only: edge colors ride the library's own CSS
+   variables so the deterministic graph layout and node structure stay put. */
 .react-flow {
+  /* --border-strong collapses into the dark canvas; --muted-strong keeps
+     unselected edges readable in both themes while selection stays primary. */
+  --xy-edge-stroke: var(--muted-strong);
+  --xy-edge-stroke-selected: var(--primary);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 .react-flow__node {
@@ -11,6 +17,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  padding: var(--space-md);
 }
 
 .workflows-toolbar {
@@ -24,33 +31,83 @@
 .workflows-title {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 10px;
   min-width: 0;
 }
 
-.workflow-name-input {
-  font-size: 17px;
-  font-weight: 700;
-  min-width: 180px;
+/* Scoped kicker scale for this title row only; the global .panel-kicker
+   rules in runtime/dashboard CSS stay untouched. */
+.workflows-title .panel-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--muted-strong);
+  white-space: nowrap;
 }
 
+/* Editable-title mode: the name input reads as the page title at rest and
+   only reveals its field chrome on hover/focus (mono: the name is an
+   identifier). Presentation only. */
+.workflow-name-input {
+  box-sizing: border-box;
+  height: auto;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--ds-font-mono);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  outline: none;
+  text-overflow: ellipsis;
+  cursor: text;
+  transition: border-color var(--ds-transition-fast), box-shadow var(--ds-transition-fast),
+    background var(--ds-transition-fast);
+}
+
+.workflow-name-input:hover {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+}
+
+.workflow-name-input:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-wash);
+}
+
+/* Source badge on the shared chip scale (.ds-chip equivalent): builtin reads
+   as the same muted origin chip the runtime tab uses, draft as warn. */
 .workflow-source-badge {
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .workflow-source-builtin {
-  background: var(--primary-soft);
-  color: var(--primary);
+  background: var(--surface-subtle);
+  border-color: var(--border);
+  color: var(--muted-strong);
 }
 
 .workflow-source-draft {
   background: var(--warning-soft);
-  color: var(--warning);
+  border-color: var(--warning-faint);
+  color: var(--warning-strong);
 }
 
 .workflows-actions {
@@ -83,12 +140,72 @@
   border-color: var(--danger);
 }
 
+/* Builder buttons on the shared ds-button hierarchy (Save draft = primary,
+   New draft / Reset / Delete = secondary), scoped to the two containers that
+   only the legacy definition branch renders so Studio and every other
+   .primary-button / .secondary-button consumer keeps its presentation. */
+.workflows-toolbar .primary-button,
+.workflows-layout .primary-button {
+  height: var(--ds-control-height-md);
+  padding: 0 14px;
+  color: var(--button-primary-fg);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  border-radius: var(--ds-radius-md);
+}
+
+.workflows-toolbar .primary-button:hover:not(:disabled),
+.workflows-layout .primary-button:hover:not(:disabled) {
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
+}
+
+.workflows-toolbar .secondary-button,
+.workflows-layout .secondary-button {
+  height: var(--ds-control-height-md);
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+}
+
+.workflows-toolbar .secondary-button:hover:not(:disabled),
+.workflows-layout .secondary-button:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  border-color: var(--border-strong);
+}
+
+.workflows-toolbar .secondary-button.danger,
+.workflows-layout .secondary-button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.workflows-toolbar .primary-button:focus-visible,
+.workflows-layout .primary-button:focus-visible,
+.workflows-toolbar .secondary-button:focus-visible,
+.workflows-layout .secondary-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--primary);
+}
+
+.workflows-toolbar .primary-button:disabled,
+.workflows-layout .primary-button:disabled,
+.workflows-toolbar .secondary-button:disabled,
+.workflows-layout .secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .workflow-notice {
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: var(--success-soft);
   color: var(--success);
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .workflow-error {
@@ -96,7 +213,7 @@
   border-radius: var(--radius-md);
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .workflows-layout {
@@ -114,27 +231,31 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+  box-shadow: 0 1px 0 var(--shadow-soft);
   max-height: 640px;
   overflow: auto;
 }
 
+/* Column headings on the shared section-kicker scale. */
 .workflow-list h3,
 .workflow-inspector h3 {
   margin: 0 0 var(--space-sm);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--muted);
+  color: var(--muted-strong);
 }
 
+/* Definition rows on the shared row scale (title / meta typography). */
 .workflow-list button {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 8px;
   align-items: center;
   padding: 10px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--ds-radius-md);
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -145,25 +266,48 @@
 }
 
 .workflow-list button.active {
-  border-color: var(--primary);
+  border-color: var(--primary-line);
   background: var(--primary-soft);
+}
+
+.workflow-list button.active strong {
+  color: var(--primary-strong);
+}
+
+.workflow-list button strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--foreground);
 }
 
 .workflow-list button small {
   grid-column: 1 / -1;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
 }
 
+/* Dashed "+ new draft" affordance keeps the secondary button geometry. */
 .workflow-list .workflow-add {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-style: dashed;
+  min-height: var(--ds-control-height-md);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--ds-radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.workflow-list .workflow-add:hover {
+  background: var(--surface-subtle);
   border-color: var(--border-strong);
-  color: var(--primary);
-  font-weight: 600;
 }
 
 .workflow-canvas {
@@ -172,6 +316,28 @@
   border-radius: var(--radius-lg);
   background: var(--surface-subtle);
   overflow: hidden;
+}
+
+/* The library's zoom controls ship light chrome; re-skin them with shared
+   tokens so they read as part of the canvas panel. Presentation only.
+   (Attribution is hidden via proOptions, so it needs no theming.) */
+.workflow-canvas .react-flow__controls {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.workflow-canvas .react-flow__controls-button {
+  background: transparent;
+  border-color: var(--border);
+  fill: var(--foreground);
+  color: var(--foreground);
+}
+
+.workflow-canvas .react-flow__controls-button:hover {
+  background: var(--surface-subtle);
 }
 
 .workflow-node {
@@ -183,12 +349,12 @@
   box-shadow: 0 2px 8px var(--shadow-card);
   display: grid;
   gap: 3px;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 .workflow-node.selected {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-soft);
+  box-shadow: 0 0 0 3px var(--primary-wash);
 }
 
 .workflow-node-role {
@@ -200,7 +366,7 @@
 }
 
 .workflow-node strong {
-  font-size: 13px;
+  font-size: var(--font-size-md);
 }
 
 .workflow-node code {
@@ -227,6 +393,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+  box-shadow: 0 1px 0 var(--shadow-soft);
   max-height: 640px;
   overflow: auto;
 }
@@ -237,23 +404,59 @@
   gap: var(--space-sm);
 }
 
+/* Field labels on the shared .ds-field-label scale. */
 .workflow-inspector label {
   display: grid;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 12px;
+  gap: 5px;
+  color: var(--muted-strong);
+  font-size: var(--font-size-sm);
 }
 
+/* Inspector controls on the shared control scale (.ds-input / .ds-select /
+   .ds-textarea equivalents implemented in this legacy scope; checkboxes keep
+   their native geometry, as in the Studio). */
 .workflow-inspector input[type="text"],
 .workflow-inspector input[type="number"],
-.workflow-inspector select,
-.workflow-inspector textarea {
-  padding: 7px 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+.workflow-inspector select {
+  box-sizing: border-box;
+  height: var(--ds-control-height-md);
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: var(--font-size-md);
   color: var(--foreground);
-  font: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius-md);
+  outline: none;
+  transition: border-color var(--ds-transition-fast), box-shadow var(--ds-transition-fast);
+}
+
+.workflow-inspector input[type="text"]:focus,
+.workflow-inspector input[type="number"]:focus,
+.workflow-inspector select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-wash);
+}
+
+.workflow-inspector textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 10px;
+  font-family: var(--ds-font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--ds-radius-md);
+  outline: none;
+  resize: vertical;
+  transition: border-color var(--ds-transition-fast), box-shadow var(--ds-transition-fast);
+}
+
+.workflow-inspector textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-wash);
 }
 
 .workflow-check {
@@ -273,8 +476,8 @@
 }
 
 .workflow-needs legend {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--muted-strong);
+  font-size: var(--font-size-sm);
 }
 
 .workflow-add-step {
@@ -284,12 +487,16 @@
 
 .workflow-hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-sm);
 }
 
 @media (max-width: 980px) {
   .workflows-layout {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-name-input {
+    font-size: var(--font-size-lg);
   }
 
   .workflow-canvas {
@@ -313,8 +520,8 @@
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface-raised, var(--surface));
-  color: var(--text);
+  background: var(--surface, var(--surface-subtle));
+  color: var(--foreground, var(--muted-strong));
   resize: vertical;
 }
 
@@ -331,8 +538,8 @@
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface-raised, var(--surface));
-  color: var(--text);
+  background: var(--surface, var(--surface-subtle));
+  color: var(--foreground, var(--muted-strong));
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
 }
@@ -375,4 +582,220 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Runtime Studio — gate evidence rail composition: a left rail carrying the
+   definition selector, per-gate status with a short reason, and each gate's
+   own action (one primary at a time); the graph workspace; and a
+   definition/node inspector. Desktop is a three-column grid at >=1280px;
+   narrower widths use the compact gate-summary stack. Presentation only:
+   every state here derives from the shared real studio state. */
+.runtime-studio { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.runtime-studio :is(input, select, textarea, button) { max-width:100%; }
+/* Unified control scale for every Studio input/select/textarea (purpose box,
+   Copilot instruction, definition/connect/repo selects, inspector fields):
+   token radius + 1px token border mirroring .ds-input/.ds-select, one
+   --font-size-md text step, a 32px height floor, and a focus ring. Implemented
+   here with studio-local selectors so the shared .ds-* classes stay untouched.
+   The :where() floor keeps per-control compact touch heights (44px/40px)
+   winning the cascade; checkboxes keep their native geometry. */
+.runtime-studio :is(input:not([type="checkbox"]), select) { padding:4px 10px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); color:var(--foreground); font-family:inherit; font-size:var(--font-size-md); }
+.runtime-studio textarea { padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); color:var(--foreground); font-family:inherit; font-size:var(--font-size-md); line-height:1.55; }
+.runtime-studio :where(input:not([type="checkbox"]), select) { min-height:32px; }
+.runtime-studio :is(input:not([type="checkbox"]), select):focus-visible, .runtime-studio textarea:focus-visible { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px var(--primary-wash); }
+.studio-grid { display:grid; grid-template-columns:minmax(0, 1fr); align-items:stretch; gap:10px; min-width:0; }
+.studio-rail, .studio-canvas, .studio-inspector { min-width:0; color:var(--foreground); }
+.studio-rail { display:flex; flex-direction:column; gap:10px; padding:10px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); }
+.studio-canvas { padding:12px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); }
+.studio-inspector { padding:12px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); }
+.studio-rail-head { display:flex; flex-direction:column; gap:8px; }
+.studio-rail-title { display:inline-flex; align-items:center; gap:6px; }
+.studio-defselect { display:flex; flex-direction:column; gap:4px; color:var(--muted, var(--muted-strong)); font-size:12px; }
+.studio-defselect select { width:100%; }
+.studio-rail-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.studio-revision-chip { display:inline-flex; align-items:center; padding:3px 8px; border:1px solid var(--border); border-radius:999px; background:var(--surface-subtle); color:var(--muted); font:11px var(--font-mono); white-space:nowrap; }
+.studio-rail-gates { display:flex; flex-direction:row; flex-wrap:wrap; align-items:stretch; gap:6px; margin:0; padding:0; list-style:none; }
+.studio-rail-gate { display:flex; flex:0 1 auto; align-items:center; gap:2px 8px; padding:5px 8px; min-height:36px; border:1px solid var(--border); border-left:3px solid var(--border-strong,var(--border)); border-radius:var(--radius-sm); background:var(--surface-subtle); }
+.studio-rail-gate > i { font-style:normal; font-weight:800; line-height:1.5; color:var(--muted); }
+.studio-rail-gate-body { display:flex; flex-direction:row; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; }
+.studio-rail-gate-body strong { font-size:12px; overflow-wrap:anywhere; }
+.studio-rail-gate-body small { color:var(--muted); font-size:11px; line-height:1.35; overflow-wrap:anywhere; display:none; }
+.studio-rail-gate[data-gate="run"] .studio-rail-gate-body small { display:block; position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+.studio-rail-gate .studio-gate-action { display:none; }
+.studio-rail-gate .studio-gate-action.is-current-action { display:inline-flex; }
+.studio-rail-meta .studio-header-fork { display:none; }
+.studio-rail-gate.gate-passed { border-left-color:var(--success); }
+.studio-rail-gate.gate-passed > i { color:var(--success); }
+.studio-rail-gate.gate-current { border-left-color:var(--primary); }
+.studio-rail-gate.gate-current > i { color:var(--primary); }
+.studio-rail-gate.gate-blocked { border-left-color:var(--danger); }
+.studio-rail-gate.gate-blocked > i { color:var(--danger); }
+.studio-gate-action { justify-content:center; min-height:40px; }
+  /* Disabled Run never presents as an enabled primary at any width: muted
+   surface, strong border, and muted text only while disabled. */
+.studio-gate-action:disabled, .studio-run-button:disabled { background:var(--surface-muted,var(--surface-subtle)); border-color:var(--border-strong); color:var(--muted-strong,var(--muted)); opacity:1; }
+.studio-next { display:flex; flex-wrap:wrap; flex-direction:column; align-items:flex-start; justify-content:space-between; gap:4px 8px; font-size:12px; color:var(--muted); }
+.studio-next b { color:var(--foreground); overflow-wrap:anywhere; }
+.studio-gate-count { padding:2px 8px; border:1px solid var(--border); border-radius:999px; background:var(--surface-subtle); color:var(--muted); font:11px var(--font-mono); white-space:nowrap; }
+.studio-rail-status { display:flex; flex-direction:column; gap:6px; }
+.studio-busy { display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; }
+.studio-note { padding:8px 10px; border:1px solid var(--danger); border-radius:var(--radius-sm); background:var(--surface-subtle); color:var(--danger); font-size:12px; overflow-wrap:anywhere; }
+.studio-note.notice-success { border-color:var(--success); color:var(--success); }
+.studio-repo { display:flex; flex-direction:column; gap:5px; margin-top:auto; padding-top:10px; border-top:1px solid var(--border); color:var(--muted, var(--muted-strong)); font-size:12px; }
+.studio-repo select { width:100%; min-height:44px; }
+.studio-repo-state { font-size:11px; overflow-wrap:anywhere; }
+.studio-repo-state.ok { color:var(--success); }
+.studio-repo-state.unset { color:var(--muted); }
+.studio-canvas-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.studio-canvas-toolbar strong { min-width:0; overflow-wrap:anywhere; font:14px var(--font-mono); }
+.studio-canvas-toolbar input { flex:1; min-width:120px; }
+/* The frame is the non-scrolling clipping context that owns the edge cues;
+   the viewport inside it is the only horizontal scroller and stays keyboard
+   reachable; the inner .studio-graph keeps the real deterministic layout
+   width, SVG dimensions, and positioned node hooks. */
+.studio-graph-frame { position:relative; overflow:hidden; min-width:0; max-width:100%; }
+.studio-graph-viewport { position:relative; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin; background:var(--surface-subtle); }
+.studio-graph-viewport::-webkit-scrollbar { height:6px; }
+/* D2: the desktop-visible webkit scrollbar rides shared tokens (slim thumb on
+   a transparent track) instead of the bright native chrome. This later rule
+   supersedes the 6px base above in the cascade; the compact base below still
+   hides the bar and the >=1280px block restores it. Firefox keeps
+   scrollbar-width:thin from the viewport rule. */
+.studio-graph-viewport::-webkit-scrollbar { height:8px; width:8px; }
+.studio-graph-viewport::-webkit-scrollbar-thumb { background:var(--border-strong); border-radius:999px; }
+.studio-graph-viewport::-webkit-scrollbar-track { background:transparent; }
+.studio-graph-viewport::-webkit-scrollbar-corner { background:transparent; }
+.studio-graph-viewport:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
+.studio-graph-cue { position:absolute; top:0; bottom:0; width:14px; z-index:2; pointer-events:none; opacity:0; }
+.studio-graph-cue-left { left:0; background:linear-gradient(to right, var(--surface-subtle), transparent); }
+.studio-graph-cue-right { right:0; background:linear-gradient(to left, var(--surface-subtle), transparent); }
+.studio-graph-frame.cue-left .studio-graph-cue-left { opacity:1; }
+.studio-graph-frame.cue-right .studio-graph-cue-right { opacity:1; }
+.studio-graph { position:relative; min-width:320px; background:var(--surface-subtle); }
+.studio-graph-svg { position:absolute; inset:0; z-index:2; display:block; overflow:visible; pointer-events:none; }
+.studio-graph-svg line { stroke:var(--primary, var(--button-primary-bg)); stroke-width:2; }
+.studio-graph-svg marker path { fill:var(--primary, var(--button-primary-bg)); }
+.studio-node { position:absolute; z-index:1; box-sizing:border-box; }
+.studio-issue { padding:8px 10px; color:var(--danger); border:1px solid var(--danger); border-radius:var(--radius-sm); }
+.studio-array-row { display:flex; gap:4px; margin:4px 0; }
+.studio-array-row input { flex:1; }
+.studio-check { display:flex; flex-direction:row !important; align-items:center; gap:6px; }
+.studio-inspector fieldset { border:1px solid var(--border); padding:8px; }
+.studio-inspector fieldset button { margin-top:6px; }
+.studio-node { display:flex; flex-direction:column; gap:5px; text-align:left; padding:14px; border:1px solid var(--border); border-left:3px solid var(--primary, var(--button-primary-bg)); background:var(--surface, var(--surface-subtle)); color:var(--foreground, var(--muted-strong)); cursor:pointer; min-width:0; overflow:hidden; }
+.studio-node strong,.studio-node span,.studio-node small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.studio-node small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.studio-node.selected { outline:2px solid var(--primary, var(--button-primary-bg)); outline-offset:2px; }
+.studio-edges { display:flex; flex-wrap:wrap; gap:6px; font:12px var(--font-mono); color:var(--muted, var(--muted-strong)); }
+.studio-edges span { padding:5px 8px; border:1px solid var(--border); }
+/* Edge entries are real buttons (click disconnects the edge); render them as
+   mono pills instead of UA default chrome. Content is bare text + Trash2 svg
+   (no inner span), so the chip itself takes overflow-wrap. */
+.studio-edges button { display:inline-flex; align-items:center; gap:6px; max-width:100%; padding:3px 10px; border:1px solid var(--border); border-radius:999px; background:var(--surface-subtle); color:var(--foreground); font:12px var(--font-mono); overflow-wrap:anywhere; cursor:pointer; }
+.studio-edges button:hover { border-color:var(--border-strong); }
+.studio-edges button svg { flex:0 0 auto; color:var(--muted); }
+.studio-edges button:hover svg { color:var(--danger); }
+.studio-inspector label { display:flex; flex-direction:column; gap:5px; margin:14px 0; color:var(--muted, var(--muted-strong)); font-size:12px; }
+.studio-inspector input { width:100%; }
+.studio-empty,.studio-loading { display:grid; place-items:center; min-height:180px; color:var(--muted, var(--muted-strong)); }
+.studio-advanced { margin-top:10px; }
+.studio-advanced > summary { cursor:pointer; min-height:44px; display:flex; align-items:center; gap:8px; color:var(--muted-strong,var(--muted)); font-size:12px; font-weight:700; }
+.studio-advanced > summary:hover { color:var(--foreground); }
+.studio-advanced:not([open]) > :not(summary) { display:none; }
+.studio-palette,.studio-connect { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+.studio-connect select { min-width:120px; }
+.studio-inspector summary { cursor:pointer; min-height:44px; display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--foreground); font-weight:700; }
+.studio-inspector summary span { min-width:0; overflow:hidden; color:var(--muted); font:11px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.studio-inspector:not([open]) > :not(summary) { display:none; }
+.studio-definition-summary { display:flex; flex-direction:column; gap:8px; padding-top:4px; }
+.studio-definition-summary h3 { margin:0; font-size:13px; }
+.studio-summary-purpose { margin:0; font-size:12px; overflow-wrap:anywhere; }
+.studio-summary-facts { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:6px; margin:0; }
+.studio-summary-facts div { display:flex; flex-direction:column; gap:2px; padding:6px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-subtle); min-width:0; }
+.studio-summary-facts dt { color:var(--muted); font-size:10px; letter-spacing:.04em; text-transform:uppercase; }
+.studio-summary-facts dd { margin:0; font:12px var(--font-mono); overflow-wrap:anywhere; }
+.studio-summary-fork { margin:0; padding:6px 8px; border-left:3px solid var(--border-strong,var(--border)); color:var(--muted-strong,var(--muted)); font-size:11px; overflow-wrap:anywhere; }
+.studio-summary-hint { margin:0; color:var(--muted); font-size:11px; }
+.studio-node-list { display:flex; flex-direction:column; gap:4px; margin:0; padding:0; list-style:none; }
+.studio-node-list button { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:36px; padding:6px 8px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-subtle); color:var(--foreground); text-align:left; cursor:pointer; }
+.studio-node-list button:hover { border-color:var(--primary); }
+.studio-node-list button span { min-width:0; overflow:hidden; color:var(--muted); font:11px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
+.studio-visually-hidden { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+/* Compact/stacked presentation is the Studio default for every width below
+   the desktop threshold, including fractional viewport gaps. */
+.studio-rail-title { display:none; }
+.studio-defselect select { min-height:40px; }
+.studio-canvas { min-width:0; overflow-x:hidden; padding:10px; }
+.studio-canvas-toolbar { align-items:stretch; flex-wrap:wrap; }
+.studio-canvas-toolbar input { width:100%; min-width:0; min-height:44px; }
+.studio-graph-frame { width:100%; }
+.studio-graph-viewport { width:100%; scrollbar-width:none; }
+.studio-graph-viewport::-webkit-scrollbar { display:none; }
+.studio-node { font-size:12px; }
+.studio-palette button, .studio-connect button, .studio-connect select { min-height:44px; }
+.studio-connect select { min-width:0; flex:1 1 100px; }
+.studio-node-list button { min-height:40px; }
+/* CKPT6 Phase 3 — Workflow Copilot proposal panel. Compact stacking is the
+   unconditional base presentation; only the 1280px media query changes layout.
+   The right column wraps the inspector + copilot panel so desktop keeps a
+   single third grid column (no new top-level navigation, no chat surface). */
+.studio-right { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.studio-copilot { display:flex; flex-direction:column; gap:8px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); color:var(--foreground); }
+.studio-copilot-title { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--foreground); }
+.studio-copilot textarea { width:100%; min-height:88px; resize:vertical; }
+.studio-copilot-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.studio-copilot-status { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.studio-copilot-note { padding:8px 10px; border:1px solid var(--danger); border-radius:var(--radius-sm); background:var(--surface-subtle); color:var(--danger); font-size:12px; overflow-wrap:anywhere; }
+.studio-copilot-proposal { display:flex; flex-direction:column; gap:6px; padding:8px; border:1px dashed var(--border-strong,var(--border)); border-radius:var(--radius-sm); background:var(--surface-subtle); }
+.studio-copilot-rationale { margin:0; font-size:12px; overflow-wrap:anywhere; }
+.studio-copilot-ops { display:flex; flex-direction:column; gap:4px; margin:0; padding:0; list-style:none; font:11px var(--font-mono); }
+.studio-copilot-ops li { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); min-width:0; }
+.studio-copilot-ops strong { color:var(--primary); font-weight:700; }
+.studio-copilot-ops code, .studio-copilot-ops span { min-width:0; overflow-wrap:anywhere; }
+.studio-copilot-hint { color:var(--muted); font-size:11px; }
+/* Proposed graph elements are preview-only: dashed highlight, no draft state. */
+.studio-node.is-proposed { border-style:dashed; outline:2px dashed var(--primary, var(--button-primary-bg)); outline-offset:2px; cursor:default; }
+.studio-node.is-proposed:disabled { opacity:1; color:var(--foreground); }
+.studio-graph-svg line.is-proposed { stroke-dasharray:6 4; }
+
+/* Compact spacing and the stacked next-action row are the mobile-first base;
+   from 600px the roomier studio spacing and horizontal row are restored. */
+@media (min-width: 600px) {
+  .runtime-studio { gap:var(--space-md); }
+  .studio-rail { padding:12px; }
+  .studio-next { flex-direction:row; align-items:baseline; justify-content:space-between; }
+}
+
+@media (min-width: 1280px) {
+  .studio-grid { grid-template-columns:minmax(196px, 216px) minmax(0, 1fr) minmax(280px, 344px); gap:var(--space-md); }
+  .studio-right { gap:var(--space-md); }
+  /* The Copilot panel is the right column's primary body: it leads the column
+     visually (CSS order only; DOM, state, and tab order are unchanged) and its
+     instruction area gets the desktop height step. */
+  .studio-right > .studio-copilot { order:-1; }
+  .studio-copilot textarea { min-height:104px; }
+  /* One shared desktop control height step for every Studio input/select,
+     replacing the mixed compact touch heights above 1280px. */
+  .runtime-studio :is(input:not([type="checkbox"]), select) { min-height:32px; }
+  .studio-palette button, .studio-connect button { min-height:32px; }
+  .studio-inspector label { margin:10px 0; }
+  .studio-rail-title { display:inline-flex; }
+  .studio-rail-gates { flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:6px; }
+  .studio-rail-gate { display:grid; flex:initial; grid-template-columns:auto minmax(0,1fr); align-items:initial; padding:8px; min-height:initial; }
+  .studio-rail-gate > i { grid-row:1 / 3; }
+  .studio-rail-gate-body { flex-direction:column; flex-wrap:nowrap; align-items:flex-start; gap:4px; }
+  .studio-rail-gate-body small { display:block; position:static; width:auto; height:auto; margin:0; padding:0; overflow:visible; clip:auto; white-space:normal; }
+  .studio-rail-gate[data-gate="run"] .studio-rail-gate-body small { display:block; position:static; width:auto; height:auto; margin:0; padding:0; overflow:visible; clip:auto; white-space:normal; }
+  .studio-rail-gate .studio-gate-action { display:inline-flex; }
+  .studio-rail-meta .studio-header-fork { display:inline-flex; }
+  .studio-gate-action { min-height:32px; }
+  .studio-canvas { overflow:visible; padding:12px; }
+  .studio-canvas-toolbar { align-items:center; flex-wrap:nowrap; }
+  .studio-canvas-toolbar input { width:auto; min-width:120px; }
+  .studio-graph-frame { width:auto; }
+  .studio-graph-viewport { width:auto; scrollbar-width:thin; }
+  .studio-graph-viewport::-webkit-scrollbar { display:initial; }
+  .studio-connect select { min-width:120px; flex:initial; }
+  .studio-node-list button { min-height:36px; }
+  .studio-inspector > summary { display:none; }
 }

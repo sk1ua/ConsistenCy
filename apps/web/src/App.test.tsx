@@ -73,4 +73,20 @@ describe("App", () => {
     expect(html).toContain("工作流");
     expect(html).toContain("中文");
   });
+
+  it("keeps the locale switch recognizable when the phone topbar trims labels", () => {
+    const html = renderApp();
+
+    expect(html).toContain("shell-locale-button");
+    expect(html).toContain("lucide-languages");
+    expect(html).toContain("shell-search-button");
+    expect(html).toContain(">English</span>");
+    expect(html).toContain('aria-label="切换到中文"');
+
+    const zhHtml = renderApp("zh-CN");
+    expect(zhHtml).toContain("shell-locale-button");
+    expect(zhHtml).toContain("lucide-languages");
+    expect(zhHtml).toContain(">中文</span>");
+    expect(zhHtml).toContain('aria-label="Switch to English"');
+  });
 });

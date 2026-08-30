@@ -848,9 +848,13 @@
   border-bottom: 1px solid var(--border);
   padding-bottom: 8px;
   margin-bottom: 12px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .workflow-tab {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1611,6 +1615,34 @@
 }
 :root[data-theme="dark"] .shell-provider-status {
   color: var(--primary);
+}
+
+.shell-topbar {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.shell-topbar > .location-breadcrumbs {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.shell-topbar-actions {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+
+.shell-search-button {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.shell-search-button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shell-provider-unconfigured {

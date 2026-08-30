@@ -19,6 +19,17 @@
   --space-lg: 24px;
   --space-xl: 32px;
   --space-2xl: 48px;
+
+  /* Type scale (theme-independent): kicker 12 / body 13-14 / section 16 /
+     page header 18-20. Page CSS must reference these instead of raw px. */
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 20px;
+
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;

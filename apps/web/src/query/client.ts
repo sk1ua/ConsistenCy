@@ -20,7 +20,12 @@ export const workspaceQueryKeys = {
   repositoryPullRequests: (repositoryId: string) => ["workspace", "repositories", repositoryId, "pull-requests"] as const,
   automations: ["workspace", "automations"] as const,
   runtimeRuns: ["workspace", "runtime-runs"] as const,
-  runtimeSnapshot: (runId: string) => ["workspace", "runtime-snapshot", runId] as const
+  runtimeSnapshot: (runId: string) => ["workspace", "runtime-snapshot", runId] as const,
+  catalogReviewPipeline: ["workspace", "catalog-review-pipeline"] as const,
+  catalogKernelSyscalls: ["workspace", "catalog-kernel-syscalls"] as const,
+  catalogEngineAllowlist: ["workspace", "catalog-engine-allowlist"] as const,
+  workflowRuntimeRuns: ["workspace", "workflow-runtime-runs"] as const,
+  workflowRuntimeRun: (runId: string) => ["workspace", "workflow-runtime-run", runId] as const
 };
 
 export function createWorkspaceQueryClient(): QueryClient {

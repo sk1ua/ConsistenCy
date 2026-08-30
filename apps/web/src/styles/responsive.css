@@ -76,6 +76,27 @@
 
 /* ===== Responsive — 680px ===== */
 @media (max-width: 680px) {
+  /* Keep the repository-first shell usable beside narrow Studio content. */
+  .repo-first-sidebar {
+    width: 56px !important;
+  }
+  .repo-first-sidebar > div:first-child > div > span,
+  .repo-first-sidebar > div:nth-child(2) > div:first-child > span,
+  .repo-first-sidebar .ds-sidebar-row > div > span:last-child,
+  .repo-first-sidebar .ds-sidebar-row > div + div,
+  .repo-first-sidebar > div:last-child > div:last-child {
+    display: none !important;
+  }
+  .repo-first-sidebar > div:nth-child(2) > div:first-child {
+    justify-content: center;
+  }
+  .repo-first-sidebar .ds-sidebar-row {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .repo-first-sidebar .ds-sidebar-row > div {
+    justify-content: center;
+  }
   .header-actions {
     gap: 8px;
   }
@@ -294,6 +315,40 @@
 
 /* ===== Responsive — 430px ===== */
 @media (max-width: 430px) {
+  /* Keep the 390px header usable: retain icon semantics, trim non-essential text. */
+  .shell-topbar {
+    padding-inline: 8px !important;
+    gap: 4px;
+  }
+  .shell-topbar-actions {
+    gap: 3px !important;
+  }
+  .shell-search-button {
+    width: 30px;
+    padding-inline: 0 !important;
+    justify-content: center;
+  }
+  .shell-search-button > span {
+    display: none;
+  }
+  /* The locale switch is text-only at wide sizes; at phone width it collapses
+     to its Languages glyph instead of becoming an invisible ghost button. */
+  .shell-locale-button {
+    justify-content: center;
+  }
+  .shell-locale-button > span {
+    display: none;
+  }
+  .shell-topbar-actions > .ds-button:not(.shell-search-button) {
+    width: 30px;
+    overflow: hidden;
+    padding-inline: 0 !important;
+    font-size: 0 !important;
+  }
+  .shell-topbar-actions > [role="group"] {
+    flex: 0 0 auto;
+  }
+
   .header-actions .demo-indicator {
     display: none;
   }

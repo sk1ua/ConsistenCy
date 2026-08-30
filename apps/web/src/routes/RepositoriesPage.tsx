@@ -23,6 +23,7 @@ import { useI18n } from "../i18n";
 import { StatusBadge } from "../components/StatusBadge";
 import { Button, ButtonLink } from "../design-system/Button";
 import { ApiRequestError } from "../api/client";
+import { ReviewWizardDialog } from "./ReviewWizardDialog";
 
 function localRepositoryName(pulse: HeartbeatPulse): string {
   if (pulse.repository.root === "unknown") return "Local repository";
@@ -86,7 +87,9 @@ export function RepositoriesPage({
   const zh = locale === "zh-CN";
   const [filterQuery, setFilterQuery] = useState("");
   const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [publicRepoInput, setPublicRepoInput] = useState("");
+  const { t } = useI18n();
   const connectButtonRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
@@ -191,16 +194,25 @@ export function RepositoriesPage({
   const publicConnectErrorMessage = publicRepositoryErrorMessage(publicRepositoryError, zh);
 
   return (
-    <div className="repository-hub-page page-stack">
+    <div className="ds-page pw-page page-stack">
       {/* Intro Header */}
-      <section className="section-block repo-hub-intro">
-        <div className="hub-intro-left">
-          <span className="panel-kicker"><FolderGit2 size={13} />{zh ? "代码仓库" : "Repositories"}</span>
-          <h2>{zh ? "已连接仓库" : "Connected Repositories"}</h2>
-          <p>{zh ? "查看 Git 状态、提交历史与拉取请求，并发起代码审查。" : "Inspect Git status, commits, pull requests, and launch code reviews."}</p>
+      <section className="ds-hero">
+        <div className="ds-hero-icon"><FolderGit2 size={18} /></div>
+        <div className="ds-hero-body">
+          <span className="ds-section-kicker">{zh ? "代码仓库" : "Repositories"}</span>
+          <h2 className="ds-hero-title">{zh ? "已连接仓库" : "Connected Repositories"}</h2>
+          <p className="ds-hero-description">{zh ? "查看 Git 状态、提交历史与拉取请求，并发起代码审查。" : "Inspect Git status, commits, pull requests, and launch code reviews."}</p>
         </div>
 
-        <div className="hub-intro-actions">
+        <div className="ds-hero-actions">
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => setWizardOpen(true)}
+            aria-haspopup="dialog"
+          >
+            {t("Review wizard")}
+          </Button>
           <Button ref={connectButtonRef} variant="primary" type="button" className="connect-btn-main"
             aria-haspopup="dialog"
             aria-expanded={connectModalOpen}
@@ -211,19 +223,35 @@ export function RepositoriesPage({
         </div>
       </section>
 
+      {repositories.length === 0 && !registryUnavailable && (
+        <section className="ds-section" data-testid="repositories-wizard-card">
+          <div className="compact-empty-head">
+            <PlayCircle size={20} className="empty-icon" />
+            <div>
+              <h3>{t("First review, guided")}</h3>
+              <p>{t("Connect a repository, pick the verified deterministic workflow, bind a trigger, and run — the wizard reuses every existing surface.")}</p>
+            </div>
+          </div>
+          <Button variant="primary" type="button" onClick={() => setWizardOpen(true)}>
+            <PlayCircle size={14} /> {t("Start the review wizard")}
+          </Button>
+        </section>
+      )}
+
       {/* Search & Stats Filter */}
-      <div className="repo-hub-search-bar">
-        <div className="search-input-wrap">
-          <Search size={14} className="search-icon" />
+      <div className="pw-toolbar">
+        <div className="pw-search">
+          <Search size={14} className="ds-input-prefix" />
           <input
+            className="ds-input ds-input--has-prefix"
             type="text"
             placeholder={zh ? "筛选代码仓库..." : "Filter repositories..."}
             value={filterQuery}
             onChange={e => setFilterQuery(e.target.value)}
           />
         </div>
-        <div className="hub-counts">
-          <span><strong>{localRepos.length + remoteRepos.length}</strong> {zh ? "个已观察仓库" : "observed repositories"}</span>
+        <div className="ds-chip-row">
+          <span className="ds-chip ds-chip--muted"><strong>{localRepos.length + remoteRepos.length}</strong> {zh ? "个已观察仓库" : "observed repositories"}</span>
         </div>
       </div>
 
@@ -235,17 +263,17 @@ export function RepositoriesPage({
       )}
 
       {/* Section 1: Local Repositories */}
-      <section className="section-block repo-group-section">
-        <div className="panel-title">
-          <div>
-            <span className="panel-kicker">{zh ? "本地文件系统" : "Local Workspace"}</span>
-            <h2>{zh ? "本地代码仓库" : "Local Repositories"}</h2>
+      <section className="ds-section">
+        <div className="ds-section-header">
+          <div className="ds-section-heading">
+            <span className="ds-section-kicker">{zh ? "本地文件系统" : "Local Workspace"}</span>
+            <h2 className="ds-section-title">{zh ? "本地代码仓库" : "Local Repositories"}</h2>
           </div>
-          <strong>{localRepos.length}</strong>
+          <strong className="ds-chip ds-chip--muted">{localRepos.length}</strong>
         </div>
 
         {localRepos.length === 0 ? (
-          <div className="empty-inline-compact">{zh ? "暂无已连接的本地 Git 仓库。" : "No local Git repositories connected."}</div>
+          <div className="ds-empty ds-empty--slim">{zh ? "暂无已连接的本地 Git 仓库。" : "No local Git repositories connected."}</div>
         ) : (
           <div className="repo-table-rows" role="list">
             {localRepos.map(repo => (
@@ -254,12 +282,12 @@ export function RepositoriesPage({
                   <span className={`repo-dot ${repo.isLive || repo.raw?.monitoringEnabled ? "monitored" : ""}`} />
                   <FolderGit2 size={16} className="card-repo-icon" />
                   <strong>{repo.name}</strong>
-                  <span className="provenance-pill">{zh ? "本地 GIT" : "LOCAL GIT"}</span>
-                  {repo.isLive && <span className="status-pill telemetry-live">{zh ? "实时监控中" : "LIVE MONITOR"}</span>}
+                  <span className="ds-chip ds-chip--muted">{zh ? "本地 GIT" : "LOCAL GIT"}</span>
+                  {repo.isLive && <span className="ds-chip ds-chip--ok">{zh ? "实时监控中" : "LIVE MONITOR"}</span>}
                 </div>
                 <div className="repo-row-meta">
                    {repo.raw?.trustLevel && (
-                     <small>{repo.raw.trustLevel === "trusted_local" ? (zh ? "受信本地" : "trusted local") : (zh ? "只读" : "read-only")}</small>
+                     <small className={`ds-chip ${repo.raw.trustLevel === "trusted_local" ? "ds-chip--ok" : "ds-chip--muted"}`}>{repo.raw.trustLevel === "trusted_local" ? (zh ? "受信本地" : "trusted local") : (zh ? "只读" : "read-only")}</small>
                    )}
                   <code><GitBranch size={11} /> {repo.branch}</code>
                 </div>
@@ -278,13 +306,13 @@ export function RepositoriesPage({
 
       {/* Section 2: Remote / Public Connected Repositories */}
       {remoteRepos.length > 0 && (
-        <section className="section-block repo-group-section">
-          <div className="panel-title">
-            <div>
-              <span className="panel-kicker">{zh ? "远端源" : "Remote Sources"}</span>
-              <h2>{zh ? "已连接远端仓库" : "Connected Remote Repositories"}</h2>
+        <section className="ds-section">
+          <div className="ds-section-header">
+            <div className="ds-section-heading">
+              <span className="ds-section-kicker">{zh ? "远端源" : "Remote Sources"}</span>
+              <h2 className="ds-section-title">{zh ? "已连接远端仓库" : "Connected Remote Repositories"}</h2>
             </div>
-            <strong>{remoteRepos.length}</strong>
+            <strong className="ds-chip ds-chip--muted">{remoteRepos.length}</strong>
           </div>
 
           <div className="repo-table-rows" role="list">
@@ -293,7 +321,7 @@ export function RepositoriesPage({
                 <div className="repo-row-title">
                   <FolderGit2 size={16} className="card-repo-icon" />
                   <strong>{repo.name}</strong>
-                  <span className="provenance-pill">{zh ? "GITHUB 公开" : "GITHUB PUBLIC"}</span>
+                  <span className="ds-chip ds-chip--muted">{zh ? "GITHUB 公开" : "GITHUB PUBLIC"}</span>
                 </div>
                 <div className="repo-row-meta">
                   <code><GitBranch size={11} /> {repo.branch}</code>
@@ -387,6 +415,14 @@ export function RepositoriesPage({
             </div>
           </div>
         </div>
+      )}
+
+      {wizardOpen && (
+        <ReviewWizardDialog
+          repositories={repositories}
+          desktopBridgeAvailable={canSelectRepository}
+          onClose={() => setWizardOpen(false)}
+        />
       )}
     </div>
   );
