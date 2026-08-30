@@ -11,6 +11,7 @@ import {
   workflowSpecSchema
 } from "./workflow";
 import { vcsChangedFileSchema } from "./vcs";
+import { workflowRuntimeRunSummarySchema } from "./workflow-runtime";
 
 const nonEmpty = z.string().trim().min(1);
 const identifier = nonEmpty.max(200);
@@ -372,25 +373,45 @@ export const automationTriggerSchema = z.discriminatedUnion("type", [
 
 export const executionProfileSchema = z.enum(["static_readonly", "trusted_sandbox"]);
 
-export const automationSchema = z.object({
+const automationObjectSchema = z.object({
   id: identifier,
   repositoryId: identifier,
   name: nonEmpty.max(200),
   trigger: automationTriggerSchema,
-  workflowRevisionId: identifier,
+  /** Legacy anchor. Optional since the runtime bridge: at least one of
+   * workflowRevisionId / runtimeDefinitionId must be present. */
+  workflowRevisionId: identifier.optional(),
   policyRevisionId: identifier,
+  /** Workflow-runtime definition mapping (optional; validated at write time). */
+  runtimeDefinitionId: identifier.optional(),
   executionProfile: executionProfileSchema.default("static_readonly"),
   enabled: z.boolean(),
   createdAt: timestamp,
   updatedAt: timestamp
 }).strict();
 
-export const createAutomationRequestSchema = automationSchema.omit({
+export const automationSchema = automationObjectSchema.superRefine((automation, context) => {
+  if (automation.workflowRevisionId !== undefined || automation.runtimeDefinitionId !== undefined) return;
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["workflowRevisionId"],
+    message: "An automation requires a workflowRevisionId, a runtimeDefinitionId, or both"
+  });
+});
+
+export const createAutomationRequestSchema = automationObjectSchema.omit({
   id: true,
   enabled: true,
   createdAt: true,
   updatedAt: true
 }).extend({ enabled: z.boolean().default(true) }).strict().superRefine((automation, context) => {
+  if (automation.workflowRevisionId === undefined && automation.runtimeDefinitionId === undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["workflowRevisionId"],
+      message: "An automation requires a workflowRevisionId, a runtimeDefinitionId, or both"
+    });
+  }
   if (automation.trigger.type !== "schedule") return;
   const parsed = cronScheduleSpecSchema.safeParse(automation.trigger);
   if (parsed.success) return;
@@ -421,7 +442,8 @@ export const auditRunSchema = z.object({
   sourceEventId: identifier.optional(),
   scheduledFor: timestamp.optional(),
   automationId: identifier.optional(),
-  workflowRevisionId: identifier,
+  /** Legacy workflow anchor; absent for runtime-only automation runs. */
+  workflowRevisionId: identifier.optional(),
   policyRevisionId: identifier,
   executionProfile: executionProfileSchema,
   baseRevision: nonEmpty.max(255).optional(),
@@ -431,6 +453,10 @@ export const auditRunSchema = z.object({
   coverage: unitInterval.optional(),
   policyEvaluation: policyEvaluationSchema.optional(),
   publicationStatus: auditPublicationStatusSchema,
+  /** Immutable link to the workflow-runtime run executing this audit run. */
+  workflowRuntimeRunId: identifier.optional(),
+  /** Executor failure detail, kept separate from legacy `error`. */
+  executionError: nonEmpty.optional(),
   createdAt: timestamp,
   startedAt: timestamp.optional(),
   finishedAt: timestamp.optional(),
@@ -444,6 +470,8 @@ export const createAuditRunRequestSchema = auditRunSchema.omit({
   coverage: true,
   policyEvaluation: true,
   publicationStatus: true,
+  workflowRuntimeRunId: true,
+  executionError: true,
   createdAt: true,
   startedAt: true,
   finishedAt: true,
@@ -463,7 +491,8 @@ export const planAuditRunDraftRequestSchema = z.object({
   planningKey: sha256DigestSchema,
   repositoryId: identifier,
   automationId: identifier,
-  workflowRevisionId: identifier,
+  /** Legacy workflow anchor; omitted for runtime-only automation planning. */
+  workflowRevisionId: identifier.optional(),
   workflowDigest: sha256DigestSchema,
   policyRevisionId: identifier,
   executionProfile: executionProfileSchema,
@@ -554,10 +583,20 @@ export const auditRunPlanningResultSchema = z.object({
   reason: auditRunPlanningReasonSchema,
   receipt: auditRunPlanningReceiptSchema,
   auditRun: auditRunSchema,
+  // execution.available is computed, not hard-coded: the current server still
+  // reports false (draft-only planning), but an executor slice may report true
+  // without another schema migration. An unavailable result must say why.
   execution: z.object({
-    available: z.literal(false),
-    reason: z.literal(AUDIT_DRAFT_ONLY_EXECUTION_REASON)
-  }).strict()
+    available: z.boolean(),
+    reason: nonEmpty.optional()
+  }).strict().superRefine((execution, context) => {
+    if (execution.available || execution.reason !== undefined) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["reason"],
+      message: "Unavailable execution requires a reason"
+    });
+  })
 }).strict().superRefine((result, context) => {
   const expectedReason = result.disposition === "created"
     ? "new_draft"
@@ -651,6 +690,25 @@ export const automationScheduleWindowSchema = z.object({
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["planningReceiptId"], message: "Planned window requires receipt and run references" });
   }
 });
+
+/** Append-only lifecycle events for an audit run (per-run seq ordering). */
+export const auditRunEventTypeSchema = z.enum([
+  "run_queued",
+  "run_running",
+  "run_succeeded",
+  "run_failed",
+  "run_cancelled"
+]);
+
+export const auditRunEventSchema = z.object({
+  id: identifier,
+  auditRunId: identifier,
+  /** Per-run append-only sequence, allocated from 1 and ordered ascending. */
+  seq: z.number().int().positive(),
+  eventType: auditRunEventTypeSchema,
+  payload: z.record(z.unknown()),
+  createdAt: timestamp
+}).strict();
 
 export const runStepArtifactSchema = z.object({
   id: identifier,
@@ -820,15 +878,64 @@ export const auditCapabilitiesSchema = z.object({
   automationScheduling: z.boolean(),
   automationHistory: z.boolean(),
   auditRunDrafts: z.boolean(),
-  auditExecution: z.literal(false),
+  // Computed since the audit-execution executor slice: the value reflects
+  // executor arming + persistence, never a hard-coded promise.
+  auditExecution: z.boolean(),
   auditRunArtifacts: z.boolean(),
-  auditRunEvents: z.literal(false),
+  auditRunEvents: z.boolean(),
   auditReports: z.boolean(),
-  auditExport: z.literal(false),
+  auditExport: z.boolean(),
   issueTriage: z.boolean(),
   evolutionPersistence: z.boolean(),
   policyEvaluation: z.boolean()
 }).strict();
+
+/** `{ events }` response for GET /audit-runs/:id/events (per-run seq order). */
+export const auditRunEventsResponseSchema = z.object({
+  events: z.array(auditRunEventSchema)
+}).strict();
+
+/**
+ * Durable run export document (GET/POST /audit-runs/:id/export).
+ *
+ * Machine-readable contract declared at the @consistency/schema boundary per
+ * docs/output_schema.md: explicit camelCase Zod definition, validated by
+ * automated tests, carrying the run fields, the append-only event sequence,
+ * the automation summary when the run was planned by one, and the linked
+ * workflow-runtime run summary when the executor bridged it.
+ */
+export const auditRunExportSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: timestamp,
+  run: auditRunSchema,
+  /** Lifecycle events in ascending per-run seq order. */
+  events: z.array(auditRunEventSchema),
+  /** Present only when the run references a persisted automation. */
+  automation: automationSchema.optional(),
+  /** Present only when the run is linked to a workflow-runtime run. */
+  workflowRuntimeRun: workflowRuntimeRunSummarySchema.optional()
+}).strict().superRefine((exportDoc, context) => {
+  if (exportDoc.events.some(event => event.auditRunId !== exportDoc.run.id)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["events"],
+      message: "Every exported event must belong to the exported run"
+    });
+  }
+  if (
+    exportDoc.automation !== undefined
+    && (
+      exportDoc.run.automationId !== exportDoc.automation.id
+      || exportDoc.automation.repositoryId !== exportDoc.run.repositoryId
+    )
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["automation"],
+      message: "Exported automation must be the run's own automation"
+    });
+  }
+});
 
 export type Repository = z.infer<typeof repositorySchema>;
 export type RepositoryTrustLevel = z.infer<typeof repositoryTrustLevelSchema>;
@@ -854,6 +961,8 @@ export type RepositoryEventPlanningResult = z.infer<typeof repositoryEventPlanni
 export type AutomationScheduleState = z.infer<typeof automationScheduleStateSchema>;
 export type AutomationScheduleWindow = z.infer<typeof automationScheduleWindowSchema>;
 export type RunStepArtifact = z.infer<typeof runStepArtifactSchema>;
+export type AuditRunEventType = z.infer<typeof auditRunEventTypeSchema>;
+export type AuditRunEvent = z.infer<typeof auditRunEventSchema>;
 export type AuditIssue = z.infer<typeof auditIssueSchema>;
 export type CreateAuditIssueRequest = z.input<typeof createAuditIssueRequestSchema>;
 export type AuditIssueAction = z.infer<typeof auditIssueActionSchema>;
@@ -861,3 +970,5 @@ export type FindingOccurrence = z.infer<typeof findingOccurrenceSchema>;
 export type EvolutionSnapshot = z.infer<typeof evolutionSnapshotSchema>;
 export type AuditReportV2 = z.infer<typeof auditReportV2Schema>;
 export type AuditCapabilities = z.infer<typeof auditCapabilitiesSchema>;
+export type AuditRunEventsResponse = z.infer<typeof auditRunEventsResponseSchema>;
+export type AuditRunExport = z.infer<typeof auditRunExportSchema>;

@@ -6,7 +6,7 @@ import {
   buildRepositorySupervisorRegistrations,
   EMPTY_REPOSITORY_WORKFLOW_DIGEST
 } from "./repositorySupervision";
-import { SQLiteAuditDomainStore } from "./store";
+import { SQLiteAuditDomainStore, type WorkflowRuntimeDefinitionGate } from "./store";
 
 const firstWorkflowSpec = workflowSpecSchema.parse({
   version: 2,
@@ -214,6 +214,43 @@ describe("buildRepositorySupervisorRegistrations (CKPT5 on_change bindings)", ()
 
       // Removing all bindings restores the legacy digest (config round-trips).
       expect(digestFor({ onChangeBindings: () => [] })).toBe(legacy);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("includes runtime-mapped automations in the digest without a legacy workflow revision", () => {
+    const { database, store, monitored } = fixture();
+    try {
+      const policy = store.createPolicyRevision({
+        policyId: "default",
+        name: "Default",
+        requiredChecks: ["syntax"],
+        minimumCoverage: 1,
+        warnAtRiskScore: 40,
+        failAtRiskScore: 70,
+        enforcement: "advisory"
+      });
+      const beforeMappingDigest = buildRepositorySupervisorRegistrations(store, 30_000)[0]!.workflowDigest;
+      const gate: WorkflowRuntimeDefinitionGate = {
+        definitionExists: (definitionId: string): boolean => definitionId === "verified-mini-review",
+        getLatestValidatedRevision: (definitionId: string): any =>
+          definitionId === "verified-mini-review" ? { revisionId: "wfrev_x", status: "validated" } : undefined
+      };
+      const runtimeStore = new SQLiteAuditDomainStore(database, { workflowRuntime: gate });
+      runtimeStore.createAutomation({
+        repositoryId: monitored.id,
+        name: "Runtime mapped",
+        trigger: { type: "manual" },
+        runtimeDefinitionId: "verified-mini-review",
+        policyRevisionId: policy.id,
+        executionProfile: "static_readonly",
+        enabled: true
+      });
+
+      const withRuntimeOnlyDigest = buildRepositorySupervisorRegistrations(runtimeStore, 30_000)[0]!.workflowDigest;
+      expect(withRuntimeOnlyDigest).not.toBe(beforeMappingDigest);
+      expect(withRuntimeOnlyDigest).toMatch(/^[0-9a-f]{64}$/);
     } finally {
       database.close();
     }

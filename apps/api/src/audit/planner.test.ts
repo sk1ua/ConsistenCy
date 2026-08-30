@@ -3,7 +3,7 @@ import { workflowSpecSchema, type RepositoryEventType } from "@consistency/schem
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
 import { AuditRunPlanner } from "./planner";
-import { SQLiteAuditDomainStore } from "./store";
+import { SQLiteAuditDomainStore, type WorkflowRuntimeDefinitionGate } from "./store";
 
 const workflowSpec = workflowSpecSchema.parse({
   version: 2,
@@ -253,6 +253,50 @@ describe("AuditRunPlanner", () => {
       expect(trustedPlan.auditRun.executionProfile).toBe("trusted_sandbox");
       expect(database.prepare("SELECT count(*) AS count FROM audit_runs WHERE source = 'schedule'")
         .get()).toEqual({ count: 0 });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("plans a runtime-only automation without inventing a legacy revision", () => {
+    const { database, store } = fixture();
+    try {
+      const policy = store.createPolicyRevision({
+        policyId: "default",
+        name: "Default",
+        requiredChecks: ["syntax"],
+        minimumCoverage: 1,
+        warnAtRiskScore: 40,
+        failAtRiskScore: 70,
+        enforcement: "advisory"
+      });
+      const gate: WorkflowRuntimeDefinitionGate = {
+        definitionExists: (definitionId: string): boolean => definitionId === "verified-mini-review",
+        getLatestValidatedRevision: (definitionId: string): any =>
+          definitionId === "verified-mini-review" ? { revisionId: "wfrev_x", status: "validated" } : undefined
+      };
+      const bridgeStore = new SQLiteAuditDomainStore(database, { workflowRuntime: gate });
+      const runtimeAutomation = bridgeStore.createAutomation({
+        repositoryId: store.listRepositories()[0]!.id,
+        name: "Runtime mapped",
+        trigger: { type: "manual" },
+        runtimeDefinitionId: "verified-mini-review",
+        policyRevisionId: policy.id,
+        executionProfile: "static_readonly",
+        enabled: true
+      });
+      const planner = new AuditRunPlanner(bridgeStore);
+      const planned = planner.planManualRun(runtimeAutomation.id);
+      expect(planned).toMatchObject({
+        disposition: "created",
+        auditRun: {
+          automationId: runtimeAutomation.id,
+          workflowRevisionId: undefined,
+          status: "created"
+        },
+        execution: { available: false }
+      });
+      expect(planned.receipt.workflowDigest).toMatch(/^[0-9a-f]{64}$/);
     } finally {
       database.close();
     }

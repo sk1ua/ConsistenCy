@@ -29,7 +29,9 @@ describe("SQLite foundation", () => {
         "0017_workflow_runtime_definitions_runs",
         "0018_workflow_runtime_bindings",
         "0019_jobs_canonical_repository_id",
-        "0020_workflow_runtime_triggers"
+        "0020_workflow_runtime_triggers",
+        "0021_audit_execution_bridge",
+        "0022_audit_runtime_only_runs"
       ]);
       expect(runMigrations(database)).toEqual([]);
       const table = database
@@ -97,7 +99,9 @@ describe("SQLite foundation", () => {
         "0017_workflow_runtime_definitions_runs",
         "0018_workflow_runtime_bindings",
         "0019_jobs_canonical_repository_id",
-        "0020_workflow_runtime_triggers"
+        "0020_workflow_runtime_triggers",
+        "0021_audit_execution_bridge",
+        "0022_audit_runtime_only_runs"
       ]);
       const tables = database.prepare(`
         SELECT name FROM sqlite_master
@@ -152,7 +156,9 @@ describe("SQLite foundation", () => {
         "0017_workflow_runtime_definitions_runs",
         "0018_workflow_runtime_bindings",
         "0019_jobs_canonical_repository_id",
-        "0020_workflow_runtime_triggers"
+        "0020_workflow_runtime_triggers",
+        "0021_audit_execution_bridge",
+        "0022_audit_runtime_only_runs"
       ]);
 
       // Assert data preserved
@@ -264,7 +270,9 @@ describe("0009_local_git_jobs", () => {
         "0017_workflow_runtime_definitions_runs",
         "0018_workflow_runtime_bindings",
         "0019_jobs_canonical_repository_id",
-        "0020_workflow_runtime_triggers"
+        "0020_workflow_runtime_triggers",
+        "0021_audit_execution_bridge",
+        "0022_audit_runtime_only_runs"
       ]);
 
       const job = database.prepare("SELECT * FROM jobs WHERE id = 'job_kept'").get() as any;
@@ -404,17 +412,16 @@ describe("0013_audit_run_planning_receipts", () => {
         failAtRiskScore: 70,
         enforcement: "advisory"
       });
-      const automation = store.createAutomation({
-        repositoryId: repository.id,
-        name: "duplicate-active",
-        trigger: { type: "manual" },
-        workflowRevisionId: workflow.id,
-        policyRevisionId: policy.id,
-        executionProfile: "trusted_sandbox",
-        enabled: true
-      });
       // This fixture intentionally remains on 0012. Insert the legacy shape
       // directly because the current store targets the fully migrated schema.
+      database.prepare(`
+        INSERT INTO automations (
+          id, repository_id, name, trigger_json, workflow_revision_id,
+          policy_revision_id, execution_profile, enabled, created_at, updated_at
+        ) VALUES ('automation_duplicate', ?, 'duplicate-active', '{"type":"manual"}', ?,
+          ?, 'trusted_sandbox', 1, '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z')
+      `).run(repository.id, workflow.id, policy.id);
+      const automation = { id: "automation_duplicate" };
       const insertLegacyDraft = database.prepare(`
         INSERT INTO audit_runs (
           id, repository_id, source, automation_id, workflow_revision_id,
@@ -468,15 +475,16 @@ describe("0014_automation_scheduler", () => {
         failAtRiskScore: 70,
         enforcement: "advisory"
       });
-      const automation = store.createAutomation({
-        repositoryId: repository.id,
-        name: "legacy-manual",
-        trigger: { type: "manual" },
-        workflowRevisionId: workflow.id,
-        policyRevisionId: policy.id,
-        executionProfile: "static_readonly",
-        enabled: true
-      });
+      // This fixture intentionally remains on 0013. Insert the legacy shape
+      // directly because the current store targets the fully migrated schema.
+      database.prepare(`
+        INSERT INTO automations (
+          id, repository_id, name, trigger_json, workflow_revision_id,
+          policy_revision_id, execution_profile, enabled, created_at, updated_at
+        ) VALUES ('automation_legacy_manual', ?, 'legacy-manual', '{"type":"manual"}', ?,
+          ?, 'static_readonly', 1, '2026-08-14T00:00:00.000Z', '2026-08-14T00:00:00.000Z')
+      `).run(repository.id, workflow.id, policy.id);
+      const automation = { id: "automation_legacy_manual" };
       database.prepare(`
         INSERT INTO audit_runs (
           id, repository_id, source, automation_id, workflow_revision_id,
@@ -492,7 +500,8 @@ describe("0014_automation_scheduler", () => {
 
       expect(runMigrations(database, migrations)).toEqual(["0014_automation_scheduler", "0015_remove_demo_data", "0016_job_llm_model",
         "0017_workflow_runtime_definitions_runs", "0018_workflow_runtime_bindings",
-        "0019_jobs_canonical_repository_id", "0020_workflow_runtime_triggers"]);
+        "0019_jobs_canonical_repository_id", "0020_workflow_runtime_triggers",
+        "0021_audit_execution_bridge", "0022_audit_runtime_only_runs"]);
       expect(database.prepare("SELECT scheduled_for FROM audit_runs WHERE id = 'audit_run_legacy'").get())
         .toEqual({ scheduled_for: null });
       expect(database.prepare("SELECT scheduled_for FROM audit_run_planning_receipts WHERE id = 'receipt_legacy'").get())
@@ -564,6 +573,124 @@ describe("0015_remove_demo_data (Database Safety Test)", () => {
 
       const remainingDeliveries = database.prepare("SELECT delivery_id FROM webhook_deliveries").all() as Array<{ delivery_id: string }>;
       expect(remainingDeliveries).toEqual([{ delivery_id: "delivery_real_123" }]);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("0021_audit_execution_bridge", () => {
+  it("preserves legacy automations and runs while adding runtime mapping and run-event persistence", () => {
+    const database = openDatabase(":memory:");
+    try {
+      runMigrations(database, migrations.filter(migration => migration.id <= "0020_workflow_runtime_triggers"));
+
+      // Seed pre-0021 rows using the exact historical column shape.
+      database.prepare(`
+        INSERT INTO repositories (
+          id, display_name, source, identity_key, server_locator,
+          remote_full_name, trust_level, monitoring_enabled, created_at, updated_at
+        ) VALUES ('repo_bridge', 'bridge', 'local_git', 'local:D:/private/work/bridge', 'D:/private/work/bridge',
+          NULL, 'trusted_local', 1, '2026-08-20T00:00:00.000Z', '2026-08-20T00:00:00.000Z')
+      `).run();
+      database.prepare(`
+        INSERT INTO workflow_revisions (id, workflow_id, revision, digest, spec_json, created_at)
+        VALUES ('wfrev_bridge', 'wf_bridge', 1, ?, '{}', '2026-08-20T00:00:00.000Z')
+      `).run("a".repeat(64));
+      database.prepare(`
+        INSERT INTO policy_revisions (id, policy_id, revision, name, digest, policy_json, created_at)
+        VALUES ('policyrev_bridge', 'policy_bridge', 1, 'Bridge', ?, '{}', '2026-08-20T00:00:00.000Z')
+      `).run("b".repeat(64));
+      database.prepare(`
+        INSERT INTO automations (
+          id, repository_id, name, trigger_json, workflow_revision_id,
+          policy_revision_id, execution_profile, enabled, created_at, updated_at
+        ) VALUES ('automation_bridge', 'repo_bridge', 'Legacy bridge', '{"type":"manual"}', 'wfrev_bridge',
+          'policyrev_bridge', 'static_readonly', 1, '2026-08-20T00:00:01.000Z', '2026-08-20T00:00:01.000Z')
+      `).run();
+      database.prepare(`
+        INSERT INTO audit_runs (
+          id, repository_id, source, automation_id, workflow_revision_id,
+          policy_revision_id, execution_profile, status, publication_status, created_at
+        ) VALUES ('auditrun_bridge', 'repo_bridge', 'manual', 'automation_bridge', 'wfrev_bridge',
+          'policyrev_bridge', 'static_readonly', 'created', 'skipped', '2026-08-20T00:00:02.000Z')
+      `).run();
+
+      expect(runMigrations(database, migrations)).toEqual(["0021_audit_execution_bridge", "0022_audit_runtime_only_runs"]);
+
+      // Historical automation data is preserved; the new mapping stays NULL.
+      const automation = database.prepare("SELECT * FROM automations WHERE id = 'automation_bridge'").get() as any;
+      expect(automation).toMatchObject({
+        repository_id: "repo_bridge",
+        name: "Legacy bridge",
+        workflow_revision_id: "wfrev_bridge",
+        policy_revision_id: "policyrev_bridge",
+        enabled: 1
+      });
+      expect(automation.runtime_definition_id).toBeNull();
+
+      // Historical run data is preserved; bridge columns stay NULL.
+      const run = database.prepare("SELECT * FROM audit_runs WHERE id = 'auditrun_bridge'").get() as any;
+      expect(run).toMatchObject({
+        repository_id: "repo_bridge",
+        automation_id: "automation_bridge",
+        status: "created"
+      });
+      expect(run.workflow_runtime_run_id).toBeNull();
+      expect(run.execution_error).toBeNull();
+
+      // Runtime-only automations are now representable: a NULL legacy revision
+      // with a runtime definition satisfies the at-least-one CHECK.
+      database.prepare(`
+        INSERT INTO automations (
+          id, repository_id, name, trigger_json, workflow_revision_id,
+          policy_revision_id, execution_profile, enabled, runtime_definition_id, created_at, updated_at
+        ) VALUES ('automation_runtime_only', 'repo_bridge', 'Runtime only', '{"type":"manual"}', NULL,
+          'policyrev_bridge', 'static_readonly', 1, 'verified-mini-review', '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:00.000Z')
+      `).run();
+      database.prepare(`
+        INSERT INTO audit_runs (
+          id, repository_id, source, automation_id, workflow_revision_id,
+          policy_revision_id, execution_profile, status, publication_status, created_at
+        ) VALUES ('auditrun_runtime_only', 'repo_bridge', 'manual', 'automation_runtime_only', NULL,
+          'policyrev_bridge', 'static_readonly', 'created', 'skipped', '2026-08-21T00:00:01.000Z')
+      `).run();
+      expect((database.prepare("SELECT workflow_revision_id FROM audit_runs WHERE id = 'auditrun_runtime_only'").get() as any).workflow_revision_id)
+        .toBeNull();
+      expect(() => database.prepare(`
+        INSERT INTO automations (
+          id, repository_id, name, trigger_json, workflow_revision_id,
+          policy_revision_id, execution_profile, enabled, created_at, updated_at
+        ) VALUES ('automation_empty', 'repo_bridge', 'Empty mapping', '{"type":"manual"}', NULL,
+          'policyrev_bridge', 'static_readonly', 1, '2026-08-21T00:00:00.000Z', '2026-08-21T00:00:00.000Z')
+      `).run()).toThrow(/CHECK constraint failed/);
+
+      // The run-event table is append-only per run and rejects unknown types.
+      database.prepare(`
+        INSERT INTO audit_run_events (id, audit_run_id, event_type, seq, payload_json, created_at)
+        VALUES ('runevt_1', 'auditrun_bridge', 'run_queued', 1, '{"status":"queued"}', '2026-08-21T00:01:00.000Z')
+      `).run();
+      expect(() => database.prepare(`
+        INSERT INTO audit_run_events (id, audit_run_id, event_type, seq, payload_json, created_at)
+        VALUES ('runevt_bad_type', 'auditrun_bridge', 'detonated', 2, '{}', '2026-08-21T00:01:01.000Z')
+      `).run()).toThrow(/CHECK constraint failed/);
+      expect(() => database.prepare(`
+        INSERT INTO audit_run_events (id, audit_run_id, event_type, seq, payload_json, created_at)
+        VALUES ('runevt_duplicate_seq', 'auditrun_bridge', 'run_running', 1, '{}', '2026-08-21T00:01:02.000Z')
+      `).run()).toThrow(/UNIQUE constraint failed/);
+      expect(() => database.prepare(`
+        INSERT INTO audit_run_events (id, audit_run_id, event_type, seq, payload_json, created_at)
+        VALUES ('runevt_orphan', 'auditrun_missing', 'run_queued', 1, '{}', '2026-08-21T00:01:03.000Z')
+      `).run()).toThrow(/FOREIGN KEY constraint failed/);
+
+      expect(database.pragma("foreign_key_check")).toEqual([]);
+      const index = database.prepare(`
+        SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'audit_run_events_run_idx'
+      `).get();
+      expect(index).toBeTruthy();
+      const automationColumns = database.pragma("table_info(automations)") as Array<{ name: string }>;
+      expect(automationColumns.map(column => column.name)).toContain("runtime_definition_id");
+      expect(runMigrations(database, [migrations[migrations.length - 1]!])).toEqual([]);
     } finally {
       database.close();
     }

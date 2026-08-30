@@ -6,7 +6,6 @@ import {
   type PlanAuditRunDraftRequest,
   type RepositoryEvent,
   type RepositoryEventPlanningResult,
-  type WorkflowRevision
 } from "@consistency/schema";
 import { AuditDomainError, type AuditDomainStore } from "./store";
 
@@ -55,19 +54,37 @@ export function schedulePlanningKey(
   return sha256([SCHEDULE_PLANNING_KEY_DOMAIN, automationId, workflowDigest, scheduledFor]);
 }
 
+type PlannedWorkflowIdentity = {
+  workflowRevisionId?: string;
+  workflowDigest: string;
+};
+
 function workflowForAutomation(
   store: AuditRunPlannerStore,
   automation: Automation
-): WorkflowRevision {
-  const workflow = store.getWorkflowRevision(automation.workflowRevisionId);
-  if (workflow === undefined) {
+): PlannedWorkflowIdentity {
+  if (automation.workflowRevisionId !== undefined) {
+    const workflow = store.getWorkflowRevision(automation.workflowRevisionId);
+    if (workflow === undefined) {
+      throw new AuditDomainError(
+        "Automation references an unavailable workflow revision",
+        "INVALID_AUDIT_RUN_REFERENCE",
+        409
+      );
+    }
+    return { workflowRevisionId: workflow.id, workflowDigest: workflow.digest };
+  }
+  if (automation.runtimeDefinitionId === undefined) {
     throw new AuditDomainError(
-      "Automation references an unavailable workflow revision",
+      "Automation has no executable workflow identity",
       "INVALID_AUDIT_RUN_REFERENCE",
       409
     );
   }
-  return workflow;
+  // Runtime-only plans are namespaced identities, never fabricated legacy IDs.
+  return {
+    workflowDigest: sha256(`runtime:${automation.runtimeDefinitionId}`)
+  };
 }
 
 /**
@@ -107,13 +124,12 @@ export class AuditRunPlanner {
       ))
       .sort((left, right) => left.id.localeCompare(right.id));
     const results = matching.map(automation => {
-      const workflow = workflowForAutomation(this.store, automation);
+      const identity = workflowForAutomation(this.store, automation);
       return this.store.planAuditRunDraft({
-        planningKey: repositoryEventPlanningKey(persisted, automation.id, workflow.digest),
+        planningKey: repositoryEventPlanningKey(persisted, automation.id, identity.workflowDigest),
         repositoryId: persisted.repositoryId,
         automationId: automation.id,
-        workflowRevisionId: automation.workflowRevisionId,
-        workflowDigest: workflow.digest,
+        ...identity,
         policyRevisionId: automation.policyRevisionId,
         executionProfile: automation.executionProfile,
         source: "repository_event",
@@ -135,18 +151,17 @@ export class AuditRunPlanner {
     if (automation === undefined) {
       throw new AuditDomainError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
     }
-    const workflow = workflowForAutomation(this.store, automation);
+    const identity = workflowForAutomation(this.store, automation);
     const input: PlanAuditRunDraftRequest = {
       planningKey: sha256([
         MANUAL_PLANNING_KEY_DOMAIN,
         automation.id,
-        workflow.digest,
+        identity.workflowDigest,
         this.createManualNonce()
       ]),
       repositoryId: automation.repositoryId,
       automationId: automation.id,
-      workflowRevisionId: automation.workflowRevisionId,
-      workflowDigest: workflow.digest,
+      ...identity,
       policyRevisionId: automation.policyRevisionId,
       executionProfile: automation.executionProfile,
       source: "manual"
@@ -159,13 +174,12 @@ export class AuditRunPlanner {
     if (automation === undefined) {
       throw new AuditDomainError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
     }
-    const workflow = workflowForAutomation(this.store, automation);
+    const identity = workflowForAutomation(this.store, automation);
     return this.store.planAuditRunDraft({
-      planningKey: schedulePlanningKey(automation.id, workflow.digest, scheduledFor),
+      planningKey: schedulePlanningKey(automation.id, identity.workflowDigest, scheduledFor),
       repositoryId: automation.repositoryId,
       automationId: automation.id,
-      workflowRevisionId: automation.workflowRevisionId,
-      workflowDigest: workflow.digest,
+      ...identity,
       policyRevisionId: automation.policyRevisionId,
       executionProfile: automation.executionProfile,
       source: "schedule",

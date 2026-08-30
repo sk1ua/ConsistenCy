@@ -4,6 +4,13 @@ import { findProjectRoot } from "./settings";
 import { basename, dirname, join } from "node:path";
 
 describe("loadEnv", () => {
+  it("ignores unknown operating-system environment keys by design", () => {
+    const config = loadEnv({ HOST: "127.0.0.1", PATH: "C:\\\\Windows", UNKNOWN_OS_VAR: "x" });
+    expect(config.HOST).toBe("127.0.0.1");
+    expect((config as Record<string, unknown>).PATH).toBeUndefined();
+    expect((config as Record<string, unknown>).UNKNOWN_OS_VAR).toBeUndefined();
+  });
+
   it("uses local-safe defaults", () => {
     const config = loadEnv({});
     expect(config.HOST).toBe("127.0.0.1");
@@ -158,5 +165,20 @@ describe("loadEnv", () => {
     const nestedCwd = join(root, "packages", "schema", "src");
     expect(resolveDatabasePath(".consistency/consistency.db", findProjectRoot(appsApiCwd))).toBe(resolved);
     expect(resolveDatabasePath(".consistency/consistency.db", findProjectRoot(nestedCwd))).toBe(resolved);
+  });
+});
+
+describe("loadEnv audit execution bridge", () => {
+  it("arms the audit executor by default and honors the kill switch and poll interval", () => {
+    const config = loadEnv({});
+    expect(config.auditExecutionEnabled).toBe(true);
+    expect(config.CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS).toBe(5_000);
+
+    expect(loadEnv({ CONSISTENCY_AUDIT_EXECUTION_ENABLED: "false" }).auditExecutionEnabled).toBe(false);
+    expect(loadEnv({ CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS: "250" }).CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS).toBe(250);
+
+    expect(() => loadEnv({ CONSISTENCY_AUDIT_EXECUTION_ENABLED: "yes" })).toThrow();
+    expect(() => loadEnv({ CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS: "10" })).toThrow();
+    expect(() => loadEnv({ CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS: "70000" })).toThrow();
   });
 });

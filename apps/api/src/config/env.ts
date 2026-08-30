@@ -18,6 +18,11 @@ const optionalSecret = z.preprocess(
   z.string().trim().min(1).optional()
 );
 
+/**
+ * Process environments are intentionally tolerant: PATH, HOME, and other OS
+ * keys are expected and ignored by design. Strict validation belongs to the
+ * workflow node configuration schema, not to the daemon's process env.
+ */
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().trim().min(1).default("127.0.0.1"),
@@ -59,6 +64,17 @@ export const envSchema = z.object({
     .transform(value => value === "true")
     .default("true"),
   CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(5_000),
+  /**
+   * Audit execution bridge (executor slice): automatic execution of durable
+   * audit-run drafts whose automation maps a workflow-runtime definition.
+   * Default on — mapping an automation to a runtime definition is explicit
+   * user intent; set to "false" as a kill-switch (drafts stay durable).
+   */
+  CONSISTENCY_AUDIT_EXECUTION_ENABLED: z
+    .enum(["true", "false"])
+    .transform(value => value === "true")
+    .default("true"),
+  CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS: z.coerce.number().int().min(50).max(60_000).default(5_000),
   /**
    * Workflow backing the deterministic review stage. Set to "legacy" to fall
    * back to the single-shot `analyze` action.
@@ -108,6 +124,8 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   /** Workflow name, or null for the legacy single-shot analyze action. */
   reviewWorkflow: string | null;
   workflowTriggersEnabled: boolean;
+  /** Audit-run executor loop (drafts with a runtime definition mapping). */
+  auditExecutionEnabled: boolean;
 };
 
 export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -184,6 +202,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     reviewWorkflow: parsed.CONSISTENCY_REVIEW_WORKFLOW === "legacy"
       ? null
       : parsed.CONSISTENCY_REVIEW_WORKFLOW,
-    workflowTriggersEnabled: parsed.CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED
+    workflowTriggersEnabled: parsed.CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED,
+    auditExecutionEnabled: parsed.CONSISTENCY_AUDIT_EXECUTION_ENABLED
   };
 }

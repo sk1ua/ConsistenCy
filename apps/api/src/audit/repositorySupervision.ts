@@ -43,6 +43,20 @@ function automationDigestMaterial(
   store: RepositorySupervisionStore,
   automation: Automation
 ): Record<string, unknown> {
+  // Runtime-mapped automations (workflow bridge) have no legacy revision; they
+  // still belong in the digest, keyed by their runtime definition instead.
+  // Legacy automations keep the exact pre-0021 material bytes.
+  if (automation.workflowRevisionId === undefined) {
+    return {
+      automationId: automation.id,
+      name: automation.name,
+      trigger: automation.trigger,
+      runtimeDefinitionId: automation.runtimeDefinitionId,
+      policyRevisionId: automation.policyRevisionId,
+      executionProfile: automation.executionProfile,
+      enabled: true
+    };
+  }
   const workflowRevision = store.getWorkflowRevision(automation.workflowRevisionId);
   if (workflowRevision === undefined) {
     throw new Error(

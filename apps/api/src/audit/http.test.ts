@@ -1,7 +1,19 @@
 import { request } from "node:http";
+import type { WorkflowSpec } from "@consistency/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDatabase, type ConsistencyDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
+import {
+  WorkflowRuntimeHost
+} from "../workflow-runtime/host";
+import {
+  WorkflowRuntimeStore
+} from "../workflow-runtime/store";
+import {
+  AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON,
+  AUDIT_EXECUTION_DISABLED_REASON,
+  AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON
+} from "./executor";
 import { createApiServer } from "../http";
 import { AuditRunPlanner } from "./planner";
 import { AutomationScheduler } from "./scheduler";
@@ -108,7 +120,7 @@ describe("audit control-plane HTTP skeleton", () => {
         nodes: [{ id: "security", uses: "engine.security" }],
         verifiers: [{ id: "syntax-gate", uses: "verify.syntax", needs: ["security"] }],
         synthesizer: { needs: ["syntax-gate"] }
-    };
+    } as WorkflowSpec;
     expect(await call(port, "POST", "/workflows/vibe-safety/validate", workflowSpec)).toMatchObject({
       status: 200,
       body: { valid: true, workflowId: "vibe-safety" }
@@ -251,14 +263,24 @@ describe("audit control-plane HTTP skeleton", () => {
       body: { error: { code: "AUTOMATION_TRIGGER_NOT_MATCHED" } }
     });
     expect((await call(port, "GET", `/audit-runs/${runId}/steps`)).body.steps).toEqual([]);
+    // Route C: real event/export endpoints replaced the 501 stubs.
     expect(await call(port, "GET", `/audit-runs/${runId}/events`)).toMatchObject({
-      status: 501,
-      body: { error: { details: { capability: "auditRunEvents" } } }
+      status: 200,
+      body: { events: [] }
     });
-    expect(await call(port, "GET", `/audit-runs/${runId}/export`)).toMatchObject({
-      status: 501,
-      body: { error: { details: { capability: "auditExport" } } }
+    const exportResponse = await call(port, "GET", `/audit-runs/${runId}/export`);
+    expect(exportResponse.status).toBe(200);
+    expect(exportResponse.body).toMatchObject({
+      schemaVersion: 1,
+      run: { id: runId, repositoryId, automationId, status: "created" },
+      events: [],
+      automation: { id: automationId }
     });
+    expect(exportResponse.body).not.toHaveProperty("workflowRuntimeRun");
+    // POST /export is the same read-only document for POST-only clients.
+    const exportViaPost = await call(port, "POST", `/audit-runs/${runId}/export`);
+    expect(exportViaPost.status).toBe(200);
+    expect(exportViaPost.body.schemaVersion).toBe(1);
     expect((await call(port, "GET", `/audit-runs/${directRunId}`)).body.auditRun.id).toBe(directRunId);
     auditStore.saveRepositoryPulse(repositoryId, {
       pulseId: "pulse_http_1",
@@ -300,6 +322,17 @@ describe("audit control-plane HTTP skeleton", () => {
 
     const cancelled = await call(port, "POST", `/audit-runs/${runId}/cancel`);
     expect(cancelled.body.auditRun.status).toBe("cancelled");
+    // The append-only lifecycle stream is readable with honest provenance.
+    const cancelledEvents = await call(port, "GET", `/audit-runs/${runId}/events`);
+    expect(cancelledEvents.status).toBe(200);
+    expect(cancelledEvents.body.events.map((event: { eventType: string }) => event.eventType))
+      .toEqual(["run_cancelled"]);
+    const cancelledExport = await call(port, "GET", `/audit-runs/${runId}/export`);
+    expect(cancelledExport.body.run).toMatchObject({ id: runId, status: "cancelled" });
+    expect(
+      (await call(port, "GET", `/audit-runs/${runId}/export`)).body.events
+        .map((event: { eventType: string }) => event.eventType)
+    ).toEqual(["run_cancelled"]);
   });
 
   it("advertises scheduling only while the injected scheduler lifecycle is running", async () => {
@@ -324,4 +357,279 @@ describe("audit control-plane HTTP skeleton", () => {
     scheduler.stop();
     expect((await call(port, "GET", "/audit/capabilities")).body.automationScheduling).toBe(false);
   });
+
+  it("Route C: event stream ordering, export document contract, and canonical 404s", async () => {
+    const database = openDatabase(":memory:");
+    databases.push(database);
+    runMigrations(database);
+    const auditStore = new SQLiteAuditDomainStore(database, {
+      // Mapping-gate fake: createAutomation validation passes without seeding
+      // a real definition row; the exported link is inserted directly below.
+      workflowRuntime: {
+        definitionExists: () => true,
+        getLatestValidatedRevision: () => ({ revisionId: "rev-seed" }) as any
+      }
+    });
+    // A real persisted workflow-runtime row backs the export summary shaping.
+    const workflowRuntimeStore = new WorkflowRuntimeStore(database);
+    workflowRuntimeStore.insertRun({
+      runId: "wfrun_export_1",
+      definitionId: "def-runtime-x",
+      revisionId: "rev-7",
+      origin: "user",
+      status: "running",
+      repository: "Fixture Local",
+      headSha: "deadbeefcafe",
+      createdAt: "2026-08-27T00:00:00.000Z",
+      evidence: []
+    });
+    workflowRuntimeStore.updateRunTerminal({
+      runId: "wfrun_export_1",
+      status: "succeeded",
+      finishedAt: "2026-08-27T00:01:00.000Z",
+      evidence: [],
+      miniReport: { findings: [{ id: "f1" }, { id: "f2" }], evidenceCount: 3 }
+    });
+
+    const repository = auditStore.createRepository({
+      displayName: "Fixture Local",
+      source: "local_git",
+      monitoringEnabled: true
+    }, { serverLocator: "\\\\fixture\\server\\checkout" });
+    const remoteRepository = auditStore.createRepository({
+      displayName: "Fixture Remote",
+      source: "github",
+      remoteFullName: "owner/fixture-remote"
+    });
+    const workflowSpec = {
+      version: 2,
+      name: "vibe-safety",
+      nodes: [{ id: "security", uses: "engine.security" }],
+      verifiers: [{ id: "syntax-gate", uses: "verify.syntax", needs: ["security"] }],
+      synthesizer: { needs: ["syntax-gate"] }
+    } as WorkflowSpec;
+    const workflow = auditStore.createWorkflowRevision({ workflowId: "vibe-safety", spec: workflowSpec });
+    const policy = auditStore.createPolicyRevision({ policyId: "default-safety", name: "Default safety" });
+    const automation = auditStore.createAutomation({
+      repositoryId: repository.id,
+      name: "Mapped export auto",
+      trigger: { type: "manual" },
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id,
+      runtimeDefinitionId: "def-runtime-x",
+      enabled: true
+    });
+
+    // Run A: full lifecycle with a terminal workflow-runtime outcome.
+    const finished = auditStore.createAuditRunDraft({
+      repositoryId: repository.id,
+      source: "manual",
+      automationId: automation.id,
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id
+    });
+    auditStore.markRunQueued(finished.id);
+    auditStore.markRunRunning(finished.id, { workflowRuntimeRunId: "wfrun_export_1" });
+    auditStore.markRunTerminal(finished.id, "succeeded", { workflowRuntimeRunId: "wfrun_export_1" });
+
+    // Run B: raw draft without automation or link (sparse export shape).
+    const bare = auditStore.createAuditRunDraft({
+      repositoryId: remoteRepository.id,
+      source: "manual",
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id
+    });
+
+    // The composition root wires the host that resolves linked-run summaries.
+    const server = createApiServer({
+      auditStore,
+      workflowRuntime: new WorkflowRuntimeHost({ store: workflowRuntimeStore })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const events = await call(port, "GET", `/audit-runs/${finished.id}/events`);
+    expect(events.status).toBe(200);
+    expect(events.body.events.map((event: { eventType: string }) => event.eventType))
+      .toEqual(["run_queued", "run_running", "run_succeeded"]);
+    for (const [index, event] of (events.body.events as Array<Record<string, unknown>>).entries()) {
+      expect(Object.keys(event).sort()).toEqual(["auditRunId", "createdAt", "eventType", "id", "payload", "seq"]);
+      expect(event.seq).toBe(index + 1);
+      if (index > 0) {
+        const previous = (events.body.events as Array<{ createdAt: string }>)[index - 1]!;
+        expect(event.auditRunId).toBe(finished.id);
+        expect(String(event.createdAt) >= previous.createdAt).toBe(true);
+      }
+    }
+
+    const exportDoc = await call(port, "GET", `/audit-runs/${finished.id}/export`);
+    expect(exportDoc.status).toBe(200);
+    expect(exportDoc.body).toMatchObject({
+      schemaVersion: 1,
+      run: { id: finished.id, status: "succeeded", workflowRuntimeRunId: "wfrun_export_1" },
+      events: events.body.events,
+      automation: { id: automation.id },
+      workflowRuntimeRun: {
+        runId: "wfrun_export_1",
+        definitionId: "def-runtime-x",
+        revisionId: "rev-7",
+        status: "succeeded",
+        headSha: "deadbeefcafe",
+        findingCount: 2,
+        evidenceCount: 3
+      }
+    });
+    expect(JSON.stringify(exportDoc.body)).not.toContain("\\\\fixture");
+    const exportViaPost = await call(port, "POST", `/audit-runs/${finished.id}/export`);
+    expect(exportViaPost.status).toBe(200);
+    expect(exportViaPost.body.run).toEqual(exportDoc.body.run);
+    expect(exportViaPost.body.events).toEqual(events.body.events);
+
+    const bareExport = await call(port, "GET", `/audit-runs/${bare.id}/export`);
+    expect(bareExport.status).toBe(200);
+    expect(bareExport.body.events).toEqual([]);
+    expect(bareExport.body).not.toHaveProperty("automation");
+    expect(bareExport.body).not.toHaveProperty("workflowRuntimeRun");
+
+    // Unknown runs keep the canonical audit 404 on every supported verb;
+    // unsupported verbs stay on the generic router fallback.
+    expect(await call(port, "GET", "/audit-runs/auditrun_missing/events")).toMatchObject({
+      status: 404,
+      body: { error: { code: "AUDIT_RUN_NOT_FOUND" } }
+    });
+    expect(await call(port, "POST", "/audit-runs/auditrun_missing/unknown-action")).toMatchObject({
+      status: 404,
+      body: { error: { code: "NOT_FOUND" } }
+    });
+    for (const method of ["GET", "POST"] as const) {
+      expect(await call(port, method, "/audit-runs/auditrun_missing/export")).toMatchObject({
+        status: 404,
+        body: { error: { code: "AUDIT_RUN_NOT_FOUND" } }
+      });
+    }
+  });
+
+  it("executor wiring flips capabilities and planning availability computed per subject", async () => {
+    const database = openDatabase(":memory:");
+    databases.push(database);
+    runMigrations(database);
+    const flags = { armed: false };
+    let store: SQLiteAuditDomainStore | undefined;
+    const wiredStore = new SQLiteAuditDomainStore(database, {
+      workflowRuntime: {
+        definitionExists: () => true,
+        getLatestValidatedRevision: () => ({ revisionId: "rev-seed" }) as any
+      },
+      resolveExecutionAvailability: subject => {
+        const current = store!;
+        if (!flags.armed) return { available: false, reason: AUDIT_EXECUTION_DISABLED_REASON };
+        const automation = current.getAutomation(subject.automationId);
+        if (automation === undefined || automation.runtimeDefinitionId === undefined) {
+          return { available: false, reason: AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON };
+        }
+        const repository = current.getRepository(subject.repositoryId);
+        if (repository === undefined || repository.source !== "local_git") {
+          return { available: false, reason: AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON };
+        }
+        return { available: true };
+      }
+    });
+    store = wiredStore;
+
+    const repository = wiredStore.createRepository({
+      displayName: "Fixture Local",
+      source: "local_git",
+      monitoringEnabled: true
+    }, { serverLocator: "\\\\fixture\\server\\checkout" });
+    const remoteRepository = wiredStore.createRepository({
+      displayName: "Fixture Remote",
+      source: "github",
+      remoteFullName: "owner/fixture-remote"
+    });
+    const workflowSpec = {
+      version: 2,
+      name: "vibe-safety",
+      nodes: [{ id: "security", uses: "engine.security" }],
+      verifiers: [{ id: "syntax-gate", uses: "verify.syntax", needs: ["security"] }],
+      synthesizer: { needs: ["syntax-gate"] }
+    } as WorkflowSpec;
+    const workflow = wiredStore.createWorkflowRevision({ workflowId: "vibe-safety", spec: workflowSpec });
+    const policy = wiredStore.createPolicyRevision({ policyId: "default-safety", name: "Default safety" });
+    const mappedLocal = wiredStore.createAutomation({
+      repositoryId: repository.id,
+      name: "Mapped local",
+      trigger: { type: "manual" },
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id,
+      runtimeDefinitionId: "def-runtime-x",
+      enabled: true
+    }).id;
+    const legacyOnly = wiredStore.createAutomation({
+      repositoryId: repository.id,
+      name: "Legacy only",
+      trigger: { type: "manual" },
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id,
+      enabled: true
+    }).id;
+    const mappedRemote = wiredStore.createAutomation({
+      repositoryId: remoteRepository.id,
+      name: "Mapped remote",
+      trigger: { type: "manual" },
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id,
+      runtimeDefinitionId: "def-runtime-x",
+      enabled: true
+    }).id;
+
+    const server = createApiServer({
+      auditStore: wiredStore,
+      auditPlanner: new AuditRunPlanner(wiredStore),
+      auditExecution: { enabled: flags.armed }
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    // Disarmed executor: capability false and every planned draft is honestly
+    // draft-only, even a mapped local one.
+    const disarmedCapabilities = (await call(port, "GET", "/audit/capabilities")).body;
+    expect(disarmedCapabilities.auditExecution).toBe(false);
+    expect(disarmedCapabilities.auditRunEvents).toBe(true);
+    expect(disarmedCapabilities.auditExport).toBe(true);
+    const disarmedPlan = (await call(port, "POST", `/automations/${mappedLocal}/run`)).body.planning;
+    expect(disarmedPlan.execution).toEqual({ available: false, reason: AUDIT_EXECUTION_DISABLED_REASON });
+
+    flags.armed = true;
+    // The composition root snapshots arm state per process; a second server
+    // wired to the SAME armed store shows the capability truth flip.
+    const armedServer = createApiServer({
+      auditStore: wiredStore,
+      auditPlanner: new AuditRunPlanner(wiredStore),
+      auditExecution: { enabled: true }
+    });
+    servers.push(armedServer);
+    await new Promise<void>(resolve => armedServer.listen(0, "127.0.0.1", resolve));
+    const armedPort = getListenPort(armedServer);
+    expect((await call(armedPort, "GET", "/audit/capabilities")).body.auditExecution).toBe(true);
+
+    // Mapped + local → available. Legacy-only mapping and non-local repos stay honest.
+    const localPlan = (await call(armedPort, "POST", `/automations/${mappedLocal}/run`)).body.planning;
+    expect(localPlan.execution).toEqual({ available: true });
+    const legacyPlan = (await call(armedPort, "POST", `/automations/${legacyOnly}/run`)).body.planning;
+    expect(legacyPlan.execution).toEqual({
+      available: false,
+      reason: AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON
+    });
+    const remotePlan = (await call(armedPort, "POST", `/automations/${mappedRemote}/run`)).body.planning;
+    expect(remotePlan.execution).toEqual({
+      available: false,
+      reason: AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON
+    });
+  });
 });
+
+function getListenPort(server: ReturnType<typeof createApiServer>): number {
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected ephemeral port");
+  return address.port;
+}

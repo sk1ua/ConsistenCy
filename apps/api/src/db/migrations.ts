@@ -1098,6 +1098,153 @@ export const migrations: readonly Migration[] = [
         ALTER TABLE workflow_runtime_runs ADD COLUMN trigger_event_id TEXT;
       `);
     }
+  },
+  {
+    // Audit execution bridge (foundation layer): automations may additionally
+    // map to a workflow-runtime definition (legacy workflowRevisionId stays a
+    // valid, mutually independent anchor — at least one must exist); audit runs
+    // gain an immutable workflow-runtime run link plus a dedicated execution
+    // error column; and run lifecycle transitions become durable through the
+    // append-only audit_run_events ledger. 0022 completes the documented
+    // nullable legacy-anchor rebuild; no legacy data changes occur here.
+    id: "0021_audit_execution_bridge",
+    up(database) {
+      const runDdl = database.exec.bind(database);
+      runDdl(`
+        CREATE TABLE automations_rebuilt (
+          id TEXT PRIMARY KEY,
+          repository_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          trigger_json TEXT NOT NULL,
+          workflow_revision_id TEXT,
+          policy_revision_id TEXT NOT NULL,
+          execution_profile TEXT NOT NULL CHECK (execution_profile IN ('static_readonly', 'trusted_sandbox')),
+          enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+          runtime_definition_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (
+            workflow_revision_id IS NOT NULL OR runtime_definition_id IS NOT NULL
+          ),
+          UNIQUE(repository_id, name),
+          FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+          FOREIGN KEY (workflow_revision_id) REFERENCES workflow_revisions(id),
+          FOREIGN KEY (policy_revision_id) REFERENCES policy_revisions(id)
+        );
+
+        INSERT INTO automations_rebuilt (
+          id, repository_id, name, trigger_json, workflow_revision_id,
+          policy_revision_id, execution_profile, enabled, runtime_definition_id,
+          created_at, updated_at
+        )
+        SELECT
+          id, repository_id, name, trigger_json, workflow_revision_id,
+          policy_revision_id, execution_profile, enabled, NULL,
+          created_at, updated_at
+        FROM automations;
+
+        DROP TABLE automations;
+        ALTER TABLE automations_rebuilt RENAME TO automations;
+
+        CREATE INDEX automations_repository_enabled_idx ON automations(repository_id, enabled, updated_at);
+
+        ALTER TABLE audit_runs ADD COLUMN workflow_runtime_run_id TEXT;
+        ALTER TABLE audit_runs ADD COLUMN execution_error TEXT;
+
+        CREATE TABLE audit_run_events (
+          id TEXT PRIMARY KEY,
+          audit_run_id TEXT NOT NULL,
+          event_type TEXT NOT NULL CHECK (event_type IN (
+            'run_queued', 'run_running', 'run_succeeded', 'run_failed', 'run_cancelled'
+          )),
+          seq INTEGER NOT NULL CHECK (seq > 0),
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(audit_run_id, seq),
+          FOREIGN KEY (audit_run_id) REFERENCES audit_runs(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX audit_run_events_run_idx ON audit_run_events(audit_run_id, created_at, seq);
+      `);
+
+      const violations = database.pragma("foreign_key_check") as unknown[];
+      if (violations.length > 0) {
+        throw new Error(`Foreign key integrity check failed after migration 0021_audit_execution_bridge: ${JSON.stringify(violations)}`);
+      }
+    }
+  },
+  {
+    // P1-A: 0021 documented a nullable legacy anchor but did not rebuild the
+    // audit_runs table. Keep 0021 immutable for databases that recorded it;
+    // this migration performs the SQLite table rebuild and preserves history.
+    id: "0022_audit_runtime_only_runs",
+    up(database) {
+      database.exec(`
+        CREATE TABLE audit_runs_rebuilt (
+          id TEXT PRIMARY KEY,
+          repository_id TEXT NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('manual', 'repository_event', 'schedule', 'legacy_job')),
+          source_event_id TEXT,
+          automation_id TEXT,
+          workflow_revision_id TEXT,
+          policy_revision_id TEXT NOT NULL,
+          execution_profile TEXT NOT NULL CHECK (execution_profile IN ('static_readonly', 'trusted_sandbox')),
+          base_revision TEXT,
+          head_revision TEXT,
+          status TEXT NOT NULL CHECK (status IN ('created', 'queued', 'running', 'succeeded', 'failed', 'cancelled')),
+          risk_score REAL CHECK (risk_score BETWEEN 0 AND 100),
+          coverage REAL CHECK (coverage BETWEEN 0 AND 1),
+          policy_evaluation_json TEXT,
+          publication_status TEXT NOT NULL CHECK (publication_status IN ('pending', 'published', 'failed', 'skipped')),
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          finished_at TEXT,
+          error TEXT,
+          workflow_runtime_run_id TEXT,
+          execution_error TEXT,
+          scheduled_for TEXT,
+          FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+          FOREIGN KEY (source_event_id) REFERENCES repository_events(id),
+          FOREIGN KEY (automation_id) REFERENCES automations(id),
+          FOREIGN KEY (workflow_revision_id) REFERENCES workflow_revisions(id),
+          FOREIGN KEY (policy_revision_id) REFERENCES policy_revisions(id)
+        );
+
+        INSERT INTO audit_runs_rebuilt (
+          id, repository_id, source, source_event_id, automation_id,
+          workflow_revision_id, policy_revision_id, execution_profile,
+          base_revision, head_revision, status, risk_score, coverage,
+          policy_evaluation_json, publication_status, created_at, started_at,
+          finished_at, error, workflow_runtime_run_id, execution_error,
+          scheduled_for
+        )
+        SELECT
+          id, repository_id, source, source_event_id, automation_id,
+          workflow_revision_id, policy_revision_id, execution_profile,
+          base_revision, head_revision, status, risk_score, coverage,
+          policy_evaluation_json, publication_status, created_at, started_at,
+          finished_at, error, workflow_runtime_run_id, execution_error,
+          scheduled_for
+        FROM audit_runs;
+
+        DROP TABLE audit_runs;
+        ALTER TABLE audit_runs_rebuilt RENAME TO audit_runs;
+
+        CREATE INDEX audit_runs_repository_created_idx ON audit_runs(repository_id, created_at DESC);
+        CREATE INDEX audit_runs_status_created_idx ON audit_runs(status, created_at);
+        CREATE UNIQUE INDEX audit_runs_one_active_per_automation_idx
+          ON audit_runs(automation_id)
+          WHERE automation_id IS NOT NULL AND status IN ('created', 'queued', 'running');
+        CREATE UNIQUE INDEX audit_runs_automation_schedule_window_idx
+          ON audit_runs(automation_id, scheduled_for)
+          WHERE source = 'schedule' AND automation_id IS NOT NULL AND scheduled_for IS NOT NULL;
+      `);
+
+      const violations = database.pragma("foreign_key_check") as unknown[];
+      if (violations.length > 0) {
+        throw new Error(`Foreign key integrity check failed after migration 0022_audit_runtime_only_runs: ${JSON.stringify(violations)}`);
+      }
+    }
   }
 ];
 

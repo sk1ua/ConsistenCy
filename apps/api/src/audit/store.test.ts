@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { workflowSpecSchema } from "@consistency/schema";
+import { workflowSpecSchema, AUDIT_DRAFT_ONLY_EXECUTION_REASON } from "@consistency/schema";
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
-import { AuditDomainError, SQLiteAuditDomainStore } from "./store";
+import { AuditDomainError, SQLiteAuditDomainStore, type WorkflowRuntimeDefinitionGate } from "./store";
+import { AuditRunPlanner } from "./planner";
 
 const workflowSpec = workflowSpecSchema.parse({
   version: 2,
@@ -465,6 +466,16 @@ describe("SQLiteAuditDomainStore", () => {
         state: "reviewing",
         stateReason: "Owner notified"
       });
+      const hostileReason = "short-token Bearer ghp_abcdefghijklmnopqrstuvwxyz1234567890 \\\\server\\share\\repo copy (1)\\file.ts /data/private-note.txt";
+      const sanitizedReason = store.applyIssueAction(issue.id, "review", hostileReason);
+      expect(sanitizedReason.stateReason).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
+      expect(sanitizedReason.stateReason).not.toContain("\\\\server\\share");
+      expect(sanitizedReason.stateReason).not.toContain("/data/");
+      const persistedReason = database.prepare("SELECT state_reason FROM audit_issues WHERE id = ?").get(issue.id) as { state_reason: string | null };
+      expect(persistedReason.state_reason).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
+      expect(persistedReason.state_reason).not.toContain("\\\\server\\share");
+      expect(persistedReason.state_reason).not.toContain("/data/");
+      expect(store.applyIssueAction(issue.id, "review").stateReason).toBeUndefined();
       expect(store.applyIssueAction(issue.id, "accept_risk", "Sandboxed prototype")).toMatchObject({
         state: "accepted_risk",
         stateReason: "Sandboxed prototype"
@@ -843,3 +854,487 @@ describe("SQLiteAuditDomainStore", () => {
     }
   });
 });
+
+describe("SQLiteAuditDomainStore runtime mapping", () => {
+  type RuntimeGate = WorkflowRuntimeDefinitionGate;
+
+  function validatedGate(): RuntimeGate {
+    return {
+      definitionExists: (definitionId: string): boolean =>
+        definitionId === "verified-mini-review" || definitionId === "draft-only-definition",
+      // These tests exercise only existence/validated-presence semantics; the
+      // fabricated revision is deliberately cast down to the minimal shape.
+      getLatestValidatedRevision: (definitionId: string): any =>
+        definitionId === "verified-mini-review"
+          ? { revisionId: "wfrev_runtime_validated", status: "validated" }
+          : undefined
+    };
+  }
+
+  function runtimeFixture(gate?: RuntimeGate) {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database, { workflowRuntime: gate });
+    const repository = store.createRepository({
+      displayName: "runtime-project",
+      source: "local_git",
+      monitoringEnabled: true
+    }, {
+      serverLocator: "D:/private/work/runtime-project",
+      trustLevel: "trusted_local"
+    });
+    const workflow = store.createWorkflowRevision({ workflowId: "vibe-safety", spec: workflowSpec });
+    const policy = store.createPolicyRevision({
+      policyId: "default-safety",
+      name: "Default safety",
+      requiredChecks: ["security"],
+      minimumCoverage: 1,
+      warnAtRiskScore: 40,
+      failAtRiskScore: 70,
+      enforcement: "advisory"
+    });
+    return { database, store, repository, workflow, policy };
+  }
+
+  it("creates legacy-only, dual-mapped, and validated runtime-only automations and projects the mapping back", () => {
+    const { database, store, repository, workflow, policy } = runtimeFixture(validatedGate());
+    try {
+      const legacyOnly = store.createAutomation({
+        repositoryId: repository.id,
+        name: "Legacy only",
+        trigger: { type: "manual" },
+        workflowRevisionId: workflow.id,
+        policyRevisionId: policy.id,
+        executionProfile: "static_readonly",
+        enabled: true
+      });
+      expect(store.getAutomation(legacyOnly.id)).toMatchObject({
+        workflowRevisionId: workflow.id
+      });
+      expect(store.getAutomation(legacyOnly.id)?.runtimeDefinitionId).toBeUndefined();
+
+      const runtimeOnly = store.createAutomation({
+        repositoryId: repository.id,
+        name: "Runtime only",
+        trigger: { type: "manual" },
+        runtimeDefinitionId: "verified-mini-review",
+        policyRevisionId: policy.id,
+        executionProfile: "static_readonly",
+        enabled: true
+      });
+      expect(runtimeOnly.workflowRevisionId).toBeUndefined();
+      expect(store.getAutomation(runtimeOnly.id)).toMatchObject({
+        runtimeDefinitionId: "verified-mini-review"
+      });
+      expect(store.getAutomation(runtimeOnly.id)?.workflowRevisionId).toBeUndefined();
+      expect(store.listAutomations(repository.id)).toHaveLength(2);
+
+      const dual = store.createAutomation({
+        repositoryId: repository.id,
+        name: "Dual mapped",
+        trigger: { type: "manual" },
+        workflowRevisionId: workflow.id,
+        runtimeDefinitionId: "verified-mini-review",
+        policyRevisionId: policy.id,
+        executionProfile: "static_readonly",
+        enabled: true
+      });
+      expect(dual).toMatchObject({
+        workflowRevisionId: workflow.id,
+        runtimeDefinitionId: "verified-mini-review"
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects automations without either revision anchor before reaching the database", () => {
+    const { database, store, repository, policy } = runtimeFixture(validatedGate());
+    try {
+      expect(() => store.createAutomation({
+        repositoryId: repository.id,
+        name: "Empty mapping",
+        trigger: { type: "manual" },
+        policyRevisionId: policy.id,
+        executionProfile: "static_readonly",
+        enabled: true
+      })).toThrowError(/workflowRevisionId/);
+      expect(store.listAutomations(repository.id)).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fail-closes runtime definitions that are missing or have no validated revision", () => {
+    const { database, store, repository, policy } = runtimeFixture(validatedGate());
+    try {
+      try {
+        store.createAutomation({
+          repositoryId: repository.id,
+          name: "Unknown definition",
+          trigger: { type: "manual" },
+          runtimeDefinitionId: "does-not-exist",
+          policyRevisionId: policy.id,
+          executionProfile: "static_readonly",
+          enabled: true
+        });
+        throw new Error("Expected unknown runtime definition to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUTOMATION_RUNTIME_DEFINITION_NOT_FOUND", statusCode: 404 });
+      }
+
+      try {
+        store.createAutomation({
+          repositoryId: repository.id,
+          name: "Unvalidated definition",
+          trigger: { type: "manual" },
+          runtimeDefinitionId: "draft-only-definition",
+          policyRevisionId: policy.id,
+          executionProfile: "static_readonly",
+          enabled: true
+        });
+        throw new Error("Expected a definition without a validated revision to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUTOMATION_RUNTIME_REVISION_NOT_EXECUTABLE", statusCode: 409 });
+      }
+      expect(store.listAutomations(repository.id)).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("refuses runtime mappings when the validation gate was never wired", () => {
+    const { database, store, repository, policy } = runtimeFixture(undefined);
+    try {
+      try {
+        store.createAutomation({
+          repositoryId: repository.id,
+          name: "Unguarded runtime mapping",
+          trigger: { type: "manual" },
+          runtimeDefinitionId: "verified-mini-review",
+          policyRevisionId: policy.id,
+          executionProfile: "static_readonly",
+          enabled: true
+        });
+        throw new Error("Expected an unwired runtime gate to fail closed");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUTOMATION_RUNTIME_GATE_UNAVAILABLE", statusCode: 500 });
+      }
+      expect(store.listAutomations(repository.id)).toHaveLength(0);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("SQLiteAuditDomainStore run lifecycle", () => {
+  function runLifecycleFixture() {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const store = new SQLiteAuditDomainStore(database);
+    const repository = store.createRepository({
+      displayName: "lifecycle-project",
+      source: "local_git",
+      monitoringEnabled: true
+    }, {
+      serverLocator: "D:/private/work/lifecycle-project",
+      trustLevel: "trusted_local"
+    });
+    const workflow = store.createWorkflowRevision({ workflowId: "vibe-safety", spec: workflowSpec });
+    const policy = store.createPolicyRevision({
+      policyId: "default-safety",
+      name: "Default safety",
+      requiredChecks: ["security"],
+      minimumCoverage: 1,
+      warnAtRiskScore: 40,
+      failAtRiskScore: 70,
+      enforcement: "advisory"
+    });
+    const automation = store.createAutomation({
+      repositoryId: repository.id,
+      name: "Lifecycle automation",
+      trigger: { type: "manual" },
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id,
+      executionProfile: "static_readonly",
+      enabled: true
+    });
+    const createDraft = () => store.createAuditRunDraft({
+      repositoryId: repository.id,
+      source: "manual",
+      automationId: automation.id,
+      workflowRevisionId: workflow.id,
+      policyRevisionId: policy.id,
+      executionProfile: "static_readonly"
+    });
+    return { database, store, createDraft };
+  }
+
+  it("advances created to queued to running to terminal while appending ordered link events", () => {
+    const { database, store, createDraft } = runLifecycleFixture();
+    try {
+      const draft = createDraft();
+      const queued = store.markRunQueued(draft.id, { workflowRuntimeRunId: "wfrun_lifecycle_1" });
+      expect(queued.status).toBe("queued");
+      expect(queued.startedAt).toBeUndefined();
+      expect(queued.workflowRuntimeRunId).toBe("wfrun_lifecycle_1");
+
+      const running = store.markRunRunning(draft.id, { workflowRuntimeRunId: "wfrun_lifecycle_1" });
+      expect(running.status).toBe("running");
+      expect(running.startedAt).toBeTypeOf("string");
+      expect(running.workflowRuntimeRunId).toBe("wfrun_lifecycle_1");
+
+      const succeeded = store.markRunTerminal(draft.id, "succeeded", { workflowRuntimeRunId: "wfrun_lifecycle_1" });
+      expect(succeeded.status).toBe("succeeded");
+      expect(succeeded.finishedAt).toBeTypeOf("string");
+      expect(succeeded.executionError).toBeUndefined();
+
+      const events = store.listRunEvents(draft.id);
+      expect(events.map(event => event.eventType)).toEqual([
+        "run_queued",
+        "run_running",
+        "run_succeeded"
+      ]);
+      expect(events[0]).toMatchObject({ auditRunId: draft.id, payload: { status: "queued", workflowRuntimeRunId: "wfrun_lifecycle_1" } });
+      expect(events[2]).toMatchObject({ payload: { status: "succeeded", workflowRuntimeRunId: "wfrun_lifecycle_1" } });
+      expect(events.map(event => event.createdAt)).toEqual([...events.map(event => event.createdAt)].sort());
+    } finally {
+      database.close();
+    }
+  });
+
+  it("records failure reasons on the failed terminal transition and in its event payload", () => {
+    const { database, store, createDraft } = runLifecycleFixture();
+    try {
+      const draft = createDraft();
+      store.markRunQueued(draft.id, { workflowRuntimeRunId: "wfrun_failure_case" });
+      store.markRunRunning(draft.id);
+      const failed = store.markRunTerminal(draft.id, "failed", {
+        executionError: "Engine exploded during synthesis"
+      });
+      expect(failed.status).toBe("failed");
+      expect(failed.executionError).toBe("Engine exploded during synthesis");
+      expect(store.getAuditRun(draft.id)).toMatchObject({ executionError: "Engine exploded during synthesis" });
+
+      const events = store.listRunEvents(draft.id);
+      expect(events.map(event => event.eventType)).toEqual(["run_queued", "run_running", "run_failed"]);
+      expect(events[2]!.payload).toMatchObject({
+        status: "failed",
+        executionError: "Engine exploded during synthesis"
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects illegal transitions with the cancel error style", () => {
+    const { database, store, createDraft } = runLifecycleFixture();
+    try {
+      const draft = createDraft();
+
+      // Skip the queue step.
+      try {
+        store.markRunRunning(draft.id);
+        throw new Error("Expected skipping the queue step to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_INVALID_TRANSITION", statusCode: 409 });
+      }
+      try {
+        store.markRunTerminal(draft.id, "succeeded");
+        throw new Error("Expected a terminal jump from created to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_INVALID_TRANSITION", statusCode: 409 });
+      }
+
+      store.markRunQueued(draft.id);
+      try {
+        store.markRunTerminal(draft.id, "failed");
+        throw new Error("Expected a terminal jump from queued to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_INVALID_TRANSITION", statusCode: 409 });
+      }
+      try {
+        store.markRunQueued(draft.id);
+        throw new Error("Expected re-queuing from queued to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_INVALID_TRANSITION", statusCode: 409 });
+      }
+
+      store.cancelAuditRun(draft.id);
+      try {
+        store.markRunRunning(draft.id);
+        throw new Error("Expected a transition out of cancelled to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_INVALID_TRANSITION", statusCode: 409 });
+      }
+      expect(store.listRunEvents(draft.id).map(event => event.eventType))
+        .toEqual(["run_queued", "run_cancelled"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the workflow runtime run id immutable once written", () => {
+    const { database, store, createDraft } = runLifecycleFixture();
+    try {
+      const draft = createDraft();
+      store.markRunQueued(draft.id, { workflowRuntimeRunId: "wfrun_original_link" });
+      store.markRunRunning(draft.id);
+
+      try {
+        store.markRunTerminal(draft.id, "succeeded", { workflowRuntimeRunId: "wfrun_other_link" });
+        throw new Error("Expected a conflicting workflow runtime run link to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_RUNTIME_LINK_CONFLICT", statusCode: 409 });
+      }
+      expect(store.getAuditRun(draft.id)?.status).toBe("running");
+      expect(store.getAuditRun(draft.id)?.workflowRuntimeRunId).toBe("wfrun_original_link");
+
+      // Same link still completes.
+      const succeeded = store.markRunTerminal(draft.id, "succeeded", { workflowRuntimeRunId: "wfrun_original_link" });
+      expect(succeeded.status).toBe("succeeded");
+      // The rejected attempt appended no event.
+      expect(store.listRunEvents(draft.id).map(event => event.eventType))
+        .toEqual(["run_queued", "run_running", "run_succeeded"]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("appends exactly one cancellation event and leaves terminal runs frozen", () => {
+    const { database, store, createDraft } = runLifecycleFixture();
+    try {
+      const first = createDraft();
+      store.markRunQueued(first.id);
+      expect(store.cancelAuditRun(first.id).status).toBe("cancelled");
+      try {
+        store.cancelAuditRun(first.id);
+        throw new Error("Expected double cancellation to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_NOT_CANCELLABLE", statusCode: 409 });
+      }
+      expect(store.listRunEvents(first.id).map(event => event.eventType))
+        .toEqual(["run_queued", "run_cancelled"]);
+
+      const second = createDraft();
+      store.markRunQueued(second.id);
+      store.markRunRunning(second.id);
+      store.markRunTerminal(second.id, "succeeded");
+      try {
+        store.cancelAuditRun(second.id);
+        throw new Error("Expected cancelling a terminal run to be rejected");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "AUDIT_RUN_NOT_CANCELLABLE", statusCode: 409 });
+      }
+      expect(store.listRunEvents(second.id).map(event => event.eventType))
+        .toEqual(["run_queued", "run_running", "run_succeeded"]);
+    } finally {
+      database.close();
+    }
+  });
+});
+
+describe("SQLiteAuditDomainStore executor bridge", () => {
+  function executorFixture() {
+    const base = fixture();
+    const gate: WorkflowRuntimeDefinitionGate = {
+      definitionExists: () => true,
+      getLatestValidatedRevision: () => ({ revisionId: "rev-seed" }) as never
+    };
+    const store = new SQLiteAuditDomainStore(base.database, { workflowRuntime: gate });
+    const automationInput = (name: string) => ({
+      repositoryId: base.repository.id,
+      name,
+      trigger: { type: "manual" } as const,
+      workflowRevisionId: base.workflow.id,
+      policyRevisionId: base.policy.id,
+      enabled: true
+    });
+    const mapped = store.createAutomation({
+      ...automationInput("Mapped"),
+      runtimeDefinitionId: "def-runtime-x"
+    });
+    const legacy = store.createAutomation(automationInput("Legacy only"));
+    return { ...base, store, mapped, legacy };
+  }
+
+  function draftFor(
+    rigged: ReturnType<typeof executorFixture>,
+    automationId: string
+  ) {
+    const automation = rigged.store.getAutomation(automationId)!;
+    return rigged.store.createAuditRunDraft({
+      repositoryId: automation.repositoryId,
+      source: "manual",
+      automationId: automation.id,
+      workflowRevisionId: automation.workflowRevisionId!,
+      policyRevisionId: automation.policyRevisionId
+    });
+  }
+
+  it("claims only created runs whose automation maps a runtime definition, bounded", () => {
+    const rigged = executorFixture();
+    try {
+      const mappedDraft = draftFor(rigged, rigged.mapped.id);
+      const legacyDraft = draftFor(rigged, rigged.legacy.id);
+
+      expect(store_ids(rigged.store.listExecutableRuns(10))).toEqual([mappedDraft.id]);
+
+      // A limit stays honored for the bounded drain.
+      expect(rigged.store.listExecutableRuns()).toHaveLength(1);
+
+      // Claiming leaves the queue; unmapped drafts never enter it at all.
+      const queued = rigged.store.markRunQueued(mappedDraft.id);
+      expect(store_ids(rigged.store.listExecutableRuns(10))).toEqual([]);
+      void legacyDraft;
+
+      // Removing the runtime mapping drops the draft out of the drain
+      // entirely (the FK keeps audit history intact).
+      rigged.store.markRunRunning(queued.id);
+      rigged.store.markRunTerminal(queued.id, "failed", { executionError: "settled for fixture" });
+      const orphed = draftFor(rigged, rigged.mapped.id);
+      rigged.database.prepare("UPDATE automations SET runtime_definition_id = NULL WHERE id = ?").run(rigged.mapped.id);
+      expect(store_ids(rigged.store.listExecutableRuns(10))).toEqual([]);
+      void orphed;
+    } finally {
+      rigged.database.close();
+    }
+  });
+
+  it("mirrors running-with-link rows only, in started order", () => {
+    const rigged = executorFixture();
+    try {
+      void draftFor(rigged, rigged.legacy.id);
+      const linked = draftFor(rigged, rigged.mapped.id);
+      rigged.store.markRunQueued(linked.id, { workflowRuntimeRunId: "wfrun_1" });
+      // queued+link is not yet mirrorable (mirror owns running rows).
+      expect(rigged.store.listLinkedRunningRuns()).toEqual([]);
+
+      const running = rigged.store.markRunRunning(linked.id, { workflowRuntimeRunId: "wfrun_1" });
+      expect(store_ids(rigged.store.listLinkedRunningRuns())).toEqual([running.id]);
+
+      rigged.store.markRunTerminal(running.id, "succeeded", { workflowRuntimeRunId: "wfrun_1" });
+      expect(rigged.store.listLinkedRunningRuns()).toEqual([]);
+    } finally {
+      rigged.database.close();
+    }
+  });
+
+  it("keeps the honest draft-only planning fallback without a resolver injection", async () => {
+    const rigged = executorFixture();
+    const planner = new AuditRunPlanner(rigged.store);
+    try {
+      const result = await Promise.resolve(planner.planManualRun(rigged.mapped.id));
+      expect(result.execution).toEqual({
+        available: false,
+        reason: AUDIT_DRAFT_ONLY_EXECUTION_REASON
+      });
+    } finally {
+      rigged.database.close();
+    }
+  });
+});
+
+function store_ids(runs: Array<{ id: string }>): string[] {
+  return runs.map(run => run.id);
+}

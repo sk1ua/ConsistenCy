@@ -3,8 +3,11 @@ import {
   AUDIT_DRAFT_ONLY_EXECUTION_REASON,
   automationScheduleStateSchema,
   automationScheduleWindowSchema,
+  auditRunEventSchema,
   auditRunPlanningResultSchema,
+  automationSchema,
   automationTriggerSchema,
+  createAutomationRequestSchema,
   cronScheduleSpecSchema,
   evaluateAuditPolicy,
   internalLocalRepositoryRegistrationRequestSchema,
@@ -173,6 +176,109 @@ describe("audit control-plane schemas", () => {
       disposition: "coalesced",
       reason: "new_draft"
     })).toThrow(/do not agree/i);
+
+    // execution.available is a computed boolean: server-side execution stays
+    // unavailable (false) today, but the schema no longer hard-codes the
+    // literal so a future executor slice can report true honestly.
+    expect(auditRunPlanningResultSchema.parse({
+      ...result,
+      execution: { available: false, reason: AUDIT_DRAFT_ONLY_EXECUTION_REASON }
+    }).execution).toEqual({ available: false, reason: AUDIT_DRAFT_ONLY_EXECUTION_REASON });
+    expect(() => auditRunPlanningResultSchema.parse({
+      ...result,
+      execution: { available: false }
+    })).toThrow(/reason/i);
+  });
+
+  it("accepts legacy, runtime-mapped, and dual automation targets but rejects an empty revision set", () => {
+    const base = {
+      repositoryId: "repo_1",
+      name: "Dual mapping",
+      trigger: { type: "manual" },
+      policyRevisionId: "policy_revision_1",
+      enabled: true
+    };
+    const legacyOnly = createAutomationRequestSchema.parse({
+      ...base,
+      workflowRevisionId: "workflow_revision_1"
+    });
+    expect(legacyOnly.workflowRevisionId).toBe("workflow_revision_1");
+    expect(legacyOnly.runtimeDefinitionId).toBeUndefined();
+
+    const runtimeOnly = createAutomationRequestSchema.parse({
+      ...base,
+      runtimeDefinitionId: "verified-mini-review"
+    });
+    expect(runtimeOnly.workflowRevisionId).toBeUndefined();
+    expect(runtimeOnly.runtimeDefinitionId).toBe("verified-mini-review");
+
+    const dual = createAutomationRequestSchema.parse({
+      ...base,
+      workflowRevisionId: "workflow_revision_1",
+      runtimeDefinitionId: "verified-mini-review"
+    });
+    expect(dual.workflowRevisionId).toBe("workflow_revision_1");
+
+    expect(() => createAutomationRequestSchema.parse(base)).toThrow(/workflowRevisionId/);
+  });
+
+  it("models optional runtime mappings on automations and durable run events", () => {
+    const runtimeOnly = automationSchema.parse({
+      id: "automation_1",
+      repositoryId: "repo_1",
+      name: "Runtime only",
+      trigger: { type: "manual" },
+      runtimeDefinitionId: "verified-mini-review",
+      policyRevisionId: "policy_revision_1",
+      executionProfile: "static_readonly",
+      enabled: true,
+      createdAt: "2026-08-14T10:00:00.000Z",
+      updatedAt: "2026-08-14T10:00:00.000Z"
+    });
+    expect(runtimeOnly.workflowRevisionId).toBeUndefined();
+
+    const legacyOnly = automationSchema.parse({
+      id: "automation_1",
+      repositoryId: "repo_1",
+      name: "Legacy only",
+      trigger: { type: "manual" },
+      workflowRevisionId: "workflow_revision_1",
+      policyRevisionId: "policy_revision_1",
+      executionProfile: "static_readonly",
+      enabled: true,
+      createdAt: "2026-08-14T10:00:00.000Z",
+      updatedAt: "2026-08-14T10:00:00.000Z"
+    });
+    expect(legacyOnly.runtimeDefinitionId).toBeUndefined();
+    expect(() => automationSchema.parse({
+      id: "automation_1",
+      repositoryId: "repo_1",
+      name: "Empty mapping",
+      trigger: { type: "manual" },
+      policyRevisionId: "policy_revision_1",
+      executionProfile: "static_readonly",
+      enabled: true,
+      createdAt: "2026-08-14T10:00:00.000Z",
+      updatedAt: "2026-08-14T10:00:00.000Z"
+    })).toThrow();
+  });
+
+  it("models durable run events with a closed event-type vocabulary", () => {
+    const event = {
+      id: "runevt_1",
+      auditRunId: "audit_run_1",
+      seq: 1,
+      eventType: "run_queued",
+      payload: { status: "queued", workflowRuntimeRunId: "wfrun_1" },
+      createdAt: "2026-08-14T10:00:00.000Z"
+    };
+    expect(auditRunEventSchema.parse(event)).toEqual(event);
+    expect(auditRunEventSchema.parse({
+      ...event,
+      eventType: "run_failed",
+      payload: { status: "failed", executionError: "engine exploded" }
+    }).eventType).toBe("run_failed");
+    expect(() => auditRunEventSchema.parse({ ...event, eventType: "detonated" })).toThrow();
   });
 
   it("validates the supported cron5 schedule subset and durable scheduler state", () => {
