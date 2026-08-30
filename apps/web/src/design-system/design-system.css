@@ -648,6 +648,13 @@
   to { opacity: 1; transform: scale(1); }
 }
 
+/* Loading icons rendered by Button/IconButton and route spinners. */
+.ds-spin { animation: ds-spin 1s linear infinite; }
+
+@keyframes ds-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ===== Shared page vocabulary (v3 style convergence) =====
  * Locked contract consumed by route surfaces (workflow runtime/triggers,
  * runs, repositories, findings, inbox, X-Ray). Everything derives from

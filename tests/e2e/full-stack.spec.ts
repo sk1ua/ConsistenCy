@@ -43,8 +43,8 @@ test.describe("ConsistenCy Full-Stack Integration E2E Suite", () => {
     // 3. Open runs queue
     await page.goto("/#/runs");
     await expect(page).toHaveURL(/#\/runs$/);
-    await expect(page.locator(".jobs-table")).toBeVisible();
-    await expect(page.locator(".jobs-table")).toContainText("full-stack-repo");
+    await expect(page.locator(".pw-runs-table")).toBeVisible();
+    await expect(page.locator(".pw-runs-table")).toContainText("full-stack-repo");
 
     // 4. Open run overview
     await page.goto(`/#/runs/${encodeURIComponent(jobId)}/overview`);

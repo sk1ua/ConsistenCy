@@ -36,6 +36,7 @@ type Matrix = {
 
 const metaCspConsoleMessage = "The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.";
 const localReviewFailureConsoleMessage = "Failed to load resource: the server responded with a status of 500 (Internal Server Error)";
+const localReviewJobId = "job/with space";
 
 function createMatrix(): Matrix {
   return {
@@ -54,7 +55,7 @@ function createMatrix(): Matrix {
 
 function responseForLocalReview() {
   return {
-    jobId: "job/with space",
+    jobId: localReviewJobId,
     repository: "Matrix repository",
     baseSha: "abcdef1",
     headSha: "1234567",
@@ -145,6 +146,26 @@ async function installMatrix(page: Page, matrix: Matrix): Promise<void> {
     }
     if (path === "/api/jobs" && request.method() === "GET") {
       await route.fulfill({ json: { jobs: [] } });
+      return;
+    }
+    // The run overview route fetches the job detail when the queued job is not
+    // in the (stubbed, empty) list — the same legitimate call the real page
+    // makes, so it needs a canned answer instead of the 501 fallback.
+    if (path.startsWith("/api/jobs/") && !path.slice("/api/jobs/".length).includes("/") && request.method() === "GET") {
+      await route.fulfill({ json: { job: {
+          id: localReviewJobId,
+          type: "PR_REVIEW",
+          status: "queued",
+          repositoryFullName: "Matrix repository",
+          repositoryId,
+          accessMode: "local_git",
+          baseSha: "abcdef1",
+          headSha: "1234567",
+          publicationPolicy: "disabled",
+          llmProvider: "deepseek",
+          llmModel: "deepseek-v4-flash",
+          createdAt: "2026-08-23T00:00:00.000Z"
+        } } });
       return;
     }
     if (path === "/api/reports/recent" && request.method() === "GET") {
@@ -310,7 +331,15 @@ test.describe("Checkpoint 2 Composer matrix and Repository Changes", () => {
   test("coalesces rapid double activation into one POST", async ({ page }) => {
     await openComposer(page);
     const start = composerStartReview(page);
-    await Promise.all([start.click(), start.click()]);
+    // A rapid double activation delivers both click events before React can
+    // re-render the pending state, so both run through the submission gate.
+    // Two concurrent full click() pipelines cannot model this: the first
+    // click's success navigation unmounts the dialog, leaving the second
+    // click waiting forever for a stable element (test-timeout flake).
+    await start.evaluate(element => {
+      element.click();
+      element.click();
+    });
     await expect(page).toHaveURL(/#\/runs\/job%2Fwith%20space\/overview$/);
     expect(matrix.postBodies).toHaveLength(1);
   });

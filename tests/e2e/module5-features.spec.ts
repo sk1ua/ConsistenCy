@@ -9,8 +9,10 @@ test.describe("Module 5 feature suite", () => {
   test("workflow builder lists builtins, creates a draft, and deletes it", async ({ page }) => {
     const draftName = `e2e-draft-${Date.now()}`;
 
-    await page.goto("/#/workflows");
-    await expect(page).toHaveURL(/#\/workflows$/);
+    // The workflows IA defaults to Runtime Studio; the legacy builder lives on
+    // its definition tab (deep-linkable as ?tab=definition since the rework).
+    await page.goto("/#/workflows?tab=definition");
+    await expect(page).toHaveURL(/#\/workflows\?tab=definition$/);
     await expect(page.getByRole("heading", { name: "Workflows", exact: true })).toBeVisible();
     const workflows = page.getByRole("complementary", { name: "Workflows", exact: true });
     await expect(workflows.getByRole("button", { name: /pr-review/ })).toBeVisible();
@@ -46,7 +48,10 @@ test.describe("Module 5 feature suite", () => {
 
   test("Inbox renders the summary and recent items in development", async ({ page }) => {
     await page.goto("/#/inbox");
-    await expect(page.locator(".inbox-header-strip")).toBeVisible();
-    await expect(page.locator(".inbox-title-group h2")).toHaveText(/Inbox|收件箱/);
+    // The Inbox header moved onto the shared ds-hero pattern (hero title plus
+    // the compact summary chip line) during the style unification rework.
+    await expect(page.locator(".ds-hero")).toBeVisible();
+    await expect(page.locator(".ds-hero-title")).toHaveText(/Inbox|收件箱/);
+    await expect(page.locator(".ds-hero .ds-chip-row")).toBeVisible();
   });
 });
