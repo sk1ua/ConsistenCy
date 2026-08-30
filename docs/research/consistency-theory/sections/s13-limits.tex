@@ -1,0 +1,48 @@
+% 第 19-20 章 + 结论
+\chapter{局限}\label{ch:limits}
+
+\section{模型与方法论的局限}
+\begin{enumerate}[itemsep=0.1em]
+  \item \textbf{模型级而非实现级证明}。除标注“代码可证”的构造性论据外，S1--S3、正交性与活性命题证明的是架构模型 $\mathcal{M}_C$。“不存在旁路”（A1 的全称否定）只有形式化验证才能消除——seL4 正是走了这条路~\cite{klein2009}，而 ConsistenCy 没有。
+  \item \textbf{OS 围堵边界}。除子进程隔离（剥离父环境秘密 + RPC 中介）外，OS 级文件系统/网络围堵\emph{未强制}；Ring 3 in-process 内建组件与宿主共享进程边界。S1 只约束经中介的效果。
+  \item \textbf{外部库公理}。Fiber LTS 语义由 Cordis 4.0.0-rc.8 库拥有；库升级会重新打开第~\ref{ch:states} 章结论。
+  \item \textbf{理想化}。碰撞界依赖随机预言机 + A7$'$（规范化单射为工程假设）；排队节整体是声明的基线近似（假设表~\ref{tab:qassump} 含五项违背/存疑）。
+  \item \textbf{诚实差距清单}（docs$\neq$code）：授权链“8 步”注释 vs 9 步实现；预算注释声称调度器消费而源码无引用；ACB 预算元数据未执法；成本通道不可消耗；Coordinator 内存去重；网关未注册动作穿透；遗留 schema 允许无证据 finding。每条都已编入相应命题的边界条件。
+  \item \textbf{文献覆盖}。45 篇经核验文献覆盖五条 lane 的正典；两篇现代平行工作（CaMeL~\cite{debenedetti2025}）为未经评审预印本，其元数据以 2026-08 为准。
+\end{enumerate}
+
+\section{度量与评估的局限}
+本报告\emph{没有}任何实测基准：排队曲线是理论图（图~\ref{fig:queueing} 图注已声明）；$D(t)$、$\E[\text{delay}_{\mathrm{flush}}]$ 等度量的参数（$T_{\mathrm{poll}},T_{\mathrm{deb}},\dots$）未在真实部署上标定；风险评分两世界并存。经验评估（真实仓库、真实 LLM、真实 PR 流）是把本报告的透镜变成工程反馈的必要下一步。
+
+\chapter{未来研究议程}\label{ch:future}
+
+\begin{openproblem}[RQ1 高频提交下的证据滞后最小化]
+在提交率 $\lambda_c$、轮询 $T_{\mathrm{poll}}$、防抖 $T_{\mathrm{deb}}$、运行成本与并发上限约束下，最小化 $\E[g(D(t))]$（或有限时域峰值）的策略类是什么？变更触发与周期触发的定量 crossover 在哪个参数区域？（\PROPOSED；需要校准的 $g$。）
+\end{openproblem}
+\begin{openproblem}[RQ2 token/成本约束下的多 Agent 调度]
+把 $\chi_9$ 的两阶段预算提升为 CMDP 准入约束（或证明确定性启发式的竞争比）；估计 $\mu$ 的在线方法；$c>1$ 与批化到达下的重交通界。（\PROPOSED~\cite{altman1999}。）
+\end{openproblem}
+\begin{openproblem}[RQ3 撤销与异步生命周期的安全一致性]
+陈旧门面窗口 $W_{\mathrm{stale}}$ 的有界性证明（微任务队列调度分析）；意图门 carve-out 的“恰好一次效果发起”在 Sink 持久性故障模型下的形式化。
+\end{openproblem}
+\begin{openproblem}[RQ4 可验证的 Agent 产出软件证据]
+把 $\ground$ 从分类器扩展为论证框架（发现=主张，证据=支撑，$\ground$=攻击关系）；证据集增长下接受精度的单调性；签名/一致性证明的引入路径~\cite{crosby2009}。
+\end{openproblem}
+\begin{openproblem}[RQ5 事件触发评审的何时更优]
+在 $g$ 校准后，更新报酬框架下变更触发 vs 周期触发的长期平均成本比较；与“驻留时间”参数 $T_{\mathrm{deb}}$ 的联合优化~\cite{astrom1999,tabuada2007}。
+\end{openproblem}
+\begin{openproblem}[RQ6 上下文分配作为约束信息分配]
+$\Vis$ 投影在 token 预算下的最优页面集选择（工作集理论的 LLM 版）；与 $\Auth$ 的正交性保持。
+\end{openproblem}
+\begin{openproblem}[RQ7 Agent Harness 的长期仓库稳定性]
+把“多 Agent 持续修改下仓库质量的平稳性”形式化：风险评分的公理化（单调、校准聚合）、评审漏检过程的诚实建模（无独立假设）、以及两风险世界的合并。
+\end{openproblem}
+
+\section*{结论}
+
+本报告对 ConsistenCy v3 完成了一次完整的理论化闭环：以当前工作树为唯一事实来源，把 14 个源码核验的组件映射到六个理论域；经 45 篇网络核验文献的支持强度分级；构造了覆盖授权、撤销、正交性、生命周期、工作流、排队、证据与新鲜度的形式模型 $\mathcal{M}_C$，其中包含 2 个已确立定理的直接实例、11 个模型级命题（含全部假设、证明与失败条件）与 3 组负结果（Petri 机件、CUSUM、线性时间年龄）。敌意数学审计（PASS\_AFTER\_FIXES，全部修正已并入）与独立引文审计（零虚构，5 处修正已应用）之后，结论可以概括为三句话：
+\begin{enumerate}[itemsep=0.1em]
+  \item \textbf{ConsistenCy 的核心安全直觉是理论上的直系后代}：引用监视器、对象能力、撤销经中介与内容寻址承诺在机制层一一对应（\DIRECT），其公理“Coeffect $\neq$ Authorization”“Context VM $\neq$ Permission System”获得了精确的数学表述——安全只由 $\Auth$ 承担，可用性与可见性只影响活性。
+  \item \textbf{最有价值的部分恰恰是诚实的负结果}：AoI 的线性年龄、Petri 网机件与 CUSUM 都被判定为不适用并给出理由；CMDP、版本滞后与模型检验被明确标记为提议而非现状。
+  \item \textbf{从工程直觉到研究议程的通道已经打开}：统一模型 $\Phi$、七个开放问题与“真实测量”的缺失共同构成下一步——让透镜遇到数据。
+\end{enumerate}

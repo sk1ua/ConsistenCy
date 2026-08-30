@@ -1,0 +1,84 @@
+% 第 5-6 章：Cordis 生命周期/上下文可见性与授权的正交性
+\chapter{Cordis Lifecycle 与 Authorization 的分离}\label{ch:sep}
+
+\section{工程事实}
+
+Cordis 层（Cordis 4.0.0-rc.8 库语义之上）管理响应式组件的生命周期：Fiber 状态为 PENDING / LOADING / ACTIVE / UNLOADING；共效（Coeffect）以声明式依赖（如 \tcode{Plugin.Function.inject=["ast"]}）表达“进入 ACTIVE 所需的服务”；每个 Agent 经 \tcode{root.isolate} 获得隔离的依赖上下文；内核能力经 \tcode{CapabilityLifecycleAdapter} 桥接为服务门面（facade）。关键事实是\textbf{两个时间尺度}：
+\begin{itemize}[itemsep=0.05em]
+  \item 能力撤销后，\tcode{capability.revoked} 事件在\emph{微任务队列}上调度销毁器；在传播完成前，Fiber 可以保持 ACTIVE 并持有\emph{陈旧门面}；
+  \item 但该陈旧门面在\textbf{下一次系统调用}处即被内核拒绝（命题~\ref{prop:revocation}）。
+\end{itemize}
+即：撤销在生命周期层是\emph{最终一致}的，在授权层是\emph{同步}的。组件公理“安全性不依赖传播时序”由此获得精确含义。
+
+\section{理论映射}
+
+Cordis 层在 Harel--Pnueli 的分类下是一个\emph{响应式系统}（reactive system）——持久运行、事件驱动、与环境持续交互而非计算到终态~\cite{harel1985}；这一定位把“Fiber 生命周期为何需要独立于任何单次运行来推理”变得自然。Fiber 的监督式生命周期（依赖缺失即不激活、失败即清理、可被监督者处置）在理论上最接近两条线：其一是 Actor 模型的严格语义~\cite{agha1986} 与 Erlang/OTP 的监督树（supervision tree）——Armstrong 的论文把“错误内核 vs 错误携带”与分层重启发展为可靠分布式系统的构造原理~\cite{armstrong2003}；其二是 Miller 的 vat 模型：事件循环受限的响应式并发与访问控制的统一~\cite{miller2006}（vat 的技术核心之一是 vat 间消息传递的全序保证；ConsistenCy 的对应物是内核中介循环的串行化——假设 A2——但 Cordis 层并未声明跨上下文的端到端消息序，故本类比限定于“事件循环受限的并发单元 + 无环境固有权限”这一结构层）。\textbf{映射强度：\STRONG}。必须指出的\emph{分歧点}：OTP 的监督哲学是“让它崩溃、以重启掩盖故障”；ConsistenCy 的触发计划执行是\textbf{单次尝试 + 诚实的重启失败记录}（执行中断在启动恢复时被标记为 \tcode{failed} 而非静默重试）——这是同一监督传统内的另一个设计点，选择“失败关闭的诚实”而非“尽力掩盖的可用性”。该分歧不能被表述为“ConsistenCy 实现了 OTP 监督语义”，只能表述为“处于同一监督谱系”。
+
+\section{可用性与授权的正交性}
+
+\begin{definition}[可用性]\label{def:avail}
+$\Avail(a,s,t)\;\equiv\;$[共效服务 $s$ 在 Agent $a$ 的隔离上下文中已提供] $\wedge$ [$a$ 的 Fiber 处于 ACTIVE]。
+\end{definition}
+
+\begin{proposition}[可用性 $\nvdash$ 授权，反之亦然]\label{prop:orthavail}
+$\Avail(a,s,t)\nvdash \Auth(a,\alpha,r,s,t)$ 且 $\Auth\nvdash\Avail$。且安全性只依赖 $\Auth$：若 $\Avail\equiv 0$，则无任何执行发生，S1 空洞成立；可用性失败只降低\emph{活性}（效果无法完成、Fiber 停留 PENDING、Agent 甚至无法发起调用），永不授予\emph{权威}。
+\end{proposition}
+\begin{proof}[见证结构]
+$\mathcal{W}_1$（授权 $\wedge$ 不可用）：$C_t$ 有有效未撤销的 (\tcode{ast.query}, snapshot) 记录，但 \tcode{ast} 服务从未提供——Fiber 停留 PENDING，Agent 永远无法调用；假想请求的 $\Auth=1$，而 $\Avail=0$。$\mathcal{W}_2$（未授权 $\wedge$ 可用）：Fiber ACTIVE 持有门面，$t_r<t$ 时底层能力被撤销而传播未运行；$\Avail=1$，$\Auth=0$（命题~\ref{prop:revocation}）。两个见证各自满足一个合取而证伪另一个，故两个蕴含都不有效。
+\end{proof}
+\tagm{PROPOSITION}
+
+\begin{proposition}[传播时序无关性]\label{prop:propagation}
+对一切 $\delta_{\mathrm{prop}}=t_{\mathrm{unload}}-t_r\in[0,\infty]$（含 $\infty$，即销毁器永不运行）：窗口 $W_{\mathrm{stale}}$ 内经陈旧门面发起的全部系统调用都被拒绝。$\delta_{\mathrm{prop}}$ 的上界（生命周期的有界最终一致性）只对\emph{资源回收}——一个活性/整洁性质——是必需的，对安全健全性永不需要；传播饥饿（微任务队列拥塞）打不开任何权威窗口。
+\end{proposition}
+\begin{proof}
+窗口内每个系统调用的中介点 $\succeq t_r$；应用命题~\ref{prop:revocation}。
+\end{proof}
+\tagm{PROPOSITION}
+
+\chapter{Context Visibility 与 Authority 的分离}\label{ch:ctx}
+
+\section{工程事实}
+
+Context VM 是“虚拟上下文内存”：不可变的 \tcode{ContextPage} 以 SHA-256 内容哈希寻址；驻留级（pinned/hot/cold/evicted）位于镜像覆盖层而非页面；工作集 $=$ pinned+hot；除 \tcode{pinned$\rightarrow$evicted} 抛错（失败关闭）外驻留级可自由迁移；COW fork 只复制页面表、共享页对象；渲染顺序由类别先序与页 id 决定（\emph{绝不}依赖哈希表插入序）。源码中明文写明：“Context VM 是状态管理，不是授权；页面成员资格不授予任何能力”（\tcode{context/manager.ts:16--19}）。当前实现\emph{没有}自动逐出、摘要或检索策略——任何暗示存在此类策略的描述都是过度陈述。
+
+\section{可见性与权限的正交性}
+
+\begin{definition}[可见性]\label{def:visible}
+$\Vis(a,x,t)\;\equiv\;\mathrm{PT}_a(x)\in\{\text{pinned},\text{hot}\}$（页 $x$ 在 $a$ 的工作集中）。
+\end{definition}
+
+\begin{proposition}[可见性 $\nvdash$ 授权，反之亦然]\label{prop:orthvis}
+$V_t$ 不是 $\Auth$ 的输入（定义~\ref{def:auth} 的自由变元不含 $V_t$）。见证：页在而无能力（“页面成员资格不授予能力”）给出 $\Vis\wedge\neg\Auth$；有 \tcode{repo.read} 能力而相关页全部被逐出到 cold 给出 $\Auth$-可能 $\wedge\neg\Vis$。
+\end{proposition}
+\tagm{PROPOSITION}
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[x=1cm,y=1cm]
+% axes
+\draw[->,thick] (0,0) -- (9.6,0) node[below right,font=\small] {$\Vis$（上下文可见性：Agent 看见什么）};
+\draw[->,thick] (0,0) -- (0,6.4) node[above,font=\small,align=center] {$\Auth$（内核权威：Agent 被允许做什么）};
+% quadrant labels
+\node[draw=framegray,fill=softrose,rounded corners=2pt,align=center,font=\scriptsize,minimum width=3.9cm,minimum height=1.7cm] (q2) at (2.3,4.6) {\textbf{“看得见，做不了”}\\机密在上下文中但无能力\\受保护 syscall 仍被拒绝};
+\node[draw=framegray,fill=softblue,rounded corners=2pt,align=center,font=\scriptsize,minimum width=3.9cm,minimum height=1.7cm] (q1) at (7.0,4.6) {\textbf{“看得见也做得了”}\\正常已授权读取\\（唯一执行区）};
+\node[draw=framegray,fill=boxgray,rounded corners=2pt,align=center,font=\scriptsize,minimum width=3.9cm,minimum height=1.7cm] (q3) at (2.3,1.7) {\textbf{“看不见也做不了”}\\无上下文且无能力\\空洞安全区};
+\node[draw=framegray,fill=softamber,rounded corners=2pt,align=center,font=\scriptsize,minimum width=3.9cm,minimum height=1.7cm] (q4) at (7.0,1.7) {\textbf{“看不见，但有权”}\\页被逐出仍可授权调用\\（pageIn 恢复后执行）};
+% annotations
+\node[font=\tiny\itshape\color{inkgray},align=left,anchor=west] at (0.2,-1.35) {安全只由纵轴决定（S1 只读 $\Auth$）；可见性只影响“调用是否可能被发起/上下文是否在手”。};
+\node[font=\tiny\itshape\color{inkgray},anchor=west] at (0.2,-0.75) {同理 $\Avail$（服务可用性）与 $\Auth$ 正交（命题~\ref{prop:orthavail}）：可用性只影响活性。};
+\end{tikzpicture}
+\end{adjustbox}
+\caption{上下文可见性与权威的正交轴。Context VM $\neq$ 权限系统：两轴独立变化，安全性只由纵轴（$\Auth$）承担；把横轴当安全边界的任何论述（例如“Agent 没看到密钥所以安全”）在模型上不成立。}
+\label{fig:orthogonal}
+\end{figure}
+
+\section{为什么这不是语义游戏}
+
+图~\ref{fig:orthogonal} 的正交结构排除了两类常见的错误论证：
+\begin{enumerate}[itemsep=0.1em]
+  \item \textbf{“看不到即安全”}：即使某秘密页从未进入 Agent 工作集，也不能据此声称机密性——那需要信息流不干涉类的性质，而本系统并未声明（密钥的机密性由服务端持有与脱敏保障，是另一条防线，不属于 $\Vis/\Auth$ 轴）；
+  \item \textbf{“看到了就危险”}：页在上下文中\emph{不}提升任何权威——受保护系统调用照样要过 9 步链。反过来，$\Vis$ 的驱逐/钉定只影响性能与正确性（如 \tcode{pinned$\rightarrow$evicted} 失败关闭保护关键上下文不丢失），不影响权限。
+\end{enumerate}
+这与 Saltzer--Schroeder 的“关注点分离/机制经济性”一脉相承~\cite{saltzer1975}：可见性（内存语义）与权威（保护语义）是两个正交的轴，各自的最优设计互不干扰。值得注意的是，COW fork 的“父修改不流入既有子镜像”与内容寻址一起，使 $\Vis$ 成为一个\emph{纯函数式}的投影——渲染是 (页表, 驻留级, 先序) 的确定性函数，这为第~\ref{ch:evidence} 章的可复现性论证提供了上下文侧的对应物。

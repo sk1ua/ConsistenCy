@@ -1,0 +1,26 @@
+# Notes 04 — Mathematical Skeptic Review (2026-08-28)
+
+RECOMMENDATION: **PASS_AFTER_FIXES**. Honesty discipline judged unusually good; most formulas textbook-correct; one derivation genuinely unsound as stated; two theorem-shaped statements false without missing preconditions.
+
+## FATAL_MATH_ERRORS
+F1. §10.4 E[peak version lag] ≤ λ_c·W not derivable as stated. (a) "Peak" undefined — at fixed t the bound gives E[D(t)] ≤ λ_c·W via Poisson stationary increments, but peak over unbounded horizon is a.s. unbounded ⇒ E[peak]=∞, inequality false. (b) Window inclusion D(t) ≤ N((t−W,t]) requires A9; re-arm chains break it unboundedly. (c) A9 (no further change, deterministic) directly contradicts A10 (Poisson): P(next change within T_deb)=1−e^{−λ_c T_deb}>0. FIX: replace "peak" with D(t) at fixed t (or finite horizon H); exact under A9; under A10 give E[D(t)] ≤ λ_c(W + E[re-arm spread]) as low-rate approx with explicit error term; disclose the inclusion step.
+
+## MAJOR_OVERCLAIMS
+M1. Prop 9.3 collision bound: missing pairwise-distinct-canonical-inputs precondition (identical 11-tuples collide w.p. 1 — duplicates are dedupe, not collision); canonicalization NOT injective in general (depth cap 64 truncation; JSON number rendering merges) — a DETERMINISTIC collision channel outside the RO model; A7 covers determinism only. FIX: condition on distinct canonical encodings; add A7′ injectivity-of-canonicalization as engineering assumption with depth-cap caveat. [Survives: RO idealization properly flagged; union-bound "no independence needed" reasoning CORRECT; arithmetic 10⁹ ⇒ ≤2⁻¹⁹⁷ checks out.]
+M2. Prop 6.2/S3 "noninterference" overreach: proves only one-step verdict-functional independence at fixed state (syntactic); trace level FALSE — data-plane grant flags causally determine which capabilities get issued (catalog → ReviewWorkload.issueCapabilities), hence later verdicts. FIX: rename "verdict-plane independence (one-step, fixed state)"; scope φ-entailment to same-instant; add "not unwinding-style noninterference over traces; the declared data→authority channel is kernel-side ring-validated issuance".
+M3. §10.4 E[detection delay] = T_poll/2 + T_deb silently drops δ_scan, contradicting §10.3 (which has detection ≤ θ+T_poll+δ_scan). FIX: flush-referenced average = T_poll/2 + δ_scan + T_deb (or detection-referenced T_poll/2 + δ_scan), declared which.
+
+## MINOR_ISSUES (binding for report notation/content)
+1. Symbol collisions: σ (topo order vs σ_k cumulative util) → rename cumulative to R_k; W (stale window vs sojourn W_q/W vs W_t noise) → stale window becomes 𝒲_stale, noise becomes ξ_t? (decide: window = W_stale, noise = ζ_t); κ (resource-kind vs LTS coupling) → coupling becomes φ; V (visibility V_t vs verdict functional vs vertex set) → verdict functional 𝒱; E (store vs edges vs expectation — conventional, disambiguate by context); c (servers vs CMDP cost c(s,a) — keep, contextually distinct); λ (arrival vs λ_c vs Lagrange — keep with subscripts); τ (service vs WAIT_τ vs ghost τ_det/τ_flush/τ_evid — DROP ghosts); π missing from table — ADD; D (data plane D_t vs staleness D(t)) → data plane becomes 𝒟_t; F (fairness F1–F5 vs map F) → map becomes Φ.
+2. §7 add assumption row: RUNNING→WAIT_τ with PendingOperation may release the running slot while an LLM call is outstanding ⇒ overlapping service breaks M/M/1 "one job in service" abstraction during LLM waits.
+3. §8 CMDP duality claim needs Slater-type strict feasibility + finite/compact action set.
+4. §3 add symmetry sentence: acceptance-time freezing applies likewise to χ3 expiry and budget reservation for accepted intents.
+5. §1/A2 scope the total-order claim to the KERNEL's mediation loop (worker-thread/child-process domains exist).
+6. §10.2 disclose d(s1,s2)=|anc(s2)\anc(s1)| is an ASYMMETRIC quasimetric, fails triangle ineq; D small does not exclude orphaned-branch analysis (analysis containing commits absent from HEAD).
+7. §7 per-item tags: "theorem OF THE M/M/c (resp. GI/G/1) IDEALIZATION".
+8. §2 S1 tag parenthetical: invoke path code-supported; bypass-absence is a universal negative (assumption).
+9. Prop 6.3 (F2): provider hang/no-timeout not covered — fold into P_t availability assumption.
+10. A2 cited in §1 before defined in §2 — fix ordering.
+
+## SUPPORTED_DERIVATIONS (survived hostile re-derivation)
+Erlang-C form + c=1 reduction; Kingman standard form (exact at M/M/1); Kleinrock HOL formula E[W_q^(k)]=W_0/((1−R_{k−1})(1−R_k)) indices/signs correct; starvation direction correct; Little discipline-independence; E[wait-to-next-poll]=T_poll/2 properly conditioned (A10 Poisson independent of grid ⇒ uniform phase; no inspection-paradox error); §10.3 worst-case chain correct under A9 (debounce-flush exact BECAUSE A9 holds); dormancy counterexample sound in both arms; S2 domination proof valid (Auth ≤ χ2, A4 monotonicity, syntactic independence legitimate; intent carve-out honest, matches notes/01); S1 definitional status disclosed; witnesses W1/W2 valid; propagation-timing independence correctly reduces to S2; §9.2 equality-preservation valid (A6 code-confirmed); §5 product well-definedness + derived invariant match notes/01; queueing violations table honest; E1/L1 tags check; no notes/03↔notes/01 contradictions; 12-action protected set count correct.

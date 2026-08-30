@@ -1,0 +1,89 @@
+% 第 8 章：Workflow DAG 与执行语义
+\chapter{Workflow DAG 与执行语义}\label{ch:workflow}
+
+\section{四段管线}
+
+工作流运行时把一个经验证的定义变成一次受治理的运行，管线为四段（全部源码核验）：
+\begin{enumerate}[itemsep=0.1em]
+  \item $\operatorname{validate}:\mathrm{Def}\to\mathrm{Def}\cup\{\bot\}$——结构良构性校验，含以 Kahn 入度消解实现的环检测；成功时给出确定性拓扑序 $\sigma$（同层平局按节点 id 决断）；
+  \item $\operatorname{compile}:\mathrm{Def}\times\mathcal{R}\to\mathrm{Plan}\cup\{\bot\}$——节点类型对运行时注册表 $\mathcal{R}$ 解析（当前两类：\tcode{analyzer.deterministic-evidence} 需 $\{\tcode{repo.read},\tcode{evidence.write}\}$；\tcode{verifier.persisted-evidence} 需 $\{\tcode{evidence.read}\}$）；能力需求必须是已注册系统调用动作；\textbf{编译器不发放任何持久授权}——需求是数据；
+  \item $\operatorname{dryload}$——逐节点可行性复查（复用同一编译函数；明示“仅可行性检查”）；
+  \item $\operatorname{execute}$——\tcode{host.trigger} 在\emph{任何}运行记录之前失败关闭（未知仓库 404 / 快照不可得 503 / 定义不可执行 409）；钉定 HEAD 后创建快照；持久化运行后异步执行；节点内\textbf{逐系统调用授权}（第~\ref{ch:security} 章）。
+\end{enumerate}
+定义携带字面量 \tcode{failurePolicy="fail-closed"}：节点失败产生终态运行状态，而非部分继续。
+
+\section{拓扑序定理与 WF-net 负结果}
+
+\begin{theorem}[拓扑序存在性]\label{thm:topo}
+无环有向图 $G=(V,E)$，$|V|\ge1$，存在拓扑序 $\sigma:V\to\{1..|V|\}$ 使 $(u,v)\in E\Rightarrow \sigma(u)<\sigma(v)$；Kahn 算法以 $O(|V|+|E|)$ 时间计算一个拓扑序（或检出环）。
+\end{theorem}
+\tagm{THEOREM\_FROM\_KNOWN\_MODEL（算法课标准结论；实现即 \tcode{validate.ts} 的入度消解）}
+
+\paragraph{Petri 网/WF-net 负结果（\NA-for-now）。}
+工作流理论的标准形式化是 van der Aalst 的工作流网（WF-net）及其\emph{健全性（soundness）}：正常完成可达、无死任务、无遗留托肯~\cite{vanderaalst1998}。经评估，对\textbf{当前的} ConsistenCy 语义——无环 DAG、确定性平局决断、无延迟选择（deferred choice）与里程碑——Kahn 拓扑序已经给出终止性与无死锁的构造性保证，WF-net 的位置不变量与托肯演算\textbf{不增加证明力}。该映射记为负结果：完整 Petri 机制\emph{推迟}，仅当语言将来引入环、迭代或延迟选择时才值得引入。这不是对 WF-net 理论的否定，而是对其适用边界的诚实划定。
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[
+  ph/.style={draw=accentblue!70,fill=softblue,rounded corners=3pt,font=\scriptsize,align=center,minimum height=2.2em,inner sep=5pt,minimum width=2.35cm},
+  ac/.style={draw=framegray,fill=boxgray,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.2em,inner sep=4pt},
+  ln/.style={-{Stealth[length=2mm]},inkgray!80,thick},
+  lb/.style={font=\tiny\itshape\color{inkgray},midway,fill=white,inner sep=1pt}]
+\node[ph] (def) at (0,2.3) {Definition\\（数据，无权威）};
+\node[ph] (val) at (3.3,2.3) {validate\\Kahn 环检测\\拓扑序 $\sigma$};
+\node[ph] (cmp) at (6.6,2.3) {compile\\注册表解析\\能力需求=数据};
+\node[ph] (dry) at (9.9,2.3) {dry-load\\可行性（仅检查）};
+\node[ac,fill=softgreen!50] (trig) at (0,0) {触发源\\manual / repository\_change};
+\node[ac,fill=softgreen!50] (plan) at (3.3,0) {持久触发计划\\哈希去重键 + 围栏单飞};
+\node[ac] (host) at (6.6,0) {host.trigger\\失败关闭前置检查};
+\node[ac,fill=softamber!60] (run) at (9.9,0) {Run（运行）\\状态 running$\to$终态};
+\node[ac,fill=softrose] (gate) at (9.9,-2.0) {逐 syscall 的 $\Auth$\\（唯一权威点）};
+\node[ac,fill=softamber!60] (ev2) at (13.2,0) {Evidence / Finding\\（接地后落地）};
+\draw[ln] (def) -- (val) node[lb,above]{良构};
+\draw[ln] (val) -- (cmp) node[lb,above]{$\sigma$};
+\draw[ln] (cmp) -- (dry);
+\draw[ln] (trig) -- (plan) node[lb,above]{eventId=观测};
+\draw[ln] (plan) -- (host);
+\draw[ln] (host) -- (run);
+\draw[ln] (dry) -- (9.9,1.0) node[lb,right=2pt]{可行性通过};
+\draw[ln] (run) -- (gate) node[lb,right]{每个受保护操作};
+\draw[ln] (gate) -- (ev2) node[lb,right]{允许才落地};
+\draw[ln,dashed,inkgray!50] (def.south) to[bend right=15] node[lb,below]{数据 $\not\Rightarrow$ 裁决} (gate.west);
+\end{tikzpicture}
+\end{adjustbox}
+\caption{工作流 DAG $\rightarrow$ 校验 $\rightarrow$ 运行时管线。上排（蓝）是纯数据变换；下排从触发到运行进入真实世界，但唯一的权威点是每个系统调用处的 $\Auth$。虚线标注被排除的推理路径：定义层命题不能蕴含任何授权结果。}
+\label{fig:workflow}
+\end{figure}
+
+\section{裁决面独立性（“校验 $\neq$ 授权”）}
+
+\begin{proposition}[裁决面独立性（单步、固定状态）]\label{prop:verdictplane}
+把状态分解为 $X_t=(\mathcal{D}_t,Y_t)$，其中 $\mathcal{D}_t$ 是数据面坐标（定义、编译计划、绑定、触发模式、事件标识），$Y_t\supseteq(C_t,B_t)$。裁决泛函 $\mathcal{V}:(q,X)\mapsto\Auth(q)$ 在数据替换下不变：对一切 $\mathcal{D},\mathcal{D}'$，
+\begin{equation}
+\mathcal{V}\bigl(q,(\mathcal{D},Y)\bigr)=\mathcal{V}\bigl(q,(\mathcal{D}',Y)\bigr).
+\end{equation}
+因此，任何局限于\emph{同一时刻}求值的数据面命题 $\varphi$ 都不能蕴含任何非平凡的授权结果（除非 $\varphi$ 本身不可满足或恒真）。
+\end{proposition}
+\begin{proof}
+由定义~\ref{def:auth} 的语法：$\Auth$ 的自由变元不含任何 $\mathcal{D}$-坐标。见证：(i) 合法计划 + 零能力发放 $\Rightarrow$ 运行内所有请求被拒（$\chi_1$ 失败）；(ii) 无计划（手动运行）+ 内核发放的能力 $\Rightarrow$ 请求被允许。校验对任何授权结果既不必要也不充分。
+\end{proof}
+\tagm{PROPOSITION（安全不变式 S3 的形式内容）}
+
+\paragraph{适用范围（对抗误读）。}
+本命题\textbf{不是}轨迹层的不干涉（noninterference）：数据面的授权标志（catalog 投射到 \tcode{ReviewWorkload.issueCapabilities}）\emph{因果地决定}哪些能力被申请发放，从而影响\emph{后续}裁决的流。声明的、且仅声明的是：发放本身是内核侧经 Ring 策略校验的操作（Ring 0 动作不能在内核外发放），因此“数据 $\to$ 权威”的唯一合法通道是\textbf{内核侧的 Ring 校验发放}；对任何\emph{给定}请求的裁决不随数据面直接变化。触发事件是“纯观测溯源，绝非授权”（\tcode{triggers.ts}）。
+
+\section{执行健全性与活性}
+
+\begin{proposition}[执行健全性与活性]\label{prop:execsound}
+\textbf{健全性}：运行的每个外部效果要么 (a) 是中介点处 $\Auth=1$ 的中介系统调用（S1 在工作流层的实例化），要么 (b) 是经幂等、哈希承诺、持久 Sink 落地的已接受提交意图。\textbf{活性}：在 (F1) $G$ 有限无环；(F2) 节点执行有限步内终止（确定性分析器全函数；LLM 路径一次修复尝试后类型化失败）；(F3) fail-closed 使节点失败产生终态；(F4) 公平派发（\emph{期望性}假设：单飞、5\,s 轮询、批量 5、单次尝试、无重试；高优先级干扰可饿死）；(F5) 无崩溃（启动恢复把 \tcode{executing} 标记为 \tcode{failed}——诚实失败而非进展）之下，运行按 $\sigma$ 序在有限步内到达终态。
+\end{proposition}
+\tagm{健全性 ENGINEERING\_INVARIANT（逐路径代码可证）；活性 PROPOSITION（F4/F5 显式为期望性假设；F2 的提供商挂起已并入 $P_t$ 可用性假设）}
+
+\paragraph{诚实限制（如实编码的实现边界）。}
+\begin{itemize}[itemsep=0.05em]
+  \item \textbf{触发是“恰好一次发起、至多一次执行”}：持久去重键 $\mathrm{SHA256}[\text{domain},\text{repo},\text{def},\text{event}]$ 与围栏式 \tcode{UPDATE WHERE status='pending'} 保证每个事件每个定义至多发起一次运行；但计划执行\emph{单次尝试、无重试循环}——鲁棒性以“状态转换间崩溃”为界，不含运行中挂起。
+  \item \textbf{CommitCoordinator 的去重态在内存}：未配置持久 Sink 的重启会丢失去重记忆，重启后重复接受同一幂等键成为可能（“恰好一次发起”以 Sink 持久性为条件）。
+  \item \textbf{监督侧事件去重也在内存}：事件\emph{标识}仅经派生键持久。
+\end{itemize}
+这三条都不是缺陷声明，而是把“什么在什么故障模型下成立”写清楚的边界条件；对应的研究问题（恰好一次效果发起的可用形式化）见第~\ref{ch:future} 章。

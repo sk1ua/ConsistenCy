@@ -1,0 +1,165 @@
+% ConsistenCy v3 — Theoretical Foundations, Mathematical Formalization & Research Report
+% XeLaTeX + biblatex/biber.  Build: latexmk -xelatex -outdir=build main.tex
+\documentclass[UTF8,zihao=-4,a4paper,oneside,openany,fontset=windows]{ctexbook}
+
+\usepackage[a4paper,left=2.6cm,right=2.6cm,top=2.8cm,bottom=2.8cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,shapes.misc,calc,fit,backgrounds,decorations.pathreplacing}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{booktabs,longtable,tabularx,array,makecell}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage[table]{xcolor}
+\usepackage{fancyhdr}
+\usepackage{adjustbox}
+\usepackage{url}
+\setlength{\headheight}{13pt}
+\setlength{\emergencystretch}{3em}
+\usepackage[backend=biber,style=numeric-comp,sorting=none,maxbibnames=9,minbibnames=3,doi=true,isbn=false,url=false,eprint=true]{biblatex}
+\addbibresource{references.bib}
+
+\definecolor{linkblue}{RGB}{20,70,150}
+\definecolor{citegreen}{RGB}{0,110,110}
+\definecolor{inkgray}{RGB}{80,80,80}
+\definecolor{boxgray}{RGB}{242,244,247}
+\definecolor{framegray}{RGB}{160,168,178}
+\definecolor{accentred}{RGB}{170,50,45}
+\definecolor{accentblue}{RGB}{50,90,170}
+\definecolor{softgreen}{RGB}{235,246,238}
+\definecolor{softblue}{RGB}{235,242,250}
+\definecolor{softamber}{RGB}{250,244,230}
+\definecolor{softrose}{RGB}{250,236,236}
+
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=linkblue,citecolor=citegreen,urlcolor=linkblue,
+  pdftitle={ConsistenCy v3 理论基础、数学形式化与研究报告},
+  pdfauthor={ConsistenCy Research},
+  pdfsubject={Theory \& Foundations Technical Report},
+  pdfcreator={XeLaTeX + biblatex}}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{定理}[chapter]
+\newtheorem{proposition}[theorem]{命题}
+\newtheorem{corollary}[theorem]{推论}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{定义}
+\newtheorem{openproblem}[theorem]{开放问题}
+\theoremstyle{remark}
+\newtheorem{remark}{注}[chapter]
+% assumptions numbered globally as printed labels A1, A2, ...
+\newcounter{assump}
+\renewcommand{\theassump}{A\arabic{assump}}
+\theoremstyle{definition}
+\newtheorem{assumptioninner}[assump]{假设}
+% classification tag shown at the right of proposition statements
+\newcommand{\tagm}[1]{\hfill{\small\itshape\color{inkgray}[#1]}}
+\newcommand{\DIRECT}{\textsc{Direct}}
+\newcommand{\STRONG}{\textsc{Strong}}
+\newcommand{\USEFUL}{\textsc{Useful}}
+\newcommand{\PROPOSED}{\textsc{Proposed}}
+\newcommand{\WEAK}{\textsc{Weak}}
+\newcommand{\NA}{\textsc{N/A}}
+
+% ---------- math macros ----------
+\newcommand{\Auth}{\operatorname{Auth}}
+\newcommand{\Exec}{\operatorname{Exec}}
+\newcommand{\Avail}{\operatorname{Available}}
+\newcommand{\Vis}{\operatorname{Visible}}
+\newcommand{\ground}{\operatorname{ground}}
+\newcommand{\fp}{\operatorname{fp}}
+\newcommand{\canon}{\operatorname{canonical}}
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{\mathbb{V}\mathrm{ar}}
+\newcommand{\Nat}{\mathbb{N}}
+\newcommand{\States}{S_{\mathrm{ACB}}}
+\newcommand{\tcode}[1]{\texttt{#1}}
+
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parskip}{0.35em}
+
+% ---------- header / footer ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\itshape ConsistenCy v3 理论基础研究报告}
+\fancyhead[R]{\small\nouppercase\leftmark}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\begin{document}
+
+% ================= cover =================
+\begin{titlepage}
+\centering
+\vspace*{2.2cm}
+{\color{inkgray}\small THEORY \& FOUNDATIONS TECHNICAL REPORT\par}
+\vspace{0.8cm}
+{\color{framegray}\rule{\textwidth}{1.2pt}\par}
+\vspace{1.2cm}
+{\Huge\bfseries ConsistenCy v3\\[0.5em] 理论基础、数学形式化与研究报告\par}
+\vspace{1.0cm}
+{\Large Theoretical Foundations, Mathematical Formalization\par}
+{\Large and a Research Agenda\par}
+\vspace{1.4cm}
+{\color{framegray}\rule{0.618\textwidth}{0.6pt}\par}
+\vspace{1.2cm}
+{\large 基于 Capability Security、Queueing Theory、Provenance、\par}
+{\large Agent Systems 与 Information Freshness 文献的诚实映射\par}
+\vspace{2.4cm}
+\begin{minipage}{0.8\textwidth}\centering\small
+\begin{tabular}{rl}
+报告类型 & 理论与技术报告（非产品文档）\\
+研究对象 & ConsistenCy v3（分支 \tcode{v3}，工作树状态 2026-08-28）\\
+文献基线 & 45 篇经网络核验的文献（20 篇承重核心）\\
+版本 & v1.0\\
+日期 & 2026 年 8 月 28 日\\
+\end{tabular}
+\end{minipage}
+\vfill
+{\color{inkgray}\small 本报告不修改任何产品源代码；所有架构事实以当前源码为唯一真相来源。\par}
+\end{titlepage}
+
+\frontmatter
+% ---------- abstract ----------
+\begin{center}
+{\Large\bfseries 摘要}
+\end{center}
+\noindent
+本报告对 ConsistenCy v3——一个仓库原生的 Agent Harness 操作系统——进行理论基础研究。以当前工作树（分支 \tcode{v3}，2026-08-28）为唯一事实来源，我们把 14 个经源码核验的组件映射到能力安全、排队与调度、溯源与可复现性、Agent 系统与工作流形式方法、信息新鲜度五个理论域，并构造共享记号层面的形式模型 $\mathcal{M}_C$：全局状态 $X_t$（十元组，见附录~\ref{app:symbols}）、九步授权谓词 $\Auth$、撤销支配命题、可用性/可见性与权威的正交性命题、ACB 与 Fiber 状态机的单向耦合关系、工作流 DAG 的裁决面独立性、$M/M/c$ 基线排队模型（显式声明的近似）、证据指纹的确定性与碰撞界、以及版本滞后度量 $D(t)$ 与检测时延界。所有映射按六类支持强度分级（DIRECT、STRONG、USEFUL、PROPOSED、WEAK、NA），全部数学结论按五类标签分类并附假设、证明与失败条件；三组负结果（Petri 网机件、CUSUM 变化检测、线性时间年龄）被显式记录。文献基线为 45 篇经网络核验的文献（20 篇承重核心）；模型经过敌意数学审计（全部 FATAL/MAJOR 修正已并入）与独立引文审计（零虚构）。核心结论：ConsistenCy 的安全内核在\textbf{机制层}是引用监视器与对象能力理论的直系实例化（\DIRECT；分析性与验证性差距见第 19 章），其“Coeffect $\neq$ Authorization”“Context VM $\neq$ Permission System”公理获得精确数学表述——安全只由 $\Auth$ 承担；而调度优化、新鲜度度量与模型检验被诚实标记为提议研究方向，不构成现状声明。
+
+\medskip
+\noindent\textbf{关键词：}能力安全；引用监视器；Agent Harness；形式化验证；排队论；数据溯源；信息新鲜度；LLM Agent 治理
+\clearpage
+
+\tableofcontents
+\listoffigures
+\listoftables
+\clearpage
+
+\mainmatter
+
+\include{sections/s01-intro}
+\include{sections/s02-arch}
+\include{sections/s03-security}
+\include{sections/s04-separation}
+\include{sections/s05-states}
+\include{sections/s06-workflow}
+\include{sections/s07-queueing}
+\include{sections/s08-monitoring}
+\include{sections/s09-evidence}
+\include{sections/s10-freshness}
+\include{sections/s11-model}
+\include{sections/s12-discussion}
+\include{sections/s13-limits}
+
+\appendix
+\include{sections/appendix-a}
+\include{sections/appendix-b}
+\include{sections/appendix-c}
+
+\backmatter
+\printbibliography[title={参考文献}]
+
+\end{document}

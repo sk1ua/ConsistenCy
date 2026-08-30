@@ -1,0 +1,71 @@
+% 第 13-14 章：统一数学模型 + 形式化性质
+\chapter{ConsistenCy 统一数学模型}\label{ch:unified}
+
+\section{统一模型（\PROPOSED：透镜，非实现）}
+
+把前述各部件装配为一个离散时间演化系统：
+\begin{equation}
+X_{t+1}=\Phi(X_t,u_t,\zeta_t),\qquad u_t=\pi(X_t),
+\end{equation}
+其中 $X_t=(R_t,S_t,Q_t,\mathfrak{A}_t,C_t,V_t,K_t,E_t,P_t,B_t)$ 为全局状态（第~\ref{ch:arch} 章），$u_t$ 为准入/调度控制，$\zeta_t$ 为外生噪声（仓库变更、提供商时延/停机、崩溃事件）。\textbf{硬约束}（任何目标不得交换）：(i) 授权不变式 S1--S3；(ii) 预算不变式 $used_c+reserved_c\le max_c$（两阶段，\emph{在授权处}执法——注意与“准入处无预算执法”的现状差距，第~\ref{ch:queueing} 章）；(iii) 依赖可用性（节点仅当 DAG 前驱终态时执行）；(iv) 证据有效性（发布发现满足接地，工作流运行时层）。目标\emph{草图}：
+\begin{equation}
+\min_\pi\;\E\Bigl[\textstyle\sum_t\bigl(w_{\mathrm{lat}}\,\text{latency}_t+w_{\mathrm{stale}}\,g(D(t))+w_{\mathrm{cost}}\,\text{cost}_t+w_{\mathrm{risk}}\,\text{risk}_t\bigr)\Bigr]\quad\text{s.t. S1--S3 与资源约束},
+\end{equation}
+其中 $g$ 为未校准的滞后代价函数、风险聚合的公理未建立（第~\ref{ch:future} 章）。
+
+\textbf{必须显式声明}：该统一模型是一个\emph{形式透镜}。实现的 $\pi$ 是 3 路确定性可行启发式（非优化器）；没有任何组件计算 $\Phi$ 或上述目标。它的价值是把“调度/新鲜度/成本/风险之间的权衡”从口头讨论提升为有明确自由度的数学问题，并为第~\ref{ch:future} 章的研究问题提供共享记号。
+
+\paragraph{非统一性自白（non-unification confession）。}
+复查全报告的命题可以发现：\emph{没有任何一个命题同时联合使用多个状态分量}——S1/S2 只读 $(C_t,B_t)$；正交性命题只对照 $(C_t)$ 与 $(K_t,V_t)$；排队节只读 $Q_t$；新鲜度节只读 $R_t$ 与 $E_t$ 的时戳；证据命题只读 $E_t,S_t$。因此本报告所称的“统一模型”应更准确地读作\textbf{共享记号（shared notation）}：一个让各章局部命题可以无歧义互相引用的公共状态空间，而不是一个产生了跨分量联合定理的模型。真正的联合优化（例如同时约束 $Q_t$ 与 $D(t)$ 的策略类）是第~\ref{ch:future} 章 RQ1/RQ2 的\emph{待做}内容，不是本报告已完成的内容。我们把这一点写在明处，以对抗“把章节摘要符号化后称作统一模型”的过度包装。
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[
+  bx/.style={draw=framegray,fill=boxgray,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.2em,inner sep=4pt},
+  hz/.style={draw=accentred!75,fill=softrose,rounded corners=2pt,font=\scriptsize\bfseries,align=center,minimum height=2.2em,inner sep=4pt},
+  ob/.style={draw=accentblue!70,fill=softblue,rounded corners=2pt,font=\scriptsize\itshape,align=center,minimum height=2.2em,inner sep=4pt},
+  ln/.style={-{Stealth[length=2mm]},inkgray!80,thick},
+  lb/.style={font=\tiny\itshape\color{inkgray},midway,fill=white,inner sep=1pt}]
+\node[bx,minimum width=3.1cm] (X) at (0,0) {状态 $X_t$\\$R,S,Q,\mathfrak{A},C,V,K,E,P,B$};
+\node[bx] (Phi) at (4.1,0) {演化 $\Phi(\cdot,u_t,\zeta_t)$};
+\node[bx] (pi) at (4.1,-1.9) {策略 $\pi$（现状：3 路启发式）};
+\node[hz,minimum width=3.4cm] (cons) at (8.6,-1.9) {硬约束\\S1--S3 $\cdot$ 预算 $\cdot$ 依赖 $\cdot$ 接地};
+\node[ob,minimum width=3.3cm] (obj) at (8.6,0) {目标（草图）\\时延 $+g(D(t))$ + 成本 + 风险};
+\node[bx] (zeta) at (4.1,1.9) {外生 $\zeta_t$\\变更/停机/崩溃};
+\draw[ln] (X) -- node[lb,above]{} (Phi);
+\draw[ln] (Phi) to[bend left=16] node[lb,above]{$X_{t+1}$} (X);
+\draw[ln] (pi) -- node[lb,right]{$u_t$} (Phi);
+\draw[ln] (zeta) -- (Phi);
+\draw[ln,dashed,accentred!75] (cons) -- node[lb,below]{不可交换} (pi);
+\draw[ln,dashed,inkgray!60] (obj) -- node[lb,right]{（\PROPOSED，未实现）} (pi);
+\end{tikzpicture}
+\end{adjustbox}
+\caption{统一形式模型（\PROPOSED\_CONSISTENCY\_FORMAL\_MODEL）。红色为任何策略都不得违背的硬约束；蓝色目标仅是研究草图——实现的 $\pi$ 不优化它。}
+\label{fig:unified}
+\end{figure}
+
+\chapter{形式化安全/活性性质清单}\label{ch:properties}
+
+下表汇总全报告的性质，含假设与“已执法 vs 期望性”的区分：
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.9cm}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}p{3.9cm}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}p{2.4cm}@{}}
+\toprule
+\textbf{ID} & \textbf{性质} & \textbf{形式内容} & \textbf{关键假设} & \textbf{状态}\\
+\midrule
+\endhead
+S1 & 无授权则无受保护效果 & $\Box(\Exec\Rightarrow\Auth(m(q)){=}1)$ & A1--A3；边界：网关穿透依赖 broker 拒绝（完全中介者是 broker） & 工程不变式（调用路径代码可证；旁路不存在性是假设）\\
+S2 & 撤销支配生命周期传播 & 中介点 $\succeq t_r$ 裁决恒 0，与 $K_t$ 无关；intent carve-out & A1--A5 & 命题（A4/A5 代码可证）\\
+S3 & 数据面不能直接改变裁决 & 裁决面独立性（单步、固定状态，命题~\ref{prop:verdictplane}） & 数据 $\to$ 权威的唯一通道是内核侧 Ring 校验发放 & 命题\\
+T1 & Git 事实来自对象库 & $\mathrm{Read}:(repo,sha,path)\to blob$ 纯函数、失败关闭钉定 & 对象库完整性（模型外） & 工程不变式\\
+T2 & PR 事实来自提供商 API & 提供商中介、失败关闭、密钥服务端、发布经意图 & 提供商诚实性（模型外） & 工程不变式（部分代码接地）\\
+E1 & 发现引用持久证据 & 工作流运行时层 $\forall f\,\exists E_f\neq\varnothing$；确定性 $\ground$ & schema \tcode{min(1)}；\textbf{差距}：遗留层可选 & 工程不变式（仅工作流层）\\
+R1 & 可复现证据指纹 & 命题~\ref{prop:determinism}+\ref{prop:collision} & A6--A8 + A7$'$；RO 理想化 & 命题（输入侧工程不变式）\\
+L1 & 准入的合格 Agent 最终推进 & 在公平派发、依赖可用、预算未竭、提供商可用、无崩溃之下 & F4/F5 为期望性；HOL 饥饿、PENDING 吸收、$\chi_9$ 拒绝、单次尝试均是其反例条件 & 命题（假设下）；截止期执法是唯一\emph{已执法}的活性邻接机制（诚实失败而非进展）\\
+\bottomrule
+\caption{形式化性质总表。S = Safety，T = Truthfulness，E = Evidence，R = Reproducibility，L = Liveness。}
+\label{tab:properties}
+\end{longtable}
+
+\paragraph{L1 的反例条件值得展开。}
+“最终推进”在下列任一情形下失败，且每一种都\emph{设计上}被接受为诚实失败而非缺陷修复目标：(i) 高优先级持续饱和使低类饥饿（定理~\ref{thm:hol}）——由截止期取消兜底为“取消”这一终态；(ii) 共效从未提供使 Fiber 永久 PENDING；(iii) $\chi_9$ 预算拒绝是\emph{条件活性}的边界（安全优先于活性的直接体现）；(iv) LLM 无重试——一次修复尝试后类型化失败；(v) 崩溃后启动恢复把执行中标记为失败。换言之，ConsistenCy 的活性哲学是“\textbf{公平假设下的进展 + 假设失守时的诚实终态}”，而非尽力掩盖的可用性最大化——与第~\ref{ch:sep} 章指出的 OTP 分歧一致。

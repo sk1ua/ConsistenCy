@@ -1,0 +1,104 @@
+% 第 15-18 章：架构决策的理论解释 / 相关系统比较 / 理论支撑现状
+\chapter{架构决策的理论解释}\label{ch:decisions}
+
+下表把九项代表性架构决策映射到其工程理由、理论解释与数学性质，并标注证据强度。这是“工程直觉 $\to$ 可检查对象”转化的核心交付物之一。
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{3.2cm}>{\raggedright\arraybackslash}p{3.2cm}>{\raggedright\arraybackslash}p{1.7cm}@{}}
+\toprule
+\textbf{架构决策} & \textbf{工程理由} & \textbf{理论} & \textbf{数学性质} & \textbf{强度}\\
+\midrule
+\endhead
+逐 syscall 授权（9 步链重评） & 防缓存授权过期、防 TOCTOU、撤销即时生效 & 引用监视器/完全中介~\cite{anderson1972,saltzer1975,bishop1996} & S1：$\Box(\Exec\Rightarrow\Auth)$ & \DIRECT\\
+撤销永久单调 + 下一调用拒绝 & 简化撤销语义；安全不依赖传播时序 & 撤销经中介（退化情形）~\cite{redell1974,miller2003} & S2：支配性（命题~\ref{prop:revocation}） & \DIRECT\\
+Coeffect 与授权两次独立检查 & 可用性与权威分属不同时间尺度 & vat 模型/事件循环响应式~\cite{miller2006} & 正交性（命题~\ref{prop:orthavail}、\ref{prop:propagation}） & \DIRECT\\
+Context VM 与能力分离 & “看见什么”与“能做什么”不同轴 & 关注点分离/最小特权~\cite{saltzer1975} & $\Vis\nvdash\Auth$（命题~\ref{prop:orthvis}） & \DIRECT\\
+intent 分发门（不可逆效果） & 外部副作用需要幂等与显式意图 & 幂等生产者/效果分级的业务效果~\cite{debenedetti2025} & $\mathrm{dispatch(intent)}\Rightarrow\neg$内联（\S\ref{ch:workflow}） & \STRONG\\
+Scheduler 属于 Kernel（非插件） & 准入/并发/截止期是权威而非功能 & 准入控制 + 非抢占 HOL~\cite{kleinrock1975} & 确定性准入函数；饥饿形状（定理~\ref{thm:hol}） & \DIRECT{}（词汇）\\
+Evidence-first findings & 模型输出不可信，需事后接地 & why/where 溯源 + 事后归因~\cite{buneman2001,gao2023rarr} & $\ground$ 分类器；E1 & \STRONG\\
+RepositorySnapshot SHA 钉定 & 读取必须是内容函数 & 内容寻址承诺~\cite{merkle1989} & T1；$A_v$ 复合（R1） & \DIRECT\\
+持久触发计划 + 去重键 & 恰好一次发起、防事件风暴 & AoI 缓冲-1 洞察~\cite{kaul2012} & 单飞 CAS 状态机（\S\ref{ch:workflow}） & \USEFUL\\
+\bottomrule
+\caption{架构决策 $\to$ 理论解释映射表。}
+\label{tab:decisions}
+\end{longtable}
+
+\chapter{与相关系统/论文的比较}\label{ch:comparison}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{2.2cm}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{2.5cm}@{}}
+\toprule
+\textbf{系统} & \textbf{权威中介} & \textbf{证据/接地} & \textbf{验证程度} & \textbf{失败哲学}\\
+\midrule
+\endhead
+\textbf{ConsistenCy v3} & 逐 syscall 9 步能力链；intent 门 & 确定性分析器 + 内容指纹 + 强制 $\ground$ & 无形式证明；模型级命题 + 源码核验 & fail-closed、单次尝试、诚实终态\\
+seL4~\cite{klein2009} & 能力内核，同步中介 & N/A（机制不做证据） & \textbf{完整机器检查函数正确性证明} & 正确性由证明承担\\
+Capsicum~\cite{watson2010} & 能力模式（沙箱内禁全局命名空间） & N/A & 无证明；部署经验 & 细粒度授权实践\\
+in-toto~\cite{torresarias2019} & 签名 layout 授权步骤 & 链接元数据绑定材料$\to$产品 & 无证明；部署（供应链） & 步骤可验证\\
+CT/history tree~\cite{crosby2009} & N/A & 防篡改仅追加日志 + 一致性证明 & 结构证明 & 公开可审计\\
+Erlang/OTP~\cite{armstrong2003} & 无能力模型（进程隔离） & N/A & 无证明；工业可靠性记录 & \textbf{让它崩溃 + 重启掩盖}\\
+ReAct~\cite{yao2023react} & \textbf{无}（宿主约定） & 无 & N/A & 提示层约束\\
+AutoGen~\cite{wu2024autogen} & \textbf{无}（会话编程） & 无 & N/A & 应用层\\
+MetaGPT~\cite{hong2024metagpt} & \textbf{无}（SOP 编码） & 无 & N/A & 应用层\\
+CodeReviewer~\cite{li2022codereviewer} & N/A & \textbf{无证据接地}（模型端到端） & 实证（预训练） & 概率输出\\
+\bottomrule
+\caption{与相关系统/论文的比较。LLM Agent 框架一行显示的“无权威中介”正是 ConsistenCy 的存在理由；与 OTP 的失败哲学分歧（诚实失败 vs 重启掩盖）见第~\ref{ch:sep} 章。}
+\label{tab:comparison}
+\end{longtable}
+
+定位声明：ConsistenCy 不是“又一个 Agent 框架”，而是把 OS 内核六十年的权限理论~\cite{dennis1966,anderson1972,saltzer1975}与可复现计算的溯源理论~\cite{buneman2001,provdm2013,merkle1989}装配到 LLM Agent 工作负载上的\emph{基础设施}；ReAct/AutoGen/MetaGPT 属于其上可承载的工作负载形态，而非同类竞争者。
+
+\chapter{哪些理论已经支撑当前实现}\label{ch:supported}
+
+图~\ref{fig:matrix} 以矩阵形式总结全部理论映射的强度分布：\DIRECT{} 集中在安全与分离公理（引用监视器、撤销、正交性、内容寻址），\STRONG{} 集中在生命周期/溯源/意图门，\USEFUL{} 在排队词汇与缓冲洞察，\PROPOSED{} 在 CMDP 与版本滞后度量，\NA{} 记录了 Petri 机件、CUSUM 与 AoI 线性年龄三组负结果。
+
+\begin{figure}[htbp]
+\centering
+\small
+\begin{tabular}{@{}l|c|c|c|c|c|c@{}}
+\toprule
+\textbf{概念 $\backslash$ 强度} & \DIRECT & \STRONG & \USEFUL & \PROPOSED & \WEAK & \NA\\
+\midrule
+逐调用授权/引用监视器 & \cellcolor{softblue}$\bullet$ & & & & & \\
+撤销支配 & \cellcolor{softblue}$\bullet$ & & & & & \\
+可用性/授权正交 & \cellcolor{softblue}$\bullet$ & & & & & \\
+可见性/权限正交 & \cellcolor{softblue}$\bullet$ & & & & & \\
+内容寻址身份 & \cellcolor{softblue}$\bullet$ & & & & & \\
+ACB/Fiber LTS & \cellcolor{softblue}$\bullet$ & & & & & \\
+PROV 溯源结构 & \cellcolor{softblue}$\bullet$ & & & & & \\
+\midrule
+Fiber 监督谱系 & & \cellcolor{softgreen}$\bullet$ & & & & \\
+证据 why/where & & \cellcolor{softgreen}$\bullet$ & & & & \\
+意图门/幂等 & & \cellcolor{softgreen}$\bullet$ & & & & \\
+防篡改日志谱系 & & \cellcolor{softgreen}$\bullet$ & & & & \\
+事件触发结构 & & \cellcolor{softgreen}$\bullet$ & & & & \\
+LLM 服务时间实证 & & \cellcolor{softgreen}$\bullet$ & & & & \\
+\midrule
+排队记号/稳定性/Little & & & \cellcolor{softamber}$\bullet$ & & & \\
+AoI 缓冲-1 洞察 & & & \cellcolor{softamber}$\bullet$ & & & \\
+峰值年龄记账 & & & \cellcolor{softamber}$\bullet$ & & & \\
+模型检验扩展 & & & & \cellcolor{softrose}$\bullet$ & & \\
+CMDP 准入研究模型 & & & & \cellcolor{softrose}$\bullet$ & & \\
+版本滞后 $D(t)$ & & & & \cellcolor{softrose}$\bullet$ & & \\
+\midrule
+两阶段预算预留 & & & & & \cellcolor{boxgray}$\bullet$ & \\
+更新或等待最优采样 & & & & & \cellcolor{boxgray}$\bullet$ & \\
+Petri/WF-net 机件 & & & & & & \cellcolor{softrose}$\bullet$\\
+CUSUM/变化检测 & & & & & & \cellcolor{softrose}$\bullet$\\
+线性时间年龄 & & & & & & \cellcolor{softrose}$\bullet$\\
+\bottomrule
+\end{tabular}
+\caption{理论支持强度矩阵（图例：蓝=\DIRECT，绿=\STRONG，琥珀=\USEFUL，玫瑰=\PROPOSED/\NA，灰=\WEAK）。逐项论证与文献见第~\ref{ch:security}--\ref{ch:freshness} 章及附录~\ref{app:mapping}。}
+\label{fig:matrix}
+\end{figure}
+
+\chapter{哪些只是提议研究方向}\label{ch:proposed}
+
+以下内容\textbf{不是}当前系统的属性，把它们写成现状即构成理论包装。（评估深度声明：本章列举的负结果与新方向中，AoI/新鲜度经受了最深的专项审计（第~\ref{ch:freshness} 章），Petri 与 CUSUM 为边界论证（\S\ref{ch:workflow}、\S\ref{ch:monitoring}），深度不一；此处列出负结果的目的是划定“已确立理论”的边界，而非宣称对三者的评估等量齐观。）
+\begin{enumerate}[itemsep=0.05em]
+  \item \textbf{CMDP 准入优化}：现状是 3 路可行启发式；预算不在准入处执法；成本通道不可消耗。
+  \item \textbf{版本滞后度量 $D(t)$ 与触发策略优化}：度量是本报告的提议（VAoI 接地）；“事件触发 vs 周期的定量优劣”是未证明命题。
+  \item \textbf{积 LTS 的模型检验}：48 状态空间是现成的检验对象，但未接线。
+  \item \textbf{统一模型 $\Phi$ 与目标函数}：透镜，无组件计算它。
+  \item \textbf{风险评分公理化}：两世界并存的现状下，任何单调性/校准主张都未建立。
+  \item \textbf{审计日志一致性证明}：仅追加接口 + 指纹纪律是现状；Crosby 式密码学防篡改~\cite{crosby2009} 是升级路径。
+  \item \textbf{ensemble 可靠性模型}：没有数据支撑独立假设，禁止 $\prod_i p_i$ 式计算；贝叶斯集成仅列为经验研究议程。
+\end{enumerate}

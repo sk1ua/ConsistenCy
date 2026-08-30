@@ -1,0 +1,22 @@
+% 第 10 章：Repository Monitoring 与 Event-Triggered Execution
+\chapter{仓库监控与事件触发执行}\label{ch:monitoring}
+
+\section{监督子系统的真实形状（轮询，而非 Webhook）}
+
+仓库监督是\textbf{轮询模型}（源码核验，\tcode{heartbeat/repositorySupervisor.ts}）：每仓库 \tcode{setInterval(pollIntervalMs)} 驱动一次 \tcode{scanRuntime}$\to$\tcode{probe.observe()}（本地 Git 探针）；重叠扫描被生命周期令牌丢弃。每次观测计算\textbf{观测摘要}
+\begin{equation}
+\mathrm{digest}_t=\mathrm{SHA256}\bigl([\,headSha \,\|\, \text{UNBORN},\;\text{workflowDigest},\;\text{normalizedChangedFiles}\,]\bigr),
+\end{equation}
+摘要不变 $\Rightarrow$ 无待处理变更；变化则武装一个 \tcode{debounceMs} 计时器，静默后冲刷（flush）一个\emph{去重}的 \tcode{RepositoryEvent}，其身份 dedupeKey 为常量前缀加 $\mathrm{SHA256}[\text{repoId},\,head,\,\text{workflowDigest}]$。工作流摘要覆盖启用的自动化与 \tcode{on\_change} 绑定：绑定集变化会重新武装事件（摘要变 $\Rightarrow$ 新键），而未启用绑定的仓库保持字节相同摘要（无“事件风暴”的兼容性设计）。失败诚实降级（\tcode{degraded} 状态 + 降级脉冲）。监督\textbf{只观测与记录}，不自行入队；审计执行桥同样经规范化路径（\tcode{launchDefinitionRun}）以围栏式 \tcode{created}$\to$\tcode{queued} 状态守卫单次尝试排空。
+
+\section{事件触发 vs 周期触发：结构性类比（\STRONG）}
+
+该机制的形态是“Riemann 采样观察下的 Lebesgue 事件”：轮询 + 摘要比较是\emph{周期观测者}；摘要变化是\emph{事件}；防抖是\emph{驻留时间}（dwell time / 最小事件间隔）。事件触发采样优于周期采样的经典结论~\cite{astrom1999} 在结构上支持“变更触发评审在同等最坏时延与动作预算下浪费更少运行”这一\emph{定性}主张；Tabuada 的最小事件间隔时间（minimum inter-event time）形式化了防抖作为防抖振（Zeno 行为）手段的角色~\cite{tabuada2007}。\textbf{但}两文的定量定理都以随机被控对象与噪声模型为前提——Git 仓库在提交之间\emph{没有动力学}：它是一个被无噪声观测的分段常数信号。因此：\textbf{结构映射 \STRONG；最优性内容 \WEAK}。任何“变更触发严格优于 cron 触发 $x\%$”的定量主张在本报告的框架内都是未证明的（第~\ref{ch:future} 章研究问题 RQ5）。
+
+\section{CUSUM/变化检测：不适用（负结果，\NA）}
+
+顺序变化检测理论（Page 的连续检查方案~\cite{page1954} 及其后续）存在的理由是\emph{噪声观测}下的检测延迟/虚警权衡。摘要比较是无噪声、内容寻址的哈希等值测试：虚警概率 $\approx$ 碰撞概率 $\approx 0$，漏检概率 $=0$，因此\emph{没有阈值可优化、没有权衡可言}——它只在与 \tcode{a!==b} 相同的意义上是“变化检测”。把防抖称作 CUSUM 阈值正是本研究要防止的“数学优雅强迫映射”。变化检测理论在\emph{观测变为有噪声}时才变得相关：远程镜像的同步滞后、部分写入、基于 mtime 的启发式、CI 指标的漂移检测——这些是假设性的未来通道，记录为条件性映射而非现状描述。
+
+\section{单运行去重与“缓冲大小为 1”}
+
+监督的去重 + 触发计划的“每 (repository, definition, event) 至多一次运行”共同实现了\emph{每键缓冲大小为 1、新到替换旧}的策略：突发的连续提交不会排队成一串过时的评审运行，而是被合并为最新状态的至多一个待执行计划。信息年龄文献的奠基性洞察——对新鲜度而言“小缓冲 + 丢弃过时更新”优于“无界排队”~\cite{kaul2012}——正是该设计的理论理由（这是 AoI 理论向本系统\emph{真正}迁移的一条；其余部分的诚实评估见第~\ref{ch:freshness} 章）。

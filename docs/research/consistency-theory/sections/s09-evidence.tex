@@ -1,0 +1,115 @@
+% 第 11 章：Evidence、Provenance 与 Reproducibility
+\chapter{证据、溯源与可复现性}\label{ch:evidence}
+
+\section{证据模型}
+
+证据记录为强类型 11 元组：
+\begin{align}
+e&=\bigl(\text{source},\,\text{ruleId},\,\text{loc}(\text{path},\text{startLine},\text{endLine}),\nonumber\\
+&\qquad\text{conf}\in[0,1],\,\text{payload},\,\mathrm{prov}\bigr),\\
+\mathrm{prov}&=(\text{repository},\text{sha},\text{analyzer},\text{analyzerVersion}),
+\end{align}
+$\text{source}\in\{\text{ast},\text{sast},\text{git},\text{lint},\text{symbol},\text{test},\text{agent}\}$。身份函数为
+\begin{equation}
+\fp(e)=\mathrm{SHA\text{-}256}\bigl(\canon(N(e))\bigr)\in\{0,1\}^{256},
+\end{equation}
+其中 $N$ 是 store 侧的确定性规范化（路径规范化——与仓库系统调用同一 \tcode{normaliseResourcePath}，拒绝绝对路径/穿越/NUL；\textbf{store 自行计算指纹，从不信任分析器提交的指纹}；校验置信度/行号/溯源；深冻结），$\canon$ 是 11 元组的规范 JSON 序列化（递归键排序、\emph{数组保序}、深度上限 64、拒绝非纯对象与环）。两个设计点值得强调：\emph{溯源参与哈希}（同一规则在不同修订版本永不共享身份）；\emph{身份与标签分离}（$\tcode{evid}\_\langle uuid\rangle$ 是非身份标签）。
+
+\section{理论映射}
+
+\begin{itemize}[itemsep=0.05em]
+  \item \textbf{why/where 溯源}：Buneman--Khanna--Tan 的经典区分——“结果由哪些源数据贡献（why）”与“值从哪个源位置拷贝（where）”~\cite{buneman2001}——与“发现必须引用贡献证据（why）+ 证据钉定 (path, 行区间)（where）”一一对应。映射强度：\STRONG（形式场景是只读关系查询，非仓库分析，但两个溯源问题逐字迁移）。
+  \item \textbf{PROV 词汇}：$\mathrm{prov}$ 四元组是 W3C PROV-DM 实体/活动/代理/派生词汇的实例化——证据（实体）由分析器运行（活动）使用快照（实体）生成~\cite{provdm2013}。\DIRECT（结构层）。
+  \item \textbf{内容寻址承诺}：SHA-256-规范元组指纹是 Merkle 哈希树的单叶退化情形~\cite{merkle1989}；RepositorySnapshot 的对象库读取同属内容寻址谱系。\DIRECT（机制层）。
+  \item \textbf{审计日志}：仅追加、全决策入账、永不出现原始句柄的 AuditJournal 站在安全审计日志~\cite{schneier1999} 与防篡改日志数据结构（history tree 及其成员/一致性证明）~\cite{crosby2009} 的谱系上。\STRONG（本系统对手模型是内部一致性而非事后取证妥协，声明更弱；一致性证明列为未来升级路径）。
+  \item \textbf{供应链证明}：分析器（步骤）绑定输入（钉定快照=材料）到输出（证据=产品）、步骤身份=分析器+版本的形态与 in-toto 的 layout+link 元数据同构~\cite{torresarias2019}。\STRONG。
+  \item \textbf{模型输出的事后接地}：评审 Agent 的输出在被确定性接地检查（接受/降级/拒绝）之前是\emph{不可信}的——这是 RARR 式“检索证据并修订输出直到被支撑”~\cite{gao2023rarr} 的内核化版本：接地依据不是另一个模型，而是第~\ref{ch:security} 章治理下的确定性证据库。实证动机：原始模型审查输出的行动率类型依赖且不可靠~\cite{goldman2025}。
+\end{itemize}
+
+\section{接地不变式（两级严格度，如实）}
+
+\begin{proposition}[证据接地]\label{prop:grounding}
+(a) 工作流运行时层面：schema 强制 $\forall f\;\exists E_f\subseteq E_t,\;E_f\neq\varnothing$（\tcode{evidenceIds} 数组 \tcode{min(1)}）。(b) 评审工作负载的接地函数 $\ground:\mathrm{Finding}^{*}\to\{\text{accept},\text{downgrade},\text{reject}\}^{*}$ 是确定性分类器：模型引用未知证据 id $\Rightarrow$ 拒绝；未变更文件引用 $\Rightarrow$ 拒绝；越界行号 $\Rightarrow$ 拒绝；\tcode{confirmed} 主张落在变更 hunk 之外或无确定性信号 $\Rightarrow$ 降级为 \tcode{likely}；被接受的发现被确定性附加运行证据。(c) \textbf{两级严格度}：遗留评审 schema 层（迁移期）\tcode{evidenceIds} 可选——finding \emph{可以}在 schema 层无证据存在；仅工作流运行时层强制 $\ge1$。
+\end{proposition}
+\tagm{(a)(b) ENGINEERING\_INVARIANT；(c) 记录为限制}
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[
+  nd/.style={draw=framegray,fill=boxgray,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.0em,inner sep=4pt},
+  sn/.style={draw=accentblue!70,fill=softblue,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.0em,inner sep=4pt},
+  ev/.style={draw=framegray,fill=softamber,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.0em,inner sep=4pt},
+  fd/.style={draw=accentred!70,fill=softrose,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.0em,inner sep=4pt},
+  ln/.style={-{Stealth[length=2mm]},inkgray!80},
+  lb/.style={font=\tiny\itshape\color{inkgray},midway,fill=white,inner sep=1pt}]
+\node[sn] (git) at (0,2.4) {Git 对象库\\$headSha$};
+\node[nd] (snap) at (3.4,2.4) {RepositorySnapshot\\（不可变钉定）};
+\node[nd] (an1) at (6.8,3.4) {分析器 $A_{v_1}$\\style/secret v1.0.0};
+\node[nd] (an2) at (6.8,1.4) {分析器 $A_{v_2}$\\（另一版本）};
+\node[ev] (e1) at (10.2,3.4) {证据 $e_1$：$\fp=\mathrm{SHA256}(\canon)$};
+\node[ev] (e2) at (10.2,1.4) {证据 $e_2$};
+\node[fd] (f1) at (13.4,2.4) {发现 $f$（confirmed）\\$E_f\ni e_1$};
+\node[nd] (aud) at (3.4,0.0) {AuditJournal\\（仅追加）};
+\draw[ln] (git) -- (snap) node[lb,above]{rev-parse 验证};
+\draw[ln] (snap) -- (an1) node[lb,above]{读取};
+\draw[ln] (snap) -- (an2) node[lb,below]{读取};
+\draw[ln] (an1) -- (e1) node[lb,above]{$\mathrm{prov}.sha, v_1$};
+\draw[ln] (an2) -- (e2) node[lb,below]{$\mathrm{prov}.sha, v_2$};
+\draw[ln] (e1) -- (f1) node[lb,above]{接地 $\ground$};
+\draw[ln,dashed,inkgray!60] (e2.south) to[bend right=14] node[lb,below]{无确定性信号 $\Rightarrow$ 降级/拒绝} (f1.south);
+\draw[ln,dashed,inkgray!60] (aud.north) -- (snap.south) node[lb,right]{全决策入账};
+\end{tikzpicture}
+\end{adjustbox}
+\caption{证据溯源图。快照（蓝）由对象库钉定；分析器带版本读入；证据身份含 $(sha, analyzer, version)$；发现经确定性接地分类器 $\ground$ 引用证据（红）。虚线标注被 $\ground$ 排除的路径。}
+\label{fig:provenance}
+\end{figure}
+
+\section{确定性与指纹可复现性}
+
+\begin{assumptioninner}[{分析器确定性（版本钉定）}]\label{ass:a6}
+$A_v$ 是钉定版本 $v$ 上的全函数、确定性（字节稳定输出；全性经孤立代理对替换为 U+FFFD 维持；输出按 (path, startLine, endLine, ruleId) 确定排序）——代码可证。
+\end{assumptioninner}
+\begin{assumptioninner}[{规范序列化的确定性}]\label{ass:a7}
+JSON 数字的渲染平台稳定（IEEE-754 双精度在 TS 引擎间的确定性渲染）——\emph{工程}假设。
+\end{assumptioninner}
+\begin{assumptioninner}[{规范化的单射性}]\label{ass:a7p}
+$\canon\circ N$ 在值域上单射（不同证据内容产生不同规范串）。\textbf{已知边界}：深度上限 64 的截断与数字渲染合并是\emph{确定性}碰撞通道，位于随机预言机模型之外——本假设把它们声明为工程上可忽略，而非数学上不存在。
+\end{assumptioninner}
+\begin{assumptioninner}[{版本可判定}]\label{ass:a8}
+“相同 $v$”可从记录本身判定（$analyzerVersion$ 在 $\mathrm{prov}$ 内）。
+\end{assumptioninner}
+
+\begin{proposition}[确定性]\label{prop:determinism}
+在 A6--A8 下，$(x,v)=(x',v')\Rightarrow \fp(N(A_v(x)))=\fp(N(A_v(x')))$。
+\end{proposition}
+\begin{proof}
+$A_v$ 确定性 $\Rightarrow$ 结构化输出相等；$N,\canon,\mathrm{SHA256}$ 是函数 $\Rightarrow$ 哈希相等（函数复合保持相等；不涉及概率）。
+\end{proof}
+\tagm{PROPOSITION（A6 代码可证；A7/A7$'$ 工程假设）}
+
+\begin{proposition}[碰撞界（随机预言机理想化）]\label{prop:collision}
+把 SHA-256 建模为\textbf{随机预言机}（显式声明：SHA-256 是固定公开函数，RO 是仅为得出界而用的建模虚构）。设 $n$ 条证据记录的\textbf{规范编码两两不同}（相同元组的重复是去重而非碰撞），$b=256$，则
+\begin{equation}
+\Pr\bigl[\exists\, i<j:\ \fp_i=\fp_j\bigr]\;\le\;\binom{n}{2}2^{-b}\;\le\;\frac{n^{2}}{2^{\,257}}.
+\end{equation}
+\end{proposition}
+\begin{proof}
+逐对使用 union bound；RO 模型下每个\emph{不同}输入对的碰撞概率为 $2^{-256}$。注意 union bound \emph{不需要}碰撞事件间的独立性——只需要逐对界。数值：$n=10^{9}\approx2^{30}$ 时上界 $\le 2^{-197}$。
+\end{proof}
+\tagm{THEOREM\_FROM\_KNOWN\_MODEL（RO 理想化下的 union/birthday 界；Merkle 谱系~\cite{merkle1989}）}
+
+\section{真相不变式 T1/T2 与可复现性 R1}
+
+\begin{proposition}[真相不变式]\label{prop:truth}
+\textbf{T1（Git 事实来自 Git 对象库）}：快照读取是纯函数 $\mathrm{Read}:(repo,sha,path)\to blob$，经失败关闭的 \tcode{rev-parse --verify} 钉定；后续工作树变更不能改变既有快照的观测（不可变性来自对象库寻址本身）。\textbf{T2（PR 事实来自提供商 API）}：外部 PR 状态只经提供商中介、失败关闭的路径进入（未配置 $\Rightarrow$ 类型化错误）；密钥仅服务端；发布只经授权意图。
+\end{proposition}
+\tagm{ENGINEERING\_INVARIANT（T1 逐行代码可证；T2 部分代码接地、部分模型级补全；提供商诚实性在模型之外）}
+
+\begin{proposition}[可复现性 R1]\label{prop:repro}
+钉定快照 $+$ 确定性分析器 $\Rightarrow$ 相等输入产生相等证据指纹（命题~\ref{prop:determinism}）；碰撞概率可忽略（命题~\ref{prop:collision}，RO 理想化 + A7$'$）。这是可复现构建（reproducible-builds）原则在\emph{分析}侧的实例化：同一源、同一过程版本 $\Rightarrow$ 位相同输出。
+\end{proposition}
+\tagm{PROPOSITION（输入侧 ENGINEERING\_INVARIANT）}
+
+\paragraph{两个风险世界的如实声明。}
+当前存在\emph{两个}风险评分世界：遗留 Python 引擎的 \tcode{compose\_file\_risk}（信号分数的加权钳制：$0.28\,$style $+\,0.39\,$structural $+\,0.33\,$semantic $+\,0.05\,$dup $+\,0.5\,$security，带安全地板）与内核证据置信度——前者的权重\emph{不是}从后者推导的。任何“风险评分有理论保证”的说法都不成立；其公理化（单调性、校准）是开放问题（第~\ref{ch:future} 章研究问题）。

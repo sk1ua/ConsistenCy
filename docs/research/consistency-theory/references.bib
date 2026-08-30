@@ -1,0 +1,438 @@
+% ConsistenCy v3 Theoretical Foundations — bibliography (45 entries)
+% All entries web-verified 2026-08-28 (see notes/02-literature-canon.md for verification records).
+
+% ===== Capability security & reference monitor =====
+
+@article{dennis1966,
+  author  = {Dennis, Jack B. and Van Horn, Earl C.},
+  title   = {Programming Semantics for Multiprogrammed Computations},
+  journal = {Communications of the ACM},
+  volume  = {9},
+  number  = {3},
+  pages   = {143--155},
+  year    = {1966},
+  doi     = {10.1145/365230.365252}
+}
+
+@techreport{anderson1972,
+  author      = {Anderson, James P.},
+  title       = {Computer Security Technology Planning Study},
+  institution = {Deputy for Command and Management Systems, HQ Electronic Systems Division, USAF},
+  number      = {ESD-TR-73-51},
+  address     = {Hanscom Field, Bedford, MA},
+  year        = {1972},
+  note        = {Vol.~I, AD-758 206}
+}
+
+@article{saltzer1975,
+  author  = {Saltzer, Jerome H. and Schroeder, Michael D.},
+  title   = {The Protection of Information in Computer Systems},
+  journal = {Proceedings of the IEEE},
+  volume  = {63},
+  number  = {9},
+  pages   = {1278--1308},
+  year    = {1975},
+  doi     = {10.1109/PROC.1975.9939}
+}
+
+@inproceedings{redell1974,
+  author    = {Redell, D. D. and Fabry, R. S.},
+  title     = {Selective Revocation of Capabilities},
+  booktitle = {Proceedings of the IRIA International Workshop on Protection in Operating Systems},
+  pages     = {197--209},
+  year      = {1974},
+  address   = {Rocquencourt, France},
+  note      = {IRIA/LABORIA; bibliographic record reconstructed from peer citations (Flask, USENIX Security 1999; Levin et al., 1975)}
+}
+
+@article{hardy1988,
+  author  = {Hardy, Norm},
+  title   = {The Confused Deputy: (or why capabilities might have been invented)},
+  journal = {ACM SIGOPS Operating Systems Review},
+  volume  = {22},
+  number  = {4},
+  pages   = {36--38},
+  year    = {1988},
+  doi     = {10.1145/54289.871709}
+}
+
+@techreport{miller2003,
+  author      = {Miller, Mark S. and Yee, Ka-Ping and Shapiro, Jonathan},
+  title       = {Capability Myths Demolished},
+  institution = {Systems Research Laboratory, Johns Hopkins University},
+  number      = {SRL-2003-02},
+  year        = {2003}
+}
+
+@phdthesis{miller2006,
+  author = {Miller, Mark Samuel},
+  title  = {Robust Composition: Towards a Unified Approach to Access Control and Concurrency Control},
+  school = {Johns Hopkins University},
+  year   = {2006}
+}
+
+@inproceedings{klein2009,
+  author    = {Klein, Gerwin and Elphinstone, Kevin and Heiser, Gernot and Andronick, June and Cock, David and Derrin, Philip and Elkaduwe, Dhammika and Engelhardt, Kai and Kolanski, Rafal and Norrish, Michael and Sewell, Thomas and Tuch, Harvey and Winwood, Simon},
+  title     = {se{L}4: Formal Verification of an {OS} Kernel},
+  booktitle = {Proceedings of the 22nd ACM SIGOPS Symposium on Operating Systems Principles (SOSP '09)},
+  pages     = {207--220},
+  year      = {2009},
+  doi       = {10.1145/1629575.1629596}
+}
+
+@inproceedings{watson2010,
+  author    = {Watson, Robert N. M. and Anderson, Jonathan and Laurie, Ben and Kennaway, Kris},
+  title     = {Capsicum: Practical Capabilities for {UNIX}},
+  booktitle = {Proceedings of the 19th USENIX Security Symposium},
+  year      = {2010},
+  address   = {Washington, DC}
+}
+
+@article{bishop1996,
+  author  = {Bishop, Matt and Dilger, Michael},
+  title   = {Checking for Race Conditions in File Accesses},
+  journal = {Computing Systems},
+  volume  = {9},
+  number  = {2},
+  pages   = {131--152},
+  year    = {1996}
+}
+
+@misc{debenedetti2025,
+  author        = {Debenedetti, Edoardo and Shumailov, Ilia and Fan, Tianqi and others},
+  title         = {Defeating Prompt Injections by Design},
+  year          = {2025},
+  eprint        = {2503.18813},
+  archiveprefix = {arXiv},
+  note          = {Preprint; introduces the {CaMeL} capability-based control layer}
+}
+
+% ===== Scheduling, queueing & resource governance =====
+
+@article{little1961,
+  author  = {Little, John D. C.},
+  title   = {A Proof for the Queuing Formula: {L} = $\lambda${W}},
+  journal = {Operations Research},
+  volume  = {9},
+  number  = {3},
+  pages   = {383--387},
+  year    = {1961},
+  doi     = {10.1287/opre.9.3.383}
+}
+
+@article{kendall1953,
+  author  = {Kendall, David G.},
+  title   = {Stochastic Processes Occurring in the Theory of Queues and their Analysis by the Method of the Imbedded {M}arkov Chain},
+  journal = {The Annals of Mathematical Statistics},
+  volume  = {24},
+  number  = {3},
+  pages   = {338--354},
+  year    = {1953},
+  doi     = {10.1214/aoms/1177728975}
+}
+
+@article{kingman1962,
+  author  = {Kingman, J. F. C.},
+  title   = {On Queues in Heavy Traffic},
+  journal = {Journal of the Royal Statistical Society: Series B (Methodological)},
+  volume  = {24},
+  number  = {2},
+  pages   = {383--392},
+  year    = {1962}
+}
+
+@book{kleinrock1975,
+  author    = {Kleinrock, Leonard},
+  title     = {Queueing Systems, Volume 1: Theory},
+  publisher = {Wiley-Interscience},
+  address   = {New York},
+  year      = {1975}
+}
+
+@inproceedings{demers1989,
+  author    = {Demers, Alan and Keshav, Srinivasan and Shenker, Scott},
+  title     = {Analysis and Simulation of a Fair Queueing Algorithm},
+  booktitle = {Proceedings of the ACM SIGCOMM Conference on Applications, Technologies, Architectures, and Protocols for Computer Communication (SIGCOMM '89)},
+  pages     = {1--12},
+  year      = {1989},
+  doi       = {10.1145/75246.75248}
+}
+
+@book{altman1999,
+  author    = {Altman, Eitan},
+  title     = {Constrained {M}arkov Decision Processes},
+  series    = {Stochastic Modeling},
+  volume    = {7},
+  publisher = {Chapman \& Hall/CRC},
+  address   = {Boca Raton, FL},
+  year      = {1999}
+}
+
+@inproceedings{yu2022orca,
+  author    = {Yu, Gyeong-In and Jeong, Joo Seong and Kim, Geon-Woo and Kim, Soojeong and Chun, Byung-Gon},
+  title     = {Orca: A Distributed Serving System for Transformer-Based Generative Models},
+  booktitle = {Proceedings of the 16th USENIX Symposium on Operating Systems Design and Implementation (OSDI '22)},
+  year      = {2022}
+}
+
+@inproceedings{kwon2023vllm,
+  author    = {Kwon, Woosuk and Li, Zhuohan and Zhuang, Siyuan and Sheng, Ying and Zheng, Lianmin and Yu, Cody Hao and Gonzalez, Joseph E. and Zhang, Hao and Stoica, Ion},
+  title     = {Efficient Memory Management for Large Language Model Serving with {PagedAttention}},
+  booktitle = {Proceedings of the 29th ACM Symposium on Operating Systems Principles (SOSP '23)},
+  year      = {2023},
+  doi       = {10.1145/3600006.3613165}
+}
+
+% ===== Provenance, evidence & reproducibility =====
+
+@inproceedings{buneman2001,
+  author    = {Buneman, Peter and Khanna, Sanjeev and Tan, Wang-Chiew},
+  title     = {Why and Where: A Characterization of Data Provenance},
+  booktitle = {Proceedings of the 8th International Conference on Database Theory (ICDT 2001)},
+  series    = {LNCS},
+  volume    = {1973},
+  pages     = {316--330},
+  year      = {2001},
+  publisher = {Springer},
+  doi       = {10.1007/3-540-44503-X_20}
+}
+
+@misc{provdm2013,
+  author       = {Moreau, Luc and Missier, Paolo (eds.)},
+  title        = {{PROV-DM}: The {PROV} Data Model},
+  howpublished = {W3C Recommendation},
+  year         = {2013},
+  url          = {https://www.w3.org/TR/2013/REC-prov-dm-20130430/},
+  note         = {30 April 2013}
+}
+
+@inproceedings{merkle1989,
+  author    = {Merkle, Ralph C.},
+  title     = {A Certified Digital Signature},
+  booktitle = {Advances in Cryptology --- CRYPTO '89},
+  series    = {LNCS},
+  volume    = {435},
+  pages     = {218--238},
+  year      = {1990},
+  publisher = {Springer},
+  doi       = {10.1007/0-387-34805-0_21},
+  note      = {Hash-tree structure originated in the author's 1979 Stanford technical report and 1980 IEEE S\&P paper}
+}
+
+@article{schneier1999,
+  author  = {Schneier, Bruce and Kelsey, John},
+  title   = {Secure Audit Logs to Support Computer Forensics},
+  journal = {ACM Transactions on Information and System Security},
+  volume  = {2},
+  number  = {2},
+  pages   = {159--176},
+  year    = {1999},
+  doi     = {10.1145/317087.317089}
+}
+
+@inproceedings{crosby2009,
+  author    = {Crosby, Scott A. and Wallach, Dan S.},
+  title     = {Efficient Data Structures for Tamper-Evident Logging},
+  booktitle = {Proceedings of the 18th USENIX Security Symposium},
+  pages     = {317--334},
+  year      = {2009}
+}
+
+@inproceedings{torresarias2019,
+  author    = {Torres-Arias, Santiago and Afzali, Hafsa and Kuppusamy, Tayssir and Curtmola, Reza and Cappos, Justin},
+  title     = {in-toto: Providing Farm-to-Table Guarantees for Bits and Bytes},
+  booktitle = {Proceedings of the 28th USENIX Security Symposium},
+  year      = {2019}
+}
+
+@inproceedings{gao2023rarr,
+  author    = {Gao, Leo and others},
+  title     = {{RARR}: Researching and Revising What Language Models Say, Using Language Models},
+  booktitle = {Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
+  year      = {2023},
+  note      = {arXiv:2210.08726}
+}
+
+% ===== Agent systems, workflow & formal methods =====
+
+@book{agha1986,
+  author    = {Agha, Gul},
+  title     = {Actors: A Model of Concurrent Computation in Distributed Systems},
+  series    = {MIT Press Series in Artificial Intelligence},
+  publisher = {MIT Press},
+  address   = {Cambridge, MA},
+  year      = {1986}
+}
+
+@phdthesis{armstrong2003,
+  author = {Armstrong, Joe},
+  title  = {Making Reliable Distributed Systems in the Presence of Software Errors},
+  school = {Royal Institute of Technology (KTH), Stockholm, Sweden},
+  year   = {2003}
+}
+
+@article{keller1976,
+  author  = {Keller, Robert M.},
+  title   = {Formal Verification of Parallel Programs},
+  journal = {Communications of the ACM},
+  volume  = {19},
+  number  = {7},
+  pages   = {371--384},
+  year    = {1976},
+  doi     = {10.1145/360248.360251}
+}
+
+@inproceedings{pnueli1977,
+  author    = {Pnueli, Amir},
+  title     = {The Temporal Logic of Programs},
+  booktitle = {18th Annual Symposium on Foundations of Computer Science (FOCS 1977)},
+  pages     = {46--57},
+  year      = {1977},
+  doi       = {10.1109/SFCS.1977.32}
+}
+
+@incollection{harel1985,
+  author    = {Harel, David and Pnueli, Amir},
+  title     = {On the Development of Reactive Systems},
+  booktitle = {Logics and Models of Concurrent Systems},
+  editor    = {Apt, Krzysztof R.},
+  series    = {NATO ASI Series F},
+  volume    = {13},
+  pages     = {477--498},
+  publisher = {Springer},
+  address   = {Berlin},
+  year      = {1985},
+  doi       = {10.1007/978-3-642-82453-1_17}
+}
+
+@inproceedings{clarke1981,
+  author    = {Clarke, Edmund M. and Emerson, E. Allen},
+  title     = {Design and Synthesis of Synchronization Skeletons Using Branching Time Temporal Logic},
+  booktitle = {Logics of Programs},
+  series    = {LNCS},
+  volume    = {131},
+  publisher = {Springer},
+  year      = {1981},
+  doi       = {10.1007/BFb0025774}
+}
+
+@article{vanderaalst1998,
+  author  = {van der Aalst, Wil M. P.},
+  title   = {The Application of {P}etri Nets to Workflow Management: Methods, Technology, and Tools},
+  journal = {Journal of Circuits, Systems and Computers},
+  volume  = {8},
+  number  = {1},
+  pages   = {21--66},
+  year    = {1998}
+}
+
+@inproceedings{li2022codereviewer,
+  author    = {Li, Zhiyu and Lu, Shuai and Guo, Daya and others},
+  title     = {Automating Code Review Activities by Large-scale Pre-training},
+  booktitle = {Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE 2022)},
+  year      = {2022},
+  doi       = {10.1145/3540250.3549081},
+  note      = {arXiv:2203.09095}
+}
+
+@inproceedings{goldman2025,
+  author    = {Goldman, Saul and Lin, Hong Yi and Pasuksmit, Jirat and Thongtanunam, Patanamon and Tantithamthavorn, Kla and Wang, Zhe and Zhang, Ray and Behnaz, Ali and Jiang, Fan and Siers, Michael and Jiang, Ryan and Buller, Mike and Jeong, Minwoo and Wu, Ming},
+  title     = {What Types of Code Review Comments Do Developers Most Frequently Resolve?},
+  booktitle = {Proceedings of the 40th IEEE/ACM International Conference on Automated Software Engineering (ASE 2025)},
+  pages     = {3760--3765},
+  year      = {2025},
+  doi       = {10.1109/ASE63991.2025.00312},
+  note      = {arXiv:2510.05450}
+}
+
+@inproceedings{yao2023react,
+  author    = {Yao, Shunyu and Zhao, Jeffrey and Yu, Dian and Du, Nan and Shafran, Izhak and Narasimhan, Karthik and Cao, Yuan},
+  title     = {{ReAct}: Synergizing Reasoning and Acting in Language Models},
+  booktitle = {The Eleventh International Conference on Learning Representations (ICLR 2023)},
+  year      = {2023},
+  note      = {arXiv:2210.03629}
+}
+
+@inproceedings{wu2024autogen,
+  author    = {Wu, Qingyun and Bansal, Gagan and Zhang, Jieyu and others},
+  title     = {{AutoGen}: Enabling Next-Gen {LLM} Applications via Multi-Agent Conversation},
+  booktitle = {First Conference on Language Modeling (COLM 2024)},
+  year      = {2024},
+  note      = {arXiv:2308.08155}
+}
+
+@inproceedings{hong2024metagpt,
+  author    = {Hong, Sirui and others},
+  title     = {{MetaGPT}: Meta Programming for A Multi-Agent Collaborative Framework},
+  booktitle = {The Twelfth International Conference on Learning Representations (ICLR 2024)},
+  year      = {2024},
+  note      = {arXiv:2308.00352}
+}
+
+% ===== Freshness / Age of Information (skeptic lane) =====
+
+@inproceedings{kaul2012,
+  author    = {Kaul, Sanjit and Yates, Roy D. and Gruteser, Marco},
+  title     = {Real-Time Status: How Often Should One Update?},
+  booktitle = {Proceedings of IEEE INFOCOM 2012},
+  pages     = {2731--2735},
+  year      = {2012},
+  doi       = {10.1109/INFCOM.2012.6195689}
+}
+
+@article{yates2021,
+  author  = {Yates, Roy D. and Sun, Yin and Brown, D. Richard and Kaul, Sanjit K. and Modiano, Eytan and Ulukus, Sennur},
+  title   = {Age of Information: An Introduction and Survey},
+  journal = {IEEE Journal on Selected Areas in Communications},
+  volume  = {39},
+  number  = {5},
+  pages   = {1183--1210},
+  year    = {2021},
+  doi     = {10.1109/JSAC.2021.3065072}
+}
+
+@inproceedings{astrom1999,
+  author    = {{\AA}str{\"o}m, Karl J. and Bernhardsson, Bo},
+  title     = {Comparison of Periodic and Event Based Sampling for First-Order Stochastic Systems},
+  booktitle = {Proceedings of the 14th IFAC World Congress},
+  address   = {Beijing, China},
+  year      = {1999}
+}
+
+@article{tabuada2007,
+  author  = {Tabuada, Paulo},
+  title   = {Event-Triggered Real-Time Scheduling of Stabilizing Control Tasks},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {52},
+  number  = {9},
+  pages   = {1680--1685},
+  year    = {2007},
+  doi     = {10.1109/TAC.2007.904277}
+}
+
+@article{page1954,
+  author  = {Page, E. S.},
+  title   = {Continuous Inspection Schemes},
+  journal = {Biometrika},
+  volume  = {41},
+  number  = {1--2},
+  pages   = {100--115},
+  year    = {1954}
+}
+
+@book{ross1970,
+  author    = {Ross, Sheldon M.},
+  title     = {Applied Probability Models with Optimization Applications},
+  publisher = {Holden-Day},
+  address   = {San Francisco},
+  year      = {1970},
+  note      = {Dover reprint, 1992}
+}
+
+@misc{buyukates2021,
+  author        = {Buyukates, Baturalp and Bastopcu, Melih and Ulukus, Sennur},
+  title         = {Version Age of Information in Clustered Gossip Networks},
+  year          = {2021},
+  eprint        = {2109.08669},
+  archiveprefix = {arXiv}
+}
