@@ -49,6 +49,7 @@ export interface ReviewAgentBodyOptions {
   readonly headSha: string;
   readonly reportLanguage: "zh-CN" | "en-US";
   readonly relevantContext?: Record<string, RelevantContext>;
+  readonly focusAreas?: ReadonlyArray<{ pathPattern: string; guidance: string }>;
   readonly facades: AgentFacadeSet;
   readonly persistence: ReviewPersistence;
   readonly providerName: string;
@@ -87,6 +88,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.evidence,
         options.reportLanguage,
         options.relevantContext,
+        options.focusAreas,
       );
 
       // WAIT_LLM: a remote inference operation is being submitted. This

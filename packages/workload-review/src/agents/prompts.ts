@@ -97,7 +97,8 @@ export function buildAgentPrompt(
   deterministicResult: DomainAnalyzeSuccess | undefined,
   evidence: readonly EvidenceSnapshot[],
   reportLanguage: "zh-CN" | "en-US" = "zh-CN",
-  relevantContext?: Record<string, RelevantContext>
+  relevantContext?: Record<string, RelevantContext>,
+  focusAreas?: ReadonlyArray<{ pathPattern: string; guidance: string }>
 ): { systemPrompt: string; userPrompt: string } {
   const files = Object.entries(context.fileContents)
     .map(([path, content]) => `FILE ${path}\n${numbered(content)}`)
@@ -139,11 +140,20 @@ export function buildAgentPrompt(
     ? "Change set: local repository review"
     : `Pull request: #${context.pullRequestNumber}`;
 
+  const focusAreasSection = focusAreas && focusAreas.length > 0
+    ? [
+        "=== PLANNER FOCUS AREAS (advisory) ===",
+        "The review planner asks you to prioritize these areas first. This does NOT limit your scope: still report any real finding outside them.",
+        ...focusAreas.map(area => `- ${area.pathPattern}: ${area.guidance}`)
+      ].join("\n")
+    : "";
+
   const userPromptParts = [
     `Repository: ${context.repositoryFullName}`,
     changeSetLine,
     `Base/head: ${context.baseSha}..${context.headSha}`,
     `Changed files: ${context.changedFiles.map(file => `${file.path} (${file.status})`).join(", ")}`,
+    focusAreasSection,
     staticEvidenceSection,
     buildEvidenceSection(evidence),
     buildHistorySection(relevantContext),

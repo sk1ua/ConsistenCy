@@ -80,6 +80,7 @@ describe("ReviewWorkload — evidence grounding", () => {
           skippedAgents: ["Correctness", "Maintainability", "Test", "Style", "ArchitectureAuditor"],
           riskAreas: ["changed code"],
           reason: "bogus plan",
+          focusAreas: [],
         } as never,
       }),
       invokeAgentFindings: async () => ({ data: findings }),
@@ -104,6 +105,7 @@ describe("ReviewWorkload — evidence grounding", () => {
           skippedAgents: ["Correctness", "Maintainability", "Test", "Style", "ArchitectureAuditor"],
           riskAreas: ["changed code"],
           reason: "valid plan",
+          focusAreas: [],
         } as never,
       }),
       invokeAgentFindings: async () => ({

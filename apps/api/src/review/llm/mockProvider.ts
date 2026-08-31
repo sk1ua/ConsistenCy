@@ -21,7 +21,8 @@ export class MockLLMProvider extends BaseLLMProvider {
           enabledAgents: REVIEW_AGENTS,
           skippedAgents: [],
           riskAreas: ["changed code"],
-          reason: "Mock provider enables the deterministic review agent set."
+          reason: "Mock provider enables the deterministic review agent set.",
+          focusAreas: []
         }))
       };
     }

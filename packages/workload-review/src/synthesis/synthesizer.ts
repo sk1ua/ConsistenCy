@@ -89,7 +89,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         throw new Error("synthesizer lost Scheduler admission after compose");
       }
 
-      const findings = deduplicateAndSortFindings(options.findings);
+      const { findings } = deduplicateAndSortFindings(options.findings);
       const {
         overallScore: score,
         riskLevel,
@@ -172,7 +172,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         llmProvider: providerName,
         llmModel: model,
         agentRuns: [...options.agentRuns, run],
-        findings,
+        findings: options.findings,
         score,
         riskLevel,
         retrieval: options.deterministicResult.evidencePack

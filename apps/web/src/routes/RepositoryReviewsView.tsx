@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, RefreshCw, FileSearch } from "lucide-react";
-import type { ReviewJob } from "@consistency/schema";
+import { riskBandForFindings, type ReviewJob } from "@consistency/schema";
 import { api } from "../api/client";
 import { workspaceQueryKeys } from "../query/client";
 import { Button } from "../design-system/Button";
@@ -160,7 +160,7 @@ function ReviewRow({ job, zh }: { job: ReviewJob; zh: boolean }) {
       <span style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
         {report ? (
           <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {zh ? "风险" : "risk"}: {report.riskLevel} · {zh ? "分" : "score"}: {report.score}
+            {zh ? "静态风险" : "static risk"}: {report.riskLevel} · {zh ? "发现风险" : "finding risk"}: {report.riskBand ?? riskBandForFindings(report.findings)} · {zh ? "分" : "score"}: {report.score}
           </span>
         ) : (
           <span style={{ fontSize: 12, color: "var(--muted)" }}>{zh ? "报告：—" : "report: —"}</span>

@@ -7,6 +7,7 @@ export const testReports: ReviewReport[] = [
     pullRequestNumber: 34,
     score: 74,
     riskLevel: "medium",
+    riskBand: "medium",
     summary: "Multi-agent review completed for sk1ua/ConsistenCy pull request #34.",
     baseSha: "base1234",
     headSha: "head5678",

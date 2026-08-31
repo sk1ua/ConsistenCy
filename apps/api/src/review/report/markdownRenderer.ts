@@ -1,4 +1,4 @@
-import type { ReviewFinding, ReviewReport } from "@consistency/schema";
+import { riskBandForFindings, type ReviewFinding, type ReviewReport } from "@consistency/schema";
 
 function location(finding: ReviewFinding): string {
   if (finding.startLine === undefined) return finding.file;
@@ -39,7 +39,10 @@ export function renderReviewComment(report: ReviewReport, options: {
     "",
     mode,
     "",
-    `**Score:** ${report.score}/100 · **Risk:** ${report.riskLevel.toUpperCase()} · **Findings:** ${report.findings.length}`,
+    `**Score:** ${report.score}/100 · **Static risk:** ${report.riskLevel.toUpperCase()} · **Finding risk:** ${(report.riskBand ?? riskBandForFindings(report.findings)).toUpperCase()} · **Findings:** ${report.findings.length}`,
+    report.duplicates && report.duplicates.length > 0
+      ? `_${report.duplicates.length} duplicate finding(s) were merged deterministically; the finding count excludes merged duplicates._`
+      : "",
     "",
     report.summary,
     "",

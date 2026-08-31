@@ -361,6 +361,7 @@ export class ReviewWorkload {
           headSha: options.context.headSha,
           reportLanguage: options.reportLanguage,
           relevantContext,
+          focusAreas: plan.focusAreas,
           facades: runtime.facades,
           persistence,
           providerName: options.modelDriver.provider,

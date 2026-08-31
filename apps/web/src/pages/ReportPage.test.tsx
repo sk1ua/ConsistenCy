@@ -23,6 +23,7 @@ describe("ReportPage (Review Overview)", () => {
     expect(html).toContain("Findings");
     expect(html).toContain("74");
     expect(html).toContain("Decision");
+    expect(html).toContain("finding risk: medium");
 
     // Does NOT contain duplicate inner mode tabs
     expect(html).not.toContain("workspace-mode-tabs");

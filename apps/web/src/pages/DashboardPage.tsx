@@ -1,4 +1,4 @@
-import type { HeartbeatPulse, ReviewJob, ReviewReport, StatsResponse } from "@consistency/schema";
+import { riskBandForFindings, type HeartbeatPulse, type ReviewJob, type ReviewReport, type StatsResponse } from "@consistency/schema";
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, Clock3, FolderGit2, History, Inbox, Layers, Play, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo } from "react";
 import { StatusBadge } from "../components/StatusBadge";
@@ -126,6 +126,7 @@ export function DashboardPage({
                       <span className="score-mini-pill">
                         <strong>{report.score}</strong>
                         <StatusBadge value={report.riskLevel} />
+                        <span className={`risk-band risk-band-${report.riskBand ?? riskBandForFindings(report.findings)}`} aria-label={zh ? "发现风险" : "Finding risk"}>{report.riskBand ?? riskBandForFindings(report.findings)}</span>
                       </span>
                     )}
                   </div>
@@ -217,6 +218,7 @@ export function DashboardPage({
                       <span className="score-mini-pill">
                         <strong>{report.score}</strong>
                         <StatusBadge value={report.riskLevel} />
+                        <span className={`risk-band risk-band-${report.riskBand ?? riskBandForFindings(report.findings)}`} aria-label={zh ? "发现风险" : "Finding risk"}>{report.riskBand ?? riskBandForFindings(report.findings)}</span>
                       </span>
                     ) : <span className="muted-text">—</span>}
                   </div>

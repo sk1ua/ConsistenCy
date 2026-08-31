@@ -1,4 +1,4 @@
-import type { JobStatus, ReviewJob, Severity } from "@consistency/schema";
+import { riskBandForFindings, type JobStatus, type ReviewJob, type Severity } from "@consistency/schema";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { StatusBadge } from "../components/StatusBadge";
@@ -45,7 +45,7 @@ export function JobsPage({ jobs, onOpenJob }: { jobs: ReviewJob[]; onOpenJob: (j
                 </button>
               </td>
               <td><StatusBadge value={job.status} /></td>
-              <td>{job.report ? <StatusBadge value={job.report.riskLevel} /> : "-"}</td>
+              <td>{job.report ? <span className="job-risk-stack"><StatusBadge value={job.report.riskLevel} /><small>{job.report.riskBand ?? riskBandForFindings(job.report.findings)}</small></span> : "-"}</td>
               <td>{job.report?.findings.length ?? "-"}</td>
               <td className="commit-range"><code>{baseDisplay} → {headDisplay}</code></td>
               <td>{new Date(job.createdAt).toLocaleDateString(locale)}</td>

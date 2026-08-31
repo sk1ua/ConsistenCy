@@ -10,8 +10,9 @@ const fixtureReport: ReviewReport = {
   headSha: "2894e50",
   summary: "Automated review.",
   score: 74,
-  riskLevel: "medium",
-  agentRuns: [],
+    riskLevel: "medium",
+    riskBand: "medium",
+    agentRuns: [],
   findings: [
     {
       id: "finding-1",
@@ -41,6 +42,8 @@ describe("renderReviewComment", () => {
     expect(markdown).toContain("# ConsistenCy PR Review");
     expect(markdown).toContain("apps/api/src/http.ts");
     expect(markdown).toContain("View full report in ConsistenCy");
+    expect(markdown).toContain("**Finding risk:** MEDIUM");
+    expect(markdown).toContain("**Static risk:** MEDIUM");
     expect(markdown.length).toBeLessThanOrEqual(60_000);
   });
 });

@@ -105,8 +105,29 @@ export const reviewPlanSchema = z.object({
   enabledAgents: z.array(reviewAgentNameSchema),
   skippedAgents: z.array(reviewAgentNameSchema),
   riskAreas: z.array(nonEmpty),
-  reason: nonEmpty
+  reason: nonEmpty,
+  /**
+   * Optional planner triage output: areas the review agents should focus on
+   * first (typically product code over tests). Advisory only — agents may
+   * still report any real finding outside these areas. Optional so plans
+   * produced before this field existed keep parsing.
+   */
+  focusAreas: z
+    .array(
+      z
+        .object({
+          pathPattern: nonEmpty,
+          guidance: nonEmpty
+        })
+        .strict()
+    )
+    .default([])
 }).strict();
+
+export type ReviewPlanFocusArea = {
+  pathPattern: string;
+  guidance: string;
+};
 
 export type Severity = z.infer<typeof severitySchema>;
 export type Confidence = z.infer<typeof confidenceSchema>;

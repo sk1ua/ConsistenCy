@@ -77,6 +77,7 @@ describe("DashboardPage operations inbox", () => {
     expect(text).toContain("Inbox");
     expect(text).toContain("Needs Attention");
     expect(text).toContain("acme/payments-api");
+    expect(text).toContain("Finding risk");
   });
 
   it("renders explicit source-aware empty states", () => {

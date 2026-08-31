@@ -159,7 +159,7 @@ export interface ReviewWorkloadOptions {
 
 export interface ReviewWorkloadResult {
   readonly report: ReviewReport;
-  readonly plan: { enabledAgents: string[]; skippedAgents: string[]; riskAreas: string[]; reason: string };
+  readonly plan: { enabledAgents: string[]; skippedAgents: string[]; riskAreas: string[]; reason: string; focusAreas: Array<{ pathPattern: string; guidance: string }> };
   readonly runId: RunId;
   readonly findings: readonly ReviewFinding[];
   readonly evidence: readonly EvidenceSnapshot[];

@@ -161,6 +161,7 @@ export class TestModelDriver implements ModelDriver {
         skippedAgents: ["ArchitectureAuditor"],
         riskAreas: ["changed code"],
         reason: "fixture plan",
+        focusAreas: [],
       };
       return Promise.resolve({ data: plan as T, tokenUsage: { totalTokens: 10 } });
     }

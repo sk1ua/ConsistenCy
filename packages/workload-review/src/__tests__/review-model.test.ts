@@ -23,7 +23,7 @@ function makeLegacyProvider(): LegacyProviderLike & { calls: string[] } {
       calls.push(`structured:${request.schemaName}`);
       const fixture =
         request.schemaName === "review-plan"
-          ? { enabledAgents: ["Security"], skippedAgents: [], riskAreas: ["r"], reason: "ok" }
+          ? { enabledAgents: ["Security"], skippedAgents: [], riskAreas: ["r"], reason: "ok", focusAreas: [] }
           : { findings: [] };
       return { data: request.schema.parse(fixture), tokenUsage: { totalTokens: 11 } };
     },

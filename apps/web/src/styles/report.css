@@ -649,6 +649,44 @@
   border-radius: var(--radius-md);
 }
 
+.review-hero-risk-stack {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.risk-band {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.risk-band-high { color: var(--danger); }
+.risk-band-medium { color: var(--warning); }
+.risk-band-low { color: var(--muted-strong); }
+.risk-band-none { color: var(--success); }
+
+.job-risk-stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.job-risk-stack small {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.score-mini-pill .risk-band {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
 .score-main-val {
   display: flex;
   flex-direction: column;
@@ -730,6 +768,13 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: 0 1px 3px var(--shadow-soft);
+}
+
+.deduplication-note {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .review-sidebar-highlights {

@@ -1,4 +1,4 @@
-import type { ReviewJob, ReviewReport } from "@consistency/schema";
+import { riskBandForFindings, type ReviewJob, type ReviewReport } from "@consistency/schema";
 import { CheckCircle2, FileSearch2, GitBranch, ShieldAlert, ShieldCheck, Sparkles } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import { FindingItem } from "../components/FindingItem";
@@ -51,6 +51,7 @@ export function ReportPage({
   const provenance = job ? formatReviewSource(job, zh) : { sourceText: "—", publicationText: "—", isFixture: false };
   const resolvedProvider = boundReport?.llmProvider ?? job?.llmProvider ?? llmProvider;
   const resolvedModel = boundReport?.llmModel ?? job?.llmModel ?? llmModel;
+  const findingRiskBand = boundReport ? boundReport.riskBand ?? riskBandForFindings(boundReport.findings) : undefined;
   const modelDisplay = resolvedProvider && resolvedProvider !== "none"
     ? `${resolvedProvider}${resolvedModel ? ` · ${resolvedModel}` : ""}`
     : t("unavailable");
@@ -96,7 +97,14 @@ export function ReportPage({
               <strong>{boundReport?.score ?? "-"}</strong>
               <small>{zh ? "质量评分" : "score"}</small>
             </div>
-            {boundReport && <StatusBadge value={boundReport.riskLevel} />}
+            {boundReport && (
+              <div className="review-hero-risk-stack">
+                <StatusBadge value={boundReport.riskLevel} />
+                {findingRiskBand && <span className={`risk-band risk-band-${findingRiskBand}`}>
+                  {zh ? `发现风险：${findingRiskBand === "high" ? "高" : findingRiskBand === "medium" ? "中" : findingRiskBand === "low" ? "低" : "无"}` : `finding risk: ${findingRiskBand}`}
+                </span>}
+              </div>
+            )}
           </div>
         </div>
 
@@ -143,6 +151,11 @@ export function ReportPage({
               <div>
                 <h2>{t("Findings")}</h2>
                 <p>{zh ? "已核验的缺陷证据、推导与修复建议" : "Evidence, reasoning and remediation"}</p>
+                {boundReport?.duplicates && boundReport.duplicates.length > 0 && (
+                  <p className="deduplication-note" role="status">
+                    {zh ? `另有 ${boundReport.duplicates.length} 条重复发现已合并。` : `${boundReport.duplicates.length} duplicate finding${boundReport.duplicates.length === 1 ? "" : "s"} merged.`}
+                  </p>
+                )}
               </div>
             </div>
             <div className="segmented" role="group" aria-label={t("Findings")}>

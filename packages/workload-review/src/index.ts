@@ -56,4 +56,5 @@ export {
   REVIEW_PROJECT_METADATA_MAX_CHARS,
 } from "./agents/prompts.js";
 export { deduplicateAndSortFindings, buildReviewReport } from "./synthesis/report.js";
+export { riskBandForFindings } from "@consistency/schema";
 export { buildComposeReviewFileResults } from "./synthesis/compose.js";

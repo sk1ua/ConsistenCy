@@ -297,6 +297,32 @@ describe("ReviewWorkload — runtime foundations", () => {
     expect(JSON.stringify(result.report)).not.toContain(FAKE_TOKEN);
   });
 
+  it("AC-REV-12: final synthesis preserves deterministic duplicate disclosure", async () => {
+    const correctnessVariant = {
+      ...securityFinding(),
+      id: "finding-correctness-duplicate",
+      agent: "Correctness" as const,
+      title: "Hardcoded synthetic credential in source",
+      severity: "medium" as const,
+      confidence: "confirmed" as const,
+      startLine: 2,
+      endLine: 2,
+    };
+    const driver = new TestModelDriver({
+      findingsByAgent: {
+        Security: [securityFinding()],
+        Correctness: [correctnessVariant],
+      },
+    });
+    const { workload } = makeRig({ driver });
+
+    const result = await workload.run();
+
+    expect(result.report.findings.map(finding => finding.id)).toEqual(["finding-1"]);
+    expect(result.report.duplicates?.map(finding => finding.id)).toEqual(["finding-correctness-duplicate"]);
+    expect(result.report.riskBand).toBe("high");
+  });
+
   it("AC-REV-13: Run cancellation prevents further Agent admission", async () => {
     let workloadRef: ReviewWorkload | null = null;
     const admittedNames: string[] = [];
@@ -373,6 +399,7 @@ describe("ReviewWorkload — runtime foundations", () => {
         skippedAgents: ["Correctness", "Maintainability", "Test", "ArchitectureAuditor"],
         riskAreas: ["changed code"],
         reason: "narrow plan",
+        focusAreas: [],
       },
       hook: ({ agentName, scheduler }) => {
         admitted.push(agentName);

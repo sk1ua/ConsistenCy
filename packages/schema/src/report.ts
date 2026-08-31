@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agentRunSchema, reviewFindingSchema } from "./review";
+import { agentRunSchema, reviewFindingSchema, type Severity } from "./review";
 
 export const riskLevelSchema = z.enum(["critical", "high", "medium", "low"]);
 const evidenceKindSchema = z.enum([
@@ -101,13 +101,40 @@ export const reviewReportSchema = z.object({
   summary: z.string().trim().min(1),
   score: z.number().int().min(0).max(100),
   riskLevel: riskLevelSchema,
+  /**
+   * Verdict band derived from the FINAL LLM findings' severity distribution
+   * (any high → high; else any medium → medium; else low; no findings →
+   * none). Deliberately separate from `riskLevel`, which is the
+   * deterministic static-analysis score band; UIs should present the two as
+   * distinct, explicitly named fields. Optional so persisted reports from
+   * before this field existed keep parsing.
+   */
+  riskBand: z.enum(["high", "medium", "low", "none"]).optional(),
   llmProvider: z.string().trim().min(1).optional(),
   llmModel: z.string().trim().min(1).optional(),
   agentRuns: z.array(agentRunSchema),
   findings: z.array(reviewFindingSchema),
+  /**
+   * Findings merged away by deterministic cross-agent deduplication
+   * (same file, near-identical title). Kept for honesty instead of being
+   * silently dropped. Optional for backward compatibility.
+   */
+  duplicates: z.array(reviewFindingSchema).optional(),
   retrieval: retrievalTraceSchema.optional(),
   createdAt: z.string().datetime()
 }).strict();
+
+/**
+ * Derive the verdict band from the final findings' severity distribution.
+ * Deterministic; the static-analysis `score`/`riskLevel` are inputs to the
+ * review, not to this band.
+ */
+export function riskBandForFindings(findings: Array<{ severity: Severity }>): "high" | "medium" | "low" | "none" {
+  if (findings.some(finding => finding.severity === "critical" || finding.severity === "high")) return "high";
+  if (findings.some(finding => finding.severity === "medium")) return "medium";
+  if (findings.length > 0) return "low";
+  return "none";
+}
 
 export type RiskLevel = z.infer<typeof riskLevelSchema>;
 export type EvidencePack = z.infer<typeof evidencePackSchema>;
