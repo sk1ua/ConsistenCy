@@ -348,6 +348,14 @@
   pointer-events: none;
 }
 
+/* The prefix slot may stretch its child in flex contexts (e.g. tall toolbar
+   rows); pin the glyph so a size={14} icon never renders magnified. */
+.ds-input-prefix svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
 /* Tabs */
 .ds-tabs-nav {
   display: flex;
