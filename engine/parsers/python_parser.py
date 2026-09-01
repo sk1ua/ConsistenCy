@@ -3,7 +3,7 @@
 Python Parser
 =============
 Python-specific parser using stdlib ast module.
-Maintains backward compatibility with existing ParserAgent.
+Feeds the canonical ParserAnalyzer snapshot contract; legacy ParserAgent imports remain available through engine.agents.
 """
 from __future__ import annotations
 

@@ -243,7 +243,7 @@ def main() -> int:
             action="analyze",
             files=load_files(root, paths, baselines),
             options={
-                "agents": ["style", "structural", "semantic", "duplication", "security"],
+                "analyzers": ["style", "structural", "semantic", "duplication", "security"],
                 "include_evidence_pack": False,
             },
         )

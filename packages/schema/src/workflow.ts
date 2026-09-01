@@ -21,12 +21,12 @@ export const sha256DigestSchema = z
 
 /**
  * Allowlisted analyzers. A workflow file selects from this set; it cannot
- * supply an arbitrary command. This mirrors the deterministic agent registry
- * in `engine/agents/registry.py` — adding a capability is a reviewed code
+ * supply an arbitrary command. This mirrors the deterministic analyzer registry
+ * in `engine/analyzers/registry.py` — adding a capability is a reviewed code
  * change, not a YAML edit, because workflow files are themselves repository
  * content that an attacker may control.
  *
- * The `engine.*` ids map 1:1 onto the existing Python agent registry.
+ * The `engine.*` ids map 1:1 onto the existing Python analyzer registry.
  */
 export const analyzerKindSchema = z.enum([
   "engine.style",

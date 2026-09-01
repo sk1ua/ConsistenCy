@@ -1,45 +1,45 @@
 # -*- coding: utf-8 -*-
 """
-SecurityAgent / EvolutionAgent 回归测试
-====================================
+SecurityAnalyzer / EvolutionAnalyzer 回归测试
+==========================================
 覆盖 SQL 注入规则扩展（f-string / .format / %）与演化熵计算逻辑。
 """
-from engine.agents.security_agent import SecurityAgent
-from engine.agents.evolution_agent import EvolutionAgent
+from engine.analyzers.security_analyzer import SecurityAnalyzer
+from engine.analyzers.evolution_analyzer import EvolutionAnalyzer
 
 
 def test_security_detects_sql_fstring():
-    agent = SecurityAgent()
+    analyzer = SecurityAnalyzer()
     src = """
 def q(user_id):
     sql = f\"SELECT * FROM users WHERE id = {user_id}\"
     return sql
 """
-    result = agent.run({"source": src}, {"source": ""})
+    result = analyzer.run({"source": src}, {"source": ""})
     assert result.details["medium_count"] >= 1
     assert any("SQL Injection Risk" in ev for ev in result.evidence)
 
 
 def test_security_detects_sql_dot_format():
-    agent = SecurityAgent()
+    analyzer = SecurityAnalyzer()
     src = """
 def q(username):
     sql = "SELECT * FROM users WHERE name = '{}'".format(username)
     return sql
 """
-    result = agent.run({"source": src}, {"source": ""})
+    result = analyzer.run({"source": src}, {"source": ""})
     assert result.details["medium_count"] >= 1
     assert any("SQL Injection Risk" in ev for ev in result.evidence)
 
 
 def test_security_detects_sql_percent_format():
-    agent = SecurityAgent()
+    analyzer = SecurityAnalyzer()
     src = """
 def q(username):
     sql = "SELECT * FROM users WHERE name = '%s'" % username
     return sql
 """
-    result = agent.run({"source": src}, {"source": ""})
+    result = analyzer.run({"source": src}, {"source": ""})
     assert result.details["medium_count"] >= 1
     assert any("SQL Injection Risk" in ev for ev in result.evidence)
 
@@ -51,34 +51,34 @@ def test_security_sql_fstring_ignores_interpolated_variable_names():
     interpolated identifiers such as {where} matched the WHERE keyword and
     {select!r} matched SELECT.
     """
-    agent = SecurityAgent()
+    analyzer = SecurityAnalyzer()
     src = """
 def validate(where, select):
     raise ValueError(f"{where} must be a mapping")
     raise ValueError(f"Unsafe ruff option value: {select!r}")
 """
-    result = agent.run({"source": src}, {"source": ""})
+    result = analyzer.run({"source": src}, {"source": ""})
     assert result.details["medium_count"] == 0
     assert not any("SQL Injection Risk" in ev for ev in result.evidence)
 
 
 def test_security_sql_fstring_without_interpolation_is_not_flagged():
     """A constant f-string is not injectable, whatever keywords it holds."""
-    agent = SecurityAgent()
-    result = agent.run({"source": 'LABEL = f"SELECT count(*) FROM t"\n'}, {"source": ""})
+    analyzer = SecurityAnalyzer()
+    result = analyzer.run({"source": 'LABEL = f"SELECT count(*) FROM t"\n'}, {"source": ""})
     assert result.details["medium_count"] == 0
     assert not any("SQL Injection Risk" in ev for ev in result.evidence)
 
 
 def test_security_sql_fstring_placeholder_list_stays_flagged():
     """Literal SQL plus generated placeholders must remain a review lead."""
-    agent = SecurityAgent()
+    analyzer = SecurityAnalyzer()
     src = '''
 def q(paths):
     placeholders = ",".join("?" for _ in paths)
     return cursor.execute(f"SELECT * FROM t WHERE id IN ({placeholders})", paths)
 '''
-    result = agent.run({"source": src}, {"source": ""})
+    result = analyzer.run({"source": src}, {"source": ""})
     assert result.details["medium_count"] >= 1
     assert any("SQL Injection Risk" in ev for ev in result.evidence)
 
@@ -99,14 +99,14 @@ def test_evolution_entropy_uses_file_churn_distribution():
         "file_churn_map": {"a.py": 50, "b.py": 50},
     }
 
-    focused_entropy = EvolutionAgent._avg_entropy([focused_commit])
-    spread_entropy = EvolutionAgent._avg_entropy([spread_commit])
+    focused_entropy = EvolutionAnalyzer._avg_entropy([focused_commit])
+    spread_entropy = EvolutionAnalyzer._avg_entropy([spread_commit])
 
     assert spread_entropy > focused_entropy
 
 
 def test_evolution_entropy_score_changes_with_distribution():
-    agent = EvolutionAgent()
+    analyzer = EvolutionAnalyzer()
     snapshot = {
         "commits": [{
             "author": "alice",
@@ -126,7 +126,7 @@ def test_evolution_entropy_score_changes_with_distribution():
         }]
     }
 
-    result = agent.run(snapshot, baseline)
+    result = analyzer.run(snapshot, baseline)
     assert result.details["entropy_score"] > 0.0
     assert result.details["avg_entropy_now"] < result.details["avg_entropy_base"]
 
@@ -135,15 +135,15 @@ def test_evolution_entropy_score_changes_with_distribution():
 
 
 def test_scan_file_python_detects_credentials():
-    agent = SecurityAgent()
-    result = agent.scan_file('API_KEY = "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx"')
+    analyzer = SecurityAnalyzer()
+    result = analyzer.scan_file('API_KEY = "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx"')
     assert result["score"] > 0
     assert result["critical_count"] >= 1
 
 
 def test_scan_file_javascript_detects_eval():
-    agent = SecurityAgent()
-    result = agent.scan_file(
+    analyzer = SecurityAnalyzer()
+    result = analyzer.scan_file(
         'function run(x) { eval(x); }',
         language="javascript",
     )
@@ -152,8 +152,8 @@ def test_scan_file_javascript_detects_eval():
 
 
 def test_scan_file_typescript_detects_xss():
-    agent = SecurityAgent()
-    result = agent.scan_file(
+    analyzer = SecurityAnalyzer()
+    result = analyzer.scan_file(
         'function render(user) { document.getElementById("app").innerHTML = user; }',
         language="typescript",
     )
@@ -164,8 +164,8 @@ def test_scan_file_typescript_detects_xss():
 
 
 def test_scan_file_clean_code_returns_zero():
-    agent = SecurityAgent()
-    result = agent.scan_file("def add(x, y):\n    return x + y\n")
+    analyzer = SecurityAnalyzer()
+    result = analyzer.scan_file("def add(x, y):\n    return x + y\n")
     assert result["score"] == 0.0
     assert result["critical_count"] == 0
     assert result["high_count"] == 0

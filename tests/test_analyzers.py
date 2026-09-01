@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-Agent 单元测试
-==============
-覆盖 ParserAgent、StyleAgent、StructuralAgent、SemanticAgent、
-DuplicationAgent、RiskScoringAgent 的核心逻辑。
+Deterministic analyzer unit tests
+=================================
+Covers ParserAnalyzer, StyleAnalyzer, StructuralAnalyzer, SemanticAnalyzer,
+DuplicationAnalyzer, and RiskScoringAnalyzer. These are rule/metric
+analyzers — no LLM, planning, or tool use is involved.
 """
 import pytest
 
-from engine.agents.base_agent import AgentBase, AgentResult
-from engine.agents.parser_agent import ParserAgent, compute_halstead, count_loc
-from engine.agents.style_agent import StyleAgent
-from engine.agents.structural_agent import StructuralAgent
-from engine.agents.semantic_agent import SemanticAgent
-from engine.agents.duplication_agent import DuplicationAgent
-from engine.agents.risk_scoring_agent import RiskScoringAgent
+from engine.analyzers.base_analyzer import AnalyzerBase, AnalyzerResult
+from engine.analyzers.parser_analyzer import ParserAnalyzer, compute_halstead, count_loc
+from engine.analyzers.style_analyzer import StyleAnalyzer
+from engine.analyzers.structural_analyzer import StructuralAnalyzer
+from engine.analyzers.semantic_analyzer import SemanticAnalyzer
+from engine.analyzers.duplication_analyzer import DuplicationAnalyzer
+from engine.analyzers.risk_scoring_analyzer import RiskScoringAnalyzer
 from engine.models import score_to_risk_colour, score_to_risk_label
 
 # ───────────────────────────── fixtures ─────────────────────────────────────
@@ -51,33 +52,33 @@ class DataProcessor:
         return True
 """
 
-_parser = ParserAgent()
+_parser = ParserAnalyzer()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AgentBase
+# AnalyzerBase
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_agent_result_summary():
-    r = AgentResult("TestAgent", 0.42, evidence=["a", "b"])
+def test_analyzer_result_summary():
+    r = AnalyzerResult("TestAnalyzer", 0.42, evidence=["a", "b"])
     s = r.summary()
-    assert "TestAgent" in s
+    assert "TestAnalyzer" in s
     assert "0.420" in s
 
 
-def test_agent_clamp():
-    class _A(AgentBase):
+def test_analyzer_clamp():
+    class _A(AnalyzerBase):
         name = "test"
-        def analyze(self, s, b): return AgentResult("test", 0)
+        def analyze(self, s, b): return AnalyzerResult("test", 0)
     a = _A()
     assert a.clamp(-1.0) == 0.0
     assert a.clamp(2.5)  == 1.0
     assert a.clamp(0.5)  == 0.5
 
 
-def test_agent_safe_div():
-    class _A(AgentBase):
+def test_analyzer_safe_div():
+    class _A(AnalyzerBase):
         name = "test"
-        def analyze(self, s, b): return AgentResult("test", 0)
+        def analyze(self, s, b): return AnalyzerResult("test", 0)
     a = _A()
     assert a.safe_div(10, 2) == 5.0
     assert a.safe_div(10, 0) == 0.0
@@ -85,7 +86,7 @@ def test_agent_safe_div():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ParserAgent
+# ParserAnalyzer
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_parser_parse_functions():
@@ -139,16 +140,16 @@ def test_parser_analyze_drift():
     snap = _parser.parse(COMPLEX_SRC)
     base = _parser.parse(SIMPLE_SRC)
     result = _parser.run(snap, base)
-    assert isinstance(result, AgentResult)
+    assert isinstance(result, AnalyzerResult)
     assert 0.0 <= result.score <= 1.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# StyleAgent
+# StyleAnalyzer
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_style_same_source_zero():
-    agent = StyleAgent()
+    agent = StyleAnalyzer()
     snap = _parser.parse(SIMPLE_SRC)
     snap["source"] = SIMPLE_SRC
     result = agent.run(snap, snap)
@@ -157,7 +158,7 @@ def test_style_same_source_zero():
 
 
 def test_style_detects_naming_drift():
-    agent = StyleAgent()
+    agent = StyleAnalyzer()
     snake_src = "def snake_case_func(x):\n    return x\n"
     camel_src = "def camelCaseFunc(x):\n    return x\n"
     snap = _parser.parse(camel_src); snap["source"] = camel_src
@@ -167,7 +168,7 @@ def test_style_detects_naming_drift():
 
 
 def test_style_docstring_drift():
-    agent = StyleAgent()
+    agent = StyleAnalyzer()
     doc_src = 'def f(x):\n    """Docstring."""\n    return x\n'
     no_doc = "def f(x):\n    return x\n"
     snap = _parser.parse(no_doc); snap["source"] = no_doc
@@ -177,11 +178,11 @@ def test_style_docstring_drift():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# StructuralAgent
+# StructuralAnalyzer
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_structural_import_drift():
-    agent = StructuralAgent()
+    agent = StructuralAnalyzer()
     new_src = "import os\nimport sys\nimport json\ndef f(): pass\n"
     old_src = "def f(): pass\n"
     snap = _parser.parse(new_src); snap["source"] = new_src
@@ -192,7 +193,7 @@ def test_structural_import_drift():
 
 
 def test_structural_same_zero():
-    agent = StructuralAgent()
+    agent = StructuralAnalyzer()
     snap = _parser.parse(SIMPLE_SRC); snap["source"] = SIMPLE_SRC
     result = agent.run(snap, snap)
     assert result.score < 0.15
@@ -200,7 +201,7 @@ def test_structural_same_zero():
 
 def test_structural_cross_file_inheritance():
     """Cross-file class map should resolve deeper inheritance chains."""
-    from engine.agents.structural_agent import _inheritance_depths
+    from engine.analyzers.structural_analyzer import _inheritance_depths
 
     # File A defines Base → Child
     # File B defines GrandChild(Child) — but Child is not defined in file B
@@ -220,18 +221,18 @@ def test_structural_cross_file_inheritance():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SemanticAgent
+# SemanticAnalyzer
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_semantic_same_source():
-    agent = SemanticAgent()
+    agent = SemanticAnalyzer()
     snap = {"source": SIMPLE_SRC}
     result = agent.run(snap, snap)
     assert result.score < 0.05
 
 
 def test_semantic_detects_api_change():
-    agent = SemanticAgent()
+    agent = SemanticAnalyzer()
     src_a = "def f():\n    print('hello')\n    len([1,2,3])\n"
     src_b = "def f():\n    open('x')\n    sorted([3,1,2])\n"
     result = agent.run({"source": src_b}, {"source": src_a})
@@ -240,14 +241,14 @@ def test_semantic_detects_api_change():
 
 
 def test_semantic_ast_distance_identical_zero():
-    agent = SemanticAgent()
+    agent = SemanticAnalyzer()
     src = "def f(x):\n    if x > 0:\n        return x\n    return 0\n"
     result = agent.run({"source": src}, {"source": src})
     assert result.details.get("ast_distance", 1.0) == 0.0
 
 
 def test_semantic_ast_distance_structure_change_positive():
-    agent = SemanticAgent()
+    agent = SemanticAnalyzer()
     src_a = "def f(x):\n    if x > 0:\n        return x\n    return 0\n"
     src_b = "def f(x):\n    while x > 0:\n        x -= 1\n    return x\n"
     result = agent.run({"source": src_b}, {"source": src_a})
@@ -255,11 +256,11 @@ def test_semantic_ast_distance_structure_change_positive():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DuplicationAgent
+# DuplicationAnalyzer
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_duplication_no_dup():
-    agent = DuplicationAgent()
+    agent = DuplicationAnalyzer()
     snap = {"source": SIMPLE_SRC}
     result = agent.run(snap, snap)
     # Small unique functions → no clone detected
@@ -267,7 +268,7 @@ def test_duplication_no_dup():
 
 
 def test_duplication_detects_clone():
-    agent = DuplicationAgent()
+    agent = DuplicationAnalyzer()
     func_body = "    " + "\n    ".join(f"x{i} = {i}" for i in range(30))
     cloned_src = f"def func_a():\n{func_body}\n    return 0\n\ndef func_b():\n{func_body}\n    return 0\n"
     result = agent.run({"source": cloned_src}, {"source": ""})
@@ -277,7 +278,7 @@ def test_duplication_detects_clone():
 
 
 def test_duplication_detects_cross_file_clone():
-    agent = DuplicationAgent()
+    agent = DuplicationAnalyzer()
     func_body = "    " + "\n    ".join(f"x{i} = {i}" for i in range(35))
     primary_src = f"def local_func():\n{func_body}\n    return 0\n"
     other_src = f"def external_func():\n{func_body}\n    return 0\n"
@@ -295,7 +296,7 @@ def test_duplication_detects_cross_file_clone():
 
 
 def test_duplication_primary_score_excludes_non_primary_clones():
-    agent = DuplicationAgent()
+    agent = DuplicationAnalyzer()
     body = "    " + "\n    ".join(f"v{i} = {i}" for i in range(35))
 
     result = agent.run(
@@ -314,7 +315,7 @@ def test_duplication_primary_score_excludes_non_primary_clones():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RiskScoringAgent
+# RiskScoringAnalyzer
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_risk_label():
@@ -331,12 +332,12 @@ def test_risk_label():
 
 
 def test_risk_aggregation_zero():
-    agent = RiskScoringAgent()
+    agent = RiskScoringAnalyzer()
     fake = {
-        "StyleAgent":      AgentResult("StyleAgent",      0.0),
-        "StructuralAgent": AgentResult("StructuralAgent", 0.0),
-        "SemanticAgent":   AgentResult("SemanticAgent",   0.0),
-        "DuplicationAgent":AgentResult("DuplicationAgent",0.0),
+        "StyleAnalyzer":      AnalyzerResult("StyleAnalyzer",      0.0),
+        "StructuralAnalyzer": AnalyzerResult("StructuralAnalyzer", 0.0),
+        "SemanticAnalyzer":   AnalyzerResult("SemanticAnalyzer",   0.0),
+        "DuplicationAnalyzer":AnalyzerResult("DuplicationAnalyzer",0.0),
     }
     result = agent.aggregate(fake)
     assert result.score == 0.0
@@ -344,12 +345,12 @@ def test_risk_aggregation_zero():
 
 
 def test_risk_aggregation_high():
-    agent = RiskScoringAgent()
+    agent = RiskScoringAnalyzer()
     fake = {
-        "StyleAgent":      AgentResult("StyleAgent",      1.0),
-        "StructuralAgent": AgentResult("StructuralAgent", 1.0),
-        "SemanticAgent":   AgentResult("SemanticAgent",   1.0),
-        "DuplicationAgent":AgentResult("DuplicationAgent",1.0),
+        "StyleAnalyzer":      AnalyzerResult("StyleAnalyzer",      1.0),
+        "StructuralAnalyzer": AnalyzerResult("StructuralAnalyzer", 1.0),
+        "SemanticAnalyzer":   AnalyzerResult("SemanticAnalyzer",   1.0),
+        "DuplicationAnalyzer":AnalyzerResult("DuplicationAnalyzer",1.0),
     }
     result = agent.aggregate(fake)
     assert result.score >= 0.95
@@ -357,7 +358,7 @@ def test_risk_aggregation_high():
 
 
 def test_risk_breakdown_keys():
-    agent = RiskScoringAgent()
+    agent = RiskScoringAnalyzer()
     result = agent.aggregate({})
     bd = result.details["breakdown"]
     for k in ("style", "structural", "semantic", "duplication"):

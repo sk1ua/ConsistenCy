@@ -18,7 +18,7 @@ class EvidenceItem:
 
     signal_name: str
     text: str
-    source: str = "agent"
+    source: str = "analyzer"
     confidence: float = 1.0
     metadata: dict[str, Any] = field(default_factory=dict)
 

@@ -238,9 +238,9 @@ class Dog extends Animal {
 
 def test_javascript_security_patterns():
     """JavaScript should be scanned for security patterns."""
-    from engine.agents.security_agent import SecurityAgent
+    from engine.analyzers.security_analyzer import SecurityAnalyzer
     
-    agent = SecurityAgent()
+    analyzer = SecurityAnalyzer()
     
     # Test eval detection
     source = '''
@@ -248,7 +248,7 @@ function dangerous(userInput) {
     eval(userInput);
 }
 '''
-    result = agent.run({"source": source, "language": "javascript"}, {"source": ""})
+    result = analyzer.run({"source": source, "language": "javascript"}, {"source": ""})
     
     # Should detect eval
     assert result.score > 0
@@ -257,16 +257,16 @@ function dangerous(userInput) {
 
 def test_javascript_xss_patterns():
     """JavaScript should detect XSS vulnerabilities."""
-    from engine.agents.security_agent import SecurityAgent
+    from engine.analyzers.security_analyzer import SecurityAnalyzer
     
-    agent = SecurityAgent()
+    analyzer = SecurityAnalyzer()
     
     source = '''
 function render(userContent) {
     document.body.innerHTML = userContent;
 }
 '''
-    result = agent.run({"source": source, "language": "javascript"}, {"source": ""})
+    result = analyzer.run({"source": source, "language": "javascript"}, {"source": ""})
     
     # Should detect innerHTML
     assert result.score > 0
@@ -277,20 +277,20 @@ function render(userContent) {
 # Integration tests
 # -----------------------------------------------------------------------------
 
-def test_parser_agent_multilang():
-    """ParserAgent should handle multiple languages via parse_file."""
-    from engine.agents.parser_agent import ParserAgent
+def test_parser_analyzer_multilang():
+    """ParserAnalyzer should handle multiple languages via parse_file."""
+    from engine.analyzers.parser_analyzer import ParserAnalyzer
     
-    agent = ParserAgent()
+    analyzer = ParserAnalyzer()
     
     # Python
     py_source = "def foo(): pass"
-    py_snapshot = agent.parse_file(py_source, "test.py")
+    py_snapshot = analyzer.parse_file(py_source, "test.py")
     assert py_snapshot.get("language") == "python"
     
     # TypeScript (if tree-sitter available)
     ts_source = "function foo() {}"
-    ts_snapshot = agent.parse_file(ts_source, "test.ts")
+    ts_snapshot = analyzer.parse_file(ts_source, "test.ts")
     # Should have language field set
     assert "language" in ts_snapshot
 
@@ -315,7 +315,7 @@ function process(data) {
     # Should return valid results even for TypeScript
     assert "risk_score" in result
     assert 0 <= result["risk_score"] <= 1
-    assert "agent_details" in result
+    assert "analyzer_details" in result
 
 
 def test_analyze_sources_javascript_end_to_end():
@@ -339,7 +339,7 @@ function processData(id) {
     assert "risk_score" in result
     assert 0 <= result["risk_score"] <= 1
     assert "breakdown" in result
-    # Security agent should detect eval → score > 0
+    # Security analyzer should detect eval → score > 0
     assert result["breakdown"].get("security", 0) > 0
     # Collaboration board should exist
     assert "agent_collaboration" in result
@@ -373,6 +373,6 @@ class UserService extends BaseService {
     result = analyze_sources(ts_now, ts_base, filepath="services.ts")
     assert "risk_score" in result
     assert "structural" in result.get("breakdown", {})
-    # Should return valid agent_details for all agents
-    for agent in ("StyleAgent", "StructuralAgent", "SemanticAgent", "SecurityAgent"):
-        assert agent in result.get("agent_details", {}), f"{agent} missing"
+    # Should return valid analyzer_details for all analyzers
+    for analyzer_name in ("StyleAnalyzer", "StructuralAnalyzer", "SemanticAnalyzer", "SecurityAnalyzer"):
+        assert analyzer_name in result.get("analyzer_details", {}), f"{analyzer_name} missing"

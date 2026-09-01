@@ -45,7 +45,7 @@ class ImportInfo:
 class ParseSnapshot:
     """Universal parse result structure.
 
-    This is the contract between parsers and agents.
+    This is the contract between parsers and deterministic analyzers.
     All parsers must return this structure, regardless of underlying implementation.
     """
     # Raw source
@@ -74,8 +74,8 @@ class ParseSnapshot:
     # Error tracking
     error: str | None = None
 
-    def to_agent_snapshot(self) -> dict[str, Any]:
-        """Convert to backward-compatible dict format for existing agents."""
+    def to_analyzer_snapshot(self) -> dict[str, Any]:
+        """Convert to the dict contract consumed by deterministic analyzers."""
         return {
             "source": self.source,
             "language": self.language,
@@ -109,6 +109,10 @@ class ParseSnapshot:
             "halstead": self.halstead,
             "error": self.error,
         }
+
+    def to_agent_snapshot(self) -> dict[str, Any]:
+        """Deprecated compatibility alias for legacy analyzer imports."""
+        return self.to_analyzer_snapshot()
 
 
 class BaseParser(ABC):

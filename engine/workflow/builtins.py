@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Built-in plugin implementations for the allowlisted step kinds.
+"""Built-in plugins backed by deterministic analyzers and verifiers.
 
-The ``engine.*`` kinds delegate to the existing deterministic agents in
-``engine/agents`` rather than reimplementing their checks, so the workflow
-engine inherits their test coverage.
+The ``engine.*`` kinds delegate to ``engine.analyzers`` rather than
+reimplementing their checks. These plugins never invoke an LLM.
 """
 from __future__ import annotations
 
@@ -12,8 +11,8 @@ import posixpath
 import re
 from typing import Any, Mapping
 
-from ..agents.parser_agent import ParserAgent
-from ..agents.registry import AGENT_REGISTRY
+from ..analyzers.parser_analyzer import ParserAnalyzer
+from ..analyzers.registry import ANALYZER_REGISTRY
 from .artifacts import EvidenceItem
 from .plugins import (
     AnalysisContext,
@@ -24,8 +23,8 @@ from .plugins import (
 )
 from .static_safety import StaticSafetyPlugin
 
-#: Maps an allowlisted analyzer kind onto a deterministic agent id.
-_AGENT_BY_KIND = {
+#: Maps an allowlisted workflow kind onto a stable deterministic analyzer ID.
+_ANALYZER_BY_KIND = {
     "engine.style": "style",
     "engine.structural": "structural",
     "engine.semantic": "semantic",
@@ -46,29 +45,29 @@ def _severity_for(score: float) -> str:
     return "info"
 
 
-class EngineAgentPlugin(BaseAnalyzerPlugin):
-    """Runs one deterministic agent across every file in the context."""
+class EngineAnalyzerPlugin(BaseAnalyzerPlugin):
+    """Runs one deterministic analyzer across every file in the context."""
 
-    def __init__(self, kind: str, agent_id: str, options: Mapping[str, Any] | None = None) -> None:
+    def __init__(self, kind: str, analyzer_id: str, options: Mapping[str, Any] | None = None) -> None:
         super().__init__(options)
         self.kind = kind
-        self._agent_id = agent_id
+        self._analyzer_id = analyzer_id
 
     async def analyze(self, context: AnalysisContext) -> PluginReport:
-        manifest = AGENT_REGISTRY[self._agent_id]
-        # ParserAgent, not PythonParser: the agents consume the snapshot *dict*
-        # that `parse_file` produces, not the ParseSnapshot dataclass.
-        parser = ParserAgent()
+        manifest = ANALYZER_REGISTRY[self._analyzer_id]
+        # ParserAnalyzer consumes the snapshot dict produced by parse_file,
+        # not the ParseSnapshot dataclass.
+        parser = ParserAnalyzer()
         evidence: list[EvidenceItem] = []
         scored_files = 0
         degraded_files = 0
 
         for path, content in sorted(context.files.items()):
             if not path.endswith(".py"):
-                # The bundled agents parse Python; other languages are handled
+                # The bundled analyzers parse Python; other languages are handled
                 # by the tool.* plugins until tree-sitter snapshots are wired in.
                 continue
-            agent = manifest.create()
+            analyzer = manifest.create()
             try:
                 snapshot = parser.parse_file(content, filepath=path)
                 baseline_source = context.baselines.get(path, "")
@@ -83,7 +82,7 @@ class EngineAgentPlugin(BaseAnalyzerPlugin):
                 continue
 
             try:
-                result = agent.analyze(snapshot, baseline)
+                result = analyzer.analyze(snapshot, baseline)
             except Exception as error:  # noqa: BLE001 - one pathological file must not fail the step
                 # Honest degradation: record the failure against this file and
                 # keep scoring the rest. A single malformed or adversarial file
@@ -105,7 +104,7 @@ class EngineAgentPlugin(BaseAnalyzerPlugin):
                     excerpt=line,
                     rule=f"{self.kind}",
                     severity=_severity_for(result.score),
-                    metadata={"score": round(result.score, 4), "agent": manifest.display_name},
+                    metadata={"score": round(result.score, 4), "analyzer": manifest.display_name},
                 ))
 
         summary = (
@@ -119,6 +118,10 @@ class EngineAgentPlugin(BaseAnalyzerPlugin):
             evidence=tuple(evidence),
             summary=summary,
         )
+
+
+# Deprecated compatibility alias for callers that imported the old plugin name.
+EngineAgentPlugin = EngineAnalyzerPlugin
 
 
 class DependencyGraphPlugin(BaseAnalyzerPlugin):
@@ -609,10 +612,10 @@ class SyntaxVerifier(BaseAnalyzerPlugin):
 
 def register_builtin_plugins() -> None:
     """Register every shipped plugin. Safe to call more than once."""
-    for kind, agent_id in _AGENT_BY_KIND.items():
+    for kind, analyzer_id in _ANALYZER_BY_KIND.items():
         register_plugin(
             kind,
-            lambda options, _kind=kind, _agent=agent_id: EngineAgentPlugin(_kind, _agent, options),
+            lambda options, _kind=kind, _analyzer=analyzer_id: EngineAnalyzerPlugin(_kind, _analyzer, options),
         )
     register_plugin("engine.security", lambda options: StaticSafetyPlugin(options))
     register_plugin("graph.dependency", lambda options: DependencyGraphPlugin(options))

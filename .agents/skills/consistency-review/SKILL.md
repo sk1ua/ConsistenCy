@@ -35,7 +35,7 @@ python3.12 .agents/skills/consistency-review/scripts/analyze_repo.py engine/runn
 Pass more than one repository-local path when comparison is useful. For example, on Windows:
 
 ```powershell
-.\.venv\Scripts\python.exe .agents\skills\consistency-review\scripts\analyze_repo.py engine\agents apps\api\src\review\deterministic.ts
+.\.venv\Scripts\python.exe .agents\skills\consistency-review\scripts\analyze_repo.py engine\analyzers apps\api\src\review\deterministic.ts
 ```
 
 To compare modified files against a baseline branch, pass `--baseline-ref`; the

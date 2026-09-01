@@ -13,7 +13,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Mapping
 
-from ..agents.security_agent import SecurityAgent
+from ..analyzers.security_analyzer import SecurityAnalyzer
 from .artifacts import EvidenceItem
 from .plugins import AnalysisContext, BaseAnalyzerPlugin, PluginReport
 
@@ -116,12 +116,12 @@ class StaticSafetyPlugin(BaseAnalyzerPlugin):
 
     async def analyze(self, context: AnalysisContext) -> PluginReport:
         evidence: list[EvidenceItem] = []
-        agent = SecurityAgent()
+        analyzer = SecurityAnalyzer()
 
         for file, source in sorted(context.files.items()):
             suffix = PurePosixPath(file.replace("\\", "/")).suffix.lower()
             language = _LANGUAGE_BY_SUFFIX.get(suffix, "text")
-            result = agent.scan_file(source, language=language)
+            result = analyzer.scan_file(source, language=language)
             for finding in result["findings"]:
                 line = finding.get("line")
                 line_number = line if isinstance(line, int) and line > 0 else 1

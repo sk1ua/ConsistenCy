@@ -282,7 +282,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "- Samples marked needs_manual_audit can still be used for the "
         "automatic weak-label benchmark; manual audit is only required for "
         "stronger gold-standard research claims.",
-        "- SemanticAgent uses AST/API/control-flow proxy signals, not formal "
+        "- SemanticAnalyzer uses AST/API/control-flow proxy signals, not formal "
         "semantic equivalence.",
         "- Multi-agent means deterministic specialist analyzers plus consensus "
         "coordination.",

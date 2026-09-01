@@ -152,7 +152,7 @@ class RunWorkflowBridgeTest(unittest.TestCase):
 # family is born inside the engine, not in the payload. The workflow must
 # stay total over such input instead of failing the step — the real-world
 # crash was pr-review `semantics` failing with `UnicodeEncodeError` from
-# SemanticAgent subtree fingerprinting.
+# SemanticAnalyzer subtree fingerprinting.
 _SURROGATE_ESCAPE_SOURCE = r"value = '\udc80'"
 
 _SEMANTICS_ONLY_SPEC = {

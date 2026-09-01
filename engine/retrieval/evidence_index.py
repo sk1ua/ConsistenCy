@@ -59,7 +59,7 @@ def build_evidence_candidates(
     for index, item in enumerate(file_result.get("evidence_chain", [])):
         if not isinstance(item, dict):
             continue
-        signal = str(item.get("signal_name", "agent"))
+        signal = str(item.get("signal_name", "analyzer"))
         _add(
             candidates,
             file=filepath,

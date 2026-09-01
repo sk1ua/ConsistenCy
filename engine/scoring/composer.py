@@ -1,4 +1,4 @@
-"""Research-facing risk composition utilities."""
+"""Research-facing deterministic risk composition utilities."""
 
 from __future__ import annotations
 
@@ -13,8 +13,22 @@ DEFAULT_FILE_WEIGHTS: dict[str, float] = {
 }
 
 
-def normalize_signal_results(agent_details: dict[str, Any]) -> dict[str, SignalResult]:
-    """Convert legacy agent details into canonical signal results."""
+def normalize_signal_results(
+    analyzer_details: dict[str, Any] | None = None,
+    *,
+    agent_details: dict[str, Any] | None = None,
+) -> dict[str, SignalResult]:
+    """Convert deterministic analyzer details into canonical signal results.
+
+    ``agent_details`` is a deprecated keyword retained for legacy callers; it
+    refers only to this deterministic Python compatibility projection, never to
+    the TypeScript LLM review-agent telemetry.
+    """
+    if analyzer_details is not None and agent_details is not None:
+        raise ValueError("pass analyzer_details or legacy agent_details, not both")
+    details_by_analyzer = analyzer_details if analyzer_details is not None else agent_details
+    if details_by_analyzer is None:
+        raise TypeError("normalize_signal_results requires analyzer details")
 
     mapping = {
         "style": "style",
@@ -25,8 +39,8 @@ def normalize_signal_results(agent_details: dict[str, Any]) -> dict[str, SignalR
         "evolution": "evolution",
     }
     normalized: dict[str, SignalResult] = {}
-    for agent_name, details in agent_details.items():
-        lowered = agent_name.lower()
+    for analyzer_name, details in details_by_analyzer.items():
+        lowered = analyzer_name.lower()
         signal = next((value for prefix, value in mapping.items() if lowered.startswith(prefix)), None)
         if not signal:
             continue
@@ -40,7 +54,7 @@ def normalize_signal_results(agent_details: dict[str, Any]) -> dict[str, SignalR
             score=max(0.0, min(1.0, score)),
             evidence=evidence,
             confidence=1.0 if evidence or score == 0 else 0.7,
-            metadata={"agent_name": agent_name},
+            metadata={"analyzer_name": analyzer_name},
         )
     return normalized
 

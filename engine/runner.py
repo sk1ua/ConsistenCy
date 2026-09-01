@@ -1,14 +1,14 @@
 """Core analysis orchestrator for ConsistenCy engine."""
 from typing import Dict, Any, List
 
-from engine.agents import (
-    ParserAgent,
-    RiskScoringAgent,
-    DEFAULT_AGENT_IDS,
-    instantiate_agents,
-    resolve_agent_manifests,
+from engine.analyzers import (
+    ParserAnalyzer,
+    RiskScoringAnalyzer,
+    DEFAULT_ANALYZER_IDS,
+    instantiate_analyzers,
+    resolve_analyzer_manifests,
 )
-from engine.agents.base_agent import AgentResult
+from engine.analyzers.base_analyzer import AnalyzerResult
 from engine.scoring import (
     normalize_signal_results,
     file_contributions,
@@ -64,8 +64,17 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
 
     try:
         # Configuration options
-        requested_agents = request.options.get("agents", list(DEFAULT_AGENT_IDS))
-        agent_manifests = resolve_agent_manifests(requested_agents)
+        requested_analyzers = request.options.get("analyzers")
+        legacy_agents = request.options.get("agents")
+        if requested_analyzers is not None and legacy_agents is not None and requested_analyzers != legacy_agents:
+            raise ValueError("options 'analyzers' and legacy 'agents' must contain the same IDs when both are provided")
+        requested_analyzers = (
+            requested_analyzers
+            if requested_analyzers is not None
+            else legacy_agents if legacy_agents is not None
+            else list(DEFAULT_ANALYZER_IDS)
+        )
+        analyzer_manifests = resolve_analyzer_manifests(requested_analyzers)
         include_evidence_pack = request.options.get("include_evidence_pack", False)
         token_budget = request.options.get("token_budget", DEFAULT_TOKEN_BUDGET)
 
@@ -73,13 +82,13 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
             # 1a. Determine language from filepath or language field
             lang = file_input.language or get_language(file_input.path)
 
-            # 1b. Instantiate agents (No global singletons)
-            parser = ParserAgent()
-            agents = instantiate_agents(agent_manifests)
+            # 1b. Instantiate analyzers (No global singletons)
+            parser = ParserAnalyzer()
+            analyzers = instantiate_analyzers(analyzer_manifests)
 
-            risk_scorer = RiskScoringAgent(weights=RISK_WEIGHTS)
+            risk_scorer = RiskScoringAnalyzer(weights=RISK_WEIGHTS)
 
-            # 1c. Parse source_now and source_base using ParserAgent
+            # 1c. Parse source_now and source_base using ParserAnalyzer
             # Non-code files (unknown language: .md, .json, .lock, ...) have no
             # AST and must not be forced through the Python parser — parsing
             # failure for such files is not evidence of a defect. Code files
@@ -108,31 +117,31 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
             if snapshot_base:
                 snapshot_base["language"] = lang
 
-            # 1d. Run each requested agent
-            agent_results: Dict[str, AgentResult] = {}
-            for agent_name, agent in agents.items():
+            # 1d. Run each requested deterministic analyzer
+            analyzer_results: Dict[str, AnalyzerResult] = {}
+            for analyzer_id, analyzer in analyzers.items():
                 try:
-                    res = agent.run(snapshot_now, snapshot_base)
-                    agent_results[agent_name] = res
+                    res = analyzer.run(snapshot_now, snapshot_base)
+                    analyzer_results[analyzer_id] = res
                 except Exception as e:
                     raise RuntimeError(
-                        f"Deterministic agent '{agent_name}' failed for file "
+                        f"Deterministic analyzer '{analyzer_id}' failed for file "
                         f"'{file_input.path}': {e}"
                     ) from e
 
-            # 1e. Aggregate with RiskScoringAgent
-            aggregated = risk_scorer.aggregate(agent_results)
+            # 1e. Aggregate with RiskScoringAnalyzer
+            aggregated = risk_scorer.aggregate(analyzer_results)
 
             # 1f. Compute signal_results via normalize_signal_results
-            details_map = {k: v.details for k, v in agent_results.items()}
+            details_map = {k: v.details for k, v in analyzer_results.items()}
             normalized_signals = normalize_signal_results(details_map)
 
             # 1g & 1h. Compute file_contributions, dominant_signals, build_confidence, build_explainability_block
-            breakdown = {k: float(v.score) for k, v in agent_results.items()}
+            breakdown = {k: float(v.score) for k, v in analyzer_results.items()}
             contribs = file_contributions(breakdown, weights=RISK_WEIGHTS)
             dom_signals = dominant_signals(contribs)
 
-            signal_evidence = {k: v.evidence for k, v in agent_results.items() if v.evidence}
+            signal_evidence = {k: v.evidence for k, v in analyzer_results.items() if v.evidence}
 
             confidence = build_confidence(
                 baseline_versions=1 if file_input.baseline else 0,
@@ -145,7 +154,7 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
                     "score": res.score,
                     "evidence": res.evidence,
                     "details": res.details
-                } for k, res in agent_results.items()
+                } for k, res in analyzer_results.items()
             }
 
             # Attach explainability to signal details so it's accessible
@@ -259,12 +268,17 @@ def analyze_sources(
         return {"risk_score": 0.0, "risk_level": "Consistent", "risk_colour": "GREEN", "error": resp.error}
 
     f = resp.files[0]
-    agent_details = {}
+    analyzer_details = {}
+    legacy_agent_details = {}
     for sig_name, sig_val in f.signals.items():
-        if sig_name == "explainability": continue
-        class_name = sig_name.capitalize() + "Agent" if not sig_name.endswith("Agent") else sig_name
-        agent_details[class_name] = sig_val
-        agent_details[sig_name] = sig_val
+        if sig_name == "explainability":
+            continue
+        analyzer_class_name = sig_name.capitalize() + "Analyzer"
+        analyzer_details[analyzer_class_name] = sig_val
+        analyzer_details[sig_name] = sig_val
+        legacy_class_name = sig_name.capitalize() + "Agent"
+        legacy_agent_details[legacy_class_name] = sig_val
+        legacy_agent_details[sig_name] = sig_val
 
     collab = f.agent_collaboration or {
         "decision": "approve" if f.risk_score < 0.3 else ("request_changes" if f.risk_score < 0.6 else "block_merge"),
@@ -278,7 +292,10 @@ def analyze_sources(
         "breakdown": f.breakdown or {},
         "signals": f.signals,
         "confidence": f.confidence,
-        "agent_details": agent_details,
+        "analyzer_details": analyzer_details,
+        # Legacy projection retained for existing embedders and old reports;
+        # new UI/report code must use analyzer_details or signals instead.
+        "agent_details": legacy_agent_details,
         "evidence": f.findings,
         "agent_collaboration": collab,
     }

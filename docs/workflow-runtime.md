@@ -57,9 +57,9 @@ or executed by this library.
 
 ```
 Pinned repository HEAD snapshot
-  → deterministic Analyzer Agent/Fiber
+  → deterministic Analyzer Fiber
   → Evidence (fingerprint + provenance, persisted via Kernel)
-  → deterministic Verifier Agent/Fiber (consumes persisted Evidence only)
+  → deterministic Verifier Fiber (consumes persisted Evidence only)
   → Findings / MiniReport
 ```
 
