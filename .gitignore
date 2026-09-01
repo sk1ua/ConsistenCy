@@ -95,6 +95,9 @@ data/cache/*.json
 .workbuddy/
 .omo/
 
+# ZCode session tool state (plans, local bundles) — never repository content
+.zcode/
+
 # Mimosa security-scanner working artifacts (never repository content)
 .mimosa/
 apps/web/.mimosa/

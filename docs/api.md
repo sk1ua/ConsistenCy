@@ -1,6 +1,6 @@
 # ConsistenCy HTTP API Reference
 
-The default development API address is `http://127.0.0.1:8787`. In Electron Desktop mode, the API binds to an ephemeral dynamic loopback port on `127.0.0.1`.
+The default development API address is `http://127.0.0.1:8787`. In Electron Desktop mode, the API binds to an ephemeral dynamic loopback port on `127.0.0.1`. Desktop GitHub authorization is owned by the Electron main process and uses a separate one-time loopback callback; it is not an API callback route.
 
 ---
 
@@ -64,8 +64,12 @@ x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
 | `GET` | `/settings` | Get sanitized runtime configuration snapshot | Authenticated |
 | `PUT` | `/settings` | Update editable runtime settings (dev / desktop mode) | Authenticated |
 | `POST` | `/settings/github/test-connection` | Single bounded read-only GitHub connection probe: targets the ACTIVE runtime credential by default, or one unsaved draft PAT supplied as `{"publicReadToken": "..."}` (probe only; never persisted, logged, or echoed). Sanitized status enum + bounded retry metadata only (CKPT4 Slice 2, Phase 2C) | Authenticated |
-| `POST` | `/settings/github/oauth/start` | Start a GitHub OAuth Device Flow sign-in: proxies github.com with the configured public client id and returns `{ flowId, userCode, verificationUri, expiresAt, intervalSeconds }`. The `device_code` never leaves the server process; 503 `GITHUB_OAUTH_NOT_CONFIGURED` when unset | Authenticated |
-| `POST` | `/settings/github/oauth/poll` | Poll one sign-in flow: `{ "flowId": "..." }`. Server-enforced polling interval; returns `pending` / `expired` / `denied` / `unavailable`, or `connected` carrying the access token exactly ONCE for a one-time handoff into the existing credential save path (desktop safeStorage bridge / web encrypted settings). Flows are single-use; unknown ids → 404 | Authenticated |
+| `POST` | `/oauth/desktop/start` | Starts the product-operated Desktop OAuth broker handoff. Accepts a loopback callback URL plus state and S256 challenge; returns only a GitHub HTTPS authorization URL and opaque flow id. No bearer token is required; no Client Secret is accepted. | Public broker entry |
+| `GET` | `/oauth/github/callback` | Broker-only GitHub callback. Stores the authorization code server-side and redirects once to the registered loopback callback with desktop state plus a single-use handoff code; no code or token is placed in the redirect. | Public broker callback |
+| `POST` | `/oauth/desktop/complete` | Completes one Desktop handoff with flow id, handoff code, and PKCE verifier. The broker performs the server-side GitHub token exchange and identity lookup, then returns `{ status, login, accessToken }` only to the main process. Responses are `no-store`. | Public broker entry |
+| `POST` | `/oauth/desktop/cancel` | Invalidates one Desktop broker flow and returns the fixed `{ "status": "cancelled" }` response. | Public broker entry |
+| `POST` | `/settings/github/oauth/start` | Browser-only compatibility route for GitHub OAuth Device Flow: proxies github.com with the server-configured public client id and returns `{ flowId, userCode, verificationUri, expiresAt, intervalSeconds }`. The `device_code` never leaves the server process; 503 `GITHUB_OAUTH_NOT_CONFIGURED` when unset. Desktop renderer requests are blocked. | Authenticated |
+| `POST` | `/settings/github/oauth/poll` | Browser-only compatibility polling route: `{ "flowId": "..." }`. Server-enforced polling interval; returns `pending` / `expired` / `denied` / `unavailable`, or `connected` carrying the access token exactly once for Web's encrypted settings handoff. Desktop renderer requests are blocked; packaged Desktop uses the main-process OAuth capability instead. | Authenticated |
 | `POST` | `/github/webhook` | Incoming HMAC-verified GitHub webhook event | GitHub HMAC Header |
 
 ---
@@ -102,7 +106,7 @@ Content-Type: application/json
 
 - Accepts canonical `https://github.com/{owner}/{repo}/pull/{number}` URLs only through the shared GitHub identity/PR URL parser. The raw input must equal the parser's exact canonical reconstruction; credentials, explicit ports (including `:443`), query strings, fragments, percent-encoded ambiguity, dot segments, parent-segment normalization, backslashes, dirty input, malformed coordinates, leading-zero numbers, non-safe-integer numbers, and every other WHATWG normalization difference are rejected.
 - Creates an analysis-only job (`accessMode=public_read`, `publicationPolicy=disabled`).
-- Requires a configured real LLM provider (DeepSeek or OpenAI) to execute analysis.
+- Requires a configured real LLM provider (DeepSeek, OpenAI, or Pi) to execute analysis.
 
 Standalone public PR URL ingestion is separate from repository workspace listing. It is read-only and does not use a GitHub App installation token merely because an App is configured.
 

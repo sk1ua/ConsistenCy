@@ -88,13 +88,14 @@ export function buildSettingsPatch(
   return {
     llm: {
       provider: draft.llm.provider,
+      piModel: draft.llm.piModel,
       deepseekBaseUrl: draft.llm.deepseekBaseUrl,
       deepseekModel: draft.llm.deepseekModel,
       openaiModel: draft.llm.openaiModel,
-      ...(hasBridge ? {} : {
-        deepseekApiKey: secretUpdates.deepseekApiKey,
-        openaiApiKey: secretUpdates.openaiApiKey
-      })
+        ...(hasBridge ? {} : {
+          deepseekApiKey: secretUpdates.deepseekApiKey,
+          openaiApiKey: secretUpdates.openaiApiKey
+        })
     },
     github: {
       appId: draft.github.appId || null,
@@ -137,7 +138,9 @@ export function computeReadiness(
       ? secretReady("deepseekApiKey", settings.llm.deepseekApiKeyConfigured)
       : draft.llm.provider === "openai"
         ? secretReady("openaiApiKey", settings.llm.openaiApiKeyConfigured)
-        : false
+        : draft.llm.provider === "pi"
+          ? Boolean(draft.llm.piModel?.trim()) || health?.llmProvider === "pi"
+          : false
   ));
   const githubAppReady = Boolean(draft && settings && draft.github.appId
     && secretReady("privateKey", settings.github.privateKeyConfigured)
@@ -208,8 +211,10 @@ export interface UseSettingsFormResult {
   updateGithub: (patch: Partial<SettingsSnapshot["github"]>) => void;
   updateRuntime: (patch: Partial<SettingsSnapshot["runtime"]>) => void;
   save: (secretOverrides?: Partial<Record<SecretName, string>>) => Promise<void>;
-  /** One-time GitHub OAuth token handoff; persists via the normal save flow. */
+  /** One-time GitHub OAuth token handoff for the non-desktop compatibility flow. */
   applyGitHubOauthToken: (token: string) => Promise<void>;
+  /** Desktop main-process OAuth completion; only the sanitized login crosses the bridge. */
+  applyGitHubDesktopOauth: (login: string) => Promise<void>;
   resetChanges: () => void;
   handleRestartRuntime: () => Promise<void>;
   reload: () => Promise<void>;
@@ -331,6 +336,23 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
     await save({ publicReadToken: token });
   }, [save]);
 
+  const applyGitHubDesktopOauth = useCallback(async (login: string) => {
+    if (!bridge?.githubOAuth || !login.trim()) return;
+    try {
+      const updatedSnapshot = await (deps.fetchSettings ?? api.settings)();
+      const credentialStatus = await bridge.credentialStatus();
+      const updated = withDesktopCredentialStatus(updatedSnapshot, credentialStatus);
+      setSettings(updated);
+      setDraft(updated);
+      setSecrets(emptySecrets);
+      setClearSecrets(keepSecrets);
+      setRestartNeeded(true);
+      setMessage({ tone: "success", text: t("Signed in as {login}. Restart the runtime to use the new credential.", { login }) });
+    } catch {
+      setMessage({ tone: "error", text: t("GitHub sign-in is unavailable.") });
+    }
+  }, [bridge, deps, t]);
+
   const resetChanges = useCallback(() => {
     setDraft(settings);
     setSecrets(emptySecrets);
@@ -388,6 +410,7 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
     updateRuntime,
     save,
     applyGitHubOauthToken,
+    applyGitHubDesktopOauth,
     resetChanges,
     handleRestartRuntime,
     reload,

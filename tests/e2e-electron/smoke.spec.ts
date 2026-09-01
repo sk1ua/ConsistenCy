@@ -13,12 +13,13 @@ test.describe("desktop shell", () => {
     const repositoryRoot = resolve(import.meta.dirname, "..", "..");
     const userData = mkdtempSync(join(tmpdir(), "consistency-electron-smoke-"));
     const python = join(repositoryRoot, ".venv", "Scripts", "python.exe");
+    const node22 = process.execPath;
     const app = await electron.launch({
       args: ["apps/desktop", `--user-data-dir=${userData}`],
       executablePath,
       env: {
         ...process.env,
-        CONSISTENCY_NODE_HELPER: process.execPath,
+        CONSISTENCY_NODE_HELPER: node22,
         CONSISTENCY_PYTHON_PATH: python,
         CONSISTENCY_WORKERS_ENABLED: "false",
         CONSISTENCY_HEARTBEAT_ENABLED: "false",
@@ -58,10 +59,18 @@ test.describe("desktop shell", () => {
               get: () => Promise<Record<string, unknown>>;
               set: (patch: unknown) => Promise<Record<string, unknown>>;
             };
+            githubOAuth?: {
+              start: () => Promise<Record<string, unknown>>;
+              cancel: () => Promise<Record<string, unknown>>;
+            };
             updates?: { getState: () => Promise<Record<string, unknown>> };
           } & Record<string, unknown>;
         }).consistencyDesktop;
         const updates = desktop?.updates;
+        const githubOAuth = desktop?.githubOAuth;
+        const sensitiveDesktopKeys = desktop
+          ? Object.keys(desktop).filter(key => /token|secret|port|redirect/i.test(key))
+          : [];
         const buildInfo = desktop?.buildInfo ? await desktop.buildInfo() : null;
         const selection = desktop?.selectRepository ? await desktop.selectRepository() : null;
         const repositoryId = selection?.repository?.id;
@@ -116,6 +125,8 @@ test.describe("desktop shell", () => {
           localReviewBody,
           buildInfo,
           desktopPreferences,
+          oauthMethods: githubOAuth ? Object.keys(githubOAuth).sort() : [],
+          sensitiveDesktopKeys,
           invalidPreferencePatchRejected,
           methods: desktop ? Object.keys(desktop).sort() : [],
           updateMethods: updates ? Object.keys(updates).sort() : [],
@@ -144,10 +155,12 @@ test.describe("desktop shell", () => {
       expect(boundary.invalidPreferencePatchRejected).toBe(true);
       expect(boundary.hasRawUserDataPath).toBe(false);
       expect(boundary.hasRawIpc).toBe(false);
+      expect(boundary.sensitiveDesktopKeys).toEqual([]);
       expect(boundary.methods).toEqual([
         "appVersion",
         "buildInfo",
         "credentialStatus",
+        "githubOAuth",
         "openLogsFolder",
         "preferences",
         "restartRuntime",
@@ -156,6 +169,7 @@ test.describe("desktop shell", () => {
         "showFromTray",
         "updates"
       ]);
+      expect(boundary.oauthMethods).toEqual(["cancel", "start"]);
       expect(boundary.updateMethods).toEqual([
         "check",
         "download",

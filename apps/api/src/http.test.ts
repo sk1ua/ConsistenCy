@@ -1,6 +1,6 @@
 import { request, ServerResponse } from "node:http";
 import { execFileSync } from "node:child_process";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
 import type { SettingsSnapshot } from "./config/settings";
 import type { RepositoryPullRequestRequest } from "./github/pullRequestReader";
+import { GitHubDesktopOAuthBroker } from "./github/oauthBroker";
 import { AuditDomainError, type AuditDomainStore } from "./audit/store";
 import { openDatabase } from "./db/connection";
 import { runMigrations } from "./db/migrations";
@@ -91,7 +92,15 @@ function httpJson(
           responseBody += chunk;
         });
         res.on("end", () => {
-          resolve({ status: res.statusCode ?? 0, body: responseBody ? JSON.parse(responseBody) : {}, headers: res.headers });
+          let body: unknown = {};
+          if (responseBody) {
+            try {
+              body = JSON.parse(responseBody);
+            } catch {
+              body = responseBody;
+            }
+          }
+          resolve({ status: res.statusCode ?? 0, body, headers: res.headers });
         });
       }
     );
@@ -111,6 +120,10 @@ function postJson(
 
 function getJson(port: number, path: string): Promise<{ status: number; body: unknown; headers: Record<string, string | string[] | undefined> }> {
   return httpJson(port, "GET", path);
+}
+
+function pkceChallenge(codeVerifier: string): string {
+  return createHash("sha256").update(codeVerifier, "ascii").digest("base64url");
 }
 
 function githubSignature(payload: unknown, secret: string): string {
@@ -299,7 +312,6 @@ describe("createApiServer", () => {
       },
       github: {
         appId: "",
-        oauthClientId: "",
         privateKeyConfigured: false,
         webhookSecretConfigured: false,
         publicReadTokenConfigured: false
@@ -1435,6 +1447,121 @@ describe("createApiServer", () => {
     expect(tokenCalls).toBe(1);
   });
 
+  it("serves desktop OAuth broker routes without leaking authorization material", async () => {
+    const verifier = "v".repeat(43);
+    const state = "s".repeat(32);
+    const upstreamCalls: string[] = [];
+    const broker = new GitHubDesktopOAuthBroker({
+      brokerBaseUrl: "https://auth.consistency.example",
+      clientId: "broker-client",
+      clientSecret: "broker-server-value",
+      deps: {
+        randomId: () => "flow-123456789012",
+        randomSecret: () => "handoff-123456789012",
+        fetchImpl: (async (url: string | URL) => {
+          upstreamCalls.push(String(url));
+          if (String(url) === "https://github.com/login/oauth/access_token") {
+            return { ok: true, status: 200, json: async () => ({ access_token: "broker-access-value" }) };
+          }
+          if (String(url) === "https://api.github.com/user") {
+            return { ok: true, status: 200, json: async () => ({ login: "octocat" }) };
+          }
+          throw new Error("unexpected upstream request");
+        }) as typeof fetch
+      }
+    });
+    const server = createApiServer({ desktopOAuthBroker: broker });
+    servers.push(server);
+    const port = await listen(server);
+
+    const invalidStart = await postJson(port, "/oauth/desktop/start", {
+      callbackUrl: "http://localhost:45678/oauth/callback",
+      state,
+      codeChallenge: pkceChallenge(verifier),
+      codeChallengeMethod: "S256"
+    });
+    expect(invalidStart.status).toBe(400);
+    expect(upstreamCalls).toEqual([]);
+
+    const started = await postJson(port, "/oauth/desktop/start", {
+      callbackUrl: "http://127.0.0.1:45678/oauth/callback",
+      state,
+      codeChallenge: pkceChallenge(verifier),
+      codeChallengeMethod: "S256"
+    });
+    expect(started.status).toBe(200);
+    const startBody = started.body as { flowId: string; authorizeUrl: string };
+    expect(new URL(startBody.authorizeUrl).hostname).toBe("github.com");
+    expect(upstreamCalls).toEqual([]);
+
+    const callback = await getJson(
+      port,
+      `/oauth/github/callback?state=${encodeURIComponent(startBody.flowId)}&code=github-code-value`
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers["cache-control"]).toBe("no-store");
+    const redirect = new URL(String(callback.headers.location));
+    expect(redirect.origin).toBe("http://127.0.0.1:45678");
+    expect(redirect.pathname).toBe("/oauth/callback");
+    expect(redirect.searchParams.get("state")).toBe(state);
+    expect(redirect.searchParams.get("handoff_code")).toBe("handoff-123456789012");
+    expect(redirect.searchParams.has("code")).toBe(false);
+    expect(redirect.searchParams.has("access_token")).toBe(false);
+    expect(upstreamCalls).toEqual([]);
+
+    const completed = await postJson(port, "/oauth/desktop/complete", {
+      flowId: startBody.flowId,
+      code: redirect.searchParams.get("handoff_code"),
+      codeVerifier: verifier
+    });
+    expect(completed.status).toBe(200);
+    expect(completed.body).toEqual({
+      status: "connected",
+      login: "octocat",
+      accessToken: "broker-access-value"
+    });
+    expect(upstreamCalls).toEqual([
+      "https://github.com/login/oauth/access_token",
+      "https://api.github.com/user"
+    ]);
+    expect(JSON.stringify(redirect)).not.toContain("github-code-value");
+
+    const replay = await postJson(port, "/oauth/desktop/complete", {
+      flowId: startBody.flowId,
+      code: redirect.searchParams.get("handoff_code"),
+      codeVerifier: verifier
+    });
+    expect(replay.status).toBe(400);
+    expect(replay.body).toMatchObject({ error: { code: "GITHUB_OAUTH_HANDOFF_INVALID" } });
+  });
+
+  it("cancels a desktop OAuth flow with a fixed response and no upstream request", async () => {
+    const broker = new GitHubDesktopOAuthBroker({
+      brokerBaseUrl: "https://auth.consistency.example",
+      clientId: "broker-client",
+      clientSecret: "broker-server-value",
+      deps: { randomId: () => "flow-123456789012", randomSecret: () => "handoff-123456789012" }
+    });
+    const server = createApiServer({ desktopOAuthBroker: broker });
+    servers.push(server);
+    const port = await listen(server);
+    const verifier = "v".repeat(43);
+    const started = await postJson(port, "/oauth/desktop/start", {
+      callbackUrl: "http://127.0.0.1:45678/oauth/callback",
+      state: "s".repeat(32),
+      codeChallenge: pkceChallenge(verifier),
+      codeChallengeMethod: "S256"
+    });
+    const flowId = (started.body as { flowId: string }).flowId;
+    const cancelled = await postJson(port, "/oauth/desktop/cancel", { flowId });
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body).toEqual({ status: "cancelled" });
+    const callback = await getJson(port, `/oauth/github/callback?state=${encodeURIComponent(flowId)}&code=unused`);
+    expect(callback.status).toBe(400);
+    expect(callback.headers["cache-control"]).toBe("no-store");
+  });
+
+
   it("reports GitHub OAuth sign-in as not configured when no flow is wired", async () => {
     const server = createApiServer({});
     servers.push(server);
@@ -1702,7 +1829,6 @@ describe("createApiServer", () => {
       },
       github: {
         appId: "",
-        oauthClientId: "",
         privateKeyConfigured: false,
         webhookSecretConfigured: false,
         publicReadTokenConfigured: false
@@ -1772,7 +1898,6 @@ describe("createApiServer", () => {
       },
       github: {
         appId: "",
-        oauthClientId: "",
         privateKeyConfigured: false,
         webhookSecretConfigured: false,
         publicReadTokenConfigured: false
@@ -1823,9 +1948,110 @@ describe("createApiServer", () => {
     expect(preparation.model.default).toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
     expect(preparation.model.providers).toEqual({
       deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-      openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+      openai: { configured: false, defaultModel: "gpt-4.1-mini" },
+      pi: { configured: false, defaultModel: "auto" }
     });
     expect(preparation.model.pendingRestart).toBeNull();
+  });
+
+  it("projects Pi readiness through health and review preparation without exposing server-side configuration", async () => {
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerRemote("Pi readiness repository", "acme/pi-readiness");
+    let piReady = false;
+    const settings: SettingsSnapshot = {
+      llm: {
+        provider: "pi",
+        piModel: "probe/probe-model",
+        deepseekBaseUrl: "https://api.deepseek.com",
+        deepseekModel: "deepseek-v4-flash",
+        openaiModel: "gpt-4.1-mini",
+        deepseekApiKeyConfigured: false,
+        openaiApiKeyConfigured: false
+      },
+      github: {
+        appId: "",
+        privateKeyConfigured: false,
+        webhookSecretConfigured: false,
+        publicReadTokenConfigured: false
+      },
+      runtime: {
+        databasePath: ":memory:",
+        workspaceRoot: "workspaces",
+        localReviewRoots: "",
+        workerConcurrency: 1,
+        workerPollIntervalMs: 1_000,
+        webUrl: "http://127.0.0.1:5173",
+        apiTokenConfigured: false
+      },
+      overriddenByEnvironment: [],
+      restartRequired: false
+    };
+    const server = createApiServer({
+      auditStore,
+      settings: { get: () => settings, update: () => settings },
+      healthDetails: () => ({
+        database: { ok: true },
+        worker: { running: true, activeJobs: 0, concurrency: 1 },
+        llmConfigured: piReady,
+        llmProvider: piReady ? "pi" : "none",
+        ...(piReady ? { llmModel: "probe/probe-model" } : {}),
+        llmCapabilities: {
+          deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
+          openai: { configured: false, defaultModel: "gpt-4.1-mini" },
+          pi: { configured: piReady, defaultModel: piReady ? "probe/probe-model" : "auto" }
+        },
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory", configured: true },
+          workerConcurrency: 1
+        }
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const notReadyHealth = await getJson(port, "/health");
+    expect(notReadyHealth.status).toBe(200);
+    expect(notReadyHealth.body).toMatchObject({
+      llmConfigured: false,
+      llmProvider: "none",
+      llmCapabilities: { pi: { configured: false, defaultModel: "auto" } }
+    });
+    expect((notReadyHealth.body as any).llmModel).toBeUndefined();
+
+    const notReadyPreparationResponse = await getJson(port, `/repositories/${repository.id}/review-preparation`);
+    const notReadyPreparation = reviewPreparationResponseSchema.parse(notReadyPreparationResponse.body);
+    expect(notReadyPreparation.model.default).toEqual({ provider: "none", model: "" });
+    expect(notReadyPreparation.model.providers.pi).toEqual({ configured: false, defaultModel: "auto" });
+    expect(notReadyPreparation.canStartReview).toBe(false);
+    expect(notReadyPreparation.blockingReasons).toContain("尚未配置大语言模型 (DeepSeek、OpenAI 或 Pi)。请前往设置页配置。");
+
+    piReady = true;
+
+    const readyHealth = await getJson(port, "/health");
+    expect(readyHealth.status).toBe(200);
+    expect(readyHealth.body).toMatchObject({
+      llmConfigured: true,
+      llmProvider: "pi",
+      llmModel: "probe/probe-model",
+      llmCapabilities: { pi: { configured: true, defaultModel: "probe/probe-model" } }
+    });
+
+    const readyPreparationResponse = await getJson(port, `/repositories/${repository.id}/review-preparation`);
+    const readyPreparation = reviewPreparationResponseSchema.parse(readyPreparationResponse.body);
+    expect(readyPreparation.model.default).toEqual({ provider: "pi", model: "probe/probe-model" });
+    expect(readyPreparation.model.providers.pi).toEqual({ configured: true, defaultModel: "probe/probe-model" });
+    expect(readyPreparation.model.pendingRestart).toBeNull();
+    expect(readyPreparation.canStartReview).toBe(true);
+
+    const serialized = JSON.stringify({ health: readyHealth.body, preparation: readyPreparation });
+    expect(serialized).not.toContain("auth.json");
+    expect(serialized).not.toContain("models.json");
+    expect(serialized).not.toContain("authorization");
+    expect(serialized).not.toContain("baseUrl");
+    expect(serialized).not.toContain("headers");
   });
 
   it("handles set-monitoring as POST, updates monitoring status, and handles invalid inputs", async () => {

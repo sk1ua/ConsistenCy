@@ -73,6 +73,8 @@ Output is written to `apps/desktop/release/`:
 
 The staged Node runtime installs `better-sqlite3` (native module) plus `web-tree-sitter` and `tree-sitter-wasms` (pinned to the versions in `packages/plugins-builtin/package.json`). The tree-sitter runtime wasm and grammar wasm files are data assets that esbuild cannot inline, so the bundled API `require.resolve`es them from the staged `node_modules` at runtime.
 
+Pi's official runtime is bundled with the API, but Desktop packaging never copies the current user's `~/.pi/agent/auth.json`, `models.json`, or catalog cache into staging, `asar`, or the installation directory. At runtime the API helper may read only the current user's Pi configuration through its server-side process environment; Electron main forwards a fixed allowlist of Pi model/path/refresh settings, and the renderer/preload receive none of them.
+
 ### Packaged Data Location
 The packaged application persists all mutable data strictly under the user data directory (`app.getPath("userData")`):
 - Database: `<userData>/consistency.db`
@@ -98,7 +100,17 @@ The API binds to `127.0.0.1` on a dynamically assigned port. Each launch generat
 ### 4.3 Runtime Restart from Settings
 When LLM provider keys or review worker settings are updated in the Settings page or the in-app Settings Dialog (Runtime section), the Desktop host provides a **[Restart ConsistenCy Runtime]** button. Clicking this instructs Electron to gracefully terminate the API child process, spawn a fresh instance with the updated settings, and re-establish connectivity seamlessly.
 
-### 4.4 Open Logs Folder (Semantic Action)
+### 4.4 Desktop GitHub browser OAuth
+
+Desktop Settings exposes a one-click GitHub sign-in backed by the product-operated OAuth broker. The product deployment registers one GitHub OAuth App and stores its Client Secret only on the broker/API service. End users do not register an OAuth App and never enter a Client ID or Client Secret.
+
+The packaged Desktop build contains only the broker's public HTTPS origin. The system browser opens GitHub's standard Authorization Code page. Electron main creates a one-time listener bound to `127.0.0.1` on a dynamic port at `/oauth/callback`, validates state and S256 PKCE, and exchanges a one-time broker handoff before writing the resulting public-read credential to `safeStorage`.
+
+The Client Secret and GitHub authorization code stay on the product broker. The PKCE verifier and access token stay in the main process; the renderer receives only `connected` plus the sanitized GitHub login, or a fixed failure status. It never receives a callback URL, port, token, or secret. The listener is closed on success, denial, error, cancellation, timeout, and application shutdown. Restart the ConsistenCy runtime after a successful sign-in so the API child process reads the new credential.
+
+Normal browser deployments do not expose this callback and keep the existing Device Flow compatibility routes. Those routes require a server-configured public Client ID and show GitHub's verification URL and user code; they are not the Desktop automatic-return experience. Desktop renderers are blocked from those routes and can only use the main-process broker capability.
+
+### 4.5 Open Logs Folder (Semantic Action)
 The About section of Settings exposes an **[Open logs folder]** button (desktop only; browsers show a not-available note). This is a semantic privileged action, not a filesystem capability: the `logs:open` IPC method takes **no arguments**, the main process resolves the `userData` folder itself — the documented home of `consistency.log` and `api.log` — opens it in the OS file manager via `shell.openPath`, and returns only `{ ok: boolean }` to the renderer. The renderer never receives arbitrary path-opening authority, never learns the resolved folder path, and never sees `shell.openPath`'s error description (which may embed local paths). There is no generic `openPath(pathFromRenderer)` API.
 
 ---
@@ -106,5 +118,5 @@ The About section of Settings exposes an **[Open logs folder]** button (desktop 
 ## 5. Limitations & Boundaries
 
 - **Supported Platform**: Desktop v1 targets Windows x64.
-- **Real LLM Required**: Review execution requires real API credentials (DeepSeek or OpenAI). Mock runtime is absent.
+- **Real LLM Required**: Review execution requires a real configured provider (DeepSeek, OpenAI, or Pi). Mock runtime is absent.
 - **OS Containment**: Electron sandboxes the renderer, but the API child process runs with standard user OS permissions.

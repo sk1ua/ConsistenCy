@@ -22,7 +22,6 @@ const configuredSettings: SettingsSnapshot = {
   },
   github: {
     appId: "123456",
-    oauthClientId: "",
     privateKeyConfigured: true,
     webhookSecretConfigured: true,
     publicReadTokenConfigured: true
@@ -212,7 +211,7 @@ describe("SettingsDialog", () => {
   it("renders the shared Appearance section when the Appearance nav item is clicked", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const settingsSpy = vi.spyOn(api, "settings").mockResolvedValue(configuredSettings);
-    window.localStorage.clear();
+    window.localStorage.clear?.();
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root: Root = createRoot(container);
@@ -249,7 +248,7 @@ describe("SettingsDialog", () => {
   it("keeps Appearance reachable when the settings API fails while form sections degrade to the empty state", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const settingsSpy = vi.spyOn(api, "settings").mockRejectedValue(new Error("settings API failed"));
-    window.localStorage.clear();
+    window.localStorage.clear?.();
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root: Root = createRoot(container);

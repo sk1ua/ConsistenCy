@@ -30,7 +30,6 @@ function makeSettings(provider: "deepseek" | "openai", model: string): SettingsS
     },
     github: {
       appId: "",
-      oauthClientId: "",
       privateKeyConfigured: false,
       webhookSecretConfigured: false,
       publicReadTokenConfigured: false

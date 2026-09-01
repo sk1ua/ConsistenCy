@@ -699,7 +699,7 @@ describe("RuntimeStudio conversational Workflow Copilot", () => {
     vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockRejectedValueOnce(new ApiRequestError("尚未配置大语言模型", "LLM_NOT_CONFIGURED", 503));
     const host = await renderStudio();
     await submitInstruction(host, "add a secret scan");
-    expect(host.querySelector(".studio-copilot-note")?.textContent).toContain("LLM is not configured; configure DeepSeek or OpenAI to generate proposals");
+    expect(host.querySelector(".studio-copilot-note")?.textContent).toContain("LLM is not configured; configure DeepSeek, OpenAI, or Pi to generate proposals");
   });
 
   it("maps WORKFLOW_PATCH_INVALID to the server issues summary", async () => {

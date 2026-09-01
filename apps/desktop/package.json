@@ -9,7 +9,8 @@
   "consistencyDesktopUpdateChannel": "stable",
   "consistencyDesktopDistribution": "manual",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "test": "vitest run src/github-oauth.test.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^1.8.0",

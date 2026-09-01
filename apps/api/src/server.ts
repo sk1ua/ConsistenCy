@@ -12,6 +12,7 @@ import { PermanentPublishError } from "./publish/error";
 import { GitHubAppAuthenticator } from "./github/auth";
 import { testGitHubConnection } from "./github/connectionTest";
 import { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
+import { GitHubDesktopOAuthBroker } from "./github/oauthBroker";
 import { RepositoryPullRequestService } from "./github/pullRequestReader";
 import { connectPublicGitHubRepository } from "./github/publicRepository";
 import { createContextBuilder } from "./review/context/contextRouter";
@@ -20,6 +21,7 @@ import { HeartbeatDaemon } from "./heartbeat/daemon";
 import { RepositorySupervisor } from "./heartbeat/repositorySupervisor";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createLLMProvider, createReviewLLMProvider, resolveReviewModel } from "./review/llm/factory";
+import { PiRuntimeProvider } from "./review/llm/piProvider";
 import { redactSensitiveText, sanitizePublicError, sanitizePublishFailure } from "./security/redact";
 import { loadRealData } from "./data/realData";
 import { DeterministicAnalyzer } from "./review/deterministic";
@@ -87,6 +89,12 @@ if (recoveredJobs > 0) {
 }
 
 const provider = createLLMProvider(config);
+const piProvider = provider?.name === "pi" ? provider as PiRuntimeProvider : undefined;
+if (piProvider) {
+  void piProvider.ready().catch(error => {
+    logger.warn({ error: sanitizePublicError(error instanceof Error ? error.message : "Pi model configuration unavailable") }, "Pi model runtime is unavailable");
+  });
+}
 export const deterministicAnalyzer = new DeterministicAnalyzer(
   config.CONSISTENCY_PYTHON_PATH,
   config.CONSISTENCY_ENGINE_MODULE,
@@ -96,6 +104,16 @@ export const deterministicAnalyzer = new DeterministicAnalyzer(
 
 const authenticator = config.GITHUB_APP_ID && config.GITHUB_PRIVATE_KEY
   ? new GitHubAppAuthenticator({ appId: config.GITHUB_APP_ID, privateKey: config.GITHUB_PRIVATE_KEY })
+  : undefined;
+
+const desktopOAuthBroker = config.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL
+  && config.CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID
+  && config.CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET
+  ? new GitHubDesktopOAuthBroker({
+      brokerBaseUrl: config.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL,
+      clientId: config.CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID,
+      clientSecret: config.CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET
+    })
   : undefined;
 
 const snapshotIndexer = new RepositorySnapshotIndexer({
@@ -161,7 +179,10 @@ export const worker = new ReviewWorker({
   pollIntervalMs: config.CONSISTENCY_WORKER_POLL_INTERVAL_MS,
   workflow: {
     provider,
-    providerFactory: override => createReviewLLMProvider(config, override),
+    providerFactory: override => createReviewLLMProvider(config, {
+      provider: override?.provider as "deepseek" | "openai" | "pi" | undefined,
+      model: override?.model
+    }),
     deterministicAnalyzer,
     reportLanguage: config.reportLanguage,
     reviewWorkflow: config.reviewWorkflow,
@@ -410,10 +431,11 @@ export const server = createApiServer({
     publicPrAnalysisEnabled: config.publicPrAnalysisEnabled,
     ...(draft?.publicReadToken === undefined ? {} : { draftPublicReadToken: draft.publicReadToken })
   }),
-  // GitHub OAuth Device Flow sign-in. The client id is a public setting; the
-  // flow stores the device_code and access token only inside this process and
-  // hands the token once to the renderer for the existing credential save path.
+  // GitHub OAuth Device Flow remains the Web compatibility path.
   githubOauth: new GitHubOauthDeviceFlow(config.GITHUB_OAUTH_CLIENT_ID ?? ""),
+  // Product-operated Desktop Authorization Code broker. The client secret is
+  // read only by this server process and is never passed to Electron.
+  desktopOAuthBroker,
   publicPr: (url, modelOverride) => enqueuePublicPrReview({
     url,
     jobs,
@@ -422,7 +444,12 @@ export const server = createApiServer({
     llmProvider: modelOverride?.provider,
     llmModel: modelOverride?.model
   }),
-  llmProviderConfigured: Boolean(provider),
+  llmProviderConfigured: () => {
+    const activeProvider = provider && (provider.name !== "pi" || piProvider?.isConfigured === true)
+      ? provider
+      : undefined;
+    return activeProvider !== undefined;
+  },
   // CKPT6 Phase 3: provider channel for the workflow copilot proposal route.
   // Model resolution stays behind options.resolveReviewModel; this factory only
   // materializes the per-request provider (deepseek/openai) for invokeWithSchema.
@@ -472,14 +499,19 @@ export const server = createApiServer({
     latest: () => heartbeat.latest(),
     subscribe: subscriber => heartbeat.subscribe(subscriber)
   },
-  healthDetails: () => ({
+  healthDetails: () => {
+    const piReady = piProvider?.isConfigured === true;
+    const activeProvider = provider && (provider.name !== "pi" || piReady) ? provider : undefined;
+    return {
     database: { ok: database.open },
     worker: worker.status(),
     publishWorker: publishWorker.status(),
     deterministicAnalyzer: deterministicAnalyzer.status(),
-    llmConfigured: Boolean(provider),
-    llmProvider: provider?.name ?? "none",
-    llmModel: provider?.model ?? undefined,
+    llmConfigured: Boolean(activeProvider),
+    llmProvider: activeProvider?.name ?? "none",
+    llmModel: activeProvider?.name === "pi" && piProvider?.isConfigured === true
+      ? piProvider.model
+      : activeProvider?.model ?? undefined,
     llmCapabilities: {
       deepseek: {
         configured: Boolean(config.DEEPSEEK_API_KEY),
@@ -488,6 +520,10 @@ export const server = createApiServer({
       openai: {
         configured: Boolean(config.OPENAI_API_KEY),
         defaultModel: config.OPENAI_MODEL
+      },
+      pi: {
+        configured: piReady,
+        defaultModel: piProvider?.model ?? config.CONSISTENCY_PI_MODEL ?? "auto"
       }
     },
     publicPrAnalysis: config.publicPrAnalysisEnabled,
@@ -510,7 +546,8 @@ export const server = createApiServer({
       // CONSISTENCY_REVIEW_WORKFLOW value the process actually runs with.
       reviewWorkflow: config.reviewWorkflow ?? "legacy"
     }
-  })
+    };
+  }
 });
 
 let shutdownPromise: Promise<void> | null = null;

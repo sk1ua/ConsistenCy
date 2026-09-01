@@ -2,23 +2,25 @@ import { Github, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GitHubOauthDevicePollResponse } from "@consistency/schema";
 import { api } from "../../api/client";
-import { openExternalUrl } from "../../desktop";
+import { openExternalUrl, type DesktopGitHubOAuthBridge } from "../../desktop";
 import { useI18n } from "../../i18n";
 
 export interface GitHubOauthSignInProps {
-  /** ACTIVE configured OAuth App client id; empty disables sign-in honestly. */
-  oauthClientId: string;
   /** True while saved settings await a restart; the new token needs one too. */
   restartPending?: boolean;
-  /** One-time token handoff into the existing credential save path. */
+  /** One-time token handoff into the Web Device Flow credential save path. */
   onConnected: (token: string) => Promise<void>;
+  /** Desktop main-process completion; no token is supplied to the renderer. */
+  desktopOAuth?: DesktopGitHubOAuthBridge;
+  onDesktopConnected?: (login: string) => Promise<void>;
 }
 
 type OauthPhase =
   | { phase: "idle" }
   | { phase: "starting" }
   | { phase: "awaiting"; flowId: string; userCode: string; verificationUri: string; intervalSeconds: number }
-  | { phase: "connected"; login: string }
+  | { phase: "desktop-awaiting" }
+  | { phase: "connected"; login?: string }
   | { phase: "failed"; messageKey: string };
 
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
@@ -27,10 +29,10 @@ const MAX_CONSECUTIVE_POLL_ERRORS = 3;
  * GitHub OAuth Device Flow sign-in for Settings. The access token crosses this
  * component exactly once (connected poll → onConnected) and is never stored in
  * state, rendered, or logged; polling stops on unmount and on every terminal
- * status. Unconfigured client ids render an honest setup hint instead of a
- * broken button.
+ * status. Desktop builds use the product-operated broker; browser deployments
+ * retain Device Flow.
  */
-export function GitHubOauthSignIn({ oauthClientId, restartPending, onConnected }: GitHubOauthSignInProps) {
+export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, onDesktopConnected }: GitHubOauthSignInProps) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<OauthPhase>({ phase: "idle" });
   const [copied, setCopied] = useState(false);
@@ -94,6 +96,29 @@ export function GitHubOauthSignIn({ oauthClientId, restartPending, onConnected }
     clearTimer();
     setCopied(false);
     setPhase({ phase: "starting" });
+    if (desktopOAuth) {
+      setPhase({ phase: "desktop-awaiting" });
+      try {
+        const result = await desktopOAuth.start();
+        if (!mountedRef.current) return;
+        if (result.status === "connected") {
+          setPhase({ phase: "connected", login: result.login });
+          await onDesktopConnected?.(result.login);
+          return;
+        }
+        const failureKeys: Record<Exclude<typeof result.status, "connected">, string> = {
+          not_configured: "This ConsistenCy desktop build has no GitHub sign-in service configured.",
+          denied: "Authorization was denied.",
+          cancelled: "GitHub sign-in was cancelled.",
+          expired: "GitHub sign-in expired. Start again.",
+          unavailable: "GitHub sign-in is unavailable."
+        };
+        setPhase({ phase: "failed", messageKey: failureKeys[result.status] });
+      } catch {
+        if (mountedRef.current) setPhase({ phase: "failed", messageKey: "GitHub sign-in is unavailable." });
+      }
+      return;
+    }
     try {
       const started = await api.startGitHubOauthDeviceFlow();
       if (!mountedRef.current) return;
@@ -113,26 +138,20 @@ export function GitHubOauthSignIn({ oauthClientId, restartPending, onConnected }
     }
   }
 
+  async function cancelSignIn(): Promise<void> {
+    clearTimer();
+    if (desktopOAuth && phase.phase === "desktop-awaiting") {
+      await desktopOAuth.cancel().catch(() => {});
+    }
+    setPhase({ phase: "idle" });
+  }
+
   function copyUserCode(): void {
     if (phase.phase !== "awaiting") return;
     void navigator.clipboard?.writeText(phase.userCode).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2_000);
     }).catch(() => {});
-  }
-
-  if (oauthClientId.trim() === "") {
-    return (
-      <div className="setting-field setting-field-wide setting-note" id="setting-github-oauth-setup">
-        <Github size={17} />
-        <div>
-          <strong>{t("GitHub sign-in (OAuth)")}</strong>
-          <p>
-            {t("Configure an OAuth App client ID below and restart to enable one-click GitHub sign-in — no personal token required.")}
-          </p>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -145,7 +164,7 @@ export function GitHubOauthSignIn({ oauthClientId, restartPending, onConnected }
         )}
         {phase.phase === "connected" && (
           <p role="status">
-            <span className="badge badge-succeeded">{t("Signed in as {login}", { login: phase.login })}</span>
+            <span className="badge badge-succeeded">{t("Signed in as {login}", { login: phase.login ?? "GitHub" })}</span>
             {restartPending && (
               <span className="github-restart-hint">{t("Restart the runtime to use the new credential.")}</span>
             )}
@@ -153,6 +172,12 @@ export function GitHubOauthSignIn({ oauthClientId, restartPending, onConnected }
         )}
         {phase.phase === "failed" && (
           <p role="status"><span className="badge badge-failed">{t(phase.messageKey)}</span></p>
+        )}
+        {phase.phase === "desktop-awaiting" && (
+          <div className="github-oauth-pending" role="status">
+            <p><LoaderCircle className="spinning" size={13} /> {t("Complete authorization in your browser…")}</p>
+            <button type="button" className="secondary-button" onClick={() => void cancelSignIn()}>{t("Cancel")}</button>
+          </div>
         )}
         {phase.phase === "awaiting" && (
           <div className="github-oauth-pending" role="status">
@@ -179,7 +204,7 @@ export function GitHubOauthSignIn({ oauthClientId, restartPending, onConnected }
           type="button"
           id="setting-github-oauth-start"
           className="secondary-button"
-          disabled={phase.phase === "starting" || phase.phase === "awaiting"}
+          disabled={phase.phase === "starting" || phase.phase === "awaiting" || phase.phase === "desktop-awaiting"}
           onClick={() => void startSignIn()}
         >
           {phase.phase === "starting" ? <LoaderCircle className="spinning" size={13} /> : <Github size={13} />}

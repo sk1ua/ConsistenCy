@@ -103,7 +103,8 @@ const preparation = (canStartReview: boolean): ReviewPreparationResponse => ({
     default: { provider: "deepseek", model: "deepseek-v4-flash" },
     providers: {
       deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-      openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+      openai: { configured: false, defaultModel: "gpt-4.1-mini" },
+      pi: { configured: false, defaultModel: "auto" }
     },
     pendingRestart: null
   },
@@ -366,7 +367,8 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
         default: { provider: "none" as const, model: "deepseek-v4-flash" },
         providers: {
           deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+          openai: { configured: false, defaultModel: "gpt-4.1-mini" },
+          pi: { configured: false, defaultModel: "auto" }
         },
         pendingRestart: null
       }
@@ -568,7 +570,8 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
           llmModel: "deepseek-v4-flash",
           llmCapabilities: {
             deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-            openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+            openai: { configured: false, defaultModel: "gpt-4.1-mini" },
+          pi: { configured: false, defaultModel: "auto" }
           },
           configuration: {
             githubAppConfigured: false,
@@ -594,7 +597,8 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
         default: { provider: "none" as const, model: "deepseek-v4-flash" },
         providers: {
           deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+          openai: { configured: false, defaultModel: "gpt-4.1-mini" },
+          pi: { configured: false, defaultModel: "auto" }
         },
         pendingRestart: { provider: "deepseek" as const, model: "deepseek-test", credentialConfigured: true }
       },

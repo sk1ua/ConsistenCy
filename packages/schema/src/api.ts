@@ -45,7 +45,7 @@ export const errorResponseSchema = z.object({
 }).strict();
 
 export const reviewModelOverrideSchema = z.object({
-  provider: z.enum(["deepseek", "openai"]).optional(),
+  provider: z.enum(["deepseek", "openai", "pi"]).optional(),
   name: z.string().trim().min(1).max(100).optional(),
   model: z.string().trim().min(1).max(100).optional()
 }).strict();
@@ -72,7 +72,7 @@ export const localReviewResponseSchema = z.object({
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: z.literal("disabled"),
-  llmProvider: z.enum(["deepseek", "openai"]).optional(),
+  llmProvider: z.enum(["deepseek", "openai", "pi"]).optional(),
   llmModel: z.string().trim().min(1).optional(),
   status: z.literal("queued")
 }).strict();
@@ -84,7 +84,7 @@ export const publicPrResponseSchema = z.object({
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: z.literal("disabled"),
-  llmProvider: z.enum(["deepseek", "openai"]).optional(),
+  llmProvider: z.enum(["deepseek", "openai", "pi"]).optional(),
   llmModel: z.string().trim().min(1).optional(),
   status: z.literal("queued")
 }).strict();
@@ -496,15 +496,16 @@ export const reviewPreparationModelProviderSchema = z.object({
 
 export const reviewPreparationModelSchema = z.object({
   default: z.object({
-    provider: z.enum(["deepseek", "openai", "none"]),
+    provider: z.enum(["deepseek", "openai", "pi", "none"]),
     model: z.string()
   }).strict(),
   providers: z.object({
     deepseek: reviewPreparationModelProviderSchema,
-    openai: reviewPreparationModelProviderSchema
+    openai: reviewPreparationModelProviderSchema,
+    pi: reviewPreparationModelProviderSchema
   }).strict(),
   pendingRestart: z.object({
-    provider: z.enum(["deepseek", "openai"]),
+    provider: z.enum(["deepseek", "openai", "pi"]),
     model: z.string().trim().min(1),
     credentialConfigured: z.boolean()
   }).strict().nullable()

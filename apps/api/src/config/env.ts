@@ -38,7 +38,12 @@ export const envSchema = z.object({
   CONSISTENCY_PYTHON_PATH: z.string().trim().min(1).default("python"),
   CONSISTENCY_ENGINE_MODULE: z.string().trim().min(1).default("engine"),
   CONSISTENCY_ENGINE_ROOT: z.string().trim().min(1).optional(),
-  LLM_PROVIDER: z.enum(["deepseek", "openai"]).optional(),
+  LLM_PROVIDER: z.enum(["deepseek", "openai", "pi"]).optional(),
+  CONSISTENCY_PI_MODEL: z.string().trim().min(3).optional(),
+  CONSISTENCY_PI_AUTH_PATH: z.string().trim().min(1).optional(),
+  CONSISTENCY_PI_MODELS_PATH: z.string().trim().min(1).optional(),
+  CONSISTENCY_PI_MODELS_STORE_PATH: z.string().trim().min(1).optional(),
+  CONSISTENCY_PI_REFRESH_ON_START: z.enum(["true", "false"]).default("true"),
   CONSISTENCY_WORKERS_ENABLED: z
     .enum(["true", "false"])
     .transform(value => value === "true")
@@ -95,8 +100,13 @@ export const envSchema = z.object({
   GITHUB_PRIVATE_KEY: optionalSecret,
   GITHUB_WEBHOOK_SECRET: optionalSecret,
   GITHUB_PUBLIC_READ_TOKEN: optionalSecret,
-  // Public OAuth App client id for Device Flow sign-in; public by design.
+  // Public OAuth App client id for the Web Device Flow; public by design.
   GITHUB_OAUTH_CLIENT_ID: optionalSecret,
+  // Product-operated desktop broker credentials stay server-side and are never
+  // included in renderer-facing settings or desktop helper environments.
+  CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: z.string().url().optional(),
+  CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID: optionalSecret,
+  CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET: optionalSecret,
   DEEPSEEK_API_KEY: optionalSecret,
   DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
   DEEPSEEK_MODEL: z.string().trim().min(1).default("deepseek-v4-flash"),
@@ -115,7 +125,7 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   /** True when CONSISTENCY_LOCAL_REVIEW_ROOTS was not configured (reviews disabled). */
   localReviewRootsAreDefaulted: boolean;
   allowedOrigins: string[];
-  LLM_PROVIDER?: "deepseek" | "openai";
+  LLM_PROVIDER?: "deepseek" | "openai" | "pi";
   publicPrAnalysisEnabled: boolean;
   settingsWritable: boolean;
   reportLanguage: "zh-CN" | "en-US";
@@ -141,6 +151,17 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.NODE_ENV === "production" && !parsed.CONSISTENCY_API_TOKEN) {
     throw new Error("CONSISTENCY_API_TOKEN is required in production");
   }
+  const desktopOAuthBrokerConfigured = Boolean(parsed.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL)
+    || Boolean(parsed.CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID)
+    || Boolean(parsed.CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET);
+  if (desktopOAuthBrokerConfigured && (!parsed.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL
+    || !parsed.CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID
+    || !parsed.CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET)) {
+    throw new Error("Desktop OAuth broker URL, client id, and client secret must be configured together");
+  }
+  if (parsed.NODE_ENV === "production" && desktopOAuthBrokerConfigured && !parsed.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL?.startsWith("https://")) {
+    throw new Error("Desktop OAuth broker URL must use HTTPS in production");
+  }
   if (parsed.NODE_ENV === "production" && githubAppConfigured && !parsed.GITHUB_WEBHOOK_SECRET) {
     throw new Error("GITHUB_WEBHOOK_SECRET is required when GitHub App mode is enabled in production");
   }
@@ -153,6 +174,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (llmProvider === "openai" && !parsed.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
+  }
+  if (llmProvider === "pi" && parsed.CONSISTENCY_PI_MODEL && !parsed.CONSISTENCY_PI_MODEL.includes("/")) {
+    throw new Error("CONSISTENCY_PI_MODEL must use provider/model format");
   }
   const allowedOrigins = parsed.CONSISTENCY_ALLOWED_ORIGINS.split(",")
     .map(origin => origin.trim())

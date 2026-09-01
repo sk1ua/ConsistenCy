@@ -4,8 +4,8 @@ import { diagnoseConfiguration } from "./doctor";
 const privateKey = "-----BEGIN PRIVATE KEY-----\nconfigured\n-----END PRIVATE KEY-----";
 
 describe("diagnoseConfiguration", () => {
-  it("accepts a complete real-review configuration", () => {
-    const result = diagnoseConfiguration({
+  it("accepts a complete real-review configuration", async () => {
+    const result = await diagnoseConfiguration({
       LLM_PROVIDER: "deepseek",
       DEEPSEEK_API_KEY: "configured",
       GITHUB_APP_ID: "123",
@@ -21,15 +21,15 @@ describe("diagnoseConfiguration", () => {
     expect(result.checks.find(check => check.id === "llm")?.status).toBe("pass");
   });
 
-  it("reports incomplete provider configuration", () => {
-    const result = diagnoseConfiguration({ LLM_PROVIDER: "deepseek" });
+  it("reports incomplete provider configuration", async () => {
+    const result = await diagnoseConfiguration({ LLM_PROVIDER: "deepseek" });
     expect(result.ok).toBe(false);
     expect(result.checks[0]?.id).toBe("schema");
     expect(result.checks[0]?.status).toBe("fail");
   });
 
-  it("warns when real integrations are intentionally absent", () => {
-    const result = diagnoseConfiguration({});
+  it("warns when real integrations are intentionally absent", async () => {
+    const result = await diagnoseConfiguration({});
     expect(result.ok).toBe(true);
     expect(result.checks.find(check => check.id === "llm")?.status).toBe("warn");
     expect(result.checks.find(check => check.id === "github")?.status).toBe("warn");

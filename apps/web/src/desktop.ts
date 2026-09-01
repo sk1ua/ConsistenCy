@@ -10,6 +10,15 @@ export const DESKTOP_CREDENTIAL_KEYS = [
 
 export type DesktopCredentialKey = typeof DESKTOP_CREDENTIAL_KEYS[number];
 export type DesktopCredentialStatus = Record<DesktopCredentialKey, boolean>;
+
+export type DesktopGitHubOAuthResult =
+  | { status: "connected"; login: string }
+  | { status: "not_configured" | "denied" | "cancelled" | "expired" | "unavailable" };
+
+export type DesktopGitHubOAuthBridge = {
+  start: () => Promise<DesktopGitHubOAuthResult>;
+  cancel: () => Promise<{ status: "cancelled" }>;
+};
 export type DesktopRepositorySelection =
   | { readonly canceled: true }
   | { readonly canceled: false; readonly repository: Readonly<Repository> }
@@ -47,6 +56,7 @@ export type ConsistencyDesktopBridge = {
   selectRepository: () => Promise<DesktopRepositorySelection>;
   credentialStatus: () => Promise<DesktopCredentialStatus>;
   setCredential: (key: DesktopCredentialKey, value: string | null) => Promise<DesktopCredentialStatus>;
+  githubOAuth?: DesktopGitHubOAuthBridge;
   showFromTray: () => Promise<{ visible: boolean }>;
   /** Desktop behavior preferences. The main process validates the patch and
    *  applies the OS side effects (tray lifecycle, login item); only boolean

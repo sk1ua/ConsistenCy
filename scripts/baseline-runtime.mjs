@@ -9,10 +9,9 @@ export function queryPythonVersion(python = "python", execute = execFileSync) {
 }
 
 export function assertNodeBaseline(version) {
-  const clean = version.replace(/^v/, "");
-  const major = Number(clean.split(".")[0]);
-  if (major !== 22) {
-    throw new Error(`Node 22.x required, got ${version}`);
+  const match = version.match(/^v?(22)\.(\d+)\.(\d+)/);
+  if (!match || Number(match[2]) < 19) {
+    throw new Error(`Node 22.19.x or newer required, got ${version}`);
   }
 }
 

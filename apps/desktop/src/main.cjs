@@ -29,6 +29,7 @@ const {
   isSafeExternalUrl,
   selectAndRegisterRepository
 } = require("./security-boundary.cjs");
+const { GitHubOAuthFlow } = require("./github-oauth.cjs");
 const {
   NSIS_INSTALL_MARKER,
   createUpdateCoordinator,
@@ -46,6 +47,75 @@ const CREDENTIAL_KEYS = new Set([
   "GITHUB_WEBHOOK_SECRET",
   "GITHUB_PUBLIC_READ_TOKEN"
 ]);
+const API_CREDENTIAL_KEYS = new Set([
+  "DEEPSEEK_API_KEY",
+  "OPENAI_API_KEY",
+  "GITHUB_PRIVATE_KEY",
+  "GITHUB_WEBHOOK_SECRET",
+  "GITHUB_PUBLIC_READ_TOKEN"
+]);
+const API_ENVIRONMENT_KEYS = Object.freeze([
+  "APPDATA",
+  "ComSpec",
+  "HOME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LOCALAPPDATA",
+  "PATH",
+  "PATHEXT",
+  "PROGRAMDATA",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "WINDIR",
+  "GITHUB_APP_ID",
+  "GITHUB_PRIVATE_KEY",
+  "GITHUB_PUBLIC_READ_TOKEN",
+  "GITHUB_WEBHOOK_SECRET",
+  "DEEPSEEK_API_KEY",
+  "DEEPSEEK_BASE_URL",
+  "DEEPSEEK_MODEL",
+  "OPENAI_API_KEY",
+  "OPENAI_MODEL",
+  "LLM_PROVIDER",
+  "CONSISTENCY_ENGINE_MODULE",
+  "CONSISTENCY_PI_AUTH_PATH",
+  "CONSISTENCY_PI_MODEL",
+  "CONSISTENCY_PI_MODELS_PATH",
+  "CONSISTENCY_PI_MODELS_STORE_PATH",
+  "CONSISTENCY_PI_REFRESH_ON_START",
+  "CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED",
+  "CONSISTENCY_REPORT_LANGUAGE",
+  "CONSISTENCY_NOTEBOOK_ENABLED",
+  "CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS",
+  "CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS",
+  "CONSISTENCY_NOTEBOOK_INDEX_MAX_BYTES",
+  "CONSISTENCY_REVIEW_WORKFLOW",
+  "CONSISTENCY_WORKERS_ENABLED",
+  "CONSISTENCY_WORKER_CONCURRENCY",
+  "CONSISTENCY_WORKER_POLL_INTERVAL_MS",
+  "CONSISTENCY_PUBLISH_WORKER_CONCURRENCY",
+  "CONSISTENCY_PUBLISH_WORKER_POLL_INTERVAL_MS",
+  "CONSISTENCY_PUBLISH_LEASE_DURATION_MS",
+  "CONSISTENCY_PUBLISH_TIMEOUT_MS",
+  "CONSISTENCY_PUBLISH_MAX_ATTEMPTS",
+  "CONSISTENCY_HEARTBEAT_ENABLED",
+  "CONSISTENCY_HEARTBEAT_INTERVAL_MS",
+  "CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED",
+  "CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS",
+  "CONSISTENCY_AUDIT_EXECUTION_ENABLED",
+  "CONSISTENCY_AUDIT_EXECUTION_POLL_INTERVAL_MS",
+  "CONSISTENCY_WEB_URL"
+]);
+
+function inheritedApiEnvironment() {
+  const environment = {};
+  for (const key of API_ENVIRONMENT_KEYS) {
+    if (process.env[key] !== undefined) environment[key] = process.env[key];
+  }
+  return environment;
+}
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "consistency",
@@ -68,6 +138,7 @@ let updateCoordinator = null;
 let intentionalExit = false;
 let restarting = false;
 let quitting = false;
+let githubOAuthFlow = null;
 
 function stopChildProcess(child, timeoutMs = 5000) {
   return new Promise(resolve => {
@@ -137,7 +208,8 @@ function resolveNode22() {
   for (const candidate of candidates) {
     if (!candidate) continue;
     const version = executableVersion(candidate);
-    if (/^v(22|23|24|25)\./.test(version)) return candidate;
+    const match = version.match(/^v22\.(\d+)\./);
+    if (match && Number(match[1]) >= 19) return candidate;
   }
   return undefined;
 }
@@ -193,7 +265,7 @@ function credentialEnvironment() {
   if (!safeStorage.isEncryptionAvailable()) return {};
   const encrypted = readEncryptedCredentials();
   const environment = {};
-  for (const key of CREDENTIAL_KEYS) {
+  for (const key of API_CREDENTIAL_KEYS) {
     if (typeof encrypted[key] !== "string") continue;
     try {
       environment[key] = safeStorage.decryptString(Buffer.from(encrypted[key], "base64"));
@@ -219,6 +291,43 @@ async function writeCredential(key, value) {
   await fs.promises.writeFile(temporary, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await fs.promises.rename(temporary, target);
   return credentialStatus();
+}
+
+function desktopOAuthBrokerUrl() {
+  if (app.isPackaged) {
+    try {
+      const metadata = JSON.parse(fs.readFileSync(path.join(stagedRoot(), "desktop-config.json"), "utf8"));
+      return typeof metadata.desktopOAuthBrokerUrl === "string" ? metadata.desktopOAuthBrokerUrl : "";
+    } catch {
+      return "";
+    }
+  }
+  return process.env.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL || "";
+}
+
+async function startGitHubOAuth() {
+  const brokerUrl = desktopOAuthBrokerUrl();
+  if (!githubOAuthFlow) githubOAuthFlow = new GitHubOAuthFlow({ fetchImpl: electronNet.fetch });
+  if (!brokerUrl) return { status: "not_configured" };
+
+  const result = await githubOAuthFlow.start({
+    brokerUrl,
+    openExternal: url => shell.openExternal(url)
+  });
+  if (result.status !== "connected" || typeof result.accessToken !== "string") {
+    return result.status === "connected" ? { status: "unavailable" } : result;
+  }
+  try {
+    await writeCredential("GITHUB_PUBLIC_READ_TOKEN", result.accessToken);
+  } catch {
+    return { status: "unavailable" };
+  }
+  return { status: "connected", login: result.login };
+}
+
+async function cancelGitHubOAuth() {
+  await githubOAuthFlow?.cancel();
+  return { status: "cancelled" };
 }
 
 function updatePreferencesPath() {
@@ -438,7 +547,7 @@ function startApi(nodeHelper, python) {
 
   const userData = app.getPath("userData");
   const env = {
-    ...process.env,
+    ...inheritedApiEnvironment(),
     ...credentialEnvironment(),
     NODE_ENV: DEV_URL ? "development" : "production",
     NODE_PATH: modulesRoot,
@@ -533,6 +642,7 @@ async function waitForHealth(timeoutMs) {
 
 async function restartApi() {
   if (quitting) return { ok: false, error: "Application is shutting down" };
+  await githubOAuthFlow?.cancel();
   log("main: runtime restart requested");
   restarting = true;
   const oldProcess = apiProcess;
@@ -710,6 +820,14 @@ function registerIpc() {
     assertTrustedSender(event);
     if (!input || typeof input !== "object") throw new Error("Credential input is invalid");
     return writeCredential(input.key, input.value);
+  });
+  ipcMain.handle("github-oauth:start", async event => {
+    assertTrustedSender(event);
+    return startGitHubOAuth();
+  });
+  ipcMain.handle("github-oauth:cancel", async event => {
+    assertTrustedSender(event);
+    return cancelGitHubOAuth();
   });
   ipcMain.handle("tray:show", event => {
     assertTrustedSender(event);
@@ -934,6 +1052,7 @@ app.on("window-all-closed", () => {
   // Repository monitoring continues while the app is resident in the tray.
 });
 app.on("before-quit", () => {
+  void githubOAuthFlow?.cancel();
   quitting = true;
   intentionalExit = true;
   const child = apiProcess;

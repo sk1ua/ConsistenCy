@@ -97,7 +97,7 @@ export const agentRunSchema = z.object({
   findings: z.array(reviewFindingSchema),
   error: nonEmpty.optional(),
   tokenUsage: tokenUsageSchema.optional(),
-  provider: z.enum(["mock", "deepseek", "openai"]).optional(),
+  provider: z.enum(["mock", "deepseek", "openai", "pi"]).optional(),
   model: nonEmpty.optional()
 }).strict();
 

@@ -4,14 +4,12 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
 const publicSettingsSchema = z.object({
-  LLM_PROVIDER: z.enum(["deepseek", "openai"]).optional(),
+  LLM_PROVIDER: z.enum(["deepseek", "openai", "pi"]).optional(),
+  CONSISTENCY_PI_MODEL: z.string().trim().min(3).optional(),
   DEEPSEEK_BASE_URL: z.string().url().optional(),
   DEEPSEEK_MODEL: z.string().trim().min(1).optional(),
   OPENAI_MODEL: z.string().trim().min(1).optional(),
   GITHUB_APP_ID: z.string().trim().min(1).optional(),
-  // Public OAuth App client id for GitHub Device Flow sign-in. Public by
-  // design — the device flow never uses a client secret.
-  GITHUB_OAUTH_CLIENT_ID: z.string().trim().min(1).optional(),
   DATABASE_PATH: z.string().trim().min(1).optional(),
   CONSISTENCY_WORKSPACE_ROOT: z.string().trim().min(1).optional(),
   CONSISTENCY_LOCAL_REVIEW_ROOTS: z.string().trim().min(1).optional(),
@@ -31,7 +29,8 @@ const secretSettingsSchema = z.object({
 
 export const settingsPatchSchema = z.object({
   llm: z.object({
-    provider: z.enum(["deepseek", "openai"]).optional(),
+    provider: z.enum(["deepseek", "openai", "pi"]).optional(),
+    piModel: z.string().trim().min(3).optional(),
     deepseekBaseUrl: z.string().url().optional(),
     deepseekModel: z.string().trim().min(1).optional(),
     openaiModel: z.string().trim().min(1).optional(),
@@ -40,7 +39,6 @@ export const settingsPatchSchema = z.object({
   }).strict().optional(),
   github: z.object({
     appId: z.string().trim().min(1).nullable().optional(),
-    oauthClientId: z.string().trim().min(1).nullable().optional(),
     privateKey: z.string().trim().min(1).nullable().optional(),
     webhookSecret: z.string().trim().min(1).nullable().optional(),
     publicReadToken: z.string().trim().min(1).nullable().optional()
@@ -60,7 +58,8 @@ export type SettingsPatch = z.infer<typeof settingsPatchSchema>;
 
 export type SettingsSnapshot = {
   llm: {
-    provider: "deepseek" | "openai" | "none";
+    provider: "deepseek" | "openai" | "pi" | "none";
+    piModel?: string;
     deepseekBaseUrl: string;
     deepseekModel: string;
     openaiModel: string;
@@ -69,7 +68,6 @@ export type SettingsSnapshot = {
   };
   github: {
     appId: string;
-    oauthClientId: string;
     privateKeyConfigured: boolean;
     webhookSecretConfigured: boolean;
     publicReadTokenConfigured: boolean;
@@ -256,13 +254,13 @@ export class SettingsStore {
     };
 
     setPublic("LLM_PROVIDER", patch.llm?.provider);
+    setPublic("CONSISTENCY_PI_MODEL", patch.llm?.piModel);
     setPublic("DEEPSEEK_BASE_URL", patch.llm?.deepseekBaseUrl);
     setPublic("DEEPSEEK_MODEL", patch.llm?.deepseekModel);
     setPublic("OPENAI_MODEL", patch.llm?.openaiModel);
     setSecret("DEEPSEEK_API_KEY", patch.llm?.deepseekApiKey);
     setSecret("OPENAI_API_KEY", patch.llm?.openaiApiKey);
     setPublic("GITHUB_APP_ID", patch.github?.appId);
-    setPublic("GITHUB_OAUTH_CLIENT_ID", patch.github?.oauthClientId);
     setSecret("GITHUB_PRIVATE_KEY", patch.github?.privateKey);
     setSecret("GITHUB_WEBHOOK_SECRET", patch.github?.webhookSecret);
     setSecret("GITHUB_PUBLIC_READ_TOKEN", patch.github?.publicReadToken);
@@ -293,12 +291,13 @@ export class SettingsStore {
     const overriddenByEnvironment = Object.keys(saved)
       .filter(key => environment[key] !== undefined && environment[key] !== saved[key])
       .sort();
-    const provider = effective.LLM_PROVIDER === "deepseek" || effective.LLM_PROVIDER === "openai"
+    const provider = effective.LLM_PROVIDER === "deepseek" || effective.LLM_PROVIDER === "openai" || effective.LLM_PROVIDER === "pi"
       ? effective.LLM_PROVIDER
       : effective.DEEPSEEK_API_KEY ? "deepseek" : effective.OPENAI_API_KEY ? "openai" : "none";
     return {
       llm: {
         provider,
+        piModel: effective.CONSISTENCY_PI_MODEL ?? "",
         deepseekBaseUrl: effective.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
         deepseekModel: effective.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
         openaiModel: effective.OPENAI_MODEL ?? "gpt-4.1-mini",
@@ -307,7 +306,6 @@ export class SettingsStore {
       },
       github: {
         appId: effective.GITHUB_APP_ID ?? "",
-        oauthClientId: effective.GITHUB_OAUTH_CLIENT_ID ?? "",
         privateKeyConfigured: Boolean(effective.GITHUB_PRIVATE_KEY),
         webhookSecretConfigured: Boolean(effective.GITHUB_WEBHOOK_SECRET),
         publicReadTokenConfigured: Boolean(effective.GITHUB_PUBLIC_READ_TOKEN)

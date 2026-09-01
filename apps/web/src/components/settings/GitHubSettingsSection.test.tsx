@@ -12,12 +12,32 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitHubConnectionTestResponse } from "@consistency/schema";
 import { api, type HealthResponse, type SettingsSnapshot } from "../../api/client";
 import { emptySecrets, keepSecrets, type ClearSecrets, type SecretDrafts } from "../../hooks/useSettingsForm";
 import { I18nProvider } from "../../i18n";
 import { GitHubSettingsSection } from "./GitHubSettingsSection";
+
+const originalDesktopDescriptor = Object.getOwnPropertyDescriptor(window, "consistencyDesktop");
+
+type DesktopOAuthFixture = {
+  start: () => Promise<{ status: "connected"; login: string }>;
+  cancel: () => Promise<{ status: "cancelled" }>;
+};
+
+function installDesktopOAuth(oauth: DesktopOAuthFixture): void {
+  Object.defineProperty(window, "consistencyDesktop", {
+    configurable: true,
+    value: { githubOAuth: oauth }
+  });
+}
+
+afterEach(() => {
+  document.body.innerHTML = "";
+  if (originalDesktopDescriptor) Object.defineProperty(window, "consistencyDesktop", originalDesktopDescriptor);
+  else Reflect.deleteProperty(window, "consistencyDesktop");
+});
 
 vi.mock("../../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api/client")>();
@@ -40,7 +60,6 @@ const draftSettings: SettingsSnapshot = {
   },
   github: {
     appId: "123456",
-    oauthClientId: "",
     privateKeyConfigured: true,
     webhookSecretConfigured: true,
     publicReadTokenConfigured: true
@@ -83,8 +102,16 @@ function sectionProps(options?: {
   secrets?: SecretDrafts;
   clearSecrets?: ClearSecrets;
   settings?: SettingsSnapshot;
+  applyGitHubDesktopOauth?: (login: string) => Promise<void>;
 }) {
-  const { health, restartPending, secrets = emptySecrets, clearSecrets = keepSecrets, settings } = options ?? {};
+  const {
+    health,
+    restartPending,
+    secrets = emptySecrets,
+    clearSecrets = keepSecrets,
+    settings,
+    applyGitHubDesktopOauth = async () => undefined
+  } = options ?? {};
   return {
     draft: draftSettings,
     settings: settings ?? draftSettings,
@@ -94,6 +121,7 @@ function sectionProps(options?: {
     updateSecret: () => undefined,
     updateClear: () => undefined,
     applyGitHubOauthToken: async () => undefined,
+    applyGitHubDesktopOauth,
     ...(health === undefined ? {} : { health }),
     ...(restartPending === undefined ? {} : { restartPending })
   };
@@ -105,6 +133,7 @@ function renderSection(options?: {
   locale?: "en-US" | "zh-CN";
   secrets?: SecretDrafts;
   settings?: SettingsSnapshot;
+  applyGitHubDesktopOauth?: (login: string) => Promise<void>;
 }): string {
   const { locale = "en-US", ...rest } = options ?? {};
   return renderToStaticMarkup(
@@ -114,7 +143,7 @@ function renderSection(options?: {
   );
 }
 
-async function mountSection(options?: { health?: HealthResponse; restartPending?: boolean; secrets?: SecretDrafts; settings?: SettingsSnapshot }) {
+async function mountSection(options?: { health?: HealthResponse; restartPending?: boolean; secrets?: SecretDrafts; settings?: SettingsSnapshot; applyGitHubDesktopOauth?: (login: string) => Promise<void> }) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -334,7 +363,7 @@ describe("GitHubSettingsSection zh-CN coverage", () => {
     expect(html).toContain("仅对这条未保存的令牌发起一次只读请求；不会存储或回显该令牌。");
     expect(html).toContain("测试针对当前运行中的配置；重启后才会应用已保存的更改。");
     expect(html).toContain("GitHub 登录（OAuth）");
-    expect(html).toContain("在下方配置 OAuth App 的 Client ID 并重启，即可启用一键 GitHub 登录——无需个人令牌。");
+    expect(html).toContain("通过 github.com 一键登录。仅授予身份标识与更高的读取速率配额——不授予任何仓库权限。");
     expect(html).not.toContain("Not tested yet");
     expect(html).not.toContain("Test Connection");
     expect(html).not.toContain("Test this token");
@@ -343,21 +372,52 @@ describe("GitHubSettingsSection zh-CN coverage", () => {
 });
 
 describe("GitHub OAuth sign-in card", () => {
-  it("renders an honest setup hint while no OAuth client id is configured", async () => {
+  it("keeps the Web Device Flow compatibility action available without desktop capabilities", async () => {
     const { container } = await mountSection();
-    expect(container.querySelector("#setting-github-oauth-setup")).not.toBeNull();
-    expect(container.querySelector("#setting-github-oauth-start")).toBeNull();
+    expect(container.querySelector("#setting-github-oauth-setup")).toBeNull();
+    expect(container.querySelector("#setting-github-oauth-start")).not.toBeNull();
+    expect(container.textContent).toContain("Sign in with GitHub");
+    expect(container.textContent).toContain("no repository permissions");
   });
 
-  it("offers device-flow sign-in once an OAuth client id is configured", async () => {
-    const configured: SettingsSnapshot = {
-      ...draftSettings,
-      github: { ...draftSettings.github, oauthClientId: "Iv1_client123" }
-    };
-    const { container } = await mountSection({ settings: configured });
-    const start = container.querySelector<HTMLButtonElement>("#setting-github-oauth-start");
-    expect(start).not.toBeNull();
-    expect(start?.textContent).toContain("Sign in with GitHub");
-    expect(container.textContent).toContain("no repository permissions");
+  it("uses the desktop browser flow without exposing device code or client secret on the renderer", async () => {
+    const start = vi.fn().mockResolvedValue({ status: "connected", login: "octocat" });
+    const cancel = vi.fn().mockResolvedValue({ status: "cancelled" });
+    installDesktopOAuth({ start, cancel });
+    const onDesktopConnected = vi.fn().mockResolvedValue(undefined);
+    const { container, root } = await mountSection({ applyGitHubDesktopOauth: onDesktopConnected });
+    expect(container.querySelector("#setting-oauthClientSecret")).toBeNull();
+    expect(container.textContent).not.toContain("Enter this code on GitHub:");
+    expect(container.textContent).not.toContain("Copy code");
+    expect(container.textContent).not.toContain("github.com/login/device");
+
+    await act(async () => { click(container, "setting-github-oauth-start"); });
+    expect(start).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Signed in as octocat");
+    expect(onDesktopConnected).toHaveBeenCalledWith("octocat");
+
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(container);
+  });
+
+  it("shows the desktop browser waiting state and cancellation without a token callback", async () => {
+    let resolveStart!: (value: { status: "connected"; login: string }) => void;
+    const start = vi.fn().mockReturnValue(new Promise(resolve => { resolveStart = resolve; }));
+    const cancel = vi.fn().mockResolvedValue({ status: "cancelled" });
+    installDesktopOAuth({ start, cancel });
+    const { container, root } = await mountSection();
+    await act(async () => { click(container, "setting-github-oauth-start"); });
+    expect(container.textContent).toContain("Complete authorization in your browser");
+    expect(container.textContent).not.toContain("Enter this code on GitHub");
+
+    const cancelButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find(button => button.textContent?.includes("Cancel"));
+    await act(async () => { cancelButton?.click(); });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain("Complete authorization in your browser");
+    resolveStart({ status: "connected", login: "octocat" });
+
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(container);
   });
 });

@@ -36,7 +36,14 @@ test.describe("desktop repository security boundary", () => {
       "/api/public/../internal/repositories/local",
       "/api/%2e%2e%2finternal/repositories/local",
       "/api\\internal\\repositories\\local",
-      "/api/%"
+      "/api/%",
+      "/api/settings/github/oauth/start",
+      "/api/settings/github/oauth/poll",
+      "/api/settings/%67ithub/oauth/start",
+      "/api/oauth/desktop/start",
+      "/api/oauth/desktop/complete",
+      "/api/oauth/desktop/cancel",
+      "/api/oauth/github/callback"
     ]) {
       expect(boundary.isBlockedRendererApiPath(pathname), pathname).toBe(true);
     }
@@ -100,8 +107,26 @@ test.describe("desktop repository security boundary", () => {
     const preload = readFileSync(resolve(repositoryRoot, "apps", "desktop", "src", "preload.cjs"), "utf8");
 
     expect(main).toContain("CONSISTENCY_SETTINGS_WRITABLE: \"true\"");
+    expect(main).toContain("const match = version.match(/^v22\\.(\\d+)\\./);");
+    expect(main).toContain("if (match && Number(match[1]) >= 19) return candidate;");
+    expect(main).not.toContain("/^v(22|23|24|25)\\./");
     expect(main).toContain("CONSISTENCY_DESKTOP_CONTROL_TOKEN: desktopControlToken");
     expect(main).toContain("CONSISTENCY_API_TOKEN: apiToken");
+    expect(main).toContain("const API_ENVIRONMENT_KEYS = Object.freeze([");
+    const apiEnvironmentKeys = main.match(/const API_ENVIRONMENT_KEYS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1];
+    expect(apiEnvironmentKeys).toBeDefined();
+    expect(apiEnvironmentKeys).toContain('"CONSISTENCY_PI_AUTH_PATH",');
+    expect(apiEnvironmentKeys).toContain('"CONSISTENCY_PI_MODELS_PATH",');
+    expect(apiEnvironmentKeys).toContain('"CONSISTENCY_PI_MODELS_STORE_PATH",');
+    expect(apiEnvironmentKeys).not.toContain("CONSISTENCY_DESKTOP_OAUTH_BROKER_URL");
+    expect(apiEnvironmentKeys).not.toContain("CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID");
+    expect(apiEnvironmentKeys).not.toContain("CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET");
+    expect(main).toContain("function inheritedApiEnvironment()");
+    expect(main).toContain("...inheritedApiEnvironment(),");
+    expect(main).not.toContain("...inheritedEnvironment,");
+    expect(main).toContain("function desktopOAuthBrokerUrl()");
+    expect(main).toContain('path.join(stagedRoot(), "desktop-config.json")');
+    expect(main).toContain("for (const key of API_CREDENTIAL_KEYS)");
     expect(main).not.toContain('CONSISTENCY_API_TOKEN: DEV_URL ? "" : apiToken');
     expect(main).toContain('apiFetch("/internal/repositories/local"');
     expect(main).toContain("[DESKTOP_CONTROL_HEADER]: desktopControlToken");
@@ -116,11 +141,21 @@ test.describe("desktop repository security boundary", () => {
     expect(preload).toContain('appVersion: () => ipcRenderer.invoke("app:version")');
     expect(preload).toContain('buildInfo: () => ipcRenderer.invoke("app:build-info")');
     expect(preload).toContain('selectRepository: () => ipcRenderer.invoke("repositories:select")');
+    expect(preload).toContain('start: () => ipcRenderer.invoke("github-oauth:start")');
+    expect(preload).toContain('cancel: () => ipcRenderer.invoke("github-oauth:cancel")');
+    expect(preload).toContain('githubOAuth');
+    expect(main).toContain('ipcMain.handle("github-oauth:start", async event =>');
+    expect(main).toContain('ipcMain.handle("github-oauth:cancel", async event =>');
+    expect(main).toContain('assertTrustedSender(event);');
     expect(preload).toContain('restartRuntime: () => ipcRenderer.invoke("runtime:restart")');
     expect(preload).not.toContain("desktopControlToken");
     expect(preload).not.toContain("apiToken");
     expect(preload).not.toContain("apiPort");
     expect(preload).not.toContain("x-consistency-desktop-control");
+    expect(preload).not.toContain("CONSISTENCY_PI_AUTH_PATH");
+    expect(preload).not.toContain("CONSISTENCY_PI_MODELS_PATH");
+    expect(preload).not.toContain("auth.json");
+    expect(preload).not.toContain("models.json");
   });
 
   test("wires the logs folder as a semantic main-only action with no renderer path authority", () => {
@@ -220,5 +255,8 @@ test.describe("desktop repository security boundary", () => {
     expect(packScript).toContain("clean Git working tree");
     expect(packScript).toContain('spawnSync("git", ["rev-parse", "HEAD"]');
     expect(packScript).toContain("apiDistModules");
+    expect(packScript).toContain('writeFileSync(join(staged, "desktop-config.json")');
+    expect(packScript).toContain("CONSISTENCY_DESKTOP_OAUTH_BROKER_URL");
+    expect(packScript).not.toContain("CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET");
   });
 });

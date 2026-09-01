@@ -62,6 +62,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
     updateRuntime,
     save,
     applyGitHubOauthToken,
+    applyGitHubDesktopOauth,
     resetChanges,
     handleRestartRuntime
   } = form;
@@ -135,7 +136,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   <div className="settings-lifecycle-notice">
                     <span>{t("Configuration saved. Restart the API to apply.")}</span>
                     <small>
-                      {t("Saved configuration")}: {settings.llm.provider === "none" ? t("Not active") : <><strong>{settings.llm.provider === "deepseek" ? "DeepSeek" : "OpenAI"}</strong> &middot; {settings.llm.provider === "deepseek" ? settings.llm.deepseekModel : settings.llm.openaiModel}</>}
+                      {t("Saved configuration")}: {settings.llm.provider === "none" ? t("Not active") : <><strong>{settings.llm.provider === "deepseek" ? "DeepSeek" : settings.llm.provider === "openai" ? "OpenAI" : "Pi"}</strong> &middot; {settings.llm.provider === "deepseek" ? settings.llm.deepseekModel : settings.llm.provider === "openai" ? settings.llm.openaiModel : settings.llm.piModel || "auto"}</>}
                       {" | "}
                       {t("Active runtime")}: {health?.llmProvider === "none" || !health ? t("Not active") : <><strong>{health.llmProvider === "deepseek" ? "DeepSeek" : health.llmProvider === "openai" ? "OpenAI" : health.llmProvider}</strong> &middot; {health.llmModel}</>}
                     </small>
@@ -184,6 +185,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   updateSecret={updateSecret}
                   updateClear={updateClear}
                   applyGitHubOauthToken={applyGitHubOauthToken}
+                  applyGitHubDesktopOauth={applyGitHubDesktopOauth}
                   health={health}
                   restartPending={restartNeeded}
                 />

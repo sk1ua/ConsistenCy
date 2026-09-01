@@ -33,7 +33,12 @@ function isBlockedRendererApiPath(pathname) {
   return normalized === "/api/internal"
     || normalized.startsWith("/api/internal/")
     || normalized === "/internal"
-    || normalized.startsWith("/internal/");
+    || normalized.startsWith("/internal/")
+    || normalized === "/api/settings/github/oauth/start"
+    || normalized === "/api/settings/github/oauth/poll"
+    || normalized === "/api/oauth/desktop"
+    || normalized.startsWith("/api/oauth/desktop/")
+    || normalized === "/api/oauth/github/callback";
 }
 
 function requiredString(value, field) {

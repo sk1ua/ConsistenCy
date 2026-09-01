@@ -2,6 +2,7 @@ import type { AppConfig } from "../../config/env";
 import type { ReviewModelOverride } from "@consistency/schema";
 import { DeepSeekProvider } from "./deepseekProvider";
 import { OpenAIProvider } from "./openaiProvider";
+import { PiRuntimeProvider } from "./piProvider";
 import type { LLMProvider } from "./types";
 
 export class ReviewModelResolutionError extends Error {
@@ -12,7 +13,7 @@ export class ReviewModelResolutionError extends Error {
 }
 
 export type ResolvedReviewModel = {
-  provider: "deepseek" | "openai";
+  provider: "deepseek" | "openai" | "pi";
   model: string;
 };
 
@@ -23,7 +24,7 @@ export function resolveReviewModel(options: {
   const providerName = options.override?.provider ?? options.config.LLM_PROVIDER;
   if (!providerName) {
     throw new ReviewModelResolutionError(
-      "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能执行审查。请前往设置页配置。",
+      "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能执行审查。请前往设置页配置。",
       "LLM_NOT_CONFIGURED"
     );
   }
@@ -36,7 +37,7 @@ export function resolveReviewModel(options: {
       );
     }
     const model = options.override?.name ?? options.override?.model ?? options.config.DEEPSEEK_MODEL;
-    if (!model || typeof model !== "string" || !model.trim()) {
+    if (!model || !model.trim()) {
       throw new ReviewModelResolutionError("DeepSeek model name must not be empty", "INVALID_REVIEW_MODEL");
     }
     return { provider: "deepseek", model: model.trim() };
@@ -50,15 +51,48 @@ export function resolveReviewModel(options: {
       );
     }
     const model = options.override?.name ?? options.override?.model ?? options.config.OPENAI_MODEL;
-    if (!model || typeof model !== "string" || !model.trim()) {
+    if (!model || !model.trim()) {
       throw new ReviewModelResolutionError("OpenAI model name must not be empty", "INVALID_REVIEW_MODEL");
     }
     return { provider: "openai", model: model.trim() };
   }
 
+  if (providerName === "pi") {
+    const model = options.override?.name ?? options.override?.model ?? options.config.CONSISTENCY_PI_MODEL ?? "auto";
+    if (model !== "auto" && (!model.trim() || !model.includes("/"))) {
+      throw new ReviewModelResolutionError("Pi model must use provider/model format", "INVALID_REVIEW_MODEL");
+    }
+    return { provider: "pi", model: model.trim() };
+  }
+
   throw new ReviewModelResolutionError(`Unsupported provider: ${providerName}`, "INVALID_REVIEW_MODEL");
 }
 
+function piOptions(config: AppConfig, model?: string) {
+  return {
+    authPath: config.CONSISTENCY_PI_AUTH_PATH,
+    modelsPath: config.CONSISTENCY_PI_MODELS_PATH,
+    modelsStorePath: config.CONSISTENCY_PI_MODELS_STORE_PATH,
+    model: model === "auto" ? undefined : model,
+    refreshOnStart: config.CONSISTENCY_PI_REFRESH_ON_START === "true"
+  };
+}
+
+const piProviders = new Map<string, PiRuntimeProvider>();
+
+function piProvider(config: AppConfig, model?: string): PiRuntimeProvider {
+  const key = [
+    config.CONSISTENCY_PI_AUTH_PATH ?? "default",
+    config.CONSISTENCY_PI_MODELS_PATH ?? "default",
+    config.CONSISTENCY_PI_MODELS_STORE_PATH ?? "default",
+    model ?? "auto"
+  ].join("|");
+  const existing = piProviders.get(key);
+  if (existing) return existing;
+  const created = PiRuntimeProvider.fromOptions(piOptions(config, model));
+  piProviders.set(key, created);
+  return created;
+}
 export function createLLMProvider(config: AppConfig): LLMProvider | undefined {
   if (config.LLM_PROVIDER === "deepseek" && config.DEEPSEEK_API_KEY) {
     return new DeepSeekProvider({
@@ -70,12 +104,15 @@ export function createLLMProvider(config: AppConfig): LLMProvider | undefined {
   if (config.LLM_PROVIDER === "openai" && config.OPENAI_API_KEY) {
     return new OpenAIProvider({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL });
   }
+  if (config.LLM_PROVIDER === "pi") {
+    return piProvider(config, config.CONSISTENCY_PI_MODEL);
+  }
   return undefined;
 }
 
 export function createReviewLLMProvider(
   config: AppConfig,
-  resolved?: { provider?: "deepseek" | "openai"; model?: string }
+  resolved?: { provider?: "deepseek" | "openai" | "pi"; model?: string }
 ): LLMProvider | undefined {
   const providerName = resolved?.provider ?? config.LLM_PROVIDER;
   if (providerName === "deepseek" && config.DEEPSEEK_API_KEY) {
@@ -90,6 +127,9 @@ export function createReviewLLMProvider(
       apiKey: config.OPENAI_API_KEY,
       model: resolved?.model ?? config.OPENAI_MODEL
     });
+  }
+  if (providerName === "pi") {
+    return piProvider(config, resolved?.model ?? config.CONSISTENCY_PI_MODEL);
   }
   return undefined;
 }

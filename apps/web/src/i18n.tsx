@@ -188,7 +188,11 @@ export const zh: Record<string, string> = {
   "Restart ConsistenCy Runtime": "重启 ConsistenCy 运行时",
   "ConsistenCy runtime restarted successfully.": "ConsistenCy 运行时已成功重启。",
   "Restarting runtime...": "正在重启运行时…",
-  "ConsistenCy requires a real LLM Provider (DeepSeek or OpenAI) to execute reviews.": "ConsistenCy 需要配置真实的大语言模型提供商（DeepSeek 或 OpenAI）以执行审查。",
+  "ConsistenCy requires a real LLM Provider (DeepSeek, OpenAI, or Pi) to execute reviews.": "ConsistenCy 需要配置真实的大语言模型提供商（DeepSeek、OpenAI 或 Pi）以执行审查。",
+  "Pi model": "Pi 模型",
+  "Pi configuration": "Pi 配置",
+  "Pi models.json and auth.json are read by the API process; no Pi credential is sent to the browser.": "Pi 的 models.json 和 auth.json 由 API 进程读取；Pi 凭据不会发送到浏览器。",
+  "Uses the model catalog and credentials from Pi's server-side agent configuration. Enter only provider/model; credentials never enter ConsistenCy settings.": "使用 Pi 服务端代理配置中的模型目录和凭据。只需输入 provider/model；凭据永不会进入 ConsistenCy 设置。",
   "The local filesystem location is owned by the API process and is never sent to the renderer.": "本地文件系统路径由 API 进程持有，绝不会传递给渲染进程。",
   "Choose local folders through the privileged desktop folder picker; raw paths do not cross into Web UI state.": "通过受保护的桌面目录选择器选择本地文件夹；原始路径不会传入 Web UI 状态。",
   "Electron owns its one-time session token in the main process. The renderer never receives or stores that token.": "Electron 在主进程中持有一次性会话令牌。渲染器永不接收或存储该令牌。",
@@ -261,7 +265,6 @@ export const zh: Record<string, string> = {
   "The draft changed; regenerate this proposal": "草稿已变化，请重新生成本提案",
   "Describe the change in your own words; every edit still goes through Apply, validate, and save": "用自然语言描述想要的修改；每次编辑仍需经过 Apply、验证与保存",
   "GitHub sign-in (OAuth)": "GitHub 登录（OAuth）",
-  "Configure an OAuth App client ID below and restart to enable one-click GitHub sign-in — no personal token required.": "在下方配置 OAuth App 的 Client ID 并重启，即可启用一键 GitHub 登录——无需个人令牌。",
   "One-click sign-in through github.com. Grants identity and read rate limits only — no repository permissions.": "通过 github.com 一键登录。仅授予身份标识与更高的读取速率配额——不授予任何仓库权限。",
   "Signed in as {login}": "已登录为 {login}",
   "Restart the runtime to use the new credential.": "重启运行时以启用新凭据。",
@@ -273,12 +276,12 @@ export const zh: Record<string, string> = {
   "GitHub sign-in expired. Start again.": "GitHub 登录已过期，请重新开始。",
   "Authorization was denied.": "授权被拒绝。",
   "GitHub sign-in is unavailable.": "GitHub 登录暂不可用。",
+  "GitHub sign-in was cancelled.": "GitHub 登录已取消。",
+  "Complete authorization in your browser…": "请在浏览器中完成授权…",
+  "Cancel": "取消",
+  "Signed in as {login}. Restart the runtime to use the new credential.": "已登录为 {login}。请重启运行时以启用新凭据。",
   "Starting…": "正在启动…",
   "Sign in with GitHub": "使用 GitHub 登录",
-  "OAuth Client ID": "OAuth 客户端 ID",
-  "Enables GitHub sign-in (device flow)": "启用 GitHub 登录（设备流）",
-  "Public client id of your OAuth App. Enable Device Flow on the OAuth App, save, and restart to activate GitHub sign-in.": "你的 OAuth App 的公开 Client ID。在 OAuth App 上启用 Device Flow，保存并重启后 GitHub 登录即生效。",
-  "Fallback for self-hosted deployments without an OAuth client ID: use a fine-grained PAT with read-only contents/metadata permissions.": "未配置 OAuth Client ID 的自部署环境的备选方案：使用只读 contents/metadata 权限的细粒度 PAT。",
   "Commit risk trend on a 0 to 1 model scale": "0 到 1 模型刻度上的提交风险趋势",
   "Commit risk trend": "提交风险趋势",
   "Fourteen analyzed commits plotted in chronological order; higher values indicate greater model-derived drift risk.": "按时间顺序绘制已分析提交；数值越高表示模型推导的漂移风险越高。",
@@ -642,7 +645,7 @@ export const zh: Record<string, string> = {
   "Describe the workflow change; the Copilot only proposes a patch and never edits the runtime": "描述想要的图更改；Copilot 只产出提案，绝不直接修改 runtime",
   "Propose patch": "生成提案",
   "Copilot proposal failed": "Copilot 提案失败",
-  "LLM is not configured; configure DeepSeek or OpenAI to generate proposals": "LLM 未配置；请先配置 DeepSeek 或 OpenAI 才能生成提案",
+  "LLM is not configured; configure DeepSeek, OpenAI, or Pi to generate proposals": "LLM 未配置；请先配置 DeepSeek、OpenAI 或 Pi 才能生成提案",
   "The selected LLM provider is not configured; configure its API key first": "所选 LLM 提供商未配置；请先配置其 API 密钥",
   "The configured review model is invalid": "配置的审查模型无效",
   "The proposal failed server validation": "提案未通过服务端校验",
@@ -883,8 +886,12 @@ export const zh: Record<string, string> = {
 
 function defaultLocale(): Locale {
   if (typeof window === "undefined") return "en-US";
-  const saved = window.localStorage.getItem(STORAGE_KEY);
-  if (saved === "en-US" || saved === "zh-CN") return saved;
+  try {
+    const saved = window.localStorage?.getItem?.(STORAGE_KEY);
+    if (saved === "en-US" || saved === "zh-CN") return saved;
+  } catch {
+    // Browser privacy settings can make localStorage unavailable.
+  }
   return window.navigator.language.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
 }
 
@@ -901,7 +908,11 @@ export function I18nProvider({ children, initialLocale }: { children: ReactNode;
 
   useEffect(() => {
     document.documentElement.lang = locale;
-    window.localStorage.setItem(STORAGE_KEY, locale);
+    try {
+      window.localStorage?.setItem?.(STORAGE_KEY, locale);
+    } catch {
+      // Browser privacy settings can make localStorage unavailable.
+    }
   }, [locale]);
 
   const t = useCallback((key: string, params?: Params) => format(locale === "zh-CN" ? zh[key] ?? key : key, params), [locale]);

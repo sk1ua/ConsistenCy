@@ -26,7 +26,7 @@ export type LLMStreamRequest = {
 };
 
 export interface LLMProvider {
-  readonly name: "mock" | "deepseek" | "openai";
+  readonly name: "mock" | "deepseek" | "openai" | "pi";
   readonly model?: string;
   invokeWithSchema<T>(request: StructuredInvocation<T>): Promise<StructuredResult<T>>;
   generateStructuredFinding(request: FindingGenerationRequest): Promise<StructuredResult<ReviewFinding[]>>;

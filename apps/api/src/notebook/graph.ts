@@ -127,7 +127,7 @@ export class NotebookGraph {
 
   async *streamMessage(input: { notebookId: string; content: string; sourceJobIds?: string[] }): AsyncIterable<NotebookStreamEvent> {
     if (!this.options.provider) {
-      throw new NotebookGraphError("尚未配置大语言模型。请在设置中配置 DeepSeek 或 OpenAI 后再使用笔记本追问功能。", "LLM_NOT_CONFIGURED");
+      throw new NotebookGraphError("尚未配置大语言模型。请在设置中配置 DeepSeek、OpenAI 或 Pi 后再使用笔记本追问功能。", "LLM_NOT_CONFIGURED");
     }
     const selections = selectNotebookSources(input.notebookId, this.options.notebookStore, this.options.jobs, input.sourceJobIds);
     const sourceJobIds = selections.map(selection => selection.job.id);
@@ -250,7 +250,7 @@ export class NotebookGraph {
 
   async *streamCard(input: { notebookId: string; kind: NotebookCardKind; sourceJobIds: string[] }): AsyncIterable<NotebookStreamEvent> {
     if (!this.options.provider) {
-      throw new NotebookGraphError("尚未配置大语言模型。请在设置中配置 DeepSeek 或 OpenAI 后再生成分析卡片。", "LLM_NOT_CONFIGURED");
+      throw new NotebookGraphError("尚未配置大语言模型。请在设置中配置 DeepSeek、OpenAI 或 Pi 后再生成分析卡片。", "LLM_NOT_CONFIGURED");
     }
     const selections = selectNotebookSources(input.notebookId, this.options.notebookStore, this.options.jobs, input.sourceJobIds);
     const runId = `notebook_card_${randomUUID()}`;

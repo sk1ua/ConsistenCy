@@ -120,6 +120,24 @@ describe("loadEnv", () => {
     expect(() => loadEnv({ GITHUB_PUBLIC_READ_TOKEN: "" })).not.toThrow();
   });
 
+  it("requires Desktop OAuth broker URL, client id, and secret as one server-side configuration", () => {
+    const base = {
+      CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: "https://auth.consistency.example",
+      CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID: "broker-client",
+      CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET: "broker-secret"
+    };
+    expect(loadEnv(base).CONSISTENCY_DESKTOP_OAUTH_BROKER_URL).toBe(base.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL);
+    expect(() => loadEnv({ CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: base.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL })).toThrow(/configured together/);
+    expect(() => loadEnv({ CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID: base.CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID })).toThrow(/configured together/);
+    expect(() => loadEnv({ CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET: base.CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET })).toThrow(/configured together/);
+    expect(() => loadEnv({
+      NODE_ENV: "production",
+      CONSISTENCY_API_TOKEN: "api-token",
+      CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: "http://auth.consistency.example",
+      CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID: base.CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID,
+      CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET: base.CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET
+    })).toThrow(/HTTPS/);
+  });
   it("keeps the desktop control credential server-only and treats whitespace as unconfigured", () => {
     expect(loadEnv({ CONSISTENCY_DESKTOP_CONTROL_TOKEN: "desktop-control" })
       .CONSISTENCY_DESKTOP_CONTROL_TOKEN).toBe("desktop-control");

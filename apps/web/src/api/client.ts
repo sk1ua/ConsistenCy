@@ -114,6 +114,7 @@ export type HealthResponse = {
   llmCapabilities?: {
     deepseek?: { configured: boolean; defaultModel: string };
     openai?: { configured: boolean; defaultModel: string };
+    pi?: { configured: boolean; defaultModel: string };
   };
   publicPrAnalysis?: boolean;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
@@ -134,7 +135,8 @@ export type HealthResponse = {
 
 export type SettingsSnapshot = {
   llm: {
-    provider?: "deepseek" | "openai" | "none";
+    provider?: "deepseek" | "openai" | "pi" | "none";
+    piModel?: string;
     deepseekBaseUrl: string;
     deepseekModel: string;
     openaiModel: string;
@@ -143,7 +145,6 @@ export type SettingsSnapshot = {
   };
   github: {
     appId: string;
-    oauthClientId: string;
     privateKeyConfigured: boolean;
     webhookSecretConfigured: boolean;
     publicReadTokenConfigured: boolean;
@@ -164,6 +165,7 @@ export type SettingsSnapshot = {
 export type SettingsPatch = {
   llm?: {
     provider?: SettingsSnapshot["llm"]["provider"];
+    piModel?: string;
     deepseekBaseUrl?: string;
     deepseekModel?: string;
     openaiModel?: string;
@@ -172,7 +174,6 @@ export type SettingsPatch = {
   };
   github?: {
     appId?: string | null;
-    oauthClientId?: string | null;
     privateKey?: string | null;
     webhookSecret?: string | null;
     publicReadToken?: string | null;

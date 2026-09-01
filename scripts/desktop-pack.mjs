@@ -31,8 +31,9 @@ const {
   updateEligibleArtifact
 } = resolveDesktopReleasePolicy(process.env, desktopManifest.version);
 
-if (Number(process.versions.node.split(".")[0]) < 22) {
-  throw new Error(`Desktop packaging requires Node >= 22.x; received ${process.version}`);
+const nodeVersion = process.version.match(/^v(\d+)\.(\d+)\.(\d+)/);
+if (!nodeVersion || Number(nodeVersion[1]) !== 22 || Number(nodeVersion[2]) < 19) {
+  throw new Error(`Desktop packaging requires Node 22.19.x or newer; received ${process.version}`);
 }
 if (!npmCli || !existsSync(npmCli)) {
   throw new Error("Desktop packaging must be started through npm so the pinned npm CLI is known");
@@ -67,6 +68,18 @@ if (revParseOutput.status !== 0 || !revParseOutput.stdout.trim()) {
   throw new Error("Desktop packaging requires an accessible Git repository to resolve HEAD commit SHA");
 }
 const gitCommitSha = revParseOutput.stdout.trim();
+const desktopOAuthBrokerUrl = process.env.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL ?? "";
+if (desktopOAuthBrokerUrl) {
+  let parsedBrokerUrl;
+  try {
+    parsedBrokerUrl = new URL(desktopOAuthBrokerUrl);
+  } catch {
+    throw new Error("CONSISTENCY_DESKTOP_OAUTH_BROKER_URL must be a valid HTTPS origin");
+  }
+  if (parsedBrokerUrl.protocol !== "https:" || parsedBrokerUrl.username || parsedBrokerUrl.password || parsedBrokerUrl.search || parsedBrokerUrl.hash || (parsedBrokerUrl.pathname !== "/" && parsedBrokerUrl.pathname !== "")) {
+    throw new Error("CONSISTENCY_DESKTOP_OAUTH_BROKER_URL must be an HTTPS origin without credentials or a path");
+  }
+}
 
 console.log(`Building same-origin renderer and bundled API (version=${desktopManifest.version}, sha=${gitCommitSha}) ...`);
 runNpm(["run", "build", "-w", "@consistency/web", "--", "--base=/"], root, {
@@ -83,6 +96,9 @@ writeFileSync(join(staged, "package.json"), JSON.stringify({
   name: "consistency-workspace",
   private: true,
   type: "commonjs"
+}, null, 2));
+writeFileSync(join(staged, "desktop-config.json"), JSON.stringify({
+  desktopOAuthBrokerUrl
 }, null, 2));
 writeFileSync(join(staged, "build-info.json"), JSON.stringify({
   version: desktopManifest.version,

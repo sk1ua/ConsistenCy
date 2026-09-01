@@ -21,6 +21,9 @@ import {
   githubOauthDevicePollRequestSchema,
   githubOauthDevicePollResponseSchema,
   githubOauthDeviceStartResponseSchema,
+  desktopOAuthStartResponseSchema,
+  desktopOAuthCompleteResponseSchema,
+  desktopOAuthCancelResponseSchema,
   internalLocalRepositoryRegistrationRequestSchema,
   localReviewRequestSchema,
   notebookCardRequestSchema,
@@ -43,6 +46,7 @@ import type { HeartbeatPulse, HeartbeatStreamEvent, Repository, VcsChangedFile }
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { RepositoryPullRequestService, type RepositoryPullRequestRequest } from "./github/pullRequestReader";
 import type { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
+import type { GitHubDesktopOAuthBroker } from "./github/oauthBroker";
 import { PublicRepositoryError } from "./github/publicRepository";
 import { ReviewModelResolutionError, type ResolvedReviewModel } from "./review/llm/factory";
 
@@ -480,6 +484,25 @@ function sendJson(request: IncomingMessage, response: ServerResponse, statusCode
   response.end(statusCode === 204 ? undefined : JSON.stringify(payload));
 }
 
+function sendOAuthJson(request: IncomingMessage, response: ServerResponse, statusCode: number, payload: unknown, allowedOrigins: string[]): void {
+  response.writeHead(statusCode, {
+    ...responseHeaders(request, allowedOrigins),
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(statusCode === 204 ? undefined : JSON.stringify(payload));
+}
+
+function sendOAuthRedirect(response: ServerResponse, location: string): void {
+  response.writeHead(302, {
+    "cache-control": "no-store",
+    "content-length": "0",
+    location,
+    "x-content-type-options": "nosniff"
+  });
+  response.end();
+}
+
 function startSse(request: IncomingMessage, response: ServerResponse, allowedOrigins: string[]): void {
   const headers = responseHeaders(request, allowedOrigins);
   response.writeHead(200, {
@@ -686,6 +709,7 @@ export type ApiHealthDetails = {
   llmCapabilities?: {
     deepseek?: { configured: boolean; defaultModel: string };
     openai?: { configured: boolean; defaultModel: string };
+    pi?: { configured: boolean; defaultModel: string };
   };
   publicPrAnalysis?: boolean;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
@@ -702,6 +726,11 @@ export type ApiHealthDetails = {
     reviewWorkflow?: string;
   };
 };
+
+function isLlmProviderConfigured(options: Pick<CreateApiServerOptions, "llmProviderConfigured">): boolean {
+  const configured = options.llmProviderConfigured;
+  return typeof configured === "function" ? configured() : configured !== false;
+}
 
 export type CreateApiServerOptions = {
   runProcess?: any;
@@ -723,8 +752,8 @@ export type CreateApiServerOptions = {
   publicPr?: (url: string, modelOverride?: ResolvedReviewModel) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
   publicRepositoryConnect?: (input: string) => Promise<Repository>;
   publicPrAnalysisEnabled?: boolean;
-  llmProviderConfigured?: boolean;
-  localReview?: (input: { repoPath: string; repositoryId?: string; baseRef?: string; headRef?: string; llmProvider?: "deepseek" | "openai"; llmModel?: string }) => Promise<{ jobId: string }>;
+  llmProviderConfigured?: boolean | (() => boolean);
+  localReview?: (input: { repoPath: string; repositoryId?: string; baseRef?: string; headRef?: string; llmProvider?: "deepseek" | "openai" | "pi"; llmModel?: string }) => Promise<{ jobId: string }>;
   auditStore?: AuditDomainStore;
   auditPlanner?: AuditRunPlanner;
   automationScheduler?: { available: boolean };
@@ -750,6 +779,8 @@ export type CreateApiServerOptions = {
   testGitHubConnection?: (input?: GitHubConnectionTestRequest) => Promise<GitHubConnectionTestResponse>;
   /** GitHub OAuth Device Flow; absent or unconfigured disables the sign-in routes. */
   githubOauth?: GitHubOauthDeviceFlow;
+  /** Product-operated desktop OAuth broker; never exposes its client secret. */
+  desktopOAuthBroker?: GitHubDesktopOAuthBroker;
 };
 
 type RequestContext = {
@@ -1135,9 +1166,9 @@ const routes: Route[] = [
     auth: true,
     handler: async ({ request, response, allowedOrigins, options }) => {
       if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
-      if (options.llmProviderConfigured === false) {
+      if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1178,7 +1209,7 @@ const routes: Route[] = [
       const provider = options.copilotProvider?.(resolvedModel);
       if (!provider) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1209,9 +1240,9 @@ const routes: Route[] = [
     auth: true,
     handler: async ({ request, response, allowedOrigins, options }) => {
       if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
-      if (options.llmProviderConfigured === false) {
+      if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1252,7 +1283,7 @@ const routes: Route[] = [
       const provider = options.copilotProvider?.(resolvedModel);
       if (!provider) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1704,33 +1735,43 @@ const routes: Route[] = [
       const settings = options.settings?.get();
       const deepseekConfigured = health?.llmCapabilities?.deepseek?.configured === true;
       const openaiConfigured = health?.llmCapabilities?.openai?.configured === true;
-      const activeProvider = health?.llmProvider === "deepseek" || health?.llmProvider === "openai"
+      const piConfigured = health?.llmCapabilities?.pi?.configured === true;
+      const activeProvider = health?.llmProvider === "deepseek" || health?.llmProvider === "openai" || health?.llmProvider === "pi"
         ? health.llmProvider
         : undefined;
       const hasConfiguredLlm = activeProvider !== undefined;
+      const piModel = health?.llmCapabilities?.pi?.defaultModel ?? "auto";
       const defaultModelName = activeProvider === "openai"
         ? health?.llmModel ?? health?.llmCapabilities?.openai?.defaultModel ?? "gpt-4.1-mini"
         : activeProvider === "deepseek"
           ? health?.llmModel ?? health?.llmCapabilities?.deepseek?.defaultModel ?? "deepseek-v4-flash"
-          : "";
-      const pendingProvider = settings?.llm.provider === "deepseek" || settings?.llm.provider === "openai"
+          : activeProvider === "pi"
+            ? health?.llmModel ?? health?.llmCapabilities?.pi?.defaultModel ?? "auto"
+            : "";
+      const pendingProvider = settings?.llm.provider === "deepseek" || settings?.llm.provider === "openai" || settings?.llm.provider === "pi"
         ? settings.llm.provider
         : undefined;
       const pendingRestart = settings?.restartRequired === true && pendingProvider
         ? {
             provider: pendingProvider,
-            model: pendingProvider === "deepseek" ? settings.llm.deepseekModel : settings.llm.openaiModel,
+            model: pendingProvider === "deepseek"
+              ? settings.llm.deepseekModel
+              : pendingProvider === "openai"
+                ? settings.llm.openaiModel
+                : settings.llm.piModel ?? "auto",
             credentialConfigured: pendingProvider === "deepseek"
               ? settings.llm.deepseekApiKeyConfigured
-              : settings.llm.openaiApiKeyConfigured
+              : pendingProvider === "openai"
+                ? settings.llm.openaiApiKeyConfigured
+                : piConfigured
           }
         : null;
 
       const blockingReasons: string[] = [];
       if (!hasConfiguredLlm) {
         blockingReasons.push(pendingRestart
-          ? `已保存 ${pendingRestart.provider === "deepseek" ? "DeepSeek" : "OpenAI"} 配置，重启 API 后生效。`
-          : "尚未配置大语言模型 (DeepSeek 或 OpenAI)。请前往设置页配置。");
+          ? `已保存 ${pendingRestart.provider === "deepseek" ? "DeepSeek" : pendingRestart.provider === "openai" ? "OpenAI" : "Pi"} 配置，重启 API 后生效。`
+          : "尚未配置大语言模型 (DeepSeek、OpenAI 或 Pi)。请前往设置页配置。");
       }
       if (!workingTree.available && !branchSource.available && !prSource.available) {
         blockingReasons.push("当前无可用的审查来源 (工作区无变更且未检测到分支差异)");
@@ -1763,6 +1804,10 @@ const routes: Route[] = [
             openai: {
               configured: openaiConfigured,
               defaultModel: health?.llmCapabilities?.openai?.defaultModel ?? "gpt-4.1-mini"
+            },
+            pi: {
+              configured: piConfigured,
+              defaultModel: piModel
             }
           },
           pendingRestart
@@ -2176,9 +2221,9 @@ const routes: Route[] = [
       if (options.publicPrAnalysisEnabled === false || (nodeEnv === "production" && options.publicPrAnalysisEnabled !== true)) {
         throw new ApiError("Public PR analysis is disabled", "PUBLIC_PR_ANALYSIS_DISABLED", 404);
       }
-      if (options.llmProviderConfigured === false) {
+      if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能执行审查。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能执行审查。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           400
         );
@@ -2272,9 +2317,9 @@ const routes: Route[] = [
       if (!options.localReview) {
         throw new ApiError("Local review is not configured", "LOCAL_REVIEW_UNAVAILABLE", 503);
       }
-      if (options.llmProviderConfigured === false) {
+      if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能执行审查。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能执行审查。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           400
         );
@@ -2421,7 +2466,7 @@ const routes: Route[] = [
         body: await readBody(request),
         secret: githubWebhookSecret,
         jobs,
-        llmConfigured: options.llmProviderConfigured !== false,
+        llmConfigured: isLlmProviderConfigured(options),
         repositoryStore: options.auditStore
       });
       sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
@@ -2623,6 +2668,81 @@ const routes: Route[] = [
         );
       }
       sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/oauth/desktop/start",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_UNAVAILABLE", 503);
+      try {
+        const result = broker.start(await readJson(request));
+        sendOAuthJson(request, response, 200, desktopOAuthStartResponseSchema.parse(result), allowedOrigins);
+      } catch (error) {
+        if (error instanceof ZodError || error instanceof ApiError) throw error;
+        throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_START_FAILED", 503);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: "/oauth/github/callback",
+    auth: false,
+    handler: async ({ response, url, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) {
+        response.writeHead(503, {
+          "cache-control": "no-store",
+          "content-type": "text/plain; charset=utf-8",
+          "x-content-type-options": "nosniff"
+        });
+        response.end("GitHub OAuth sign-in is unavailable.");
+        return;
+      }
+      const result = await broker.githubCallback({
+        state: url.searchParams.get("state") ?? undefined,
+        code: url.searchParams.get("code") ?? undefined,
+        error: url.searchParams.get("error") ?? undefined
+      });
+      if (!result.redirectUrl) {
+        response.writeHead(result.status === "expired" ? 410 : 400, {
+          "cache-control": "no-store",
+          "content-type": "text/plain; charset=utf-8",
+          "x-content-type-options": "nosniff"
+        });
+        response.end("GitHub authorization callback is no longer active.");
+        return;
+      }
+      sendOAuthRedirect(response, result.redirectUrl);
+    }
+  },
+  {
+    method: "POST",
+    path: "/oauth/desktop/complete",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_UNAVAILABLE", 503);
+      try {
+        const result = await broker.complete(await readJson(request));
+        sendOAuthJson(request, response, 200, desktopOAuthCompleteResponseSchema.parse(result), allowedOrigins);
+      } catch (error) {
+        if (error instanceof ZodError || error instanceof ApiError) throw error;
+        throw new ApiError("OAuth handoff is unavailable", "GITHUB_OAUTH_HANDOFF_INVALID", 400);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: "/oauth/desktop/cancel",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_UNAVAILABLE", 503);
+      const result = broker.cancel(await readJson(request));
+      sendOAuthJson(request, response, 200, desktopOAuthCancelResponseSchema.parse(result), allowedOrigins);
     }
   },
   {

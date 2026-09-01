@@ -27,7 +27,6 @@ const draftSettings: SettingsSnapshot = {
   },
   github: {
     appId: "123456",
-    oauthClientId: "",
     privateKeyConfigured: true,
     webhookSecretConfigured: true,
     publicReadTokenConfigured: true

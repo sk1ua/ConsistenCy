@@ -2,7 +2,7 @@
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { HealthResponse, SettingsPatch, SettingsSnapshot } from "../api/client";
 import type { ConsistencyDesktopBridge, DesktopCredentialKey, DesktopCredentialStatus } from "../desktop";
 import { I18nProvider } from "../i18n";
@@ -33,7 +33,6 @@ const baseSettings: SettingsSnapshot = {
   },
   github: {
     appId: "123456",
-    oauthClientId: "",
     privateKeyConfigured: true,
     webhookSecretConfigured: true,
     publicReadTokenConfigured: false
@@ -71,9 +70,7 @@ describe("secretValue", () => {
   it("returns the trimmed value when a replacement is entered", () => {
     expect(secretValue("  replacement-value  ", false)).toBe("replacement-value");
   });
-});
-
-describe("buildSettingsPatch", () => {
+});describe("buildSettingsPatch", () => {
   it("omits secret fields from the patch body when a bridge is available", () => {
     const patch = buildSettingsPatch(baseSettings, emptySecrets, keepSecrets, true);
     const llmKeys = Object.keys(patch.llm ?? {});
@@ -97,9 +94,7 @@ describe("buildSettingsPatch", () => {
     const patch = buildSettingsPatch(baseSettings, emptySecrets, clearSecrets, false);
     expect((patch.github as Record<string, unknown>)[GH_KEY_WEBHOOK]).toBe(null);
   });
-});
-
-describe("computeReadiness", () => {
+});describe("computeReadiness", () => {
   const health: HealthResponse = {
     ok: true,
     service: "consistency-api",
@@ -132,9 +127,7 @@ describe("computeReadiness", () => {
     expect(r.readiness.total).toBe(3);
     expect(r.readiness.complete).toBeGreaterThanOrEqual(1);
   });
-});
-
-describe("withDesktopCredentialStatus", () => {
+});describe("withDesktopCredentialStatus", () => {
   it("OR-merges desktop credential booleans onto the settings snapshot", () => {
     const status = {
       DEEPSEEK_API_KEY: true,
@@ -150,9 +143,7 @@ describe("withDesktopCredentialStatus", () => {
     expect(result.github.webhookSecretConfigured).toBe(true);
     expect(result.github.publicReadTokenConfigured).toBe(true);
   });
-});
-
-const clearedStatus: DesktopCredentialStatus = {
+});const clearedStatus: DesktopCredentialStatus = {
   DEEPSEEK_API_KEY: false,
   OPENAI_API_KEY: false,
   GITHUB_PRIVATE_KEY: false,
@@ -210,9 +201,7 @@ describe("publicPrAccessModeView", () => {
     // claim anonymous read access — it must fail closed to "Disabled".
     expect(publicPrAccessModeView(undefined)).toEqual({ labelKey: "Disabled", ok: false });
   });
-});
-
-describe("save() restart honesty on the desktop bridge path", () => {
+});describe("save() restart honesty on the desktop bridge path", () => {
   function bridgeDeps(options?: { restartRequired?: boolean; writes?: DesktopCredentialKey[] }) {
     const patches: SettingsPatch[] = [];
     return {
@@ -275,9 +264,7 @@ describe("save() restart honesty on the desktop bridge path", () => {
 
     await harness.unmount();
   });
-});
-
-describe("applyGitHubOauthToken one-time handoff", () => {
+});describe("applyGitHubOauthToken one-time handoff", () => {
   function oauthDeps(options?: { restartRequired?: boolean; writes?: DesktopCredentialKey[] }) {
     const patches: SettingsPatch[] = [];
     return {

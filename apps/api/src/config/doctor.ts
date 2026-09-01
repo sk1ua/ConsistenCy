@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { loadEnv } from "./env";
 import { normalizeGitHubPrivateKey } from "../github/auth";
+import { PiRuntimeProvider } from "../review/llm/piProvider";
 
 export type DoctorCheck = {
   id: string;
@@ -24,7 +25,7 @@ function nearestExistingDirectory(path: string): string {
   return directory;
 }
 
-export function diagnoseConfiguration(environment: NodeJS.ProcessEnv): DoctorResult {
+export async function diagnoseConfiguration(environment: NodeJS.ProcessEnv): Promise<DoctorResult> {
   const checks: DoctorCheck[] = [];
   let config;
   try {
@@ -54,6 +55,17 @@ export function diagnoseConfiguration(environment: NodeJS.ProcessEnv): DoctorRes
 
   if (!config.LLM_PROVIDER) {
     checks.push({ id: "llm", status: "warn", message: "LLM provider is not configured; review executions will be blocked until configured" });
+  } else if (config.LLM_PROVIDER === "pi") {
+    const descriptor = await PiRuntimeProvider.probe({
+      authPath: config.CONSISTENCY_PI_AUTH_PATH,
+      modelsPath: config.CONSISTENCY_PI_MODELS_PATH,
+      modelsStorePath: config.CONSISTENCY_PI_MODELS_STORE_PATH,
+      model: config.CONSISTENCY_PI_MODEL,
+      refreshOnStart: false
+    });
+    checks.push(descriptor
+      ? { id: "llm", status: "pass", message: `Pi model ${descriptor.provider}/${descriptor.model} is configured` }
+      : { id: "llm", status: "fail", message: "Pi has no configured authenticated model" });
   } else {
     const configured = config.LLM_PROVIDER === "deepseek" ? Boolean(config.DEEPSEEK_API_KEY) : Boolean(config.OPENAI_API_KEY);
     checks.push(configured

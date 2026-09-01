@@ -5,6 +5,7 @@ export * from "./context";
 export * from "./heartbeat";
 export * from "./job";
 export * from "./notebook";
+export * from "./oauth";
 export * from "./protocol";
 export * from "./report";
 export * from "./review";

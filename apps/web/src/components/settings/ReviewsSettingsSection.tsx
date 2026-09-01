@@ -13,6 +13,7 @@ export interface ReviewsSettingsSectionProps {
 function providerLabel(provider: string): string {
   if (provider === "deepseek") return "DeepSeek";
   if (provider === "openai") return "OpenAI";
+  if (provider === "pi") return "Pi";
   return provider;
 }
 
@@ -32,7 +33,7 @@ function providerLabel(provider: string): string {
 export function ReviewsSettingsSection({ settings, health }: ReviewsSettingsSectionProps) {
   const { t } = useI18n();
 
-  const activeConfigured = health?.llmProvider === "deepseek" || health?.llmProvider === "openai";
+  const activeConfigured = health?.llmProvider === "deepseek" || health?.llmProvider === "openai" || health?.llmProvider === "pi";
   const activeModelLabel = !health || !activeConfigured
     ? t("Not configured")
     : `${providerLabel(health.llmProvider)}${health.llmModel ? ` · ${health.llmModel}` : ""}`;
@@ -42,8 +43,10 @@ export function ReviewsSettingsSection({ settings, health }: ReviewsSettingsSect
     ? settings?.llm.deepseekModel
     : savedProvider === "openai"
       ? settings?.llm.openaiModel
-      : undefined;
-  const savedModelLabel = !settings || (savedProvider !== "deepseek" && savedProvider !== "openai")
+      : savedProvider === "pi"
+        ? settings?.llm.piModel
+        : undefined;
+  const savedModelLabel = !settings || (savedProvider !== "deepseek" && savedProvider !== "openai" && savedProvider !== "pi")
     ? t("Not active")
     : `${providerLabel(savedProvider)}${savedModel ? ` · ${savedModel}` : ""}`;
   const modelDrift = health !== undefined && settings !== undefined

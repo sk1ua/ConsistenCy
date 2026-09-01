@@ -36,7 +36,6 @@ const savedSettings: SettingsSnapshot = {
   },
   github: {
     appId: "",
-    oauthClientId: "",
     privateKeyConfigured: false,
     webhookSecretConfigured: false,
     publicReadTokenConfigured: true
