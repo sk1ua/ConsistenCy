@@ -129,7 +129,7 @@ You can configure keys directly in the Web/Desktop **Settings** page, via CLI (`
 ## Connecting a Repository
 
 1. **Local Git Checkout**: In Desktop mode, click **Connect Repository** and use the native folder picker to select any local Git worktree. In Web mode, configure `CONSISTENCY_LOCAL_REVIEW_ROOTS`.
-2. **Public GitHub Pull Request**: Paste any public PR URL (e.g. `https://github.com/owner/repo/pull/123`) into the Public PR input. The review runs in read-only mode without requiring GitHub App installation.
+2. **Public GitHub Pull Request**: Paste any public PR URL (e.g. `https://github.com/owner/repo/pull/123`) into the Public PR input. The review runs in read-only mode without requiring GitHub App installation. For higher rate limits, use one-click **GitHub sign-in (OAuth Device Flow)** in Settings — zero scopes, no personal token — or fall back to a fine-grained public read PAT.
 3. **GitHub App Webhook Review**: Configure `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET` to receive webhooks and post review comments automatically.
 
 ---

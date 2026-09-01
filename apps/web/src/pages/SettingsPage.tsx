@@ -36,6 +36,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     updateGithub,
     updateRuntime,
     save,
+    applyGitHubOauthToken,
     resetChanges,
     handleRestartRuntime
   } = form;
@@ -117,6 +118,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       updateGithub={updateGithub}
       updateSecret={updateSecret}
       updateClear={updateClear}
+      applyGitHubOauthToken={applyGitHubOauthToken}
       health={health}
       restartPending={restartNeeded}
     />

@@ -429,6 +429,47 @@ export type GitHubConnectionTestStatus = z.infer<typeof githubConnectionTestStat
 export type GitHubConnectionTestResponse = z.infer<typeof githubConnectionTestResponseSchema>;
 export type GitHubConnectionTestRequest = z.infer<typeof githubConnectionTestRequestSchema>;
 
+/**
+ * GitHub OAuth Device Flow responses. The device_code never leaves the API
+ * process: the start response carries only the human code and polling window,
+ * and the poll response carries the access token exactly ONCE on the
+ * `connected` branch so the renderer can hand it to the existing credential
+ * save path (desktop safeStorage bridge / web encrypted settings). The token
+ * is never echoed again, logged, or persisted in any other payload.
+ */
+export const githubOauthDeviceStartResponseSchema = z.object({
+  flowId: z.string().min(1),
+  userCode: z.string().min(1),
+  verificationUri: z.string().url(),
+  expiresAt: z.string().datetime(),
+  intervalSeconds: z.number().int().positive().max(120)
+}).strict();
+
+export const githubOauthDevicePollRequestSchema = z.object({
+  flowId: z.string().min(1)
+}).strict();
+
+export const githubOauthDevicePollResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("pending"),
+    retryAfterSeconds: z.number().int().positive()
+  }).strict(),
+  z.object({
+    status: z.literal("connected"),
+    login: z.string().min(1),
+    /** One-time handoff token; the renderer forwards it to the credential save path. */
+    publicReadToken: z.string().min(1)
+  }).strict(),
+  z.object({ status: z.literal("expired") }).strict(),
+  z.object({ status: z.literal("denied") }).strict(),
+  z.object({ status: z.literal("unavailable") }).strict()
+]);
+
+export type GitHubOauthDeviceStartResponse = z.infer<typeof githubOauthDeviceStartResponseSchema>;
+export type GitHubOauthDevicePollRequest = z.infer<typeof githubOauthDevicePollRequestSchema>;
+export type GitHubOauthDevicePollResponse = z.infer<typeof githubOauthDevicePollResponseSchema>;
+
+
 export const reviewPreparationSourceWorkingTreeSchema = z.object({
   available: z.boolean(),
   reason: z.string().optional(),

@@ -60,9 +60,12 @@ x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
 | `POST` | `/workflow-runtime/repositories/:id/runs` | Binding-gated manual trigger (latest validated revision; fail-closed 404/409) | Authenticated |
 | `GET` | `/workflow-runtime/repositories/:id/runs` | Bounded per-repository run history (canonical repositoryId join; optional trigger provenance) | Authenticated |
 | `POST` | `/workflow-runtime/copilot/proposal` | Generate a structured WorkflowPatch proposal from natural language (zero persistence, zero side effects; sanitized fail-closed errors) | Authenticated (Real LLM Required) |
+| `POST` | `/workflow-runtime/copilot/chat` | Conversational graph editing: client-held message history (≤24, last message `user`) + definition/definitionId → `{ reply, patch, basis.definitionFingerprint }`. Empty `patch` is a purely conversational reply. Full reducer vocabulary (`ADD_NODE`/`ADD_EDGE`/`REMOVE_NODE`/`REMOVE_EDGE`/`UPDATE_PARAMS`) validated in order server-side + compile precheck; zero session state server-side. Unknown `flow`/definition → 404; sanitized 400/502 otherwise | Authenticated (Real LLM Required) |
 | `GET` | `/settings` | Get sanitized runtime configuration snapshot | Authenticated |
 | `PUT` | `/settings` | Update editable runtime settings (dev / desktop mode) | Authenticated |
 | `POST` | `/settings/github/test-connection` | Single bounded read-only GitHub connection probe: targets the ACTIVE runtime credential by default, or one unsaved draft PAT supplied as `{"publicReadToken": "..."}` (probe only; never persisted, logged, or echoed). Sanitized status enum + bounded retry metadata only (CKPT4 Slice 2, Phase 2C) | Authenticated |
+| `POST` | `/settings/github/oauth/start` | Start a GitHub OAuth Device Flow sign-in: proxies github.com with the configured public client id and returns `{ flowId, userCode, verificationUri, expiresAt, intervalSeconds }`. The `device_code` never leaves the server process; 503 `GITHUB_OAUTH_NOT_CONFIGURED` when unset | Authenticated |
+| `POST` | `/settings/github/oauth/poll` | Poll one sign-in flow: `{ "flowId": "..." }`. Server-enforced polling interval; returns `pending` / `expired` / `denied` / `unavailable`, or `connected` carrying the access token exactly ONCE for a one-time handoff into the existing credential save path (desktop safeStorage bridge / web encrypted settings). Flows are single-use; unknown ids → 404 | Authenticated |
 | `POST` | `/github/webhook` | Incoming HMAC-verified GitHub webhook event | GitHub HMAC Header |
 
 ---

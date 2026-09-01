@@ -2,12 +2,12 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkflowRuntimeDryLoadResult } from "@consistency/schema";
+import type { WorkflowRuntimeCopilotPatchOperation, WorkflowRuntimeDryLoadResult } from "@consistency/schema";
 import { ApiRequestError, api } from "../api/client";
 import { zh } from "../i18n";
 import { RuntimeStudio, RUNTIME_STUDIO_I18N_KEYS } from "./RuntimeStudio";
 import { CopilotPanel, RUNTIME_COPILOT_I18N_KEYS } from "./CopilotPanel";
-import { rectangleEdgeAnchors, STUDIO_NODE_HEIGHT, STUDIO_NODE_WIDTH } from "./state";
+import { rectangleEdgeAnchors, studioDefinitionFingerprint, STUDIO_NODE_HEIGHT, STUDIO_NODE_WIDTH } from "./state";
 
 const nodeType = { type: "analyzer.deterministic-evidence", serviceRef: "deterministic-evidence.analyzer", role: "analyzer" as const, description: "", capabilityRequirements: [], coeffects: [], parameterSchema: { fields: [{ name: "analyzers", label: "Analyzers", type: "string[]" as const, required: false, enumValues: ["style", "a,b"], default: ["style"] }] } };
 const definition = { id: "verified-mini-review", version: 1 as const, nodes: [{ id: "analyze", type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: { analyzers: ["style"] }, failurePolicy: "fail-closed" as const }], edges: [] };
@@ -486,14 +486,13 @@ describe("RuntimeStudio executable component contract", () => {
   });
 });
 
-describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
-  const copilotProposal = {
-    patch: [
-      { op: "ADD_NODE" as const, nodeId: "secret-scan", serviceRef: "deterministic-evidence.analyzer" },
-      { op: "ADD_EDGE" as const, from: "analyze", to: "secret-scan" }
-    ],
-    rationale: "adds a secret scan fed by the analyzer"
-  };
+describe("RuntimeStudio conversational Workflow Copilot", () => {
+  const baseFingerprint = studioDefinitionFingerprint(definition);
+  const addPatch = [
+    { op: "ADD_NODE" as const, nodeId: "secret-scan", serviceRef: "deterministic-evidence.analyzer" },
+    { op: "ADD_EDGE" as const, from: "analyze", to: "secret-scan" }
+  ];
+  const chatTurn = (reply: string, patch: WorkflowRuntimeCopilotPatchOperation[], basis: string) => ({ reply, patch, basis: { definitionFingerprint: basis } });
 
   it("has exact zh-CN parity for every Copilot translation key", () => {
     for (const key of RUNTIME_COPILOT_I18N_KEYS) expect(zh[key]).toBeTruthy();
@@ -508,23 +507,19 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
     });
   }
 
-  async function propose(host: HTMLElement) {
+  async function submitInstruction(host: HTMLElement, instruction: string) {
+    await typeInstruction(host, instruction);
     await act(async () => { host.querySelector<HTMLButtonElement>(".studio-copilot-submit")!.click(); });
     await settle();
   }
 
-  async function submitInstruction(host: HTMLElement, instruction: string) {
-    await typeInstruction(host, instruction);
-    await propose(host);
-  }
-
-  it("renders the proposal as preview-only: highlighted graph elements, operation list, rationale, unchanged draft", async () => {
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockResolvedValue({ proposal: copilotProposal });
+  it("renders the assistant reply and patch as preview-only: highlighted graph elements, operation list, unchanged draft", async () => {
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("adds a secret scan fed by the analyzer", addPatch, baseFingerprint));
     const host = await renderStudio();
     await submitInstruction(host, "add a secret scan");
-    expect(vi.mocked(api.proposeWorkflowRuntimeCopilotPatch)).toHaveBeenCalledWith({ instruction: "add a secret scan", definition }, expect.any(AbortSignal));
+    expect(vi.mocked(api.chatWorkflowRuntimeCopilot)).toHaveBeenCalledWith({ messages: [{ role: "user", content: "add a secret scan" }], definition }, expect.any(AbortSignal));
+    expect(host.querySelector(".studio-copilot-turns")?.textContent).toContain("adds a secret scan fed by the analyzer");
     const panel = host.querySelector(".studio-copilot-proposal")!;
-    expect(panel.textContent).toContain("adds a secret scan fed by the analyzer");
     expect(panel.textContent).toContain("ADD_NODE");
     expect(panel.textContent).toContain("deterministic-evidence.analyzer");
     expect(panel.textContent).toContain("analyze → secret-scan");
@@ -538,8 +533,31 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
     expect(host.querySelector(".studio-copilot")?.textContent).toContain("Preview only; the draft is unchanged until you Apply");
   });
 
-  it("disables Apply for an ADD_NODE proposal against an unforked builtin seed with the fork reason", async () => {
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockResolvedValue({ proposal: copilotProposal });
+  it("sends the whole client-held history on the second turn", async () => {
+    const spy = vi.spyOn(api, "chatWorkflowRuntimeCopilot")
+      .mockResolvedValueOnce(chatTurn("which analyzer should I add?", [], baseFingerprint))
+      .mockResolvedValueOnce(chatTurn("adding the secret scan now", addPatch, baseFingerprint));
+    const host = await renderStudio();
+    await submitInstruction(host, "what can you add?");
+    await submitInstruction(host, "add a secret scan");
+    const secondCall = vi.mocked(spy).mock.calls[1]?.[0];
+    expect(secondCall?.messages).toHaveLength(3);
+    expect(secondCall?.messages[0]).toEqual({ role: "user", content: "what can you add?" });
+    expect(secondCall?.messages[1]?.role).toBe("assistant");
+    expect(secondCall?.messages[2]).toEqual({ role: "user", content: "add a secret scan" });
+  });
+
+  it("renders a purely conversational reply without any patch preview", async () => {
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("This workflow runs one deterministic analyzer over the pinned snapshot.", [], baseFingerprint));
+    const host = await renderStudio();
+    await submitInstruction(host, "what does this workflow do?");
+    expect(host.querySelector(".studio-copilot-turns")?.textContent).toContain("This workflow runs one deterministic analyzer over the pinned snapshot.");
+    expect(host.querySelector(".studio-copilot-proposal")).toBeNull();
+    expect(host.querySelector(".studio-node.is-proposed")).toBeNull();
+  });
+
+  it("disables Apply for an ADD_NODE patch against an unforked builtin seed with the fork reason", async () => {
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("adds a secret scan", addPatch, baseFingerprint));
     const host = await renderStudio();
     await submitInstruction(host, "add a secret scan");
     const apply = host.querySelector<HTMLButtonElement>(".studio-copilot-apply")!;
@@ -548,15 +566,13 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
     expect(api.saveWorkflowRuntimeDefinition).not.toHaveBeenCalled();
   });
 
-  it("applies the proposal on a user draft through reducer actions and invalidates the downstream gates", async () => {
-    // A user-origin definition: the reducer's add-node guard only fences
-    // unforked verified-* builtin seeds, so this draft can take new nodes.
+  it("applies the patch on a user draft through reducer actions and invalidates the downstream gates", async () => {
     const userDefinition = { id: "user-flow", version: 1 as const, nodes: definition.nodes, edges: [] as Array<{ from: string; to: string }> };
     const userRevision = { ...revision, definitionId: "user-flow", revisionId: "wfrev_user_user-flow_v1", definition: userDefinition };
     const userSummary = { ...summary, definitionId: "user-flow", origin: "user" as const, latestRevisionId: userRevision.revisionId };
     vi.mocked(api.workflowRuntimeDefinitions).mockResolvedValue([userSummary]);
     vi.mocked(api.workflowRuntimeRevision).mockResolvedValue(userRevision);
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockResolvedValue({ proposal: copilotProposal });
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("adds a secret scan", addPatch, studioDefinitionFingerprint(userDefinition)));
     const host = await renderStudio();
     expect(host.textContent).toContain("user-flow");
     await submitInstruction(host, "add a secret scan");
@@ -564,12 +580,12 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
     expect(apply.disabled).toBe(false);
     await act(async () => { apply.click(); });
     await settle();
-    // Preview cleared; the reducer chain produced the same effect as a manual edit.
-    expect(host.querySelector(".studio-copilot-proposal")).toBeNull();
+    // Applied: the patch block marks the turn, no preview residue remains,
+    // and the reducer chain produced the same effect as a manual edit.
+    expect(host.querySelector(".studio-copilot-proposal")?.textContent).toContain("Applied");
     expect(host.querySelector(".studio-node.is-proposed")).toBeNull();
     expect(host.querySelector(".studio-graph-svg line.is-proposed")).toBeNull();
     expect([...host.querySelectorAll(".studio-node strong")].map(button => button.textContent)).toEqual(["analyze", "secret-scan"]);
-    // add-node selects the new node; the typed inspector shows it.
     expect(host.querySelector(".studio-inspector summary span")?.textContent).toBe("secret-scan");
     expect(vi.mocked(api.saveWorkflowRuntimeDefinition)).not.toHaveBeenCalled();
     // Downstream gates invalidated: needs validation, persist/dry/run blocked.
@@ -580,8 +596,94 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
     expect((host.querySelector(".studio-run-button") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("reject clears the preview without any state residue", async () => {
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockResolvedValue({ proposal: copilotProposal });
+  it("applies the full editing vocabulary: update-params, remove-edge, remove-node", async () => {
+    const userDefinition = {
+      id: "user-flow",
+      version: 1 as const,
+      nodes: [
+        { id: "analyze", type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: { analyzers: ["style"] }, failurePolicy: "fail-closed" as const },
+        { id: "verify", type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: { analyzers: ["a,b"] }, failurePolicy: "fail-closed" as const }
+      ],
+      edges: [{ from: "analyze", to: "verify" }]
+    };
+    const userRevision = { ...revision, definitionId: "user-flow", revisionId: "wfrev_user_user-flow_v1", definition: userDefinition };
+    const userSummary = { ...summary, definitionId: "user-flow", origin: "user" as const, latestRevisionId: userRevision.revisionId };
+    vi.mocked(api.workflowRuntimeDefinitions).mockResolvedValue([userSummary]);
+    vi.mocked(api.workflowRuntimeRevision).mockResolvedValue(userRevision);
+    const fullPatch = [
+      { op: "UPDATE_PARAMS" as const, nodeId: "analyze", parameters: { analyzers: ["a,b"] } },
+      { op: "REMOVE_EDGE" as const, from: "analyze", to: "verify" },
+      { op: "REMOVE_NODE" as const, nodeId: "verify" }
+    ];
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("retargets the analyzer and drops the duplicate verifier", fullPatch, studioDefinitionFingerprint(userDefinition)));
+    const host = await renderStudio();
+    await submitInstruction(host, "drop the verifier and switch analyzers");
+    const apply = host.querySelector<HTMLButtonElement>(".studio-copilot-apply")!;
+    expect(apply.disabled).toBe(false);
+    await act(async () => { apply.click(); });
+    await settle();
+    expect([...host.querySelectorAll(".studio-node strong")].map(button => button.textContent)).toEqual(["analyze"]);
+    expect(gateRow(host, "validate").textContent).toContain("Needs validation");
+  });
+
+  it("undoes the last applied edit step by step and re-opens the gates", async () => {
+    const userDefinition = { id: "user-flow", version: 1 as const, nodes: definition.nodes, edges: [] as Array<{ from: string; to: string }> };
+    const userRevision = { ...revision, definitionId: "user-flow", revisionId: "wfrev_user_user-flow_v1", definition: userDefinition };
+    const userSummary = { ...summary, definitionId: "user-flow", origin: "user" as const, latestRevisionId: userRevision.revisionId };
+    vi.mocked(api.workflowRuntimeDefinitions).mockResolvedValue([userSummary]);
+    vi.mocked(api.workflowRuntimeRevision).mockResolvedValue(userRevision);
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("adds a secret scan", addPatch, studioDefinitionFingerprint(userDefinition)));
+    const host = await renderStudio();
+    const undo = host.querySelector<HTMLButtonElement>(".studio-copilot-undo")!;
+    expect(undo.disabled).toBe(true);
+    await submitInstruction(host, "add a secret scan");
+    await act(async () => { host.querySelector<HTMLButtonElement>(".studio-copilot-apply")!.click(); });
+    await settle();
+    expect([...host.querySelectorAll(".studio-node strong")].map(button => button.textContent)).toEqual(["analyze", "secret-scan"]);
+    expect(undo.disabled).toBe(false);
+    await act(async () => { undo.click(); });
+    await settle();
+    // One undo pops one reducer step: the ADD_EDGE rolls back first, so both
+    // nodes remain while the gates re-open.
+    expect(gateRow(host, "validate").textContent).toContain("Needs validation");
+    expect(undo.disabled).toBe(false);
+    await act(async () => { undo.click(); });
+    await settle();
+    expect([...host.querySelectorAll(".studio-node strong")].map(button => button.textContent)).toEqual(["analyze"]);
+    expect(undo.disabled).toBe(true);
+  });
+
+  it("marks an unapplied patch turn stale after a manual draft edit and refuses Apply", async () => {
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("adds a secret scan", addPatch, baseFingerprint));
+    const host = await renderStudio();
+    await submitInstruction(host, "add a secret scan");
+    expect(host.querySelector(".studio-copilot-proposal")).toBeTruthy();
+    await editPurpose(host, "changed during preview");
+    expect(host.querySelectorAll(".studio-copilot-turn")).toHaveLength(2);
+    expect(host.querySelector(".studio-node.is-proposed")).toBeNull();
+    const apply = host.querySelector<HTMLButtonElement>(".studio-copilot-apply")!;
+    expect(apply.disabled).toBe(true);
+    expect(host.querySelector(".studio-copilot")?.textContent).toContain("The draft changed; regenerate this proposal");
+  });
+
+  it("keeps an assistant reply that arrives after an in-flight draft edit, marked stale", async () => {
+    let resolve!: (value: { reply: string; patch: WorkflowRuntimeCopilotPatchOperation[]; basis: { definitionFingerprint: string } }) => void;
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockReturnValueOnce(new Promise(resolvePromise => { resolve = resolvePromise; }));
+    const host = await renderStudio();
+    await typeInstruction(host, "add a secret scan");
+    await act(async () => { host.querySelector<HTMLButtonElement>(".studio-copilot-submit")!.click(); });
+    await editPurpose(host, "edited during flight");
+    resolve(chatTurn("adds a secret scan", addPatch, baseFingerprint));
+    await settle();
+    expect(host.querySelectorAll(".studio-copilot-turn")).toHaveLength(2);
+    expect(host.querySelector(".studio-copilot-turns")?.textContent).toContain("adds a secret scan");
+    expect(host.querySelector(".studio-node.is-proposed")).toBeNull();
+    expect((host.querySelector<HTMLButtonElement>(".studio-copilot-apply")!).disabled).toBe(true);
+    expect(host.querySelector(".studio-copilot")?.textContent).toContain("The draft changed; regenerate this proposal");
+  });
+
+  it("discard removes only the assistant turn without any state residue", async () => {
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockResolvedValue(chatTurn("adds a secret scan", addPatch, baseFingerprint));
     const host = await renderStudio();
     await submitInstruction(host, "add a secret scan");
     await act(async () => { host.querySelector<HTMLButtonElement>(".studio-copilot-reject")!.click(); });
@@ -593,40 +695,15 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
     expect(host.querySelector(".studio-copilot-note")).toBeNull();
   });
 
-  it("discards the preview immediately when the draft is edited during preview", async () => {
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockResolvedValue({ proposal: copilotProposal });
-    const host = await renderStudio();
-    await submitInstruction(host, "add a secret scan");
-    expect(host.querySelector(".studio-copilot-proposal")).toBeTruthy();
-    await editPurpose(host, "changed during preview");
-    expect(host.querySelector(".studio-copilot-proposal")).toBeNull();
-    expect(host.querySelector(".studio-node.is-proposed")).toBeNull();
-    expect(host.querySelector(".studio-copilot-status")?.textContent).toContain("Preview discarded; the draft changed");
-  });
-
-  it("discards a proposal whose base draft changed while the request was in flight", async () => {
-    let resolve!: (value: { proposal: typeof copilotProposal }) => void;
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockReturnValueOnce(new Promise<{ proposal: typeof copilotProposal }>(resolvePromise => { resolve = resolvePromise; }));
-    const host = await renderStudio();
-    await typeInstruction(host, "add a secret scan");
-    await act(async () => { host.querySelector<HTMLButtonElement>(".studio-copilot-submit")!.click(); });
-    await editPurpose(host, "edited during flight");
-    resolve({ proposal: copilotProposal });
-    await settle();
-    expect(host.querySelector(".studio-copilot-proposal")).toBeNull();
-    expect(host.querySelector(".studio-node.is-proposed")).toBeNull();
-    expect(host.querySelector(".studio-copilot-status")?.textContent).toContain("Preview discarded; the draft changed");
-  });
-
   it("maps LLM_NOT_CONFIGURED to honest copy", async () => {
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockRejectedValueOnce(new ApiRequestError("尚未配置大语言模型", "LLM_NOT_CONFIGURED", 503));
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockRejectedValueOnce(new ApiRequestError("尚未配置大语言模型", "LLM_NOT_CONFIGURED", 503));
     const host = await renderStudio();
     await submitInstruction(host, "add a secret scan");
     expect(host.querySelector(".studio-copilot-note")?.textContent).toContain("LLM is not configured; configure DeepSeek or OpenAI to generate proposals");
   });
 
   it("maps WORKFLOW_PATCH_INVALID to the server issues summary", async () => {
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockRejectedValueOnce(new ApiRequestError("invalid patch", "WORKFLOW_PATCH_INVALID", 400, {
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockRejectedValueOnce(new ApiRequestError("invalid patch", "WORKFLOW_PATCH_INVALID", 400, {
       issues: [{ code: "unknown_service_ref", path: ["patch", 0, "serviceRef"], message: "serviceRef 'fake.service' is not registered in the runtime Node Registry" }]
     }));
     const host = await renderStudio();
@@ -637,7 +714,7 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
   });
 
   it("maps WORKFLOW_PATCH_GENERATION_FAILED to honest copy", async () => {
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockRejectedValueOnce(new ApiRequestError("generation failed", "WORKFLOW_PATCH_GENERATION_FAILED", 502));
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockRejectedValueOnce(new ApiRequestError("generation failed", "WORKFLOW_PATCH_GENERATION_FAILED", 502));
     const host = await renderStudio();
     await submitInstruction(host, "add a secret scan");
     expect(host.querySelector(".studio-copilot-note")?.textContent).toContain("The LLM could not produce a schema-valid proposal; try again");
@@ -645,7 +722,7 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
 
   it("aborts the in-flight copilot request on unmount", async () => {
     let signal: AbortSignal | undefined;
-    vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch").mockImplementation((_input, abortSignal) => {
+    vi.spyOn(api, "chatWorkflowRuntimeCopilot").mockImplementation((_input, abortSignal) => {
       signal = abortSignal;
       return new Promise<never>(() => undefined);
     });
@@ -659,13 +736,13 @@ describe("RuntimeStudio Workflow Copilot panel (CKPT6 Phase 3)", () => {
     expect(signal!.aborted).toBe(true);
   });
 
-  it("disables the proposal submit on an empty draft with an honest reason", async () => {
-    const proposalSpy = vi.spyOn(api, "proposeWorkflowRuntimeCopilotPatch");
+  it("disables the message submit on an empty draft with an honest reason", async () => {
+    const chatSpy = vi.spyOn(api, "chatWorkflowRuntimeCopilot");
     const host = await renderStudio();
     await act(async () => { host.querySelector<HTMLButtonElement>("[aria-label='New definition']")!.click(); });
     await typeInstruction(host, "add a secret scan");
     expect(host.querySelector<HTMLButtonElement>(".studio-copilot-submit")!.disabled).toBe(true);
     expect(host.querySelector(".studio-copilot")?.textContent).toContain("Add a node before requesting a proposal");
-    expect(proposalSpy).not.toHaveBeenCalled();
+    expect(chatSpy).not.toHaveBeenCalled();
   });
 });

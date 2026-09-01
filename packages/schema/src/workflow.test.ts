@@ -6,7 +6,7 @@ import {
   workflowEvidenceItemSchema,
   workflowSpecSchema
 } from "./workflow";
-import { MAX_PUBLIC_PARAMETER_DEPTH, workflowRuntimeCopilotProposalRequestSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeCopilotProposalSchema, workflowRuntimeDefinitionSchema, workflowRuntimeExecutablePlanSchema, workflowRuntimeParameterSchemaDescriptorSchema, workflowRuntimePublicParameterSchema, workflowRuntimeSaveDefinitionRequestSchema, workflowRuntimeValidationResultSchema } from "./workflow-runtime";
+import { MAX_PUBLIC_PARAMETER_DEPTH, workflowRuntimeCopilotChatRequestSchema, workflowRuntimeCopilotChatResponseSchema, workflowRuntimeCopilotProposalRequestSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeCopilotProposalSchema, workflowRuntimeDefinitionSchema, workflowRuntimeExecutablePlanSchema, workflowRuntimeParameterSchemaDescriptorSchema, workflowRuntimePublicParameterSchema, workflowRuntimeSaveDefinitionRequestSchema, workflowRuntimeValidationResultSchema } from "./workflow-runtime";
 
 const validSpec = {
   version: 2,
@@ -261,7 +261,7 @@ describe("workflow copilot proposal (CKPT6 Phase 3 WorkflowPatch)", () => {
 
   it("rejects unknown operations, unknown fields, and malformed node ids", () => {
     for (const patch of [
-      [{ op: "REMOVE_NODE", nodeId: "analyze" }],
+      [{ op: "DELETE_EVERYTHING" }],
       [{ ...addNode, condition: "severity >= high" }],
       [{ op: "ADD_EDGE", from: "analyze", to: "secret-scan", condition: "severity >= high" }],
       [{ ...addNode, nodeId: "Bad_Upper" }],
@@ -297,5 +297,46 @@ describe("workflow copilot proposal (CKPT6 Phase 3 WorkflowPatch)", () => {
       { instruction: "add a scan", definition: { ...definition, nodes: [] } },
       { instruction: "add a scan", definition, extra: true },
     ]) expect(() => workflowRuntimeCopilotProposalRequestSchema.parse(request)).toThrow();
+  });
+
+  it("parses the conversational vocabulary (REMOVE_NODE / REMOVE_EDGE / UPDATE_PARAMS)", () => {
+    const patch = [
+      { op: "REMOVE_NODE", nodeId: "secret-scan" },
+      { op: "REMOVE_EDGE", from: "analyze", to: "verify" },
+      { op: "UPDATE_PARAMS", nodeId: "analyze", parameters: { analyzers: ["style"] } },
+    ];
+    expect(workflowRuntimeCopilotProposalSchema.parse({ patch, rationale: "prunes the scan" }).patch).toEqual(patch);
+    for (const bad of [
+      { op: "REMOVE_NODE" },
+      { op: "REMOVE_EDGE", from: "analyze" },
+      { op: "UPDATE_PARAMS", nodeId: "analyze" },
+      { op: "UPDATE_PARAMS", nodeId: "analyze", parameters: 5 },
+    ]) expect(() => workflowRuntimeCopilotProposalSchema.parse({ patch: [bad], rationale: "r" })).toThrow();
+  });
+
+  it("parses conversational chat turns and enforces the history contract", () => {
+    expect(workflowRuntimeCopilotChatRequestSchema.parse({
+      messages: [
+        { role: "user", content: "what does this do?" },
+        { role: "assistant", content: "It runs one analyzer." },
+        { role: "user", content: "add a secret scan" },
+      ],
+      definitionId: "flow-1",
+    }).messages).toHaveLength(3);
+    expect(workflowRuntimeCopilotChatResponseSchema.parse({
+      reply: "It runs one deterministic analyzer over the pinned snapshot.",
+      patch: [],
+      basis: { definitionFingerprint: "abc123" },
+    }).patch).toEqual([]);
+    // The last message must be the user's turn; history is bounded at 24.
+    for (const request of [
+      { messages: [{ role: "assistant", content: "hi" }], definitionId: "flow-1" },
+      { messages: [{ role: "user", content: "hi" }], definitionId: "flow-1", extra: true },
+      { messages: Array.from({ length: 25 }, (_, index) => ({ role: "user", content: `m${index}` })), definitionId: "flow-1" },
+      { messages: [{ role: "user", content: "" }], definitionId: "flow-1" },
+      { messages: [{ role: "user", content: "hi" }], definition: { ...definition, nodes: [] } },
+    ]) expect(() => workflowRuntimeCopilotChatRequestSchema.parse(request)).toThrow();
+    expect(() => workflowRuntimeCopilotChatResponseSchema.parse({ reply: "", patch: [], basis: { definitionFingerprint: "abc123" } })).toThrow();
+    expect(() => workflowRuntimeCopilotChatResponseSchema.parse({ reply: "r", patch: [], basis: {} })).toThrow();
   });
 });

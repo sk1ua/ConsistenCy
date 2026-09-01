@@ -40,6 +40,7 @@ const draftSettings: SettingsSnapshot = {
   },
   github: {
     appId: "123456",
+    oauthClientId: "",
     privateKeyConfigured: true,
     webhookSecretConfigured: true,
     publicReadTokenConfigured: true
@@ -81,16 +82,18 @@ function sectionProps(options?: {
   restartPending?: boolean;
   secrets?: SecretDrafts;
   clearSecrets?: ClearSecrets;
+  settings?: SettingsSnapshot;
 }) {
-  const { health, restartPending, secrets = emptySecrets, clearSecrets = keepSecrets } = options ?? {};
+  const { health, restartPending, secrets = emptySecrets, clearSecrets = keepSecrets, settings } = options ?? {};
   return {
     draft: draftSettings,
-    settings: draftSettings,
+    settings: settings ?? draftSettings,
     secrets,
     clearSecrets,
     updateGithub: () => undefined,
     updateSecret: () => undefined,
     updateClear: () => undefined,
+    applyGitHubOauthToken: async () => undefined,
     ...(health === undefined ? {} : { health }),
     ...(restartPending === undefined ? {} : { restartPending })
   };
@@ -101,6 +104,7 @@ function renderSection(options?: {
   restartPending?: boolean;
   locale?: "en-US" | "zh-CN";
   secrets?: SecretDrafts;
+  settings?: SettingsSnapshot;
 }): string {
   const { locale = "en-US", ...rest } = options ?? {};
   return renderToStaticMarkup(
@@ -110,7 +114,7 @@ function renderSection(options?: {
   );
 }
 
-async function mountSection(options?: { health?: HealthResponse; restartPending?: boolean; secrets?: SecretDrafts }) {
+async function mountSection(options?: { health?: HealthResponse; restartPending?: boolean; secrets?: SecretDrafts; settings?: SettingsSnapshot }) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -329,9 +333,31 @@ describe("GitHubSettingsSection zh-CN coverage", () => {
     expect(html).toContain("试连此令牌");
     expect(html).toContain("仅对这条未保存的令牌发起一次只读请求；不会存储或回显该令牌。");
     expect(html).toContain("测试针对当前运行中的配置；重启后才会应用已保存的更改。");
+    expect(html).toContain("GitHub 登录（OAuth）");
+    expect(html).toContain("在下方配置 OAuth App 的 Client ID 并重启，即可启用一键 GitHub 登录——无需个人令牌。");
     expect(html).not.toContain("Not tested yet");
     expect(html).not.toContain("Test Connection");
     expect(html).not.toContain("Test this token");
     expect(html).not.toContain("Restart to apply saved changes");
+  });
+});
+
+describe("GitHub OAuth sign-in card", () => {
+  it("renders an honest setup hint while no OAuth client id is configured", async () => {
+    const { container } = await mountSection();
+    expect(container.querySelector("#setting-github-oauth-setup")).not.toBeNull();
+    expect(container.querySelector("#setting-github-oauth-start")).toBeNull();
+  });
+
+  it("offers device-flow sign-in once an OAuth client id is configured", async () => {
+    const configured: SettingsSnapshot = {
+      ...draftSettings,
+      github: { ...draftSettings.github, oauthClientId: "Iv1_client123" }
+    };
+    const { container } = await mountSection({ settings: configured });
+    const start = container.querySelector<HTMLButtonElement>("#setting-github-oauth-start");
+    expect(start).not.toBeNull();
+    expect(start?.textContent).toContain("Sign in with GitHub");
+    expect(container.textContent).toContain("no repository permissions");
   });
 });

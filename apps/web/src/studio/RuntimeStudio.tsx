@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, GitBranch, LoaderCircle, Play, Plus, Save, ShieldCheck, Trash2, RotateCcw } from "lucide-react";
-import type { Repository, WorkflowRuntimeDefinition, WorkflowRuntimeDefinitionRevision, WorkflowRuntimeDefinitionSummary, WorkflowRuntimeNodeType, WorkflowRuntimeDryLoadResult, WorkflowRuntimeCopilotProposal } from "@consistency/schema";
+import type { Repository, WorkflowRuntimeDefinition, WorkflowRuntimeDefinitionRevision, WorkflowRuntimeDefinitionSummary, WorkflowRuntimeNodeType, WorkflowRuntimeDryLoadResult, WorkflowRuntimeCopilotPatchOperation } from "@consistency/schema";
 import { api } from "../api/client";
 import { useI18n } from "../i18n";
 import { SelectMenu } from "../design-system/SelectMenu";
@@ -83,13 +83,21 @@ export function RuntimeStudio() {
   }, [desktopPresentation]);
   const [connectFrom, setConnectFrom] = useState("");
   const [connectTo, setConnectTo] = useState("");
-  // CKPT6 Phase 3 — Workflow Copilot proposal state. The proposal is preview
-  // data bound to the draft fingerprint it was generated against; it never
-  // mutates the draft until the human Apply translates it into reducer actions.
-  const [copilotProposal, setCopilotProposal] = useState<WorkflowRuntimeCopilotProposal>();
-  const [copilotBaseFingerprint, setCopilotBaseFingerprint] = useState<string>();
+  // Conversational Copilot state. The client owns the conversation: turns are
+  // sent per request and never persisted server-side. Each assistant patch
+  // turn records the definition fingerprint it was computed against; staleness
+  // is derived (basis ≠ current fingerprint ⇒ Apply refused), never guessed.
+  const [copilotTurns, setCopilotTurns] = useState<Array<{
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    patch: WorkflowRuntimeCopilotPatchOperation[];
+    basisFingerprint?: string;
+    applied?: boolean;
+  }>>([]);
   const [copilotError, setCopilotError] = useState<unknown>();
   const [copilotStatus, setCopilotStatus] = useState("");
+  const copilotTurnSeq = useRef(0);
   const generation = useRef(0);
   const operation = useRef<{ generation: number; requestId: number; controller: AbortController } | null>(null);
   const requestId = useRef(0);
@@ -98,7 +106,7 @@ export function RuntimeStudio() {
   const OPEN_TIMEOUT_MS = 15_000;
 
   const resetGates = () => { setValidatedFingerprint(undefined); setSavedFingerprint(undefined); setDryLoad(undefined); setHasValidatedDraft(false); };
-  const clearCopilotPreview = () => { setCopilotProposal(undefined); setCopilotBaseFingerprint(undefined); setCopilotError(undefined); setCopilotStatus(""); };
+  const clearCopilotPreview = () => { setCopilotTurns([]); setCopilotError(undefined); setCopilotStatus(""); };
   const invalidate = () => {
     generation.current += 1;
     operation.current?.controller.abort();
@@ -207,29 +215,50 @@ export function RuntimeStudio() {
   const revisionLabel = revision ? `r${revision.revision}` : t("No revision");
   const busyLabel = busy === "validate" ? t("Validate") : busy === "save" ? t("Save revision") : busy === "dry" ? t("Dry-load") : busy === "run" ? t("Run") : busy === "copilot" ? t("Copilot proposal") : busy === "open" ? t("Loading Runtime Studio") : undefined;
   const definitionSelectValue = selectedSummary ? selectedSummary.definitionId : activeState?.draft.id ?? "";
-  // CKPT6 Phase 3 — diff preview: the rendered graph is draft + proposed patch
-  // (preview data only). The draft state itself stays untouched until Apply.
+  // Conversational diff preview: the rendered graph simulates the LATEST
+  // unapplied assistant patch turn against the current draft (preview data
+  // only). A stale turn (basis ≠ current fingerprint) previews nothing.
+  const activeCopilotTurn = useMemo(() => {
+    for (let index = copilotTurns.length - 1; index >= 0; index--) {
+      const turn = copilotTurns[index];
+      if (!turn) continue;
+      if (turn.role === "assistant" && turn.patch.length > 0 && !turn.applied) return turn;
+    }
+    return null;
+  }, [copilotTurns]);
+  const activeCopilotStale = Boolean(activeCopilotTurn && activeCopilotTurn.basisFingerprint !== fingerprint);
   const copilotPreview = useMemo(() => {
-    if (!activeState || !copilotProposal) return null;
+    if (!activeState || !activeCopilotTurn || activeCopilotStale) return null;
     const registryByRef = new Map(nodeTypes.map(candidate => [candidate.serviceRef, candidate]));
-    const nodes = [...activeState.draft.nodes];
-    for (const operation of copilotProposal.patch) {
-      if (operation.op !== "ADD_NODE") continue;
-      const nodeType = registryByRef.get(operation.serviceRef);
-      // An unknown serviceRef cannot be previewed honestly — render no preview.
-      if (!nodeType) return null;
-      nodes.push({ id: operation.nodeId, type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: operation.parameters ?? {}, failurePolicy: "fail-closed" });
+    let nodes = [...activeState.draft.nodes];
+    let edges = [...activeState.draft.edges];
+    const proposedNodeIds = new Set<string>();
+    const proposedEdgeKeys = new Set<string>();
+    for (const operation of activeCopilotTurn.patch) {
+      if (operation.op === "ADD_NODE") {
+        const nodeType = registryByRef.get(operation.serviceRef);
+        // An unknown serviceRef cannot be previewed honestly — render no preview.
+        if (!nodeType) return null;
+        nodes.push({ id: operation.nodeId, type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: operation.parameters ?? {}, failurePolicy: "fail-closed" });
+        proposedNodeIds.add(operation.nodeId);
+      } else if (operation.op === "ADD_EDGE") {
+        edges.push({ from: operation.from, to: operation.to });
+        proposedEdgeKeys.add(`${operation.from}-${operation.to}`);
+      } else if (operation.op === "REMOVE_NODE") {
+        nodes = nodes.filter(node => node.id !== operation.nodeId);
+        edges = edges.filter(edge => edge.from !== operation.nodeId && edge.to !== operation.nodeId);
+      } else if (operation.op === "REMOVE_EDGE") {
+        edges = edges.filter(edge => !(edge.from === operation.from && edge.to === operation.to));
+      } else if (operation.op === "UPDATE_PARAMS") {
+        nodes = nodes.map(node => node.id === operation.nodeId ? { ...node, parameters: operation.parameters } : node);
+      }
     }
     return {
-      proposedNodeIds: new Set(copilotProposal.patch.filter(operation => operation.op === "ADD_NODE").map(operation => operation.nodeId)),
-      proposedEdgeKeys: new Set(copilotProposal.patch.filter(operation => operation.op === "ADD_EDGE").map(operation => `${operation.from}-${operation.to}`)),
-      definition: {
-        ...activeState.draft,
-        nodes,
-        edges: [...activeState.draft.edges, ...copilotProposal.patch.filter(operation => operation.op === "ADD_EDGE").map(operation => ({ from: operation.from, to: operation.to }))]
-      } as WorkflowRuntimeDefinition
+      proposedNodeIds,
+      proposedEdgeKeys,
+      definition: { ...activeState.draft, nodes, edges } as WorkflowRuntimeDefinition
     };
-  }, [activeState, copilotProposal, nodeTypes]);
+  }, [activeState, activeCopilotTurn, activeCopilotStale, nodeTypes]);
   const layout = useMemo(() => activeState ? layoutStudioGraph(copilotPreview ? copilotPreview.definition : activeState.draft) : null, [copilotPreview, activeState]);
   const graphViewportRef = useRef<HTMLDivElement | null>(null);
   const [graphScroll, setGraphScroll] = useState({ overflow: false, left: false, right: false });
@@ -255,45 +284,50 @@ export function RuntimeStudio() {
     window.addEventListener("resize", updateGraphScroll);
     return () => window.removeEventListener("resize", updateGraphScroll);
   }, [layout?.width, layout?.height, updateGraphScroll]);
-  // A draft edit during preview immediately invalidates the copilot proposal:
-  // the patch was validated against a different definition, so the preview is
-  // discarded via the studioDefinitionFingerprint comparison. Apply itself
-  // clears the preview first, so its own fingerprint change never trips this.
-  useEffect(() => {
-    if (!copilotProposal || copilotBaseFingerprint === undefined) return;
-    if (fingerprint === copilotBaseFingerprint) return;
-    setCopilotProposal(undefined);
-    setCopilotBaseFingerprint(undefined);
-    setCopilotStatus(t("Preview discarded; the draft changed"));
-  }, [fingerprint, copilotProposal, copilotBaseFingerprint, t]);
+  // Staleness is derived per turn from the recorded basis fingerprint: a draft
+  // edit (manual, another Apply, Undo) instantly marks older patch turns stale
+  // and disables their Apply — the conversation itself stays visible history.
   if (!activeState || !layout) return <section className="runtime-studio" aria-label={t("Runtime Studio")}><div className="studio-loading" role="alert">{loadError || openError ? <><p>{loadError ?? openError}</p><button className="secondary-button btn-small" onClick={() => loadError ? void load() : selectedSummary && void open(selectedSummary)}>{t("Retry")}</button></> : <><LoaderCircle className="spin" size={18} />{t("Loading Runtime Studio")}</>}</div></section>;
   const selected = activeState.draft.nodes.find(node => node.id === activeState.selectedNodeId);
   const selectedType = selected ? nodeTypes.find(type => type.type === selected.type) : undefined;
   const mutate = (next: ReturnType<typeof studioReducer>) => { setStudioState(next); setValidatedFingerprint(undefined); setSavedFingerprint(undefined); setDryLoad(undefined); };
-  // CKPT6 Phase 3 — copilot proposal submit. Reuses the shared operation
-  // machinery (generation + AbortController) so a superseding open/load/inval-
-  // idation aborts the in-flight LLM request, and unmount aborts it via
-  // invalidate() in the load effect cleanup.
+  // Conversational copilot submit. Reuses the shared operation machinery
+  // (generation + AbortController) so a superseding open/load/invalidation
+  // aborts the in-flight LLM request, and unmount aborts it via invalidate()
+  // in the load effect cleanup. The whole client-held history rides along.
   const submitCopilot = async (instruction: string) => {
     if (!activeState || busy) return;
     const requestGeneration = generation.current;
+    // The turn's basis is the CLIENT fingerprint of the draft this request was
+    // computed against — the server's basis hash is a different algorithm and
+    // is metadata only. Comparing against the client fingerprint at apply time
+    // is what makes staleness detection honest.
     const requestFingerprint = fingerprint;
     const requestDefinition = activeState.draft;
+    const history = [
+      ...copilotTurns.map(turn => ({ role: turn.role, content: turn.content })),
+      { role: "user" as const, content: instruction }
+    ];
+    const userTurnId = `turn-${copilotTurnSeq.current++}-u`;
+    const userTurn = { id: userTurnId, role: "user" as const, content: instruction, patch: [] as WorkflowRuntimeCopilotPatchOperation[] };
+    setCopilotTurns(current => [...current, userTurn]);
     const op = begin("copilot");
     setBusy("copilot");
     setCopilotError(undefined);
     setCopilotStatus("");
     try {
-      const result = await api.proposeWorkflowRuntimeCopilotPatch({ instruction, definition: requestDefinition }, op.identity.controller.signal);
+      const result = await api.chatWorkflowRuntimeCopilot({ messages: history, definition: requestDefinition }, op.identity.controller.signal);
       if (!op.current() || generation.current !== requestGeneration) return;
-      // The draft may have changed while the request was in flight; a proposal
-      // validated against a different definition is discarded, never applied.
-      if (studioDefinitionFingerprint(studioStateRef.current?.draft as WorkflowRuntimeDefinition) !== requestFingerprint) {
-        setCopilotStatus(t("Preview discarded; the draft changed"));
-        return;
-      }
-      setCopilotProposal(result.proposal);
-      setCopilotBaseFingerprint(requestFingerprint);
+      // The assistant turn joins the conversation bound to the client-side
+      // request fingerprint; if the draft changed in flight, staleness derives
+      // from the mismatch instead of silently dropping the reply.
+      setCopilotTurns(current => [...current, {
+        id: `turn-${copilotTurnSeq.current++}-a`,
+        role: "assistant",
+        content: result.reply,
+        patch: result.patch,
+        basisFingerprint: requestFingerprint
+      }]);
     } catch (caught) {
       if (op.current() && generation.current === requestGeneration && (caught as Error)?.name !== "AbortError") setCopilotError(caught);
     } finally {
@@ -301,15 +335,17 @@ export function RuntimeStudio() {
       if (op.current()) setBusy(undefined);
     }
   };
-  // Apply translates the proposal into existing reducer actions one by one
-  // (add-node / update-params / connect) — never a direct draft-JSON write.
-  // The resulting draft then flows through the canonical validate →
-  // save-revision gate chain like any manual edit.
-  const applyCopilotProposal = () => {
+  // Apply translates a turn's patch into existing reducer actions one by one
+  // (add-node / remove-node / connect / disconnect / update-params) — never a
+  // direct draft-JSON write. The resulting draft then flows through the
+  // canonical validate → save-revision gate chain like any manual edit.
+  const applyCopilotTurn = (turnId: string) => {
     const current = studioStateRef.current;
-    if (!current || !copilotProposal || busy) return;
+    const turn = copilotTurns.find(candidate => candidate.id === turnId);
+    if (!current || !turn || busy || turn.applied) return;
+    if (turn.patch.length === 0 || turn.basisFingerprint !== fingerprint) return;
     let next = current;
-    for (const operation of copilotProposal.patch) {
+    for (const operation of turn.patch) {
       if (operation.op === "ADD_NODE") {
         const nodeType = nodeTypes.find(candidate => candidate.serviceRef === operation.serviceRef);
         // The server whitelist-validated the serviceRef; a missing local
@@ -321,17 +357,47 @@ export function RuntimeStudio() {
         }
         continue;
       }
+      if (operation.op === "REMOVE_NODE") {
+        next = studioReducer(next, { type: "remove-node", nodeId: operation.nodeId }, nodeTypes);
+        continue;
+      }
+      if (operation.op === "REMOVE_EDGE") {
+        next = studioReducer(next, { type: "disconnect", from: operation.from, to: operation.to }, nodeTypes);
+        continue;
+      }
+      if (operation.op === "UPDATE_PARAMS") {
+        next = studioReducer(next, { type: "update-params", nodeId: operation.nodeId, parameters: operation.parameters }, nodeTypes);
+        continue;
+      }
       next = studioReducer(next, { type: "connect", from: operation.from, to: operation.to }, nodeTypes);
     }
     if (next === current) return;
     mutate(next);
-    clearCopilotPreview();
+    setCopilotTurns(currentTurns => currentTurns.map(candidate => candidate.id === turnId ? { ...candidate, applied: true } : candidate));
   };
-  const rejectCopilotProposal = () => { clearCopilotPreview(); };
-  // Mirror of the reducer add-node guard: an unforked builtin seed cannot take
-  // new nodes, so an ADD_NODE proposal must be forked first. Edge-only patches
-  // follow the same rules as the manual connect control.
-  const copilotNeedsFork = Boolean(copilotProposal?.patch.some(operation => operation.op === "ADD_NODE") && activeState.baseline.id.startsWith("verified-") && activeState.draft.id === activeState.baseline.id);
+  const discardCopilotTurn = (turnId: string) => {
+    setCopilotTurns(currentTurns => currentTurns.filter(candidate => candidate.id !== turnId));
+  };
+  const undoLastEdit = () => {
+    const current = studioStateRef.current;
+    if (!current) return;
+    const next = studioReducer(current, { type: "undo" }, nodeTypes);
+    if (next !== current) mutate(next);
+  };
+  // Per-turn panel view model: all gating truth (staleness, fork guard) is
+  // derived here so the panel stays a dumb renderer.
+  const copilotTurnViews = copilotTurns.map(turn => {
+    const base = { id: turn.id, role: turn.role, content: turn.content, patch: turn.patch };
+    if (turn.role === "user") return { ...base, patch: [], status: "plain" as const, applyBlockedReason: "" };
+    const status = turn.applied ? "applied" as const
+      : turn.patch.length === 0 ? "plain" as const
+      : turn.basisFingerprint !== fingerprint ? "stale" as const
+      : "ready" as const;
+    const needsFork = turn.patch.some(operation => operation.op === "ADD_NODE")
+      && activeState.baseline.id.startsWith("verified-")
+      && activeState.draft.id === activeState.baseline.id;
+    return { ...base, status, applyBlockedReason: needsFork ? t("Fork before applying a proposal to a builtin seed") : "" };
+  });
   const newDefinition = () => { invalidate(); setSelectedSummary(undefined); setRevision(undefined); resetGates(); setConnectFrom(""); setConnectTo(""); setNotice(undefined); setError(undefined); setOpenError(undefined); setStudioState(createStudioState({ id: "new-definition", version: 1, nodes: [], edges: [] } as WorkflowRuntimeDefinition)); clearCopilotPreview(); };
   const fork = () => { invalidate(); const id = `${activeState.draft.id}-fork`; const unique = definitions.some(item => item.definitionId === id) ? `${id}-${Date.now().toString(36)}` : id; setSelectedSummary(undefined); setRevision(undefined); resetGates(); setConnectFrom(""); setConnectTo(""); setNotice(undefined); setError(undefined); setOpenError(undefined); setStudioState(createStudioState({ ...activeState.draft, id: unique })); clearCopilotPreview(); };
   const validate = async () => { if (activeState.draft.nodes.length === 0) return; const requestGeneration = generation.current; const requestFingerprint = fingerprint; const op = begin("validate"); setBusy("validate"); setError(undefined); try { const result = await api.validateWorkflowRuntime(activeState.draft, op.identity.controller.signal); if (!op.current() || generation.current !== requestGeneration || studioDefinitionFingerprint(studioStateRef.current?.draft as WorkflowRuntimeDefinition) !== requestFingerprint) return; if (result.ok) { setValidatedFingerprint(requestFingerprint); setHasValidatedDraft(true); } else { setValidatedFingerprint(undefined); } setNotice(result.ok ? t("Server validation passed") : t("Server validation failed")); } catch (caught) { if (op.current() && generation.current === requestGeneration) { setValidatedFingerprint(undefined); if ((caught as Error)?.name !== "AbortError") setError(caught instanceof Error ? caught.message : t("Validation failed")); } } finally { op.done(); if (op.current()) setBusy(undefined); } };
@@ -458,13 +524,14 @@ export function RuntimeStudio() {
         busy={busy !== undefined}
         canSubmit={activeState.draft.nodes.length > 0}
         submitBlockedReason={t("Add a node before requesting a proposal")}
-        proposal={copilotProposal}
+        turns={copilotTurnViews}
         error={copilotError}
-        applyBlockedReason={copilotNeedsFork ? t("Fork before applying a proposal to a builtin seed") : ""}
         status={copilotStatus}
+        canUndo={activeState.history.length > 0}
         onSubmit={instruction => void submitCopilot(instruction)}
-        onApply={applyCopilotProposal}
-        onReject={rejectCopilotProposal}
+        onApply={applyCopilotTurn}
+        onDiscard={discardCopilotTurn}
+        onUndo={undoLastEdit}
       />
       </div>
     </div>

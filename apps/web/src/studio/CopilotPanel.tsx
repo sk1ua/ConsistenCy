@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { Check, LoaderCircle, Sparkles, X } from "lucide-react";
-import type { WorkflowRuntimeCopilotProposal } from "@consistency/schema";
+import { Check, LoaderCircle, RotateCcw, Sparkles, X } from "lucide-react";
+import type { WorkflowRuntimeCopilotPatchOperation } from "@consistency/schema";
 import { ApiRequestError } from "../api/client";
 import { useI18n } from "../i18n";
 
 export const RUNTIME_COPILOT_I18N_KEYS = [
   "Workflow Copilot",
   "Copilot instruction",
-  "Describe the workflow change; the Copilot only proposes a patch and never edits the runtime",
-  "Propose patch",
+  "Describe the change in your own words; every edit still goes through Apply, validate, and save",
+  "Send message",
   "Copilot proposal failed",
   "LLM is not configured; configure DeepSeek or OpenAI to generate proposals",
   "The selected LLM provider is not configured; configure its API key first",
@@ -20,11 +20,15 @@ export const RUNTIME_COPILOT_I18N_KEYS = [
   "Proposed patch",
   "Preview only; the draft is unchanged until you Apply",
   "Apply",
-  "Reject",
+  "Discard",
   "Add a node before requesting a proposal",
   "Fork before applying a proposal to a builtin seed",
   "Copilot proposal",
-  "Preview discarded; the draft changed"
+  "The draft changed; regenerate this proposal",
+  "Applied",
+  "Undo",
+  "Nothing to undo",
+  "Applied edits roll back one step; gates re-run afterwards"
 ] as const;
 
 type CopilotErrorIssue = { message?: unknown };
@@ -41,9 +45,9 @@ function copilotIssueSummary(error: unknown): string {
 }
 
 /**
- * Honest error-code mapping for the copilot proposal endpoint. Every code the
- * API can return has explicit copy; unknown codes fall back to the sanitized
- * server message instead of pretending success or guessing a reason.
+ * Honest error-code mapping for the conversational copilot endpoint. Every
+ * code the API can return has explicit copy; unknown codes fall back to the
+ * sanitized server message instead of pretending success or guessing a reason.
  */
 export function copilotErrorMessage(error: unknown, t: (key: string, params?: Record<string, string | number>) => string): string {
   if (!error) return "";
@@ -63,45 +67,97 @@ export function copilotErrorMessage(error: unknown, t: (key: string, params?: Re
   }
 }
 
+/** View model for one conversation turn; all gating truth is computed by the
+ *  parent Studio (staleness, fork guard, busy state) — the panel is dumb. */
+export type CopilotTurnView = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  patch: WorkflowRuntimeCopilotPatchOperation[];
+  /** applied | stale | ready | plain (plain = conversational, no patch). */
+  status: "applied" | "stale" | "ready" | "plain";
+  applyBlockedReason: string;
+};
+
 export type CopilotPanelProps = {
   /** Any in-flight studio operation disables panel actions (shared discipline). */
   busy: boolean;
   /** The definition schema requires at least one node; an empty draft cannot be sent. */
   canSubmit: boolean;
   submitBlockedReason: string;
-  proposal: WorkflowRuntimeCopilotProposal | undefined;
+  turns: CopilotTurnView[];
   error: unknown;
-  /** Translated reason Apply is currently refused (e.g. unforked builtin seed). */
-  applyBlockedReason: string;
-  /** Transient honest status line (e.g. preview discarded after a draft edit). */
+  /** Transient honest status line. */
   status: string;
+  canUndo: boolean;
   onSubmit: (instruction: string) => void;
-  onApply: () => void;
-  onReject: () => void;
+  onApply: (turnId: string) => void;
+  onDiscard: (turnId: string) => void;
+  onUndo: () => void;
 };
 
 /**
- * CKPT6 Phase 3 — Workflow Copilot panel (SPEC §18.2: the right column is NOT
- * a chat; it produces a structured WorkflowPatch proposal).
+ * Conversational Workflow Copilot panel (right column). The conversation is
+ * client-held and sent per turn to POST /workflow-runtime/copilot/chat.
  *
  * Honesty contract:
- * - Submits one instruction to POST /workflow-runtime/copilot/proposal and
- *   renders the returned proposal as an operation list. It never mutates the
- *   draft and never talks to the runtime itself.
+ * - Each assistant turn renders its reply and, when present, the patch as an
+ *   operation list. The panel never mutates the draft and never talks to the
+ *   runtime itself.
  * - Apply is executed by the parent Studio: the patch is translated into
- *   existing reducer actions (add-node / update-params / connect) and then
- *   flows through the canonical validate → save-revision gate chain. There is
- *   no compiler bypass.
+ *   existing reducer actions (add-node / remove-node / connect / disconnect /
+ *   update-params) and then flows through the canonical validate →
+ *   save-revision gate chain. There is no compiler bypass.
+ * - A turn whose basis draft changed (manual edit, another Apply, Undo) is
+ *   marked stale and honestly refuses Apply instead of guessing.
  */
-export function CopilotPanel({ busy, canSubmit, submitBlockedReason, proposal, error, applyBlockedReason, status, onSubmit, onApply, onReject }: CopilotPanelProps) {
+export function CopilotPanel({ busy, canSubmit, submitBlockedReason, turns, error, status, canUndo, onSubmit, onApply, onDiscard, onUndo }: CopilotPanelProps) {
   const { t } = useI18n();
   const [instruction, setInstruction] = useState("");
   const message = error ? copilotErrorMessage(error, t) : "";
   return <section className="studio-copilot" aria-label={t("Workflow Copilot")}>
     <span className="studio-copilot-title"><Sparkles size={14} /> {t("Workflow Copilot")}</span>
+    {turns.length > 0 && <div className="studio-copilot-turns" role="list" aria-label={t("Copilot proposal")}>
+      {turns.map(turn => <div key={turn.id} role="listitem" className={`studio-copilot-turn is-${turn.role}${turn.patch.length > 0 ? " has-patch" : ""}`}>
+        <p className="studio-copilot-content">{turn.content}</p>
+        {turn.role === "assistant" && turn.patch.length > 0 && <div className="studio-copilot-proposal" role="group" aria-label={t("Proposed patch")}>
+          <ul className="studio-copilot-ops">
+            {turn.patch.map((operation, index) => <li key={`${turn.id}-${operation.op}-${index}`}>
+              <strong>{operation.op}</strong>
+              {operation.op === "ADD_NODE"
+                ? <><code>{operation.nodeId}</code><span>{operation.serviceRef}</span>{operation.name ? <span>{operation.name}</span> : null}</>
+                : operation.op === "ADD_EDGE" || operation.op === "REMOVE_EDGE"
+                  ? <code>{operation.from} → {operation.to}</code>
+                  : <code>{operation.nodeId}</code>}
+            </li>)}
+          </ul>
+          {turn.status === "applied" ? <small className="studio-copilot-hint">{t("Applied")}</small> : <>
+            <small className="studio-copilot-hint">{t("Preview only; the draft is unchanged until you Apply")}</small>
+            {turn.status === "stale" && <small className="studio-copilot-hint is-stale">{t("The draft changed; regenerate this proposal")}</small>}
+            <div className="studio-copilot-actions">
+              <button
+                type="button"
+                className="primary-button btn-small studio-copilot-apply"
+                disabled={busy || turn.status !== "ready" || turn.applyBlockedReason.length > 0}
+                title={turn.status === "stale"
+                  ? t("The draft changed; regenerate this proposal")
+                  : turn.applyBlockedReason || undefined}
+                onClick={() => onApply(turn.id)}
+              ><Check size={13} />{t("Apply")}</button>
+              <button
+                type="button"
+                className="secondary-button btn-small studio-copilot-reject"
+                disabled={busy}
+                onClick={() => onDiscard(turn.id)}
+              ><X size={13} />{t("Discard")}</button>
+            </div>
+          </>}
+        </div>}
+      </div>)}
+    </div>}
     <textarea
       aria-label={t("Copilot instruction")}
-      placeholder={t("Describe the workflow change; the Copilot only proposes a patch and never edits the runtime")}
+      placeholder={t("Describe the change in your own words; every edit still goes through Apply, validate, and save")}
       value={instruction}
       maxLength={2000}
       onChange={event => setInstruction(event.target.value)}
@@ -114,38 +170,18 @@ export function CopilotPanel({ busy, canSubmit, submitBlockedReason, proposal, e
         title={canSubmit ? undefined : submitBlockedReason}
         onClick={() => { if (instruction.trim()) onSubmit(instruction.trim()); }}
       >
-        {busy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}{t("Propose patch")}
+        {busy ? <LoaderCircle className="spin" size={13} /> : <Sparkles size={13} />}{t("Send message")}
       </button>
+      <button
+        type="button"
+        className="secondary-button btn-small studio-copilot-undo"
+        disabled={busy || !canUndo}
+        title={canUndo ? t("Applied edits roll back one step; gates re-run afterwards") : t("Nothing to undo")}
+        onClick={onUndo}
+      ><RotateCcw size={13} />{t("Undo")}</button>
       {!canSubmit && <small className="studio-copilot-status">{submitBlockedReason}</small>}
     </div>
     {message && <div className="studio-copilot-note" role="alert">{message}</div>}
     {!message && status && <small className="studio-copilot-status" role="status">{status}</small>}
-    {proposal && <div className="studio-copilot-proposal" role="group" aria-label={t("Proposed patch")}>
-      <p className="studio-copilot-rationale">{proposal.rationale}</p>
-      <ul className="studio-copilot-ops">
-        {proposal.patch.map((operation, index) => <li key={`${operation.op}-${index}`}>
-          <strong>{operation.op}</strong>
-          {operation.op === "ADD_NODE"
-            ? <><code>{operation.nodeId}</code><span>{operation.serviceRef}</span>{operation.name ? <span>{operation.name}</span> : null}</>
-            : <code>{operation.from} → {operation.to}</code>}
-        </li>)}
-      </ul>
-      <small className="studio-copilot-hint">{t("Preview only; the draft is unchanged until you Apply")}</small>
-      <div className="studio-copilot-actions">
-        <button
-          type="button"
-          className="primary-button btn-small studio-copilot-apply"
-          disabled={busy || applyBlockedReason.length > 0}
-          title={applyBlockedReason || undefined}
-          onClick={onApply}
-        ><Check size={13} />{t("Apply")}</button>
-        <button
-          type="button"
-          className="secondary-button btn-small studio-copilot-reject"
-          disabled={busy}
-          onClick={onReject}
-        ><X size={13} />{t("Reject")}</button>
-      </div>
-    </div>}
   </section>;
 }

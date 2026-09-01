@@ -18,6 +18,9 @@ import {
   evaluateAuditPolicy,
   githubConnectionTestRequestSchema,
   githubConnectionTestResponseSchema,
+  githubOauthDevicePollRequestSchema,
+  githubOauthDevicePollResponseSchema,
+  githubOauthDeviceStartResponseSchema,
   internalLocalRepositoryRegistrationRequestSchema,
   localReviewRequestSchema,
   notebookCardRequestSchema,
@@ -39,6 +42,7 @@ import {
 import type { HeartbeatPulse, HeartbeatStreamEvent, Repository, VcsChangedFile } from "@consistency/schema";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { RepositoryPullRequestService, type RepositoryPullRequestRequest } from "./github/pullRequestReader";
+import type { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
 import { PublicRepositoryError } from "./github/publicRepository";
 import { ReviewModelResolutionError, type ResolvedReviewModel } from "./review/llm/factory";
 
@@ -103,10 +107,14 @@ import { compileWorkflowRuntimeDefinition } from "./workflow-runtime/compile";
 import { listWorkflowNodeTypes } from "./workflow-runtime/registry";
 import type { LLMProvider } from "./review/llm/types";
 import {
+  workflowRuntimeCopilotChatRequestSchema,
+  workflowRuntimeCopilotChatResponseSchema,
   workflowRuntimeCopilotProposalRequestSchema,
   workflowRuntimeCopilotProposalResponseSchema,
   workflowRuntimeCopilotProposalSchema,
-  type WorkflowRuntimeCopilotAddEdgeOperation,
+  workflowRuntimeCopilotPatchOperationSchema,
+  type WorkflowRuntimeCopilotPatchOperation,
+  type WorkflowRuntimeCopilotChatMessage,
   type WorkflowRuntimeCopilotProposal,
   type WorkflowRuntimeDefinition,
   type WorkflowRuntimeNodeType,
@@ -212,6 +220,77 @@ function buildWorkflowCopilotPrompt(input: {
   return { systemPrompt, userPrompt: `Instruction:\n${input.instruction}\n\nReturn the WorkflowPatch JSON object only.` };
 }
 
+const workflowRuntimeCopilotChatTurnSchema = z.object({
+  /** Natural-language answer to the user's latest message. */
+  reply: z.string().trim().min(1).max(4000),
+  /** Empty when the turn is purely conversational (answers or clarifies). */
+  patch: z.array(workflowRuntimeCopilotPatchOperationSchema).max(32)
+}).strict();
+
+/**
+ * Conversational Copilot system prompt: same hard hallucination rules as the
+ * single-shot proposal, extended with the full reducer vocabulary, ordered
+ * patch semantics, and multi-turn continuity. An empty patch is the honest
+ * way to answer a question or ask for clarification.
+ */
+function buildWorkflowCopilotChatPrompt(input: {
+  messages: WorkflowRuntimeCopilotChatMessage[];
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): { systemPrompt: string; userPrompt: string } {
+  const registryLines = input.nodeTypes.map(nodeType => {
+    const fields = nodeType.parameterSchema.fields
+      .map(field => `${field.name}:${field.type}${field.required ? "(required)" : ""}${field.enumValues ? `(${field.enumValues.join("|")})` : ""}`)
+      .join(", ") || "none";
+    return `- type=${nodeType.type} serviceRef=${nodeType.serviceRef} role=${nodeType.role} parameters: ${fields}`;
+  }).join("\n");
+  const systemPrompt = [
+    "You are the ConsistenCy Workflow Copilot: a conversational assistant that helps a human edit the Workflow Studio execution graph across multiple turns.",
+    "Hard rules:",
+    "- Output ONLY a JSON object that satisfies the provided schema. No prose, no markdown fences.",
+    "- reply always carries your natural-language answer. Use an EMPTY patch array to answer questions or ask for clarification without changing the graph.",
+    "- Every ADD_NODE.serviceRef MUST be copied verbatim from the registry whitelist below. Never invent node types, serviceRefs, or capabilities.",
+    "- Edges and removals MUST reference node ids that exist at that point of the ordered patch: the current definition, or nodes added earlier in the same patch. REMOVE_EDGE must reference an existing edge. REMOVE_NODE also removes the node's edges.",
+    "- The full vocabulary is ADD_NODE, ADD_EDGE, REMOVE_NODE, REMOVE_EDGE, UPDATE_PARAMS. Propose only the delta relative to the current definition; re-adding an existing node or edge is an error.",
+    "- Edge conditions do not exist in this contract version; never emit a condition field.",
+    "- Parameters must follow the registry parameter descriptors; prefer omitting parameters over guessing values. UPDATE_PARAMS replaces a node's whole parameter object.",
+    "- failurePolicy is always fail-closed and cannot be changed.",
+    "- Stay consistent with earlier turns; treat the current definition below as the authoritative state (earlier patches that were applied are already part of it).",
+    "",
+    "Registry whitelist (the only allowed node types / serviceRefs):",
+    registryLines,
+    "",
+    "Current definition:",
+    JSON.stringify(input.definition)
+  ].join("\n");
+  const transcript = input.messages
+    .map(message => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
+    .join("\n\n");
+  return { systemPrompt, userPrompt: `Conversation so far:\n${transcript}\n\nRespond to the last user message. Return the JSON object only.` };
+}
+
+async function generateWorkflowCopilotChatTurn(provider: LLMProvider, input: {
+  messages: WorkflowRuntimeCopilotChatMessage[];
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): Promise<{ reply: string; patch: WorkflowRuntimeCopilotPatchOperation[] }> {
+  const { systemPrompt, userPrompt } = buildWorkflowCopilotChatPrompt(input);
+  try {
+    const result = await provider.invokeWithSchema({
+      schema: workflowRuntimeCopilotChatTurnSchema,
+      schemaName: "workflow-copilot-chat-turn",
+      systemPrompt,
+      userPrompt
+    });
+    return result.data;
+  } catch {
+    // One sanitized 502 for EVERY generation failure (schema-invalid output
+    // after the provider's own repair attempt included). The raw LLM output,
+    // provider errors, prompts, and conversation content are never echoed.
+    throw new ApiError("The configured LLM failed to produce a schema-valid workflow reply", "WORKFLOW_PATCH_GENERATION_FAILED", 502);
+  }
+}
+
 async function generateWorkflowCopilotProposal(provider: LLMProvider, input: {
   instruction: string;
   definition: WorkflowRuntimeDefinition;
@@ -244,36 +323,85 @@ async function generateWorkflowCopilotProposal(provider: LLMProvider, input: {
  * 4. zero-side-effect compile of "current definition + patch applied".
  * Any violation throws the sanitized 400 WORKFLOW_PATCH_INVALID.
  */
-function validateWorkflowCopilotProposal(input: {
-  proposal: WorkflowRuntimeCopilotProposal;
+/**
+ * Fail-closed post-generation validation (hallucination detection), shared by
+ * the single-shot proposal and the conversational chat endpoints. Operations
+ * are SIMULATED IN ORDER against the current definition:
+ * 1. registry serviceRef whitelist against the server-owned registry;
+ * 2. ADD_EDGE endpoint existence, counting nodes the patch itself adds;
+ * 3. ADD_EDGE duplication — an edge that already exists in the definition or
+ *    was added earlier in the same patch is rejected (fail-closed: the reducer
+ *    would otherwise silently skip it at Apply time);
+ * 4. REMOVE_NODE / REMOVE_EDGE / UPDATE_PARAMS reference nodes and edges that
+ *    exist at their position in the ordered patch (conversational vocabulary);
+ * 5. zero-side-effect compile of "current definition + patch applied in order"
+ *    — including registry-descriptor parameter validation.
+ * Any violation throws the sanitized 400 WORKFLOW_PATCH_INVALID.
+ */
+function validateWorkflowCopilotPatch(input: {
+  patch: WorkflowRuntimeCopilotPatchOperation[];
   definition: WorkflowRuntimeDefinition;
   nodeTypes: WorkflowRuntimeNodeType[];
 }): void {
   const issues: Array<{ code: string; path: (string | number)[]; message: string }> = [];
   const registryByRef = new Map(input.nodeTypes.map(nodeType => [nodeType.serviceRef, nodeType]));
-  const existingIds = new Set(input.definition.nodes.map(node => node.id));
-  const addedIds = new Set<string>();
+  // Ordered simulation state: node id → serviceRef (undefined for pre-existing
+  // nodes whose type the patch never needs), edge keys as from\0to.
+  const nodeServices = new Map<string, string | undefined>(
+    input.definition.nodes.map(node => [node.id, node.serviceRef])
+  );
   const knownEdges = new Set(input.definition.edges.map(edge => `${edge.from}\0${edge.to}`));
-  for (const [index, operation] of input.proposal.patch.entries()) {
+
+  const removeNodeAt = (nodeId: string): void => {
+    nodeServices.delete(nodeId);
+    for (const edgeKey of [...knownEdges]) {
+      const [from, to] = edgeKey.split("\0");
+      if (from === nodeId || to === nodeId) knownEdges.delete(edgeKey);
+    }
+  };
+
+  for (const [index, operation] of input.patch.entries()) {
     if (operation.op === "ADD_NODE") {
       if (!registryByRef.has(operation.serviceRef)) {
         issues.push({ code: "unknown_service_ref", path: ["patch", index, "serviceRef"], message: `serviceRef '${operation.serviceRef}' is not registered in the runtime Node Registry` });
         continue;
       }
-      if (existingIds.has(operation.nodeId) || addedIds.has(operation.nodeId)) {
+      if (nodeServices.has(operation.nodeId)) {
         issues.push({ code: "duplicate_node_id", path: ["patch", index, "nodeId"], message: `Node id '${operation.nodeId}' already exists` });
         continue;
       }
-      addedIds.add(operation.nodeId);
+      nodeServices.set(operation.nodeId, operation.serviceRef);
+      continue;
+    }
+    if (operation.op === "REMOVE_NODE") {
+      if (!nodeServices.has(operation.nodeId)) {
+        issues.push({ code: "unknown_node_id", path: ["patch", index, "nodeId"], message: `REMOVE_NODE references unknown node '${operation.nodeId}'` });
+        continue;
+      }
+      removeNodeAt(operation.nodeId);
+      continue;
+    }
+    if (operation.op === "UPDATE_PARAMS") {
+      if (!nodeServices.has(operation.nodeId)) {
+        issues.push({ code: "unknown_node_id", path: ["patch", index, "nodeId"], message: `UPDATE_PARAMS references unknown node '${operation.nodeId}'` });
+      }
       continue;
     }
     const edgeKey = `${operation.from}\0${operation.to}`;
+    if (operation.op === "REMOVE_EDGE") {
+      if (!knownEdges.has(edgeKey)) {
+        issues.push({ code: "unknown_edge", path: ["patch", index], message: `REMOVE_EDGE references a missing edge '${operation.from}' → '${operation.to}'` });
+        continue;
+      }
+      knownEdges.delete(edgeKey);
+      continue;
+    }
     if (knownEdges.has(edgeKey)) {
       issues.push({ code: "duplicate_edge", path: ["patch", index], message: `Edge '${operation.from}' → '${operation.to}' is a duplicate edge (already present in the definition or added earlier in this patch)` });
       continue;
     }
     for (const [key, endpoint] of [["from", operation.from], ["to", operation.to]] as const) {
-      if (!existingIds.has(endpoint) && !addedIds.has(endpoint)) {
+      if (!nodeServices.has(endpoint)) {
         issues.push({ code: "unknown_node_reference", path: ["patch", index, key], message: `Edge ${key} references unknown node '${endpoint}'` });
       }
     }
@@ -282,22 +410,33 @@ function validateWorkflowCopilotProposal(input: {
   if (issues.length > 0) {
     throw new ApiError("Workflow copilot proposal references unknown registry services or nodes", "WORKFLOW_PATCH_INVALID", 400, { issues: sanitizeValidationIssues(issues) });
   }
-  const nodes = [...input.definition.nodes];
-  for (const operation of input.proposal.patch) {
-    if (operation.op !== "ADD_NODE") continue;
-    const nodeType = registryByRef.get(operation.serviceRef)!;
-    nodes.push({ id: operation.nodeId, type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: operation.parameters ?? {}, failurePolicy: "fail-closed" });
+
+  // Apply the patch in order to build the candidate definition for the
+  // canonical compile precheck (parameter descriptors are validated there).
+  let nodes = [...input.definition.nodes];
+  let edges = [...input.definition.edges];
+  for (const operation of input.patch) {
+    if (operation.op === "ADD_NODE") {
+      const nodeType = registryByRef.get(operation.serviceRef)!;
+      nodes.push({ id: operation.nodeId, type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: operation.parameters ?? {}, failurePolicy: "fail-closed" });
+      continue;
+    }
+    if (operation.op === "REMOVE_NODE") {
+      nodes = nodes.filter(node => node.id !== operation.nodeId);
+      edges = edges.filter(edge => edge.from !== operation.nodeId && edge.to !== operation.nodeId);
+      continue;
+    }
+    if (operation.op === "REMOVE_EDGE") {
+      edges = edges.filter(edge => !(edge.from === operation.from && edge.to === operation.to));
+      continue;
+    }
+    if (operation.op === "UPDATE_PARAMS") {
+      nodes = nodes.map(node => node.id === operation.nodeId ? { ...node, parameters: operation.parameters } : node);
+      continue;
+    }
+    edges.push({ from: operation.from, to: operation.to });
   }
-  const candidate: WorkflowRuntimeDefinition = {
-    ...input.definition,
-    nodes,
-    edges: [
-      ...input.definition.edges,
-      ...input.proposal.patch
-        .filter((operation): operation is WorkflowRuntimeCopilotAddEdgeOperation => operation.op === "ADD_EDGE")
-        .map(operation => ({ from: operation.from, to: operation.to }))
-    ]
-  };
+  const candidate: WorkflowRuntimeDefinition = { ...input.definition, nodes, edges };
   const compilation = compileWorkflowRuntimeDefinition(candidate);
   if (!compilation.ok) {
     throw new ApiError("Workflow copilot proposal failed canonical runtime compilation", "WORKFLOW_PATCH_INVALID", 400, { issues: sanitizeValidationIssues(compilation.errors) });
@@ -609,6 +748,8 @@ export type CreateApiServerOptions = {
   /** CKPT6 Phase 3: LLM provider channel for POST /workflow-runtime/copilot/proposal. */
   copilotProvider?: (resolved?: ResolvedReviewModel) => LLMProvider | undefined;
   testGitHubConnection?: (input?: GitHubConnectionTestRequest) => Promise<GitHubConnectionTestResponse>;
+  /** GitHub OAuth Device Flow; absent or unconfigured disables the sign-in routes. */
+  githubOauth?: GitHubOauthDeviceFlow;
 };
 
 type RequestContext = {
@@ -1049,10 +1190,86 @@ const routes: Route[] = [
         nodeTypes
       });
       // Fail-closed hallucination detection BEFORE anything reaches the client.
-      validateWorkflowCopilotProposal({ proposal, definition: baseDefinition, nodeTypes });
+      validateWorkflowCopilotPatch({ patch: proposal.patch, definition: baseDefinition, nodeTypes });
       const definitionFingerprint = createHash("sha256").update(canonicalJson(baseDefinition)).digest("hex");
       sendJson(request, response, 200, workflowRuntimeCopilotProposalResponseSchema.parse({
         proposal: { ...proposal, basis: { definitionFingerprint } }
+      }), allowedOrigins);
+    }
+  },
+  {
+    // Conversational Copilot: multi-turn graph editing. Same zero-side-effect
+    // posture as /proposal — no persistence, no run/dry-load side effects, no
+    // authorization. The client owns the message history; the server holds no
+    // conversation state. Human Apply goes through the Studio reducer and the
+    // canonical validate → save-revision gates; the LLM can never bypass the
+    // compiler.
+    method: "POST",
+    path: "/workflow-runtime/copilot/chat",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      if (options.llmProviderConfigured === false) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const parsed = workflowRuntimeCopilotChatRequestSchema.safeParse(await readJson(request));
+      if (!parsed.success) {
+        throw new ApiError("Workflow copilot chat request is invalid", "WORKFLOW_PATCH_INVALID", 400, {
+          issues: sanitizeValidationIssues(parsed.error.issues.map(issue => ({ code: "schema_invalid", path: issue.path, message: issue.message })))
+        });
+      }
+      // Base definition: inline body XOR the latest persisted revision of a
+      // definitionId; host/store failures keep their sanitized mapping.
+      let baseDefinition: WorkflowRuntimeDefinition;
+      try {
+        if (parsed.data.definition) {
+          baseDefinition = parsed.data.definition;
+        } else if (parsed.data.definitionId) {
+          const summary = options.workflowRuntime.listDefinitions().find(item => item.definitionId === parsed.data.definitionId);
+          if (!summary?.latestRevisionId) throw new ApiError("Workflow definition not found", "WORKFLOW_DEFINITION_NOT_FOUND", 404);
+          baseDefinition = options.workflowRuntime.getDefinitionRevision(parsed.data.definitionId, summary.latestRevisionId).definition;
+        } else {
+          throw new ApiError("Workflow copilot chat request is invalid", "WORKFLOW_PATCH_INVALID", 400);
+        }
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel();
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, error.code === "INVALID_REVIEW_MODEL" ? 400 : 503);
+          }
+          throw error;
+        }
+      }
+      const provider = options.copilotProvider?.(resolvedModel);
+      if (!provider) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek 或 OpenAI) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const nodeTypes = listWorkflowNodeTypes();
+      const turn = await generateWorkflowCopilotChatTurn(provider, {
+        messages: parsed.data.messages,
+        definition: baseDefinition,
+        nodeTypes
+      });
+      // Fail-closed hallucination detection BEFORE anything reaches the client.
+      validateWorkflowCopilotPatch({ patch: turn.patch, definition: baseDefinition, nodeTypes });
+      const definitionFingerprint = createHash("sha256").update(canonicalJson(baseDefinition)).digest("hex");
+      sendJson(request, response, 200, workflowRuntimeCopilotChatResponseSchema.parse({
+        reply: turn.reply,
+        patch: turn.patch,
+        basis: { definitionFingerprint }
       }), allowedOrigins);
     }
   },
@@ -2404,6 +2621,56 @@ const routes: Route[] = [
           "GITHUB_CONNECTION_TEST_RESPONSE_INVALID",
           502
         );
+      }
+      sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/settings/github/oauth/start",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      // GitHub OAuth Device Flow sign-in. The device_code stays inside the API
+      // process for its whole lifetime; the start response only carries the
+      // human user code and polling metadata.
+      const flow = options.githubOauth;
+      if (!flow || !flow.configured) {
+        throw new ApiError("GitHub OAuth sign-in is not configured", "GITHUB_OAUTH_NOT_CONFIGURED", 503);
+      }
+      let result;
+      try {
+        result = await flow.start();
+      } catch {
+        throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_START_FAILED", 502);
+      }
+      const parsed = githubOauthDeviceStartResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new ApiError("GitHub OAuth response is unavailable", "GITHUB_OAUTH_RESPONSE_INVALID", 502);
+      }
+      sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/settings/github/oauth/poll",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      // On `connected` the response carries the access token exactly ONCE for
+      // the one-time handoff into the existing credential save path (desktop
+      // safeStorage bridge / web encrypted settings). The API itself never
+      // persists, logs, or echoes it anywhere else.
+      const flow = options.githubOauth;
+      if (!flow || !flow.configured) {
+        throw new ApiError("GitHub OAuth sign-in is not configured", "GITHUB_OAUTH_NOT_CONFIGURED", 503);
+      }
+      const input = githubOauthDevicePollRequestSchema.parse(await readJson(request));
+      const result = await flow.poll(input.flowId);
+      if (result === undefined) {
+        throw new ApiError("Unknown OAuth sign-in flow", "GITHUB_OAUTH_FLOW_NOT_FOUND", 404);
+      }
+      const parsed = githubOauthDevicePollResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new ApiError("GitHub OAuth response is unavailable", "GITHUB_OAUTH_RESPONSE_INVALID", 502);
       }
       sendJson(request, response, 200, parsed.data, allowedOrigins);
     }

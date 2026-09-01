@@ -18,7 +18,12 @@ import {
   automationSchema,
   evolutionSnapshotSchema,
   githubConnectionTestResponseSchema,
+  githubOauthDevicePollResponseSchema,
+  githubOauthDeviceStartResponseSchema,
   type GitHubConnectionTestRequest,
+  type GitHubOauthDevicePollRequest,
+  type GitHubOauthDevicePollResponse,
+  type GitHubOauthDeviceStartResponse,
   repositoryEventSchema,
   repositoryPulseSchema,
   repositorySchema,
@@ -60,8 +65,10 @@ import {
   type WorkflowRuntimeRunV2,
   type WorkflowRuntimeValidationResult,
   type WorkflowRuntimeCopilotProposalResponse,
+  type WorkflowRuntimeCopilotChatResponse,
   workflowRuntimeOverviewSchema,
   workflowRuntimeCopilotProposalResponseSchema,
+  workflowRuntimeCopilotChatResponseSchema,
   workflowRuntimeDefinitionsResponseSchema,
   workflowRuntimeRevisionResponseSchema,
   workflowRuntimeDryLoadResponseSchema,
@@ -136,6 +143,7 @@ export type SettingsSnapshot = {
   };
   github: {
     appId: string;
+    oauthClientId: string;
     privateKeyConfigured: boolean;
     webhookSecretConfigured: boolean;
     publicReadTokenConfigured: boolean;
@@ -164,6 +172,7 @@ export type SettingsPatch = {
   };
   github?: {
     appId?: string | null;
+    oauthClientId?: string | null;
     privateKey?: string | null;
     webhookSecret?: string | null;
     publicReadToken?: string | null;
@@ -412,6 +421,19 @@ export const api = {
       signal
     }));
   },
+  async startGitHubOauthDeviceFlow(): Promise<GitHubOauthDeviceStartResponse> {
+    return githubOauthDeviceStartResponseSchema.parse(await request("/settings/github/oauth/start", { method: "POST" }));
+  },
+  async pollGitHubOauthDeviceFlow(input: GitHubOauthDevicePollRequest, signal?: AbortSignal): Promise<GitHubOauthDevicePollResponse> {
+    // On the `connected` branch the response carries the access token exactly
+    // once for the one-time handoff into the credential save path; the client
+    // never stores, logs, or displays it.
+    return githubOauthDevicePollResponseSchema.parse(await request("/settings/github/oauth/poll", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal
+    }));
+  },
   async analyzePublicPr(url: string, model?: ReviewModelOverride) {
     return publicPrResponseSchema.parse(await request("/reviews/public-pr", {
       method: "POST",
@@ -490,6 +512,15 @@ export const api = {
   },
   async proposeWorkflowRuntimeCopilotPatch(input: { instruction: string; definition?: unknown; definitionId?: string }, signal?: AbortSignal): Promise<WorkflowRuntimeCopilotProposalResponse> {
     return workflowRuntimeCopilotProposalResponseSchema.parse(await request("/workflow-runtime/copilot/proposal", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal
+    }));
+  },
+  async chatWorkflowRuntimeCopilot(input: { messages: Array<{ role: "user" | "assistant"; content: string }>; definition?: unknown; definitionId?: string }, signal?: AbortSignal): Promise<WorkflowRuntimeCopilotChatResponse> {
+    // The client owns the conversation history; the server holds no session
+    // state. An empty `patch` in the response is a purely conversational turn.
+    return workflowRuntimeCopilotChatResponseSchema.parse(await request("/workflow-runtime/copilot/chat", {
       method: "POST",
       body: JSON.stringify(input),
       signal

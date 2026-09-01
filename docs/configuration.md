@@ -80,9 +80,40 @@ When configuration changes are saved via the Web UI Settings page (`PUT /api/set
 | `OPENAI_API_KEY` | *empty* | API key for OpenAI provider |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model identifier |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
+| `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id enabling GitHub Device Flow sign-in (Settings → GitHub sign-in). Public by design; no client secret exists for the device flow |
 | `GITHUB_PRIVATE_KEY` | *empty* | PEM private key string or path for GitHub App |
 | `GITHUB_WEBHOOK_SECRET` | *empty* | HMAC secret for verifying incoming GitHub webhooks |
-| `GITHUB_PUBLIC_READ_TOKEN` | *empty* | Optional fine-grained PAT for elevated public GitHub API rate limits |
+| `GITHUB_PUBLIC_READ_TOKEN` | *empty* | Optional fine-grained PAT for elevated public GitHub API rate limits (fallback; OAuth sign-in is the recommended source of this credential) |
 | `CONSISTENCY_ALLOWED_ORIGINS` | `http://127.0.0.1:5173,http://localhost:5173` | Allowed CORS origins for browser clients |
 | `CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED` | `true` | CKPT5 kill-switch for automatic execution of `on_change` workflow bindings from repository change events (planning continues while off; pending plans drain when re-enabled) |
 | `CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS` | `5000` | Poll interval of the workflow trigger executor loop |
+
+### 4.1 GitHub Sign-In (OAuth Device Flow)
+
+Settings → GitHub offers one-click GitHub sign-in as the recommended source of
+the public read credential, replacing manual PAT creation for the common case.
+
+Setup (one time per deployment):
+
+1. Register an OAuth App under **GitHub → Settings → Developer settings →
+   OAuth Apps**. The callback URL is unused by the device flow; any placeholder
+   works.
+2. On the OAuth App page, enable **Enable Device Flow**.
+3. Copy the public **Client ID** into Settings → GitHub → *OAuth Client ID* (or
+   set `GITHUB_OAUTH_CLIENT_ID`), save, and restart the runtime.
+
+Behavior and security properties:
+
+- **Zero scopes.** The granted token carries no repository permissions; it only
+  identifies the user and lifts the public-data rate limit from the shared
+  anonymous 60/hr budget to the authenticated 5,000/hr budget. This is a
+  strictly smaller grant than the PAT it replaces.
+- The `device_code` stays inside the API process for its whole lifetime. The
+  browser only ever sees the human `user_code` and the polling window; the
+  access token is delivered exactly once to the local renderer for the
+  existing credential save path (desktop: OS-encrypted safeStorage bridge;
+  web: AES-256-GCM encrypted settings store) and is never logged or echoed.
+- Flows are single-use and expire with GitHub's own window; the polling
+  interval is enforced server-side.
+- `GITHUB_PUBLIC_READ_TOKEN` remains as a fallback for self-hosted deployments
+  that have not configured an OAuth client id.

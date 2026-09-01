@@ -61,6 +61,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
     updateGithub,
     updateRuntime,
     save,
+    applyGitHubOauthToken,
     resetChanges,
     handleRestartRuntime
   } = form;
@@ -182,6 +183,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   updateGithub={updateGithub}
                   updateSecret={updateSecret}
                   updateClear={updateClear}
+                  applyGitHubOauthToken={applyGitHubOauthToken}
                   health={health}
                   restartPending={restartNeeded}
                 />

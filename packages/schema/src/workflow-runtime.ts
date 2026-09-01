@@ -568,6 +568,22 @@ export const workflowRuntimeCopilotAddEdgeOperationSchema = z.object({
 export const workflowRuntimeCopilotPatchOperationSchema = z.discriminatedUnion("op", [
   workflowRuntimeCopilotAddNodeOperationSchema,
   workflowRuntimeCopilotAddEdgeOperationSchema,
+  // Conversational Copilot (full reducer vocabulary). Removals and parameter
+  // edits are validated server-side in patch order before any compile.
+  z.object({
+    op: z.literal("REMOVE_NODE"),
+    nodeId: workflowRuntimeNodeIdSchema,
+  }).strict(),
+  z.object({
+    op: z.literal("REMOVE_EDGE"),
+    from: workflowRuntimeNodeIdSchema,
+    to: workflowRuntimeNodeIdSchema,
+  }).strict(),
+  z.object({
+    op: z.literal("UPDATE_PARAMS"),
+    nodeId: workflowRuntimeNodeIdSchema,
+    parameters: z.record(z.unknown()),
+  }).strict(),
 ]);
 
 export const workflowRuntimeCopilotProposalSchema = z.object({
@@ -599,6 +615,59 @@ export const workflowRuntimeCopilotProposalRequestSchema = z.object({
     });
   }
 });
+
+/**
+ * Conversational Copilot (one chat turn). The client owns the conversation:
+ * it sends the bounded message history plus the definition the assistant
+ * should see; the server stays stateless and persists nothing.
+ */
+export const workflowRuntimeCopilotChatMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().trim().min(1).max(4000),
+}).strict();
+
+export const workflowRuntimeCopilotChatRequestSchema = z.object({
+  /** Bounded conversation history; the LAST message must be the user's turn. */
+  messages: z.array(workflowRuntimeCopilotChatMessageSchema).min(1).max(24),
+  /** Inline definition to reason about — XOR `definitionId`. */
+  definition: workflowRuntimeDefinitionSchema.optional(),
+  /** Persisted definition whose latest revision is the context — XOR `definition`. */
+  definitionId: workflowRuntimeDefinitionIdSchema.optional(),
+}).strict().superRefine((request, ctx) => {
+  if ((request.definition === undefined) === (request.definitionId === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [request.definition === undefined ? "definition" : "definitionId"],
+      message: "exactly one of definition or definitionId is required",
+    });
+  }
+  if (request.messages[request.messages.length - 1]?.role !== "user") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["messages"],
+      message: "the last message must have role 'user'",
+    });
+  }
+});
+
+/**
+ * One conversational assistant turn: a natural-language reply plus an
+ * OPTIONAL patch. An empty patch means the assistant answered a question or
+ * asked for clarification — no graph change is proposed. Patches are DATA:
+ * applying one still goes through the Studio reducer and the canonical
+ * validate → save-revision gate chain (the compiler is never bypassed).
+ */
+export const workflowRuntimeCopilotChatResponseSchema = z.object({
+  reply: z.string().trim().min(1).max(4000),
+  patch: z.array(workflowRuntimeCopilotPatchOperationSchema).max(32),
+  basis: z.object({
+    definitionFingerprint: nonEmpty,
+  }).strict(),
+}).strict();
+
+export type WorkflowRuntimeCopilotChatMessage = z.infer<typeof workflowRuntimeCopilotChatMessageSchema>;
+export type WorkflowRuntimeCopilotChatRequest = z.infer<typeof workflowRuntimeCopilotChatRequestSchema>;
+export type WorkflowRuntimeCopilotChatResponse = z.infer<typeof workflowRuntimeCopilotChatResponseSchema>;
 
 export type WorkflowRuntimeCopilotAddNodeOperation = z.infer<typeof workflowRuntimeCopilotAddNodeOperationSchema>;
 export type WorkflowRuntimeCopilotAddEdgeOperation = z.infer<typeof workflowRuntimeCopilotAddEdgeOperationSchema>;

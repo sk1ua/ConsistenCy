@@ -5,7 +5,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeDefinitionsResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
+import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, workflowRuntimeCopilotChatResponseSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeDefinitionsResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
+import { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createApiServer, ApiError } from "./http";
 import { InMemoryJobQueue } from "./jobQueue";
@@ -298,6 +299,7 @@ describe("createApiServer", () => {
       },
       github: {
         appId: "",
+        oauthClientId: "",
         privateKeyConfigured: false,
         webhookSecretConfigured: false,
         publicReadTokenConfigured: false
@@ -1382,6 +1384,109 @@ describe("createApiServer", () => {
     });
   });
 
+  it("starts and polls GitHub OAuth device sign-in with a one-time token handoff", async () => {
+    let ms = 1_700_000_000_000;
+    let tokenCalls = 0;
+    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const deviceFlow = new GitHubOauthDeviceFlow("oauth-client-id", {
+      fetchImpl: (async (url: string | URL) => {
+        const key = String(url);
+        if (key === "https://github.com/login/device/code") {
+          return ok({
+            device_code: "DEVICE_SECRET",
+            user_code: "ABCD-1234",
+            verification_uri: "https://github.com/login/device",
+            expires_in: 900,
+            interval: 5
+          });
+        }
+        if (key === "https://github.com/login/oauth/access_token") {
+          tokenCalls += 1;
+          return ok({ access_token: "gho_HANDOFF_SECRET", token_type: "bearer" });
+        }
+        if (key === "https://api.github.com/user") return ok({ login: "octocat" });
+        throw new Error("unexpected fetch");
+      }) as typeof fetch,
+      now: () => new Date(ms += 10_000)
+    });
+    const server = createApiServer({ githubOauth: deviceFlow });
+    servers.push(server);
+    const port = await listen(server);
+
+    const started = await postJson(port, "/settings/github/oauth/start", {});
+    expect(started.status).toBe(200);
+    const startBody = started.body as { flowId: string; userCode: string; intervalSeconds: number };
+    expect(startBody.userCode).toBe("ABCD-1234");
+    expect(startBody.intervalSeconds).toBe(5);
+    expect(JSON.stringify(started.body)).not.toContain("DEVICE_SECRET");
+
+    const connected = await postJson(port, "/settings/github/oauth/poll", { flowId: startBody.flowId });
+    expect(connected.status).toBe(200);
+    expect(connected.body).toEqual({
+      status: "connected",
+      login: "octocat",
+      publicReadToken: "gho_HANDOFF_SECRET"
+    });
+
+    // Single use: the flow is destroyed after the one-time handoff.
+    const replay = await postJson(port, "/settings/github/oauth/poll", { flowId: startBody.flowId });
+    expect(replay.status).toBe(404);
+    expect(replay.body).toMatchObject({ error: { code: "GITHUB_OAUTH_FLOW_NOT_FOUND" } });
+    expect(tokenCalls).toBe(1);
+  });
+
+  it("reports GitHub OAuth sign-in as not configured when no flow is wired", async () => {
+    const server = createApiServer({});
+    servers.push(server);
+    const port = await listen(server);
+
+    const start = await postJson(port, "/settings/github/oauth/start", {});
+    expect(start.status).toBe(503);
+    expect(start.body).toMatchObject({ error: { code: "GITHUB_OAUTH_NOT_CONFIGURED" } });
+
+    const poll = await postJson(port, "/settings/github/oauth/poll", { flowId: "whatever" });
+    expect(poll.status).toBe(503);
+    expect(poll.body).toMatchObject({ error: { code: "GITHUB_OAUTH_NOT_CONFIGURED" } });
+  });
+
+  it("guards the GitHub OAuth routes behind the bearer token", async () => {
+    let ms = 1_700_000_000_000;
+    const deviceFlow = new GitHubOauthDeviceFlow("oauth-client-id", {
+      fetchImpl: (async (url: string | URL) => {
+        const key = String(url);
+        if (key === "https://github.com/login/device/code") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              device_code: "DEVICE_SECRET",
+              user_code: "ABCD-1234",
+              verification_uri: "https://github.com/login/device",
+              expires_in: 900,
+              interval: 5
+            })
+          };
+        }
+        throw new Error("unexpected fetch");
+      }) as typeof fetch,
+      now: () => new Date(ms += 10_000)
+    });
+    const server = createApiServer({ apiToken: "secret-token", githubOauth: deviceFlow });
+    servers.push(server);
+    const port = await listen(server);
+
+    const unauthorizedStart = await postJson(port, "/settings/github/oauth/start", {});
+    expect(unauthorizedStart.status).toBe(401);
+    const authorizedStart = await postJson(port, "/settings/github/oauth/start", {}, {
+      authorization: "Bearer secret-token"
+    });
+    expect(authorizedStart.status).toBe(200);
+    expect(JSON.stringify(authorizedStart.body)).not.toContain("DEVICE_SECRET");
+
+    const unauthorizedPoll = await postJson(port, "/settings/github/oauth/poll", { flowId: "x" });
+    expect(unauthorizedPoll.status).toBe(401);
+  });
+
   it("maps invalid probe payloads and probe crashes to sanitized 502 errors without secret leakage", async () => {
     const server = createApiServer({
       testGitHubConnection: async () => ({
@@ -1597,6 +1702,7 @@ describe("createApiServer", () => {
       },
       github: {
         appId: "",
+        oauthClientId: "",
         privateKeyConfigured: false,
         webhookSecretConfigured: false,
         publicReadTokenConfigured: false
@@ -1666,6 +1772,7 @@ describe("createApiServer", () => {
       },
       github: {
         appId: "",
+        oauthClientId: "",
         privateKeyConfigured: false,
         webhookSecretConfigured: false,
         publicReadTokenConfigured: false
@@ -1992,6 +2099,168 @@ describe("workflow copilot proposal endpoint (CKPT6 Phase 3)", () => {
     });
     const { port } = await copilotRig(provider);
     const res = await postJson(port, "/workflow-runtime/copilot/proposal", { instruction: "add a secret scan", definition: copilotDefinition });
+    expect(res.status).toBe(502);
+    expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_GENERATION_FAILED" } });
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toContain("raw junk");
+    expect(serialized).not.toContain("repair attempt");
+    expect(serialized).not.toContain("openai");
+  });
+});
+
+describe("workflow copilot chat endpoint (conversational)", () => {
+  const servers: ReturnType<typeof createApiServer>[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      servers.map(
+        server =>
+          new Promise<void>(resolve => {
+            server.close(() => resolve());
+          })
+      )
+    );
+    servers.length = 0;
+  });
+
+  const chatDefinition = {
+    id: "copilot-flow",
+    version: 1 as const,
+    nodes: [
+      { id: "analyze", type: "analyzer.deterministic-evidence", serviceRef: "deterministic-evidence.analyzer", parameters: { analyzers: ["style"] }, failurePolicy: "fail-closed" as const },
+      { id: "verify", type: "verifier.persisted-evidence", serviceRef: "persisted-evidence.verifier", parameters: {}, failurePolicy: "fail-closed" as const }
+    ],
+    edges: [{ from: "analyze", to: "verify" }]
+  };
+
+  async function chatRig(provider?: LLMProvider, extra: Parameters<typeof createApiServer>[0] = {}) {
+    const database = openDatabase(":memory:");
+    runMigrations(database);
+    const host = new WorkflowRuntimeHost({ store: new WorkflowRuntimeStore(database) });
+    host.initialize();
+    const server = createApiServer({
+      workflowRuntime: host,
+      llmProviderConfigured: provider !== undefined,
+      ...(provider ? { copilotProvider: () => provider } : {}),
+      ...extra
+    });
+    servers.push(server);
+    const port = await listen(server);
+    return { port, database };
+  }
+
+  const userTurn = (content: string) => ({ role: "user" as const, content });
+
+  it("rejects chat generation with 503 LLM_NOT_CONFIGURED when no LLM is configured", async () => {
+    const { port } = await chatRig(undefined, { llmProviderConfigured: false });
+    const res = await postJson(port, "/workflow-runtime/copilot/chat", { messages: [userTurn("add a secret scan")], definition: chatDefinition });
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: { code: "LLM_NOT_CONFIGURED" } });
+  });
+
+  it("rejects malformed conversations: empty history, assistant-last, both/neither definition source, over-cap history", async () => {
+    const provider = new StubCopilotProvider(() => ({ reply: "ignored", patch: [] }));
+    const { port } = await chatRig(provider);
+    const messageOverflow = Array.from({ length: 25 }, (_, index) => userTurn(`message ${index}`));
+    for (const body of [
+      { messages: [], definition: chatDefinition },
+      { messages: [{ role: "assistant", content: "hi" }], definition: chatDefinition },
+      { messages: [userTurn("hi")] },
+      { messages: [userTurn("hi")], definition: chatDefinition, definitionId: "copilot-flow" },
+      { messages: messageOverflow, definition: chatDefinition }
+    ]) {
+      const res = await postJson(port, "/workflow-runtime/copilot/chat", body);
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    }
+    expect(provider.lastInvocation).toBeUndefined();
+  });
+
+  it("answers with a conversational turn (empty patch) and zero persistence side effects", async () => {
+    const provider = new StubCopilotProvider(() => ({
+      reply: "This pipeline runs one deterministic analyzer and verifies the persisted evidence.",
+      patch: []
+    }));
+    const { port, database } = await chatRig(provider);
+    const before = await getJson(port, "/workflow-runtime/definitions");
+    const res = await postJson(port, "/workflow-runtime/copilot/chat", {
+      messages: [userTurn("what does this workflow do?")],
+      definition: chatDefinition
+    });
+    expect(res.status).toBe(200);
+    const parsed = workflowRuntimeCopilotChatResponseSchema.parse(res.body);
+    expect(parsed.reply).toContain("deterministic analyzer");
+    expect(parsed.patch).toEqual([]);
+    expect(parsed.basis.definitionFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    // The prompt carries the registry whitelist, the transcript, and the graph.
+    expect(provider.lastInvocation?.schemaName).toBe("workflow-copilot-chat-turn");
+    expect(provider.lastInvocation?.systemPrompt).toContain("Registry whitelist");
+    expect(provider.lastInvocation?.systemPrompt).toContain("persisted-evidence.verifier");
+    expect(provider.lastInvocation?.userPrompt).toContain("what does this workflow do?");
+    const after = await getJson(port, "/workflow-runtime/definitions");
+    expect(after.body).toEqual(before.body);
+    database.close();
+  });
+
+  it("validates the conversational patch vocabulary fail-closed before responding", async () => {
+    const unknownNode = new StubCopilotProvider(() => ({
+      reply: "removing it now",
+      patch: [{ op: "REMOVE_NODE", nodeId: "ghost-node" }]
+    }));
+    const missingEdge = new StubCopilotProvider(() => ({
+      reply: "unwiring",
+      patch: [{ op: "REMOVE_EDGE", from: "verify", to: "analyze" }]
+    }));
+    const badParams = new StubCopilotProvider(() => ({
+      reply: "tightening the analyzers",
+      patch: [{ op: "UPDATE_PARAMS", nodeId: "analyze", parameters: { analyzers: 5 } }]
+    }));
+    for (const provider of [unknownNode, missingEdge, badParams]) {
+      const { port } = await chatRig(provider);
+      const res = await postJson(port, "/workflow-runtime/copilot/chat", {
+        messages: [userTurn("apply the change")],
+        definition: chatDefinition
+      });
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_INVALID" } });
+    }
+    const unknownNodeIssues = (await (async () => {
+      const { port } = await chatRig(unknownNode);
+      const res = await postJson(port, "/workflow-runtime/copilot/chat", {
+        messages: [userTurn("apply the change")],
+        definition: chatDefinition
+      });
+      return (res.body as { error: { details: { issues: Array<{ code: string }> } } }).error.details.issues;
+    })());
+    expect(unknownNodeIssues.some(issue => issue.code === "unknown_node_id")).toBe(true);
+  });
+
+  it("resolves the base definition from definitionId's latest revision and 404s unknown ids", async () => {
+    const provider = new StubCopilotProvider(() => ({
+      reply: "the verifier consumes the persisted evidence",
+      patch: []
+    }));
+    const { port } = await chatRig(provider);
+    const definition = { ...chatDefinition, id: "copilot-flow-user" };
+    const saved = await postJson(port, "/workflow-runtime/definitions", { definitionId: "copilot-flow-user", definition });
+    expect(saved.status).toBe(201);
+    const res = await postJson(port, "/workflow-runtime/copilot/chat", {
+      messages: [userTurn("what consumes the analyzer output?")],
+      definitionId: "copilot-flow-user"
+    });
+    expect(res.status).toBe(200);
+    expect(provider.lastInvocation?.systemPrompt).toContain("copilot-flow-user");
+    const unknown = await postJson(port, "/workflow-runtime/copilot/chat", { messages: [userTurn("x")], definitionId: "missing-flow" });
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toMatchObject({ error: { code: "WORKFLOW_DEFINITION_NOT_FOUND" } });
+  });
+
+  it("maps schema-invalid generation failures to a sanitized 502", async () => {
+    const provider = new StubCopilotProvider(() => {
+      throw new StructuredOutputError('Provider openai failed schema workflow-copilot-chat-turn after one repair attempt: raw junk {"reply": 5}');
+    });
+    const { port } = await chatRig(provider);
+    const res = await postJson(port, "/workflow-runtime/copilot/chat", { messages: [userTurn("add a secret scan")], definition: chatDefinition });
     expect(res.status).toBe(502);
     expect(res.body).toMatchObject({ error: { code: "WORKFLOW_PATCH_GENERATION_FAILED" } });
     const serialized = JSON.stringify(res.body);

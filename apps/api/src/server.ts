@@ -11,6 +11,7 @@ import { publishToGitHub } from "./publish/githubPublisher";
 import { PermanentPublishError } from "./publish/error";
 import { GitHubAppAuthenticator } from "./github/auth";
 import { testGitHubConnection } from "./github/connectionTest";
+import { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
 import { RepositoryPullRequestService } from "./github/pullRequestReader";
 import { connectPublicGitHubRepository } from "./github/publicRepository";
 import { createContextBuilder } from "./review/context/contextRouter";
@@ -409,6 +410,10 @@ export const server = createApiServer({
     publicPrAnalysisEnabled: config.publicPrAnalysisEnabled,
     ...(draft?.publicReadToken === undefined ? {} : { draftPublicReadToken: draft.publicReadToken })
   }),
+  // GitHub OAuth Device Flow sign-in. The client id is a public setting; the
+  // flow stores the device_code and access token only inside this process and
+  // hands the token once to the renderer for the existing credential save path.
+  githubOauth: new GitHubOauthDeviceFlow(config.GITHUB_OAUTH_CLIENT_ID ?? ""),
   publicPr: (url, modelOverride) => enqueuePublicPrReview({
     url,
     jobs,

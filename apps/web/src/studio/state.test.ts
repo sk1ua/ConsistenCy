@@ -13,6 +13,30 @@ describe("Runtime Studio state", () => {
   it("adds registry nodes and connects them", () => { let state = createStudioState(definition("user-review")); state = studioReducer(state, { type: "add-node", nodeType: types[0]! }, types); expect(state.draft.nodes.length).toBe(3); const added = state.draft.nodes.find(node => node.id !== "analyze" && node.id !== "verify")!; state = studioReducer(state, { type: "connect", from: "verify", to: added.id }, types); expect(state.draft.edges.some(e => e.to === added.id)).toBe(true); });
   it("rejects self edges and unknown parameters", () => { const state = createStudioState(definition()); expect(studioReducer(state, { type: "connect", from: "verify", to: "verify" }, types).draft.edges).toHaveLength(1); expect(studioReducer(state, { type: "update-params", nodeId: "analyze", parameters: { nope: true } }, types).draft.nodes.find(n => n.id === "analyze")!.parameters).toEqual({ analyzers: ["style"] }); });
   it("removes associated edges and resets to immutable baseline", () => { let state = createStudioState(definition()); state = studioReducer(state, { type: "remove-node", nodeId: "analyze" }, types); expect(state.draft.edges).toHaveLength(0); state = studioReducer(state, { type: "reset" }, types); expect(state.draft.nodes).toHaveLength(2); expect(state.dirty).toBe(false); });
+  it("undoes one mutation step at a time and stays put on an empty history", () => {
+    let state = createStudioState(definition());
+    expect(studioReducer(state, { type: "undo" }, types)).toBe(state);
+    state = studioReducer(state, { type: "add-node", nodeType: types[0]!, id: "extra" }, types);
+    state = studioReducer(state, { type: "connect", from: "analyze", to: "extra" }, types);
+    expect(state.draft.nodes.map(node => node.id)).toContain("extra");
+    expect(state.history).toHaveLength(2);
+    state = studioReducer(state, { type: "undo" }, types);
+    // One step back: the edge rolls away first, both nodes remain.
+    expect(state.draft.nodes.map(node => node.id)).toContain("extra");
+    expect(state.draft.edges.some(edge => edge.to === "extra")).toBe(false);
+    state = studioReducer(state, { type: "undo" }, types);
+    expect(state.draft.nodes.map(node => node.id)).not.toContain("extra");
+    expect(state.dirty).toBe(false);
+    expect(studioReducer(state, { type: "undo" }, types)).toBe(state);
+  });
+
+  it("clears the selection when undo removes the selected node", () => {
+    let state = createStudioState(definition());
+    state = studioReducer(state, { type: "add-node", nodeType: types[0]!, id: "extra" }, types);
+    expect(state.selectedNodeId).toBe("extra");
+    state = studioReducer(state, { type: "undo" }, types);
+    expect(state.selectedNodeId).toBeUndefined();
+  });
   it("reports graph invariants", () => expect(studioGraphIssues({ ...definition(), edges: [{ from: "verify", to: "missing" }] }, types)).toContain("unknown edge endpoint: verify → missing"));
   it("detects cycles, duplicate edges, and non-finite typed parameters", () => {
     const cyclic = { ...definition(), edges: [{ from: "analyze", to: "verify" }, { from: "verify", to: "analyze" }, { from: "verify", to: "analyze" }], nodes: definition().nodes.map(node => node.id === "analyze" ? { ...node, parameters: { analyzers: ["style"], extra: true } } : node) };

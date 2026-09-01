@@ -384,7 +384,67 @@ Studio drafts keep an immutable persisted baseline separate from a dirty draft. 
 
 The human gate is explicit: Validate draft (client graph checks plus server canonical validation) → Save revision → Dry-load persisted revision → Run. Dry-load is compile-time feasibility only and never grants syscall authorization. Run is restricted to a registered local repository; no public repository is treated as an executable normal path.
 
-## CKPT6 Phase 3 — Workflow Copilot (structured WorkflowPatch proposals)
+## CKPT6 Phase 3 — Workflow Copilot (conversational graph editing)
+
+The Studio's right column carries a conversational Workflow Copilot (SPEC
+§18.2/§18.3). It talks to `POST /workflow-runtime/copilot/chat` (see
+docs/api.md §11): the client sends the bounded message history plus the
+definition under discussion, and the assistant answers with a natural-language
+reply plus an OPTIONAL patch — an empty patch is a purely conversational turn
+(answers or clarifying questions). The single-shot
+`POST /workflow-runtime/copilot/proposal` endpoint remains available for API
+compatibility.
+
+Safety contract (SPEC §36):
+
+- The endpoint is a pure advisor — zero persistence, zero session state
+  server-side, zero run/dry-load side effects, zero authorization. The client
+  owns the conversation history (bounded at 24 messages); the server holds no
+  conversation state. It never publishes, patches, or executes code.
+- The generation prompt's node-type whitelist is built server-side from the
+  runtime Node Registry (`listWorkflowNodeTypes()`); client-supplied
+  registries are never trusted. Post-generation, the server fail-closed
+  validates the whole patch IN ORDER against the current definition:
+  `ADD_NODE` serviceRefs are checked against the registry, `ADD_EDGE` /
+  `REMOVE_EDGE` endpoints and duplication are checked against the simulated
+  edge set (an edge that already exists, or appears twice in one patch, is
+  rejected — the reducer would otherwise silently skip it at Apply time), and
+  `REMOVE_NODE` / `UPDATE_PARAMS` must reference nodes that exist at their
+  position. Finally the server compiles "current definition + patch applied in
+  order" with zero side effects, including registry-descriptor parameter
+  validation. Violations return the sanitized 400 `WORKFLOW_PATCH_INVALID`;
+  generation failures return the sanitized 502
+  `WORKFLOW_PATCH_GENERATION_FAILED` (the raw LLM output is never echoed or
+  logged).
+- The patch vocabulary mirrors the Studio reducer: `ADD_NODE`, `ADD_EDGE`,
+  `REMOVE_NODE`, `REMOVE_EDGE`, `UPDATE_PARAMS`. `ADD_EDGE`/`REMOVE_EDGE` have
+  no `condition` field — the current `workflowRuntimeEdgeSchema` supports
+  `{ from, to }` only and the contract does not invent capability the graph
+  schema cannot represent. Conditions can be enabled once the edge schema
+  grows them.
+- Each assistant patch turn is preview-only: the Studio renders the simulated
+  result in a dashed `.is-proposed` highlight over a preview graph computed
+  from "draft + patch in order" without touching draft state, and lists the
+  operations under the reply.
+- Apply is human and explicit, per turn. The Studio translates the patch into
+  existing reducer actions (`add-node`, `remove-node`, `connect`,
+  `disconnect`, `update-params`) dispatched one by one — never a direct
+  draft-JSON write — so the result flows through the canonical validate →
+  save-revision gate chain like any manual edit (fingerprint invalidation
+  included).
+- Every applied reducer step is recorded on the Studio history stack; the
+  panel's Undo pops one step at a time and re-opens the downstream gates
+  exactly like a manual edit.
+- Staleness is honest: each assistant patch turn records the definition
+  fingerprint it was computed against. Any draft change (manual edit, another
+  Apply, Undo) makes older unapplied turns stale — their Apply is disabled
+  with an explicit "regenerate" hint while the conversation stays visible as
+  history.
+- Builtin seeds stay fork-only: an `ADD_NODE` patch against an unforked
+  builtin seed disables Apply with an explicit fork hint (mirroring the
+  reducer's add-node guard); edge-only patches follow the same rules as the
+  manual connect control.
+
 
 The Studio's right column carries a Workflow Copilot panel (SPEC §18.2: it is
 NOT a chat; it produces a structured `WorkflowPatch`). The panel submits one

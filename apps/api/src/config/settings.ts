@@ -9,6 +9,9 @@ const publicSettingsSchema = z.object({
   DEEPSEEK_MODEL: z.string().trim().min(1).optional(),
   OPENAI_MODEL: z.string().trim().min(1).optional(),
   GITHUB_APP_ID: z.string().trim().min(1).optional(),
+  // Public OAuth App client id for GitHub Device Flow sign-in. Public by
+  // design — the device flow never uses a client secret.
+  GITHUB_OAUTH_CLIENT_ID: z.string().trim().min(1).optional(),
   DATABASE_PATH: z.string().trim().min(1).optional(),
   CONSISTENCY_WORKSPACE_ROOT: z.string().trim().min(1).optional(),
   CONSISTENCY_LOCAL_REVIEW_ROOTS: z.string().trim().min(1).optional(),
@@ -37,6 +40,7 @@ export const settingsPatchSchema = z.object({
   }).strict().optional(),
   github: z.object({
     appId: z.string().trim().min(1).nullable().optional(),
+    oauthClientId: z.string().trim().min(1).nullable().optional(),
     privateKey: z.string().trim().min(1).nullable().optional(),
     webhookSecret: z.string().trim().min(1).nullable().optional(),
     publicReadToken: z.string().trim().min(1).nullable().optional()
@@ -65,6 +69,7 @@ export type SettingsSnapshot = {
   };
   github: {
     appId: string;
+    oauthClientId: string;
     privateKeyConfigured: boolean;
     webhookSecretConfigured: boolean;
     publicReadTokenConfigured: boolean;
@@ -257,6 +262,7 @@ export class SettingsStore {
     setSecret("DEEPSEEK_API_KEY", patch.llm?.deepseekApiKey);
     setSecret("OPENAI_API_KEY", patch.llm?.openaiApiKey);
     setPublic("GITHUB_APP_ID", patch.github?.appId);
+    setPublic("GITHUB_OAUTH_CLIENT_ID", patch.github?.oauthClientId);
     setSecret("GITHUB_PRIVATE_KEY", patch.github?.privateKey);
     setSecret("GITHUB_WEBHOOK_SECRET", patch.github?.webhookSecret);
     setSecret("GITHUB_PUBLIC_READ_TOKEN", patch.github?.publicReadToken);
@@ -301,6 +307,7 @@ export class SettingsStore {
       },
       github: {
         appId: effective.GITHUB_APP_ID ?? "",
+        oauthClientId: effective.GITHUB_OAUTH_CLIENT_ID ?? "",
         privateKeyConfigured: Boolean(effective.GITHUB_PRIVATE_KEY),
         webhookSecretConfigured: Boolean(effective.GITHUB_WEBHOOK_SECRET),
         publicReadTokenConfigured: Boolean(effective.GITHUB_PUBLIC_READ_TOKEN)

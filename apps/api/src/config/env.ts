@@ -95,6 +95,8 @@ export const envSchema = z.object({
   GITHUB_PRIVATE_KEY: optionalSecret,
   GITHUB_WEBHOOK_SECRET: optionalSecret,
   GITHUB_PUBLIC_READ_TOKEN: optionalSecret,
+  // Public OAuth App client id for Device Flow sign-in; public by design.
+  GITHUB_OAUTH_CLIENT_ID: optionalSecret,
   DEEPSEEK_API_KEY: optionalSecret,
   DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
   DEEPSEEK_MODEL: z.string().trim().min(1).default("deepseek-v4-flash"),

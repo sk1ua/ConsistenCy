@@ -295,6 +295,24 @@
   color: var(--warning-strong);
   font-weight: 700;
 }
+/* GitHub OAuth device-flow sign-in row: pending state stacks the user code
+   and the verification link with the same quiet note rhythm. */
+.github-oauth-pending p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.github-oauth-user-code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-subtle);
+}
 .settings-status {
   padding: 18px;
 }

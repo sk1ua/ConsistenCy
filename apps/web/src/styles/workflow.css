@@ -286,6 +286,14 @@
 .studio-copilot-ops strong { color:var(--primary); font-weight:700; }
 .studio-copilot-ops code, .studio-copilot-ops span { min-width:0; overflow-wrap:anywhere; }
 .studio-copilot-hint { color:var(--muted); font-size:11px; }
+/* Conversational turn list: compact bubbles, user turn on a subtle tint, the
+   per-turn patch block reuses .studio-copilot-proposal below it. */
+.studio-copilot-turns { display:flex; flex-direction:column; gap:8px; max-height:320px; overflow-y:auto; padding-right:2px; }
+.studio-copilot-turn { display:flex; flex-direction:column; gap:4px; padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius-sm); font-size:12px; min-width:0; }
+.studio-copilot-turn.is-user { background:var(--surface-subtle); }
+.studio-copilot-turn.has-patch { border-color:var(--border-strong,var(--border)); }
+.studio-copilot-content { margin:0; overflow-wrap:anywhere; white-space:pre-wrap; }
+.studio-copilot-hint.is-stale { color:var(--warning-strong,var(--muted)); font-weight:700; }
 /* Proposed graph elements are preview-only: dashed highlight, no draft state. */
 .studio-node.is-proposed { border-style:dashed; outline:2px dashed var(--primary, var(--button-primary-bg)); outline-offset:2px; cursor:default; }
 .studio-node.is-proposed:disabled { opacity:1; color:var(--foreground); }

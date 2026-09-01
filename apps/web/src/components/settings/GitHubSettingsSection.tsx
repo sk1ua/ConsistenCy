@@ -6,6 +6,7 @@ import type { SecretDrafts, ClearSecrets, SecretName } from "../../hooks/useSett
 import { publicPrAccessModeView } from "../../hooks/useSettingsForm";
 import { useI18n } from "../../i18n";
 import { SettingHelp, SETTING_HELP_LINKS } from "../SettingHelp";
+import { GitHubOauthSignIn } from "./GitHubOauthSignIn";
 import { SecretField } from "./SecretField";
 
 export interface GitHubSettingsSectionProps {
@@ -16,6 +17,8 @@ export interface GitHubSettingsSectionProps {
   updateGithub: (patch: Partial<SettingsSnapshot["github"]>) => void;
   updateSecret: (name: SecretName, value: string) => void;
   updateClear: (name: SecretName, value: boolean) => void;
+  /** One-time OAuth token handoff; persists through the normal save flow. */
+  applyGitHubOauthToken: (token: string) => Promise<void>;
   /** ACTIVE runtime truth from /health; the status rows hide when absent. */
   health?: HealthResponse;
   /** True while saved settings await a restart; the probe tests the running config. */
@@ -68,6 +71,7 @@ export function GitHubSettingsSection({
   updateGithub,
   updateSecret,
   updateClear,
+  applyGitHubOauthToken,
   health,
   restartPending
 }: GitHubSettingsSectionProps) {
@@ -111,13 +115,19 @@ export function GitHubSettingsSection({
     <section className="settings-group section-block">
       <div className="settings-group-title"><Github size={18} /><div><h3>{t("GitHub")}</h3><p>{t("Start with anonymous public PR analysis, then add credentials only for the mode you need.")}</p></div></div>
       <div className="settings-fields">
+        <GitHubOauthSignIn
+          oauthClientId={settings.github.oauthClientId}
+          restartPending={Boolean(restartPending)}
+          onConnected={applyGitHubOauthToken}
+        />
         <div className="source-mode-guide setting-field-wide" aria-label={t("GitHub connection modes")}>
           <span><strong>{t("Anonymous public PR")}</strong><small>{t("Recommended for trying ConsistenCy. No GitHub App or token is required.")}</small></span>
           <span><strong>{t("Public read token")}</strong><small>{t("Optional. Adds authenticated read capacity for selected public repositories.")}</small></span>
           <span><strong>{t("GitHub App automation")}</strong><small>{t("Only needed for signed webhooks and installation-based repository access.")}</small></span>
         </div>
+        <div className="setting-field"><label htmlFor="setting-oauth-client-id">{t("OAuth Client ID")}</label><input id="setting-oauth-client-id" aria-describedby="setting-oauth-client-id-help" value={draft.github.oauthClientId} onChange={event => updateGithub({ oauthClientId: event.target.value })} placeholder={t("Enables GitHub sign-in (device flow)")} /><SettingHelp id="setting-oauth-client-id-help" text="Public client id of your OAuth App. Enable Device Flow on the OAuth App, save, and restart to activate GitHub sign-in." href={SETTING_HELP_LINKS.githubApp} /></div>
         <div className="setting-field"><label htmlFor="setting-app-id">{t("GitHub App ID")}</label><input id="setting-app-id" aria-describedby="setting-app-id-help" value={draft.github.appId} onChange={event => updateGithub({ appId: event.target.value })} placeholder={t("Only for GitHub App mode")} /><SettingHelp id="setting-app-id-help" text="Find the numeric App ID on the GitHub App settings page. Skip this for anonymous or PAT read-only mode." href={SETTING_HELP_LINKS.githubApp} /></div>
-        <SecretField name="publicReadToken" label="Public read token" configured={settings.github.publicReadTokenConfigured} value={secrets.publicReadToken} clear={clearSecrets.publicReadToken} help="Optional: use a fine-grained PAT limited to selected repositories and read-only contents/metadata permissions." helpHref={SETTING_HELP_LINKS.githubPat} onValue={updateSecret} onClear={updateClear} />
+        <SecretField name="publicReadToken" label="Public read token" configured={settings.github.publicReadTokenConfigured} value={secrets.publicReadToken} clear={clearSecrets.publicReadToken} help="Fallback for self-hosted deployments without an OAuth client ID: use a fine-grained PAT with read-only contents/metadata permissions." helpHref={SETTING_HELP_LINKS.githubPat} onValue={updateSecret} onClear={updateClear} />
         <div className="setting-field-wide github-draft-test">
           <button
             type="button"

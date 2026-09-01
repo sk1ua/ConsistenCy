@@ -207,7 +207,9 @@ export interface UseSettingsFormResult {
   updateLlm: (patch: Partial<SettingsSnapshot["llm"]>) => void;
   updateGithub: (patch: Partial<SettingsSnapshot["github"]>) => void;
   updateRuntime: (patch: Partial<SettingsSnapshot["runtime"]>) => void;
-  save: () => Promise<void>;
+  save: (secretOverrides?: Partial<Record<SecretName, string>>) => Promise<void>;
+  /** One-time GitHub OAuth token handoff; persists via the normal save flow. */
+  applyGitHubOauthToken: (token: string) => Promise<void>;
   resetChanges: () => void;
   handleRestartRuntime: () => Promise<void>;
   reload: () => Promise<void>;
@@ -283,11 +285,16 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
     setDraft(current => current ? ({ ...current, runtime: { ...current.runtime, ...patch } }) : current);
   }, []);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (secretOverrides?: Partial<Record<SecretName, string>>) => {
     if (!draft) return;
     setSaving(true);
     setMessage(undefined);
-    const patch = buildSettingsPatch(draft, secrets, clearSecrets, Boolean(bridge));
+    // OAuth handoff tokens ride through here as overrides: they are never
+    // staged into visible draft fields, they flow straight through the same
+    // save path (desktop protected bridge / web encrypted settings) and then
+    // vanish with the request.
+    const effectiveSecrets: SecretDrafts = { ...secrets, ...secretOverrides };
+    const patch = buildSettingsPatch(draft, effectiveSecrets, clearSecrets, Boolean(bridge));
     // Bridge-written credentials land only in the OS credential store and take
     // effect at the next runtime restart; the API never sees those writes, so
     // its restartRequired flag alone would hide the pending-restart state.
@@ -298,7 +305,7 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
       if (bridge) {
         let status = await bridge.credentialStatus();
         for (const name of secretNames) {
-          const value = secretValue(secrets[name], clearSecrets[name]);
+          const value = secretValue(effectiveSecrets[name], clearSecrets[name]);
           if (value === undefined) continue;
           status = await bridge.setCredential(desktopCredentialBySecret[name], value);
           bridgeStoredCredential = true;
@@ -317,6 +324,12 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
       setSaving(false);
     }
   }, [draft, secrets, clearSecrets, bridge, deps, t]);
+
+  /** One-time GitHub OAuth handoff: persists the token through the normal
+   *  save flow and never renders or logs it. */
+  const applyGitHubOauthToken = useCallback(async (token: string) => {
+    await save({ publicReadToken: token });
+  }, [save]);
 
   const resetChanges = useCallback(() => {
     setDraft(settings);
@@ -374,6 +387,7 @@ export function useSettingsForm(options: UseSettingsFormOptions): UseSettingsFor
     updateGithub,
     updateRuntime,
     save,
+    applyGitHubOauthToken,
     resetChanges,
     handleRestartRuntime,
     reload,

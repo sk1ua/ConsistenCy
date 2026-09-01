@@ -33,6 +33,7 @@ const baseSettings: SettingsSnapshot = {
   },
   github: {
     appId: "123456",
+    oauthClientId: "",
     privateKeyConfigured: true,
     webhookSecretConfigured: true,
     publicReadTokenConfigured: false
@@ -270,6 +271,53 @@ describe("save() restart honesty on the desktop bridge path", () => {
     await act(async () => { await harness.current().save(); });
 
     expect(writes).toEqual([]);
+    expect(harness.current().restartNeeded).toBe(true);
+
+    await harness.unmount();
+  });
+});
+
+describe("applyGitHubOauthToken one-time handoff", () => {
+  function oauthDeps(options?: { restartRequired?: boolean; writes?: DesktopCredentialKey[] }) {
+    const patches: SettingsPatch[] = [];
+    return {
+      patches,
+      deps: {
+        fetchSettings: async () => baseSettings,
+        updateSettings: async (patch: SettingsPatch) => {
+          patches.push(patch);
+          return { ...baseSettings, restartRequired: options?.restartRequired ?? false };
+        },
+        ...(options?.writes ? { bridge: makeBridge(options.writes) } : {})
+      } satisfies UseSettingsFormOptions["deps"]
+    };
+  }
+
+  it("persists the OAuth token through the encrypted settings path without a bridge", async () => {
+    const { deps, patches } = oauthDeps();
+    const harness = await mountSettingsForm({ deps });
+
+    await act(async () => { await harness.current().applyGitHubOauthToken("gho_oauth_secret"); });
+
+    // Web mode: the token rides in the patch body (the API stores it
+    // AES-256-GCM encrypted) and the snapshot turns on tokenConfigured only
+    // through the server response, so the handoff leaves no visible draft.
+    expect((patches[0]?.github as Record<string, unknown>)?.publicReadToken).toBe("gho_oauth_secret");
+    expect(harness.current().secrets.publicReadToken).toBe("");
+    expect(harness.current().restartNeeded).toBe(false);
+
+    await harness.unmount();
+  });
+
+  it("routes the OAuth token through the protected bridge in desktop mode", async () => {
+    const writes: DesktopCredentialKey[] = [];
+    const { deps, patches } = oauthDeps({ writes });
+    const harness = await mountSettingsForm({ deps });
+
+    await act(async () => { await harness.current().applyGitHubOauthToken("gho_oauth_secret"); });
+
+    expect(writes).toEqual(["GITHUB_PUBLIC_READ_TOKEN"]);
+    expect((patches[0]?.github as Record<string, unknown>)?.publicReadToken).toBeUndefined();
     expect(harness.current().restartNeeded).toBe(true);
 
     await harness.unmount();

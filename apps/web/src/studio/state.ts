@@ -14,6 +14,7 @@ export type StudioAction =
   | { type: "update-params"; nodeId: string; parameters: Record<string, unknown> }
   | { type: "rename"; id: string }
   | { type: "purpose"; purpose: string }
+  | { type: "undo" }
   | { type: "reset" };
 
 export type StudioState = {
@@ -140,6 +141,21 @@ export function studioReducer(state: StudioState, action: StudioAction, nodeType
   const lookup = new Map(nodeTypes.map(nodeType => [nodeType.type, nodeType]));
   switch (action.type) {
     case "reset": return { ...state, draft: clone(state.baseline), dirty: false, selectedNodeId: undefined, history: [] };
+    case "undo": {
+      // Pop the last pre-mutation draft snapshot. An empty stack leaves the
+      // state untouched; the restored draft re-enters the dirty/gates flow
+      // exactly like any manual edit (mutate() clears the gate fingerprints).
+      if (state.history.length === 0) return state;
+      const history = [...state.history];
+      const restored = clone(history.pop() as WorkflowRuntimeDefinition);
+      return {
+        ...state,
+        draft: restored,
+        dirty: JSON.stringify(restored) !== JSON.stringify(state.baseline),
+        history,
+        selectedNodeId: state.selectedNodeId && restored.nodes.some(node => node.id === state.selectedNodeId) ? state.selectedNodeId : undefined
+      };
+    }
     case "select": return { ...state, selectedNodeId: action.nodeId };
     case "purpose": return withDraft(state, { ...state.draft, metadata: { ...(state.draft as WorkflowRuntimeDefinition & { metadata?: Record<string, unknown> }).metadata, purpose: action.purpose } } as WorkflowRuntimeDefinition);
     case "rename": {
