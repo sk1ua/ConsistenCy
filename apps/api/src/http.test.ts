@@ -304,6 +304,10 @@ describe("createApiServer", () => {
     const internalSettings = {
       llm: {
         provider: "none" as const,
+        anthropicModel: "",
+        anthropicApiKeyConfigured: false,
+        llmApiKeyConfigured: false,
+        llmModel: "",
         deepseekBaseUrl: "https://api.deepseek.com",
         deepseekModel: "deepseek-chat",
         openaiModel: "gpt-4o-mini",
@@ -1821,6 +1825,10 @@ describe("createApiServer", () => {
     const savedSettings: SettingsSnapshot = {
       llm: {
         provider: "deepseek",
+        anthropicModel: "",
+        anthropicApiKeyConfigured: false,
+        llmApiKeyConfigured: false,
+        llmModel: "",
         deepseekBaseUrl: "https://api.deepseek.com",
         deepseekModel: "deepseek-v4-flash",
         openaiModel: "gpt-4.1-mini",
@@ -1856,8 +1864,11 @@ describe("createApiServer", () => {
         llmConfigured: false,
         llmProvider: "none",
         llmCapabilities: {
-          deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+          providers: [
+            { id: "deepseek", label: "DeepSeek", configured: false, defaultModel: "deepseek-v4-flash" },
+            { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+            { id: "anthropic", label: "Anthropic", configured: false }
+          ]
         },
         configuration: {
           githubAppConfigured: false,
@@ -1876,7 +1887,7 @@ describe("createApiServer", () => {
 
     expect(response.status).toBe(200);
     expect(preparation.model.default).toEqual({ provider: "none", model: "" });
-    expect(preparation.model.providers.deepseek.configured).toBe(false);
+    expect(preparation.model.providers.find(provider => provider.id === "deepseek")?.configured).toBe(false);
     expect(preparation.model.pendingRestart).toEqual({
       provider: "deepseek",
       model: "deepseek-v4-flash",
@@ -1890,6 +1901,10 @@ describe("createApiServer", () => {
     const savedSettings: SettingsSnapshot = {
       llm: {
         provider: "openai",
+        anthropicModel: "",
+        anthropicApiKeyConfigured: false,
+        llmApiKeyConfigured: false,
+        llmModel: "",
         deepseekBaseUrl: "https://api.deepseek.com",
         deepseekModel: "deepseek-v4-flash",
         openaiModel: "gpt-4.1-mini",
@@ -1926,8 +1941,11 @@ describe("createApiServer", () => {
         llmProvider: "deepseek",
         llmModel: "deepseek-v4-flash",
         llmCapabilities: {
-          deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: false, defaultModel: "gpt-4.1-mini" }
+          providers: [
+            { id: "deepseek", label: "DeepSeek", configured: true, defaultModel: "deepseek-v4-flash" },
+            { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+            { id: "anthropic", label: "Anthropic", configured: false }
+          ]
         },
         configuration: {
           githubAppConfigured: false,
@@ -1946,22 +1964,25 @@ describe("createApiServer", () => {
 
     expect(response.status).toBe(200);
     expect(preparation.model.default).toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
-    expect(preparation.model.providers).toEqual({
-      deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-      openai: { configured: false, defaultModel: "gpt-4.1-mini" },
-      pi: { configured: false, defaultModel: "auto" }
-    });
+    expect(preparation.model.providers).toEqual([
+      { id: "deepseek", label: "DeepSeek", configured: true, defaultModel: "deepseek-v4-flash" },
+      { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+      { id: "anthropic", label: "Anthropic", configured: false }
+    ]);
     expect(preparation.model.pendingRestart).toBeNull();
   });
 
-  it("projects Pi readiness through health and review preparation without exposing server-side configuration", async () => {
+  it("projects Anthropic readiness through health and review preparation without exposing server-side configuration", async () => {
     const auditStore = createAuditStore();
-    const repository = auditStore.registerRemote("Pi readiness repository", "acme/pi-readiness");
+    const repository = auditStore.registerRemote("Anthropic readiness repository", "acme/anthropic-readiness");
     let piReady = false;
     const settings: SettingsSnapshot = {
       llm: {
-        provider: "pi",
-        piModel: "probe/probe-model",
+        provider: "anthropic",
+        anthropicModel: "claude-sonnet-4-5",
+        anthropicApiKeyConfigured: false,
+        llmApiKeyConfigured: false,
+        llmModel: "",
         deepseekBaseUrl: "https://api.deepseek.com",
         deepseekModel: "deepseek-v4-flash",
         openaiModel: "gpt-4.1-mini",
@@ -1993,12 +2014,14 @@ describe("createApiServer", () => {
         database: { ok: true },
         worker: { running: true, activeJobs: 0, concurrency: 1 },
         llmConfigured: piReady,
-        llmProvider: piReady ? "pi" : "none",
-        ...(piReady ? { llmModel: "probe/probe-model" } : {}),
+        llmProvider: piReady ? "anthropic" : "none",
+        ...(piReady ? { llmModel: "claude-sonnet-4-5" } : {}),
         llmCapabilities: {
-          deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: false, defaultModel: "gpt-4.1-mini" },
-          pi: { configured: piReady, defaultModel: piReady ? "probe/probe-model" : "auto" }
+          providers: [
+            { id: "deepseek", label: "DeepSeek", configured: false, defaultModel: "deepseek-v4-flash" },
+            { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+            { id: "anthropic", label: "Anthropic", configured: piReady, defaultModel: "claude-sonnet-4-5" }
+          ]
         },
         configuration: {
           githubAppConfigured: false,
@@ -2017,16 +2040,23 @@ describe("createApiServer", () => {
     expect(notReadyHealth.body).toMatchObject({
       llmConfigured: false,
       llmProvider: "none",
-      llmCapabilities: { pi: { configured: false, defaultModel: "auto" } }
+      llmCapabilities: {
+        providers: [
+          { id: "deepseek", label: "DeepSeek", configured: false, defaultModel: "deepseek-v4-flash" },
+          { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+          { id: "anthropic", label: "Anthropic", configured: false, defaultModel: "claude-sonnet-4-5" }
+        ]
+      }
     });
     expect((notReadyHealth.body as any).llmModel).toBeUndefined();
 
     const notReadyPreparationResponse = await getJson(port, `/repositories/${repository.id}/review-preparation`);
     const notReadyPreparation = reviewPreparationResponseSchema.parse(notReadyPreparationResponse.body);
     expect(notReadyPreparation.model.default).toEqual({ provider: "none", model: "" });
-    expect(notReadyPreparation.model.providers.pi).toEqual({ configured: false, defaultModel: "auto" });
+    expect(notReadyPreparation.model.providers.find(provider => provider.id === "anthropic"))
+      .toEqual({ id: "anthropic", label: "Anthropic", configured: false, defaultModel: "claude-sonnet-4-5" });
     expect(notReadyPreparation.canStartReview).toBe(false);
-    expect(notReadyPreparation.blockingReasons).toContain("尚未配置大语言模型 (DeepSeek、OpenAI 或 Pi)。请前往设置页配置。");
+    expect(notReadyPreparation.blockingReasons).toContain("尚未配置大语言模型。请前往设置页从 Pi 模型目录中选择服务商并配置密钥。");
 
     piReady = true;
 
@@ -2034,15 +2064,22 @@ describe("createApiServer", () => {
     expect(readyHealth.status).toBe(200);
     expect(readyHealth.body).toMatchObject({
       llmConfigured: true,
-      llmProvider: "pi",
-      llmModel: "probe/probe-model",
-      llmCapabilities: { pi: { configured: true, defaultModel: "probe/probe-model" } }
+      llmProvider: "anthropic",
+      llmModel: "claude-sonnet-4-5",
+      llmCapabilities: {
+        providers: [
+          { id: "deepseek", label: "DeepSeek", configured: false, defaultModel: "deepseek-v4-flash" },
+          { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+          { id: "anthropic", label: "Anthropic", configured: true, defaultModel: "claude-sonnet-4-5" }
+        ]
+      }
     });
 
     const readyPreparationResponse = await getJson(port, `/repositories/${repository.id}/review-preparation`);
     const readyPreparation = reviewPreparationResponseSchema.parse(readyPreparationResponse.body);
-    expect(readyPreparation.model.default).toEqual({ provider: "pi", model: "probe/probe-model" });
-    expect(readyPreparation.model.providers.pi).toEqual({ configured: true, defaultModel: "probe/probe-model" });
+    expect(readyPreparation.model.default).toEqual({ provider: "anthropic", model: "claude-sonnet-4-5" });
+    expect(readyPreparation.model.providers.find(provider => provider.id === "anthropic"))
+      .toEqual({ id: "anthropic", label: "Anthropic", configured: true, defaultModel: "claude-sonnet-4-5" });
     expect(readyPreparation.model.pendingRestart).toBeNull();
     expect(readyPreparation.canStartReview).toBe(true);
 

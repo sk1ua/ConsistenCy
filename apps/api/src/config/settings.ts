@@ -4,8 +4,9 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
 const publicSettingsSchema = z.object({
-  LLM_PROVIDER: z.enum(["deepseek", "openai", "pi"]).optional(),
-  CONSISTENCY_PI_MODEL: z.string().trim().min(3).optional(),
+  LLM_PROVIDER: z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).optional(),
+  LLM_MODEL: z.string().trim().min(1).optional(),
+  ANTHROPIC_MODEL: z.string().trim().min(1).optional(),
   DEEPSEEK_BASE_URL: z.string().url().optional(),
   DEEPSEEK_MODEL: z.string().trim().min(1).optional(),
   OPENAI_MODEL: z.string().trim().min(1).optional(),
@@ -24,13 +25,19 @@ const secretSettingsSchema = z.object({
   GITHUB_PUBLIC_READ_TOKEN: z.string().trim().min(1).optional(),
   DEEPSEEK_API_KEY: z.string().trim().min(1).optional(),
   OPENAI_API_KEY: z.string().trim().min(1).optional(),
+  ANTHROPIC_API_KEY: z.string().trim().min(1).optional(),
+  LLM_API_KEY: z.string().trim().min(1).optional(),
   CONSISTENCY_API_TOKEN: z.string().trim().min(1).optional()
 }).strict();
 
 export const settingsPatchSchema = z.object({
   llm: z.object({
-    provider: z.enum(["deepseek", "openai", "pi"]).optional(),
-    piModel: z.string().trim().min(3).optional(),
+    /** Any provider id from the bundled Pi catalog; validated at runtime. */
+    provider: z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).optional(),
+    llmApiKey: z.string().trim().min(1).nullable().optional(),
+    llmModel: z.string().trim().min(1).nullable().optional(),
+    anthropicModel: z.string().trim().min(1).nullable().optional(),
+    anthropicApiKey: z.string().trim().min(1).nullable().optional(),
     deepseekBaseUrl: z.string().url().optional(),
     deepseekModel: z.string().trim().min(1).optional(),
     openaiModel: z.string().trim().min(1).optional(),
@@ -58,8 +65,12 @@ export type SettingsPatch = z.infer<typeof settingsPatchSchema>;
 
 export type SettingsSnapshot = {
   llm: {
-    provider: "deepseek" | "openai" | "pi" | "none";
-    piModel?: string;
+    /** Any Pi catalog provider id; "none" when unconfigured. */
+    provider: string;
+    llmApiKeyConfigured: boolean;
+    llmModel: string;
+    anthropicModel: string;
+    anthropicApiKeyConfigured: boolean;
     deepseekBaseUrl: string;
     deepseekModel: string;
     openaiModel: string;
@@ -134,6 +145,8 @@ const SECRET_KEYS = new Set<keyof SecretSettings>([
   "GITHUB_PUBLIC_READ_TOKEN",
   "DEEPSEEK_API_KEY",
   "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "LLM_API_KEY",
   "CONSISTENCY_API_TOKEN"
 ]);
 
@@ -254,7 +267,10 @@ export class SettingsStore {
     };
 
     setPublic("LLM_PROVIDER", patch.llm?.provider);
-    setPublic("CONSISTENCY_PI_MODEL", patch.llm?.piModel);
+    setPublic("LLM_MODEL", patch.llm?.llmModel);
+    setSecret("LLM_API_KEY", patch.llm?.llmApiKey);
+    setPublic("ANTHROPIC_MODEL", patch.llm?.anthropicModel);
+    setSecret("ANTHROPIC_API_KEY", patch.llm?.anthropicApiKey);
     setPublic("DEEPSEEK_BASE_URL", patch.llm?.deepseekBaseUrl);
     setPublic("DEEPSEEK_MODEL", patch.llm?.deepseekModel);
     setPublic("OPENAI_MODEL", patch.llm?.openaiModel);
@@ -291,13 +307,18 @@ export class SettingsStore {
     const overriddenByEnvironment = Object.keys(saved)
       .filter(key => environment[key] !== undefined && environment[key] !== saved[key])
       .sort();
-    const provider = effective.LLM_PROVIDER === "deepseek" || effective.LLM_PROVIDER === "openai" || effective.LLM_PROVIDER === "pi"
+    const provider = effective.LLM_PROVIDER === "deepseek" || effective.LLM_PROVIDER === "openai" || effective.LLM_PROVIDER === "anthropic"
       ? effective.LLM_PROVIDER
-      : effective.DEEPSEEK_API_KEY ? "deepseek" : effective.OPENAI_API_KEY ? "openai" : "none";
+      : effective.LLM_PROVIDER
+        ? effective.LLM_PROVIDER.toLowerCase()
+        : effective.DEEPSEEK_API_KEY ? "deepseek" : effective.OPENAI_API_KEY ? "openai" : effective.ANTHROPIC_API_KEY ? "anthropic" : "none";
     return {
       llm: {
         provider,
-        piModel: effective.CONSISTENCY_PI_MODEL ?? "",
+        llmApiKeyConfigured: Boolean(effective.LLM_API_KEY),
+        llmModel: effective.LLM_MODEL ?? "",
+        anthropicModel: effective.ANTHROPIC_MODEL ?? "",
+        anthropicApiKeyConfigured: Boolean(effective.ANTHROPIC_API_KEY),
         deepseekBaseUrl: effective.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
         deepseekModel: effective.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
         openaiModel: effective.OPENAI_MODEL ?? "gpt-4.1-mini",

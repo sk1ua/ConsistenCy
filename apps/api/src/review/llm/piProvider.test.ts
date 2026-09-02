@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,6 +97,57 @@ function sendSse(response: ServerResponse, content: string): void {
 }
 
 describe("PiRuntimeProvider", () => {
+  it("createManaged injects the provider key in-memory against Pi's built-in catalog", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "consistency-pi-managed-"));
+    const authPath = join(directory, "runtime-auth.json");
+    try {
+      const provider = PiRuntimeProvider.createManaged({
+        authPath,
+        provider: "deepseek",
+        apiKey: "managed-test-key-0001",
+        model: "deepseek-v4-flash"
+      });
+      await provider.ready();
+
+      expect(provider.isConfigured).toBe(true);
+      expect(provider.name).toBe("deepseek");
+      expect(provider.model).toBe("deepseek/deepseek-v4-flash");
+
+      const descriptor = await provider.descriptor();
+      expect(descriptor).toMatchObject({
+        provider: "deepseek",
+        model: "deepseek-v4-flash",
+        configured: true
+      });
+
+      // The runtime key overlay is non-persistent: even if Pi creates an
+      // empty auth-storage file, the injected key material never lands there.
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(existsSync(authPath) ? readFileSync(authPath, "utf8") : "").not.toContain("managed-test-key-0001");
+      const serialized = JSON.stringify(descriptor);
+      expect(serialized).not.toContain("managed-test-key-0001");
+      expect(serialized).not.toContain(authPath.replaceAll("\\", "/"));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("createManaged fails closed when the pinned model is not in the provider catalog", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "consistency-pi-managed-"));
+    try {
+      const provider = PiRuntimeProvider.createManaged({
+        authPath: join(directory, "runtime-auth.json"),
+        provider: "deepseek",
+        apiKey: "managed-test-key-0002",
+        model: "not-a-real-model"
+      });
+      await expect(provider.ready()).rejects.toThrow("Pi model is unavailable or not authenticated");
+      expect(provider.isConfigured).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("loads Pi models.json and auth.json through the official runtime", async () => {
     await withFixture(
       (_request, response) => response.end(),

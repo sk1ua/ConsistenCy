@@ -1,8 +1,10 @@
 import type { Repository } from "@consistency/schema";
 
 export const DESKTOP_CREDENTIAL_KEYS = [
+  "LLM_API_KEY",
   "DEEPSEEK_API_KEY",
   "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
   "GITHUB_PRIVATE_KEY",
   "GITHUB_WEBHOOK_SECRET",
   "GITHUB_PUBLIC_READ_TOKEN"

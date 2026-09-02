@@ -47,14 +47,11 @@ async function mountSection(initialLocale: "en-US" | "zh-CN" = "en-US") {
   return { container, root };
 }
 
-function selectOption(container: HTMLElement, id: string, value: string) {
-  const select = container.querySelector<HTMLSelectElement>(`#${id}`)!;
-  // Bypass React's instance-level value tracker so the native change event is
-  // observed as a real controlled change (same approach as the editable-field
-  // tests in RuntimeSettingsSection.test.tsx).
-  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-  setter?.call(select, value);
-  select.dispatchEvent(new Event("change", { bubbles: true }));
+async function selectOption(container: HTMLElement, label: string, value: string) {
+  const trigger = container.querySelector<HTMLButtonElement>(`.ds-select-menu-trigger[aria-label="${label}"]`)!;
+  await act(async () => { trigger.click(); });
+  const option = container.querySelector<HTMLLIElement>(`.ds-select-menu-option[data-value="${value}"]`)!;
+  await act(async () => { option.click(); });
 }
 
 // The providers persist to localStorage; clear it so every test starts from
@@ -66,21 +63,17 @@ beforeEach(() => {
 describe("AppearanceSettingsSection structure", () => {
   it("renders the stable field ids for theme, locale, resolved theme and density", () => {
     const html = renderSection();
-    expect(html).toContain('id="setting-theme"');
-    expect(html).toContain('id="setting-locale"');
+    expect(html).toContain('aria-label="Theme"');
+    expect(html).toContain('aria-label="Language"');
     expect(html).toContain('id="setting-theme-resolved"');
     expect(html).toContain('id="setting-density"');
-    expect(html).toContain("04 · Appearance");
     expect(html).toContain("Theme and language");
   });
 
   it("localizes the theme and locale options and states the immediate/local effect", () => {
     const html = renderSection();
-    expect(html).toMatch(/<option value="system"[^>]*>Follow system<\/option>/);
-    expect(html).toMatch(/<option value="light"[^>]*>Light<\/option>/);
-    expect(html).toMatch(/<option value="dark"[^>]*>Dark<\/option>/);
-    expect(html).toMatch(/<option value="zh-CN"[^>]*>中文<\/option>/);
-    expect(html).toMatch(/<option value="en-US"[^>]*>English<\/option>/);
+    expect(html).toContain("Follow system");
+    expect(html).toContain("English");
     expect(html).toContain("Applies immediately and is stored locally.");
   });
 
@@ -98,10 +91,10 @@ describe("AppearanceSettingsSection structure", () => {
     expect(html).toContain("No density contract exists yet, so no option is offered.");
   });
 
-  it("exposes exactly two interactive selects and no button (no save lifecycle inside the section)", async () => {
+  it("exposes exactly two design-system select menus and no save command", async () => {
     const { container, root } = await mountSection();
-    expect(container.querySelectorAll("select")).toHaveLength(2);
-    expect(container.querySelectorAll("button")).toHaveLength(0);
+    expect(container.querySelectorAll(".ds-select-menu")).toHaveLength(2);
+    expect(container.querySelectorAll(".ds-select-menu-trigger")).toHaveLength(2);
     const densityRow = container.querySelector("#setting-density")!;
     expect(densityRow).toBeTruthy();
     expect(densityRow.querySelector("select, input, button, textarea")).toBeNull();
@@ -114,13 +107,13 @@ describe("AppearanceSettingsSection structure", () => {
 describe("AppearanceSettingsSection immediate-effect semantics", () => {
   it("changes the theme preference through the real theme provider without any save step", async () => {
     const { container, root } = await mountSection();
-    const themeSelect = container.querySelector<HTMLSelectElement>("#setting-theme")!;
-    expect(themeSelect.value).toBe("system");
+    const themeTrigger = container.querySelector<HTMLButtonElement>('.ds-select-menu-trigger[aria-label="Theme"]')!;
+    expect(themeTrigger.textContent).toContain("Follow system");
     expect(document.documentElement.dataset.theme).toBe("light");
 
-    await act(async () => { selectOption(container, "setting-theme", "dark"); });
+    await selectOption(container, "Theme", "dark");
 
-    expect(themeSelect.value).toBe("dark");
+    expect(themeTrigger.textContent).toContain("Dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(window.localStorage.getItem("consistency.theme.v1")).toBe("dark");
     // Forced preference: resolved row follows without the system qualifier.
@@ -133,13 +126,12 @@ describe("AppearanceSettingsSection immediate-effect semantics", () => {
 
   it("switches the interface language through the real i18n provider without any save step", async () => {
     const { container, root } = await mountSection("en-US");
-    expect(container.querySelector('label[for="setting-theme"]')?.textContent).toBe("Theme");
+    expect(container.textContent).toContain("Theme");
 
-    await act(async () => { selectOption(container, "setting-locale", "zh-CN"); });
+    await selectOption(container, "Language", "zh-CN");
 
-    expect(container.querySelector<HTMLSelectElement>("#setting-locale")?.value).toBe("zh-CN");
-    expect(container.querySelector('label[for="setting-theme"]')?.textContent).toBe("主题");
-    expect(container.querySelector("#setting-theme")?.textContent).toContain("跟随系统");
+    expect(container.textContent).toContain("主题");
+    expect(container.textContent).toContain("跟随系统");
     expect(container.querySelector("#setting-density")?.textContent).toContain("暂未提供");
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(window.localStorage.getItem("consistency.locale.v1")).toBe("zh-CN");
@@ -152,7 +144,6 @@ describe("AppearanceSettingsSection immediate-effect semantics", () => {
 describe("AppearanceSettingsSection zh-CN coverage", () => {
   it("translates every newly introduced user-visible string without English fallback", () => {
     const html = renderSection("zh-CN");
-    expect(html).toContain("04 · 外观");
     expect(html).toContain("主题与语言");
     expect(html).toContain("跟随系统");
     expect(html).toContain("立即生效，并保存在本地。");

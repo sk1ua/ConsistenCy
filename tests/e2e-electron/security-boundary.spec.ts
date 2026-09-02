@@ -115,9 +115,9 @@ test.describe("desktop repository security boundary", () => {
     expect(main).toContain("const API_ENVIRONMENT_KEYS = Object.freeze([");
     const apiEnvironmentKeys = main.match(/const API_ENVIRONMENT_KEYS = Object\.freeze\(\[([\s\S]*?)\]\);/)?.[1];
     expect(apiEnvironmentKeys).toBeDefined();
-    expect(apiEnvironmentKeys).toContain('"CONSISTENCY_PI_AUTH_PATH",');
-    expect(apiEnvironmentKeys).toContain('"CONSISTENCY_PI_MODELS_PATH",');
-    expect(apiEnvironmentKeys).toContain('"CONSISTENCY_PI_MODELS_STORE_PATH",');
+    expect(apiEnvironmentKeys).toContain('"CONSISTENCY_PI_CONFIG_DIR",');
+    expect(apiEnvironmentKeys).toContain('"LLM_API_KEY",');
+    expect(apiEnvironmentKeys).toContain('"LLM_MODEL",');
     expect(apiEnvironmentKeys).not.toContain("CONSISTENCY_DESKTOP_OAUTH_BROKER_URL");
     expect(apiEnvironmentKeys).not.toContain("CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID");
     expect(apiEnvironmentKeys).not.toContain("CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET");

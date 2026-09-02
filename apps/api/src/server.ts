@@ -21,6 +21,7 @@ import { HeartbeatDaemon } from "./heartbeat/daemon";
 import { RepositorySupervisor } from "./heartbeat/repositorySupervisor";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createLLMProvider, createReviewLLMProvider, resolveReviewModel } from "./review/llm/factory";
+import { piCatalog, configuredProviderIds, type PiCatalogProvider } from "./review/llm/piCatalog";
 import { PiRuntimeProvider } from "./review/llm/piProvider";
 import { redactSensitiveText, sanitizePublicError, sanitizePublishFailure } from "./security/redact";
 import { loadRealData } from "./data/realData";
@@ -89,10 +90,16 @@ if (recoveredJobs > 0) {
 }
 
 const provider = createLLMProvider(config);
-const piProvider = provider?.name === "pi" ? provider as PiRuntimeProvider : undefined;
+const piProvider = provider instanceof PiRuntimeProvider ? provider : undefined;
+// Pi's built-in catalog (33+ providers) is the source of truth for the Web
+// UI's provider/model dropdowns; loaded once, safe metadata only.
+let llmCatalogProviders: PiCatalogProvider[] = [];
+void piCatalog(config).then(catalog => { llmCatalogProviders = catalog; }).catch(error => {
+  logger.warn({ error: sanitizePublicError(error instanceof Error ? error.message : "LLM catalog unavailable") }, "LLM catalog projection failed");
+});
 if (piProvider) {
   void piProvider.ready().catch(error => {
-    logger.warn({ error: sanitizePublicError(error instanceof Error ? error.message : "Pi model configuration unavailable") }, "Pi model runtime is unavailable");
+    logger.warn({ error: sanitizePublicError(error instanceof Error ? error.message : "LLM runtime is unavailable") }, "LLM model runtime is unavailable");
   });
 }
 export const deterministicAnalyzer = new DeterministicAnalyzer(
@@ -180,7 +187,7 @@ export const worker = new ReviewWorker({
   workflow: {
     provider,
     providerFactory: override => createReviewLLMProvider(config, {
-      provider: override?.provider as "deepseek" | "openai" | "pi" | undefined,
+      provider: override?.provider as string | undefined,
       model: override?.model
     }),
     deterministicAnalyzer,
@@ -445,7 +452,7 @@ export const server = createApiServer({
     llmModel: modelOverride?.model
   }),
   llmProviderConfigured: () => {
-    const activeProvider = provider && (provider.name !== "pi" || piProvider?.isConfigured === true)
+    const activeProvider = provider && (provider.name !== "anthropic" || piProvider?.isConfigured === true)
       ? provider
       : undefined;
     return activeProvider !== undefined;
@@ -499,9 +506,11 @@ export const server = createApiServer({
     latest: () => heartbeat.latest(),
     subscribe: subscriber => heartbeat.subscribe(subscriber)
   },
+  llmCatalogProviders: () => llmCatalogProviders,
   healthDetails: () => {
-    const piReady = piProvider?.isConfigured === true;
-    const activeProvider = provider && (provider.name !== "pi" || piReady) ? provider : undefined;
+    const piReady = provider instanceof PiRuntimeProvider && provider.isConfigured === true;
+    const activeProvider = piReady ? provider : undefined;
+    const configuredIds = new Set(configuredProviderIds(config));
     return {
     database: { ok: database.open },
     worker: worker.status(),
@@ -509,22 +518,18 @@ export const server = createApiServer({
     deterministicAnalyzer: deterministicAnalyzer.status(),
     llmConfigured: Boolean(activeProvider),
     llmProvider: activeProvider?.name ?? "none",
-    llmModel: activeProvider?.name === "pi" && piProvider?.isConfigured === true
-      ? piProvider.model
+    llmModel: activeProvider instanceof PiRuntimeProvider && activeProvider.isConfigured === true
+      ? activeProvider.model
       : activeProvider?.model ?? undefined,
     llmCapabilities: {
-      deepseek: {
-        configured: Boolean(config.DEEPSEEK_API_KEY),
-        defaultModel: config.DEEPSEEK_MODEL
-      },
-      openai: {
-        configured: Boolean(config.OPENAI_API_KEY),
-        defaultModel: config.OPENAI_MODEL
-      },
-      pi: {
-        configured: piReady,
-        defaultModel: piProvider?.model ?? config.CONSISTENCY_PI_MODEL ?? "auto"
-      }
+      providers: llmCatalogProviders.map(catalogProvider => ({
+        id: catalogProvider.id,
+        label: catalogProvider.label,
+        configured: configuredIds.has(catalogProvider.id),
+        ...(catalogProvider.id === "deepseek" ? { defaultModel: config.DEEPSEEK_MODEL } : {}),
+        ...(catalogProvider.id === "openai" ? { defaultModel: config.OPENAI_MODEL } : {}),
+        ...(catalogProvider.id === "anthropic" ? { defaultModel: config.ANTHROPIC_MODEL || undefined } : {})
+      }))
     },
     publicPrAnalysis: config.publicPrAnalysisEnabled,
     publicPrAccessMode: config.publicPrAnalysisEnabled

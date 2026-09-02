@@ -4,6 +4,7 @@ import type { HealthResponse } from "../../api/client";
 import { desktopBridge, type BuildInfoSummary } from "../../desktop";
 import { useI18n } from "../../i18n";
 import { SettingHelp } from "../SettingHelp";
+import { Button } from "../../design-system/Button";
 
 export interface AboutSettingsSectionProps {
   health?: HealthResponse;
@@ -54,7 +55,7 @@ export function AboutSettingsSection({ health, buildInfo }: AboutSettingsSection
   }
 
   return <section className="settings-group section-block">
-    <div className="settings-group-title"><Info size={18} /><div><span>{t("06 · About")}</span><h3>{t("Version and environment")}</h3><p>{t("Build identity, API service and runtime mode. These rows are read-only status.")}</p></div></div>
+    <div className="settings-group-title"><Info size={18} /><div><h3>{t("Version and environment")}</h3><p>{t("Build identity, API service and runtime mode. These rows are read-only status.")}</p></div></div>
     <div className="settings-fields">
       <div className="setting-field setting-note" id="setting-about-version"><Tag size={17} /><div><strong>{t("ConsistenCy version")}</strong>{versionRow}<SettingHelp id="setting-about-version-help" text="The desktop host reports its build through the buildInfo bridge; no such bridge exists in the browser." /></div></div>
       <div className="setting-field setting-note" id="setting-about-build"><GitCommit size={17} /><div><strong>{t("Build")}</strong>{buildRow}<SettingHelp id="setting-about-build-help" text="Short commit identifier of the desktop build; hover for the full SHA." /></div></div>
@@ -79,16 +80,9 @@ export function AboutSettingsSection({ health, buildInfo }: AboutSettingsSection
               {logsState === "opened" && t("Logs folder opened.")}
               {logsState === "failed" && t("Could not open the logs folder.")}
             </p>
-            <button
-              type="button"
-              id="setting-about-open-logs"
-              className="secondary-button"
-              disabled={logsState === "opening"}
-              onClick={() => void openLogs()}
-            >
-              <FolderOpen size={13} />
+            <Button type="button" id="setting-about-open-logs" variant="outline" size="sm" icon={<FolderOpen size={13} />} loading={logsState === "opening"} onClick={() => void openLogs()}>
               {t("Open logs folder")}
-            </button>
+            </Button>
             <SettingHelp id="setting-about-open-logs-help" text="Opens the desktop app's own data folder — where the main and API logs live — in your file manager. The folder location stays in the main process; no path is shown or sent to this page." />
           </div>
         </div>

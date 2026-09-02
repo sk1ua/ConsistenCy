@@ -12,23 +12,23 @@ ConsistenCy v3 is a **real-data, real-LLM runtime**. It requires a real, configu
 
 | Provider | Supported Models | Required Environment / Setting | Default Model |
 |---|---|---|---|
-| **DeepSeek** | `deepseek-chat`, `deepseek-v4-flash`, etc. | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
-| **OpenAI** | `gpt-4.1-mini`, etc. | `OPENAI_API_KEY` | `gpt-4.1-mini` |
-| **Pi** | Models/providers from Pi's official catalog and `models.json` | Pi `auth.json` or provider environment/auth configuration | Selected configured Pi model |
+| **DeepSeek** | `deepseek-v4-flash`, `deepseek-v4-pro`, etc. | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
+| **OpenAI** | `gpt-4.1-mini`, `gpt-5`, etc. | `OPENAI_API_KEY` | `gpt-4.1-mini` |
+| **Anthropic** | `claude-sonnet-4-5`, `claude-opus-4-5`, etc. | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
 
-### 1.3 Pi model configuration reuse
+### 1.3 Bundled Pi runtime engine
 
-Set `LLM_PROVIDER=pi` to use the official `@earendil-works/pi-coding-agent` runtime. ConsistenCy delegates loading of Pi's model catalog and credentials to Pi instead of reimplementing `models.json` or `auth.json` parsing.
+All providers are executed by the bundled official Pi runtime (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent`). ConsistenCy delegates model catalogs, request formatting, and streaming to Pi instead of reimplementing them, and `models.json`/`auth.json` parsing stays inside Pi.
 
-By default Pi reads:
+ConsistenCy does not read a user-level `~/.pi` directory and does not require a local Pi installation:
 
-- `~/.pi/agent/models.json`
-- `~/.pi/agent/auth.json`
+- Pi's built-in model catalog is the single model source; the runtime is created with `modelsPath: null` so any user-level Pi `models.json` is ignored.
+- Provider API keys configured through Settings (or `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` server-side) are injected in-memory via Pi's `setRuntimeApiKey` and are never written to Pi config files.
+- `CONSISTENCY_PI_CONFIG_DIR` only relocates the runtime's isolated auth-storage path inside the ConsistenCy data directory. It is server-side process configuration: never editable through Web Settings and never included in settings snapshots, health payloads, logs, renderer state, or Desktop preload capabilities.
+- Model catalog network refresh stays disabled; requests go only to the selected provider's API endpoint.
 
-`CONSISTENCY_PI_*_PATH` variables are server-side process configuration only. They are not editable through Web Settings and are never included in settings snapshots, health payloads, logs, renderer state, or Desktop preload capabilities. `CONSISTENCY_PI_MODEL` may pin a safe `provider/model-id`; when omitted, the API selects the first authenticated model from Pi's available catalog.
-
-Pi's credentials can be API keys or OAuth credentials supported by Pi. ConsistenCy only receives the final model response and normalized usage; Pi headers, API keys, OAuth tokens, and raw provider errors remain inside the API process. The existing DeepSeek/OpenAI configuration path remains supported when `LLM_PROVIDER` is set to those providers.
-If no supported provider is configured (DeepSeek, OpenAI, or Pi):
+ConsistenCy only receives the final model response and normalized usage; provider headers, API keys, OAuth tokens, and raw provider errors remain inside the API process and fail closed to sanitized fixed errors.
+If no supported provider is configured (DeepSeek, OpenAI, or Anthropic):
 - The API sets `llmProviderConfigured: false` and reports `llmProvider: "none"` on `GET /health`.
 - Repository browsing, Git status, diff views, and deterministic AST analysis function normally.
 - Review execution requests (`POST /reviews/local`, `POST /reviews/public-pr`) are rejected with HTTP 400 (`LLM_NOT_CONFIGURED`).
@@ -91,11 +91,9 @@ When configuration changes are saved via the Web UI Settings page (`PUT /api/set
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek model identifier |
 | `OPENAI_API_KEY` | *empty* | API key for OpenAI provider |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model identifier |
-| `CONSISTENCY_PI_MODEL` | *empty* | Optional server-side `provider/model-id` pin for Pi's catalog |
-| `CONSISTENCY_PI_AUTH_PATH` | `~/.pi/agent/auth.json` | Server-side Pi auth file override; never returned to the renderer |
-| `CONSISTENCY_PI_MODELS_PATH` | `~/.pi/agent/models.json` | Server-side Pi model catalog override; never returned to the renderer |
-| `CONSISTENCY_PI_MODELS_STORE_PATH` | sibling `models-store.json` | Server-side Pi catalog cache override |
-| `CONSISTENCY_PI_REFRESH_ON_START` | `true` | Whether Pi restores/refreshes its catalog during API startup; network access remains disabled by ConsistenCy |
+| `ANTHROPIC_API_KEY` | *empty* | API key for the Anthropic provider |
+| `ANTHROPIC_MODEL` | *empty* | Optional Anthropic model id; empty uses the catalog default (`claude-sonnet-4-5`) |
+| `CONSISTENCY_PI_CONFIG_DIR` | `<database-dir>/pi` | Server-side isolation directory for the bundled Pi runtime's auth storage; never returned to the renderer |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
 | `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the browser Device Flow compatibility path only |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the product-operated Desktop OAuth broker; configure on the API/broker service, not in user Settings |

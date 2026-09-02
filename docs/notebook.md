@@ -8,9 +8,9 @@ The Repository Review Notebook is an evidence-grounded research workspace design
 
 | Mode | Source Authority | LLM Provider | Side Effects |
 |---|---|---|---|
-| **Public Read — Anonymous** | Public GitHub REST API & anonymous Git clone | DeepSeek, OpenAI, or Pi | Creates read-only analysis Job; never publishes comments |
-| **Public Read — PAT** | Server-side read-only PAT | DeepSeek, OpenAI, or Pi | Creates read-only analysis Job; never publishes comments |
-| **Webhook Review** | GitHub App installation token | DeepSeek, OpenAI, or Pi | Evaluates pull request and follows configured publication policy |
+| **Public Read — Anonymous** | Public GitHub REST API & anonymous Git clone | DeepSeek, OpenAI, or Anthropic | Creates read-only analysis Job; never publishes comments |
+| **Public Read — PAT** | Server-side read-only PAT | DeepSeek, OpenAI, or Anthropic | Creates read-only analysis Job; never publishes comments |
+| **Webhook Review** | GitHub App installation token | DeepSeek, OpenAI, or Anthropic | Evaluates pull request and follows configured publication policy |
 
 ---
 

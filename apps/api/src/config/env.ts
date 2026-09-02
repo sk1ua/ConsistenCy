@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import { findProjectRoot } from "./settings";
 
@@ -38,12 +38,23 @@ export const envSchema = z.object({
   CONSISTENCY_PYTHON_PATH: z.string().trim().min(1).default("python"),
   CONSISTENCY_ENGINE_MODULE: z.string().trim().min(1).default("engine"),
   CONSISTENCY_ENGINE_ROOT: z.string().trim().min(1).optional(),
-  LLM_PROVIDER: z.enum(["deepseek", "openai", "pi"]).optional(),
-  CONSISTENCY_PI_MODEL: z.string().trim().min(3).optional(),
-  CONSISTENCY_PI_AUTH_PATH: z.string().trim().min(1).optional(),
-  CONSISTENCY_PI_MODELS_PATH: z.string().trim().min(1).optional(),
-  CONSISTENCY_PI_MODELS_STORE_PATH: z.string().trim().min(1).optional(),
-  CONSISTENCY_PI_REFRESH_ON_START: z.enum(["true", "false"]).default("true"),
+  /**
+   * Any provider id from the bundled Pi runtime's built-in catalog (e.g.
+   * deepseek, openai, anthropic, google, xai, openrouter, groq, moonshotai…).
+   * The catalog is the source of truth; an unknown id fails closed at
+   * provider creation with a typed error.
+   */
+  LLM_PROVIDER: z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).optional(),
+  // The LLM engine is the bundled Pi runtime (@earendil-works/pi-*). Keys are
+  // injected in-memory via setRuntimeApiKey at provider creation; nothing is
+  // written to Pi config files and no local Pi installation is required.
+  // CONSISTENCY_PI_CONFIG_DIR only isolates the runtime's auth-storage path
+  // away from any user-level ~/.pi directory.
+  LLM_API_KEY: optionalSecret,
+  LLM_MODEL: z.string().trim().min(1).optional(),
+  ANTHROPIC_API_KEY: optionalSecret,
+  ANTHROPIC_MODEL: z.string().trim().min(1).optional(),
+  CONSISTENCY_PI_CONFIG_DIR: z.string().trim().min(1).optional(),
   CONSISTENCY_WORKERS_ENABLED: z
     .enum(["true", "false"])
     .transform(value => value === "true")
@@ -120,12 +131,14 @@ export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONS
   databasePath: string;
   workspaceRoot: string;
   engineRoot?: string;
+  /** Directory where ConsistenCy writes its managed Pi auth/models files. */
+  piConfigDir: string;
   /** Explicit review roots; empty when unset, which disables POST /reviews/local. */
   localReviewRoots: string[];
   /** True when CONSISTENCY_LOCAL_REVIEW_ROOTS was not configured (reviews disabled). */
   localReviewRootsAreDefaulted: boolean;
   allowedOrigins: string[];
-  LLM_PROVIDER?: "deepseek" | "openai" | "pi";
+  LLM_PROVIDER?: string;
   publicPrAnalysisEnabled: boolean;
   settingsWritable: boolean;
   reportLanguage: "zh-CN" | "en-US";
@@ -168,16 +181,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.NODE_ENV === "production" && !githubAppConfigured && parsed.GITHUB_WEBHOOK_SECRET) {
     throw new Error("GITHUB_WEBHOOK_SECRET requires GitHub App credentials");
   }
-  const llmProvider = parsed.LLM_PROVIDER ?? (parsed.DEEPSEEK_API_KEY ? "deepseek" : parsed.OPENAI_API_KEY ? "openai" : undefined);
-  if (llmProvider === "deepseek" && !parsed.DEEPSEEK_API_KEY) {
-    throw new Error("DEEPSEEK_API_KEY is required when LLM_PROVIDER=deepseek");
-  }
-  if (llmProvider === "openai" && !parsed.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
-  }
-  if (llmProvider === "pi" && parsed.CONSISTENCY_PI_MODEL && !parsed.CONSISTENCY_PI_MODEL.includes("/")) {
-    throw new Error("CONSISTENCY_PI_MODEL must use provider/model format");
-  }
+  const llmProvider = parsed.LLM_PROVIDER ?? (parsed.DEEPSEEK_API_KEY ? "deepseek" : parsed.OPENAI_API_KEY ? "openai" : parsed.ANTHROPIC_API_KEY ? "anthropic" : undefined);
+  // Provider-id validation happens against the bundled Pi catalog at provider
+  // creation (fail-closed typed error); env cannot enumerate 39 provider ids.
   const allowedOrigins = parsed.CONSISTENCY_ALLOWED_ORIGINS.split(",")
     .map(origin => origin.trim())
     .filter(Boolean);
@@ -215,6 +221,9 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     LLM_PROVIDER: llmProvider,
     databasePath: resolveDatabasePath(parsed.DATABASE_PATH),
     workspaceRoot: resolveWorkspaceRoot(parsed.CONSISTENCY_WORKSPACE_ROOT),
+    piConfigDir: parsed.CONSISTENCY_PI_CONFIG_DIR
+      ? resolve(parsed.CONSISTENCY_PI_CONFIG_DIR)
+      : resolve(dirname(resolveDatabasePath(parsed.DATABASE_PATH)), "pi"),
     engineRoot: parsed.CONSISTENCY_ENGINE_ROOT ? resolve(parsed.CONSISTENCY_ENGINE_ROOT) : undefined,
     localReviewRoots,
     localReviewRootsAreDefaulted,

@@ -48,6 +48,8 @@ import {
   type RepositoryGitStatusResponse,
   type RepositoryCommitsResponse,
   type RepositoryPullRequestsResponse,
+  llmCatalogResponseSchema,
+  type LlmCatalogResponse,
   type ReviewPreparationResponse,
   type PullRequestSummary,
   type Severity,
@@ -112,9 +114,7 @@ export type HealthResponse = {
   llmProvider: string;
   llmModel?: string;
   llmCapabilities?: {
-    deepseek?: { configured: boolean; defaultModel: string };
-    openai?: { configured: boolean; defaultModel: string };
-    pi?: { configured: boolean; defaultModel: string };
+    providers?: Array<{ id: string; label?: string; configured: boolean; defaultModel?: string }>;
   };
   publicPrAnalysis?: boolean;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
@@ -135,8 +135,11 @@ export type HealthResponse = {
 
 export type SettingsSnapshot = {
   llm: {
-    provider?: "deepseek" | "openai" | "pi" | "none";
-    piModel?: string;
+    provider?: string;
+    llmApiKeyConfigured: boolean;
+    llmModel?: string;
+    anthropicModel?: string;
+    anthropicApiKeyConfigured: boolean;
     deepseekBaseUrl: string;
     deepseekModel: string;
     openaiModel: string;
@@ -165,7 +168,10 @@ export type SettingsSnapshot = {
 export type SettingsPatch = {
   llm?: {
     provider?: SettingsSnapshot["llm"]["provider"];
-    piModel?: string;
+    llmApiKey?: string | null;
+    llmModel?: string | null;
+    anthropicModel?: string | null;
+    anthropicApiKey?: string | null;
     deepseekBaseUrl?: string;
     deepseekModel?: string;
     openaiModel?: string;
@@ -381,6 +387,9 @@ export const api = {
   },
   async repositoryPullRequests(repositoryId: string, signal?: AbortSignal): Promise<RepositoryPullRequestsResponse> {
     return repositoryPullRequestsResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/pull-requests`, { signal }));
+  },
+  async llmCatalog(): Promise<LlmCatalogResponse> {
+    return llmCatalogResponseSchema.parse(await request("/llm/catalog"));
   },
   async reviewPreparation(repositoryId: string, signal?: AbortSignal): Promise<ReviewPreparationResponse> {
     return reviewPreparationResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/review-preparation`, { signal }));

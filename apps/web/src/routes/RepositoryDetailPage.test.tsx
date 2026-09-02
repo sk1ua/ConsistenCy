@@ -101,11 +101,11 @@ const preparation = (canStartReview: boolean): ReviewPreparationResponse => ({
   },
   model: {
     default: { provider: "deepseek", model: "deepseek-v4-flash" },
-    providers: {
-      deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-      openai: { configured: false, defaultModel: "gpt-4.1-mini" },
-      pi: { configured: false, defaultModel: "auto" }
-    },
+    providers: [
+      { id: "deepseek", label: "DeepSeek", configured: true, defaultModel: "deepseek-v4-flash" },
+      { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+      { id: "anthropic", label: "Anthropic", configured: false, defaultModel: "claude-sonnet-4-5" }
+    ],
     pendingRestart: null
   },
   canStartReview,
@@ -365,11 +365,11 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
       ...preparation(false),
       model: {
         default: { provider: "none" as const, model: "deepseek-v4-flash" },
-        providers: {
-          deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: false, defaultModel: "gpt-4.1-mini" },
-          pi: { configured: false, defaultModel: "auto" }
-        },
+        providers: [
+          { id: "deepseek", label: "DeepSeek", configured: false, defaultModel: "deepseek-v4-flash" },
+          { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+          { id: "anthropic", label: "Anthropic", configured: false, defaultModel: "claude-sonnet-4-5" }
+        ],
         pendingRestart: null
       }
     };
@@ -569,9 +569,11 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
           llmProvider: "deepseek",
           llmModel: "deepseek-v4-flash",
           llmCapabilities: {
-            deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-            openai: { configured: false, defaultModel: "gpt-4.1-mini" },
-          pi: { configured: false, defaultModel: "auto" }
+            providers: [
+              { id: "deepseek", label: "DeepSeek", configured: true, defaultModel: "deepseek-v4-flash" },
+              { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+              { id: "anthropic", label: "Anthropic", configured: false, defaultModel: "claude-sonnet-4-5" }
+            ]
           },
           configuration: {
             githubAppConfigured: false,
@@ -595,11 +597,11 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
       ...preparation(false),
       model: {
         default: { provider: "none" as const, model: "deepseek-v4-flash" },
-        providers: {
-          deepseek: { configured: false, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: false, defaultModel: "gpt-4.1-mini" },
-          pi: { configured: false, defaultModel: "auto" }
-        },
+        providers: [
+          { id: "deepseek", label: "DeepSeek", configured: false, defaultModel: "deepseek-v4-flash" },
+          { id: "openai", label: "OpenAI", configured: false, defaultModel: "gpt-4.1-mini" },
+          { id: "anthropic", label: "Anthropic", configured: false, defaultModel: "claude-sonnet-4-5" }
+        ],
         pendingRestart: { provider: "deepseek" as const, model: "deepseek-test", credentialConfigured: true }
       },
       blockingReasons: ["LLM 提供商配置已保存，重启 API 后生效。"]

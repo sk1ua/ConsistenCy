@@ -540,3 +540,167 @@
 .settings-dialog-content .source-mode-guide > span {
   flex: 1 1 200px;
 }
+
+/* ===== Simplified settings architecture ===== */
+.settings-general-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-advanced {
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.settings-advanced-summary {
+  min-height: 68px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-muted);
+  border-radius: 7px;
+}
+
+.settings-advanced-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted-strong);
+  background: var(--surface);
+}
+
+.settings-advanced-summary strong {
+  display: block;
+  font-size: 13px;
+}
+
+.settings-advanced-summary p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.settings-advanced-trigger svg {
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.settings-advanced.is-open .settings-advanced-trigger svg {
+  transform: rotate(180deg);
+}
+
+.settings-advanced-content {
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* Settings navigation uses Button for behavior but owns its workbench rhythm. */
+.settings-dialog-nav .ds-button.settings-dialog-nav-item {
+  min-height: 38px;
+  padding: 0 11px;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted-strong);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-dialog-nav .ds-button.settings-dialog-nav-item:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+
+.settings-dialog-nav .ds-button.settings-dialog-nav-item--active {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+
+.setting-field .ds-select-menu {
+  width: 100%;
+}
+
+.setting-field .ds-select-menu-trigger {
+  width: 100%;
+  min-height: 40px;
+}
+
+@media (max-width: 680px) {
+  .settings-advanced-summary {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+  .settings-advanced-trigger {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+.settings-switch {
+  width: 36px;
+  height: 20px;
+  position: relative;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+.settings-switch.is-checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+.settings-switch:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.settings-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--white);
+  box-shadow: 0 1px 2px var(--shadow-soft);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+.settings-switch.is-checked .settings-switch-knob {
+  transform: translateX(16px);
+}
+.settings-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-switch-copy {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.settings-switch-copy > div {
+  min-width: 0;
+}
+.settings-switch-row-icon {
+  margin-top: 2px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.settings-switch-copy p {
+  margin: 2px 0 0;
+}

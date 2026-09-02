@@ -25,6 +25,10 @@ import {
 const baseSettings: SettingsSnapshot = {
   llm: {
     provider: "deepseek",
+        anthropicModel: "",
+        anthropicApiKeyConfigured: false,
+        llmApiKeyConfigured: false,
+        llmModel: "",
     deepseekBaseUrl: "https://api.deepseek.com",
     deepseekModel: "deepseek-chat",
     openaiModel: "",
@@ -132,6 +136,8 @@ describe("secretValue", () => {
     const status = {
       DEEPSEEK_API_KEY: true,
       OPENAI_API_KEY: false,
+      ANTHROPIC_API_KEY: false,
+      LLM_API_KEY: false,
       GITHUB_PRIVATE_KEY: true,
       GITHUB_WEBHOOK_SECRET: false,
       GITHUB_PUBLIC_READ_TOKEN: true
@@ -146,6 +152,8 @@ describe("secretValue", () => {
 });const clearedStatus: DesktopCredentialStatus = {
   DEEPSEEK_API_KEY: false,
   OPENAI_API_KEY: false,
+  ANTHROPIC_API_KEY: false,
+  LLM_API_KEY: false,
   GITHUB_PRIVATE_KEY: false,
   GITHUB_WEBHOOK_SECRET: false,
   GITHUB_PUBLIC_READ_TOKEN: false

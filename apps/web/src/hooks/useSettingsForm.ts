@@ -3,27 +3,31 @@ import { api, type HealthResponse, type SettingsPatch, type SettingsSnapshot } f
 import { DESKTOP_CREDENTIAL_KEYS, desktopBridge, type BuildInfoSummary, type ConsistencyDesktopBridge, type DesktopCredentialKey, type DesktopCredentialStatus } from "../desktop";
 import { useI18n } from "../i18n";
 
-export type SecretName = "deepseekApiKey" | "openaiApiKey" | "privateKey" | "webhookSecret" | "publicReadToken";
+export type SecretName = "llmApiKey" | "deepseekApiKey" | "openaiApiKey" | "anthropicApiKey" | "privateKey" | "webhookSecret" | "publicReadToken";
 export type SecretDrafts = Record<SecretName, string>;
 export type ClearSecrets = Record<SecretName, boolean>;
 
 export const emptySecrets: SecretDrafts = {
+  llmApiKey: "",
   deepseekApiKey: "",
   openaiApiKey: "",
+  anthropicApiKey: "",
   privateKey: "",
   webhookSecret: "",
   publicReadToken: ""
 };
 
 export const keepSecrets: ClearSecrets = {
+  llmApiKey: false,
   deepseekApiKey: false,
   openaiApiKey: false,
+  anthropicApiKey: false,
   privateKey: false,
   webhookSecret: false,
   publicReadToken: false
 };
 
-const secretNames: readonly SecretName[] = ["deepseekApiKey", "openaiApiKey", "privateKey", "webhookSecret", "publicReadToken"];
+const secretNames: readonly SecretName[] = ["llmApiKey", "deepseekApiKey", "openaiApiKey", "anthropicApiKey", "privateKey", "webhookSecret", "publicReadToken"];
 
 const desktopCredentialBySecret: Record<SecretName, DesktopCredentialKey> = Object.fromEntries(
   secretNames.map((name, idx) => [name, DESKTOP_CREDENTIAL_KEYS[idx]])
@@ -34,14 +38,16 @@ export function withDesktopCredentialStatus(settings: SettingsSnapshot, status: 
     ...settings,
     llm: {
       ...settings.llm,
-      deepseekApiKeyConfigured: settings.llm.deepseekApiKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[0]],
-      openaiApiKeyConfigured: settings.llm.openaiApiKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[1]]
+      llmApiKeyConfigured: settings.llm.llmApiKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[0]],
+      deepseekApiKeyConfigured: settings.llm.deepseekApiKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[1]],
+      openaiApiKeyConfigured: settings.llm.openaiApiKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[2]],
+      anthropicApiKeyConfigured: settings.llm.anthropicApiKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[3]]
     },
     github: {
       ...settings.github,
-      privateKeyConfigured: settings.github.privateKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[2]],
-      webhookSecretConfigured: settings.github.webhookSecretConfigured || status[DESKTOP_CREDENTIAL_KEYS[3]],
-      publicReadTokenConfigured: settings.github.publicReadTokenConfigured || status[DESKTOP_CREDENTIAL_KEYS[4]]
+      privateKeyConfigured: settings.github.privateKeyConfigured || status[DESKTOP_CREDENTIAL_KEYS[4]],
+      webhookSecretConfigured: settings.github.webhookSecretConfigured || status[DESKTOP_CREDENTIAL_KEYS[5]],
+      publicReadTokenConfigured: settings.github.publicReadTokenConfigured || status[DESKTOP_CREDENTIAL_KEYS[6]]
     }
   };
 }
@@ -88,13 +94,16 @@ export function buildSettingsPatch(
   return {
     llm: {
       provider: draft.llm.provider,
-      piModel: draft.llm.piModel,
+      llmModel: draft.llm.llmModel || null,
+      anthropicModel: draft.llm.anthropicModel || null,
       deepseekBaseUrl: draft.llm.deepseekBaseUrl,
       deepseekModel: draft.llm.deepseekModel,
       openaiModel: draft.llm.openaiModel,
         ...(hasBridge ? {} : {
+          llmApiKey: secretUpdates.llmApiKey,
           deepseekApiKey: secretUpdates.deepseekApiKey,
-          openaiApiKey: secretUpdates.openaiApiKey
+          openaiApiKey: secretUpdates.openaiApiKey,
+          anthropicApiKey: secretUpdates.anthropicApiKey
         })
     },
     github: {
@@ -135,12 +144,14 @@ export function computeReadiness(
 
   const llmReady = Boolean(draft && settings && (
     draft.llm.provider === "deepseek"
-      ? secretReady("deepseekApiKey", settings.llm.deepseekApiKeyConfigured)
+      ? secretReady("deepseekApiKey", settings.llm.deepseekApiKeyConfigured) || secretReady("llmApiKey", settings.llm.llmApiKeyConfigured)
       : draft.llm.provider === "openai"
-        ? secretReady("openaiApiKey", settings.llm.openaiApiKeyConfigured)
-        : draft.llm.provider === "pi"
-          ? Boolean(draft.llm.piModel?.trim()) || health?.llmProvider === "pi"
-          : false
+        ? secretReady("openaiApiKey", settings.llm.openaiApiKeyConfigured) || secretReady("llmApiKey", settings.llm.llmApiKeyConfigured)
+        : draft.llm.provider === "anthropic"
+          ? secretReady("anthropicApiKey", settings.llm.anthropicApiKeyConfigured) || secretReady("llmApiKey", settings.llm.llmApiKeyConfigured)
+          : draft.llm.provider && draft.llm.provider !== "none"
+            ? secretReady("llmApiKey", settings.llm.llmApiKeyConfigured) || health?.llmProvider === draft.llm.provider
+            : false
   ));
   const githubAppReady = Boolean(draft && settings && draft.github.appId
     && secretReady("privateKey", settings.github.privateKeyConfigured)

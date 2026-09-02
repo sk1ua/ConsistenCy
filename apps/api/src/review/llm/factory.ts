@@ -1,8 +1,8 @@
+import { createHash } from "node:crypto";
 import type { AppConfig } from "../../config/env";
 import type { ReviewModelOverride } from "@consistency/schema";
-import { DeepSeekProvider } from "./deepseekProvider";
-import { OpenAIProvider } from "./openaiProvider";
 import { PiRuntimeProvider } from "./piProvider";
+import { configuredProviderIds, hasCatalogProvider } from "./piCatalog";
 import type { LLMProvider } from "./types";
 
 export class ReviewModelResolutionError extends Error {
@@ -13,7 +13,8 @@ export class ReviewModelResolutionError extends Error {
 }
 
 export type ResolvedReviewModel = {
-  provider: "deepseek" | "openai" | "pi";
+  provider: string;
+  /** Empty string lets the Pi runtime pick the provider's first available model. */
   model: string;
 };
 
@@ -21,115 +22,76 @@ export function resolveReviewModel(options: {
   config: AppConfig;
   override?: ReviewModelOverride;
 }): ResolvedReviewModel {
-  const providerName = options.override?.provider ?? options.config.LLM_PROVIDER;
-  if (!providerName) {
+  const provider = (options.override?.provider ?? options.config.LLM_PROVIDER ?? "").trim().toLowerCase();
+  if (!provider) {
     throw new ReviewModelResolutionError(
-      "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能执行审查。请前往设置页配置。",
+      "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider 后才能执行审查。请前往设置页配置。",
       "LLM_NOT_CONFIGURED"
     );
   }
 
-  if (providerName === "deepseek") {
-    if (!options.config.DEEPSEEK_API_KEY) {
-      throw new ReviewModelResolutionError(
-        "DeepSeek API 密钥未配置，无法使用 DeepSeek 执行审查。请在设置页配置密钥或选择已配置的提供商。",
-        "LLM_PROVIDER_NOT_CONFIGURED"
-      );
-    }
-    const model = options.override?.name ?? options.override?.model ?? options.config.DEEPSEEK_MODEL;
-    if (!model || !model.trim()) {
-      throw new ReviewModelResolutionError("DeepSeek model name must not be empty", "INVALID_REVIEW_MODEL");
-    }
-    return { provider: "deepseek", model: model.trim() };
-  }
-
-  if (providerName === "openai") {
-    if (!options.config.OPENAI_API_KEY) {
-      throw new ReviewModelResolutionError(
-        "OpenAI API 密钥未配置，无法使用 OpenAI 执行审查。请在设置页配置密钥或选择已配置的提供商。",
-        "LLM_PROVIDER_NOT_CONFIGURED"
-      );
-    }
-    const model = options.override?.name ?? options.override?.model ?? options.config.OPENAI_MODEL;
-    if (!model || !model.trim()) {
-      throw new ReviewModelResolutionError("OpenAI model name must not be empty", "INVALID_REVIEW_MODEL");
-    }
-    return { provider: "openai", model: model.trim() };
-  }
-
-  if (providerName === "pi") {
-    const model = options.override?.name ?? options.override?.model ?? options.config.CONSISTENCY_PI_MODEL ?? "auto";
-    if (model !== "auto" && (!model.trim() || !model.includes("/"))) {
-      throw new ReviewModelResolutionError("Pi model must use provider/model format", "INVALID_REVIEW_MODEL");
-    }
-    return { provider: "pi", model: model.trim() };
-  }
-
-  throw new ReviewModelResolutionError(`Unsupported provider: ${providerName}`, "INVALID_REVIEW_MODEL");
+  const pinnedModel = options.override?.name ?? options.override?.model
+    ?? providerModelPin(options.config, provider)
+    ?? "";
+  return { provider, model: pinnedModel.trim() };
 }
 
-function piOptions(config: AppConfig, model?: string) {
-  return {
-    authPath: config.CONSISTENCY_PI_AUTH_PATH,
-    modelsPath: config.CONSISTENCY_PI_MODELS_PATH,
-    modelsStorePath: config.CONSISTENCY_PI_MODELS_STORE_PATH,
-    model: model === "auto" ? undefined : model,
-    refreshOnStart: config.CONSISTENCY_PI_REFRESH_ON_START === "true"
-  };
+/** Provider-specific model pin from server-side environment configuration. */
+function providerModelPin(config: AppConfig, provider: string): string | undefined {
+  if (provider === "deepseek") return config.DEEPSEEK_MODEL;
+  if (provider === "openai") return config.OPENAI_MODEL;
+  if (provider === "anthropic") return config.ANTHROPIC_MODEL;
+  return config.LLM_MODEL;
+}
+
+export function providerUnconfiguredError(provider: string): ReviewModelResolutionError {
+  return new ReviewModelResolutionError(
+    `${provider} 尚未配置 API 密钥，无法执行审查。请在设置页配置该服务商的密钥。`,
+    "LLM_PROVIDER_NOT_CONFIGURED"
+  );
 }
 
 const piProviders = new Map<string, PiRuntimeProvider>();
 
-function piProvider(config: AppConfig, model?: string): PiRuntimeProvider {
+/**
+ * One provider adapter per (provider, model, key-fingerprint). The underlying
+ * Pi runtime is shared (see piCatalog.ts); adapters only pin the selection.
+ * With no pinned model the runtime selects the provider's first authenticated
+ * catalog model.
+ */
+function piProvider(config: AppConfig, provider: string, model: string): PiRuntimeProvider {
   const key = [
-    config.CONSISTENCY_PI_AUTH_PATH ?? "default",
-    config.CONSISTENCY_PI_MODELS_PATH ?? "default",
-    config.CONSISTENCY_PI_MODELS_STORE_PATH ?? "default",
-    model ?? "auto"
+    provider,
+    model,
+    createHash("sha256").update(JSON.stringify([config.LLM_PROVIDER ?? "", config.LLM_API_KEY ?? "", config.DEEPSEEK_API_KEY ?? "", config.OPENAI_API_KEY ?? "", config.ANTHROPIC_API_KEY ?? ""])).digest("hex").slice(0, 16)
   ].join("|");
   const existing = piProviders.get(key);
   if (existing) return existing;
-  const created = PiRuntimeProvider.fromOptions(piOptions(config, model));
+  const created = PiRuntimeProvider.fromShared(config, provider, model || undefined);
   piProviders.set(key, created);
   return created;
 }
+
 export function createLLMProvider(config: AppConfig): LLMProvider | undefined {
-  if (config.LLM_PROVIDER === "deepseek" && config.DEEPSEEK_API_KEY) {
-    return new DeepSeekProvider({
-      apiKey: config.DEEPSEEK_API_KEY,
-      baseUrl: config.DEEPSEEK_BASE_URL,
-      model: config.DEEPSEEK_MODEL
-    });
-  }
-  if (config.LLM_PROVIDER === "openai" && config.OPENAI_API_KEY) {
-    return new OpenAIProvider({ apiKey: config.OPENAI_API_KEY, model: config.OPENAI_MODEL });
-  }
-  if (config.LLM_PROVIDER === "pi") {
-    return piProvider(config, config.CONSISTENCY_PI_MODEL);
-  }
-  return undefined;
+  const provider = config.LLM_PROVIDER?.trim().toLowerCase();
+  if (!provider) return undefined;
+  return piProvider(config, provider, resolveReviewModel({ config }).model);
 }
 
 export function createReviewLLMProvider(
   config: AppConfig,
-  resolved?: { provider?: "deepseek" | "openai" | "pi"; model?: string }
+  resolved?: { provider?: string; model?: string }
 ): LLMProvider | undefined {
-  const providerName = resolved?.provider ?? config.LLM_PROVIDER;
-  if (providerName === "deepseek" && config.DEEPSEEK_API_KEY) {
-    return new DeepSeekProvider({
-      apiKey: config.DEEPSEEK_API_KEY,
-      baseUrl: config.DEEPSEEK_BASE_URL,
-      model: resolved?.model ?? config.DEEPSEEK_MODEL
-    });
-  }
-  if (providerName === "openai" && config.OPENAI_API_KEY) {
-    return new OpenAIProvider({
-      apiKey: config.OPENAI_API_KEY,
-      model: resolved?.model ?? config.OPENAI_MODEL
-    });
-  }
-  if (providerName === "pi") {
-    return piProvider(config, resolved?.model ?? config.CONSISTENCY_PI_MODEL);
-  }
-  return undefined;
+  const provider = (resolved?.provider ?? config.LLM_PROVIDER ?? "").trim().toLowerCase();
+  if (!provider) return undefined;
+  const model = resolved?.model ?? providerModelPin(config, provider) ?? "";
+  return piProvider(config, provider, model);
+}
+
+/** Honest readiness: a provider counts as configured only when a key exists
+ *  in ConsistenCy settings/env or Pi's catalog actually lists it. */
+export async function isProviderConfigured(config: AppConfig, provider: string): Promise<boolean> {
+  const normalized = provider.trim().toLowerCase();
+  if (configuredProviderIds(config).includes(normalized)) return true;
+  return hasCatalogProvider(config, normalized);
 }

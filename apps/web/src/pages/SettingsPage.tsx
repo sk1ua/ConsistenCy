@@ -8,6 +8,8 @@ import { RuntimeSettingsSection } from "../components/settings/RuntimeSettingsSe
 import { AppearanceSettingsSection } from "../components/settings/AppearanceSettingsSection";
 import { DesktopSettingsSection } from "../components/settings/DesktopSettingsSection";
 import { AboutSettingsSection } from "../components/settings/AboutSettingsSection";
+import { AdvancedSettingsDisclosure } from "../components/settings/AdvancedSettingsDisclosure";
+import { Button } from "../design-system/Button";
 import { desktopBridge } from "../desktop";
 import { useI18n } from "../i18n";
 import { publicPrAccessModeView, useSettingsForm } from "../hooks/useSettingsForm";
@@ -72,21 +74,15 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
         <div className="settings-lifecycle-notice">
           <span>{t("Configuration saved. Restart the API to apply.")}</span>
           <small>
-            {t("Saved configuration")}: {settings.llm.provider === "none" ? t("Not active") : <><strong>{settings.llm.provider === "deepseek" ? "DeepSeek" : settings.llm.provider === "openai" ? "OpenAI" : "Pi"}</strong> &middot; {settings.llm.provider === "deepseek" ? settings.llm.deepseekModel : settings.llm.provider === "openai" ? settings.llm.openaiModel : settings.llm.piModel || "auto"}</>}
+            {t("Saved configuration")}: {settings.llm.provider === "none" ? t("Not active") : <><strong>{settings.llm.provider === "deepseek" ? "DeepSeek" : settings.llm.provider === "openai" ? "OpenAI" : "Anthropic"}</strong> &middot; {settings.llm.provider === "deepseek" ? settings.llm.deepseekModel : settings.llm.provider === "openai" ? settings.llm.openaiModel : settings.llm.anthropicModel || "catalog default"}</>}
             {" | "}
             {t("Active runtime")}: {health.llmProvider === "none" ? t("Not active") : <><strong>{health.llmProvider === "deepseek" ? "DeepSeek" : health.llmProvider === "openai" ? "OpenAI" : health.llmProvider}</strong> &middot; {health.llmModel}</>}
           </small>
         </div>
         {desktopBridge()?.restartRuntime ? (
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={restarting}
-            onClick={() => void handleRestartRuntime()}
-          >
-            {restarting ? <LoaderCircle className="spinning" size={13} /> : <RotateCcw size={13} />}
+          <Button type="button" variant="outline" size="sm" loading={restarting} icon={<RotateCcw size={13} />} onClick={() => void handleRestartRuntime()}>
             {t(restarting ? "Restarting..." : "Restart Runtime")}
-          </button>
+          </Button>
         ) : (
           <small className="settings-lifecycle-manual">
             {t("Restart the terminal process to apply.")}
@@ -112,6 +108,7 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
     />
 
     <GitHubSettingsSection
+      mode="core"
       draft={draft}
       settings={settings}
       secrets={secrets}
@@ -127,16 +124,26 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
 
     <ReviewsSettingsSection settings={settings} health={health} />
 
-    <RuntimeSettingsSection
-      draft={draft}
-      settings={settings}
-      health={health}
-      updateRuntime={updateRuntime}
-    />
+    <AdvancedSettingsDisclosure>
+      <RuntimeSettingsSection draft={draft} settings={settings} health={health} updateRuntime={updateRuntime} />
+      <GitHubSettingsSection
+        mode="advanced"
+        draft={draft}
+        settings={settings}
+        secrets={secrets}
+        clearSecrets={clearSecrets}
+        updateGithub={updateGithub}
+        updateSecret={updateSecret}
+        updateClear={updateClear}
+        applyGitHubOauthToken={applyGitHubOauthToken}
+        applyGitHubDesktopOauth={applyGitHubDesktopOauth}
+        health={health}
+        restartPending={restartNeeded}
+      />
+      <DesktopSettingsSection />
+    </AdvancedSettingsDisclosure>
 
     <AppearanceSettingsSection />
-
-    <DesktopSettingsSection />
 
     <AboutSettingsSection health={health} buildInfo={buildInfo} />
 
@@ -153,6 +160,6 @@ export function SettingsPage({ health }: { health?: HealthResponse }) {
       </div>
     </section>
 
-    <div className="settings-actions"><span><LockKeyhole size={15} />{t("Secrets are encrypted locally and never returned.")}</span><button className="secondary-button" type="button" onClick={resetChanges}><RotateCcw size={15} />{t("Reset changes")}</button><button className="save-settings" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spinning" size={16} /> : <Save size={16} />}{t(saving ? "Saving" : "Save settings")}</button></div>
+    <div className="settings-actions"><span><LockKeyhole size={15} />{t("Secrets are encrypted locally and never returned.")}</span><Button variant="outline" type="button" icon={<RotateCcw size={15} />} onClick={resetChanges}>{t("Reset changes")}</Button><Button variant="primary" type="submit" icon={<Save size={15} />} loading={saving}>{t(saving ? "Saving" : "Save settings")}</Button></div>
   </form>;
 }

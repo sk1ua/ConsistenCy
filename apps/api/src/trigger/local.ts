@@ -13,7 +13,7 @@ export type LocalTriggerInput = {
    *  job); omit both for the working tree. */
   baseRef?: string;
   headRef?: string;
-  llmProvider?: "deepseek" | "openai" | "pi";
+  llmProvider?: string;
   llmModel?: string;
 };
 

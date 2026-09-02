@@ -45,7 +45,8 @@ export const errorResponseSchema = z.object({
 }).strict();
 
 export const reviewModelOverrideSchema = z.object({
-  provider: z.enum(["deepseek", "openai", "pi"]).optional(),
+  /** Any provider id from the bundled Pi catalog; validated at runtime. */
+  provider: z.string().trim().min(1).max(64).optional(),
   name: z.string().trim().min(1).max(100).optional(),
   model: z.string().trim().min(1).max(100).optional()
 }).strict();
@@ -72,7 +73,8 @@ export const localReviewResponseSchema = z.object({
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: z.literal("disabled"),
-  llmProvider: z.enum(["deepseek", "openai", "pi"]).optional(),
+  /** Pi catalog provider id. */
+  llmProvider: z.string().trim().min(1).max(64).optional(),
   llmModel: z.string().trim().min(1).optional(),
   status: z.literal("queued")
 }).strict();
@@ -84,7 +86,8 @@ export const publicPrResponseSchema = z.object({
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   publicationPolicy: z.literal("disabled"),
-  llmProvider: z.enum(["deepseek", "openai", "pi"]).optional(),
+  /** Pi catalog provider id. */
+  llmProvider: z.string().trim().min(1).max(64).optional(),
   llmModel: z.string().trim().min(1).optional(),
   status: z.literal("queued")
 }).strict();
@@ -489,26 +492,43 @@ export const reviewPreparationSourcePullRequestSchema = z.object({
   pullRequestCount: z.number().int().nonnegative().optional()
 }).strict();
 
+/**
+ * Providers come from the bundled Pi runtime's built-in catalog; the id set
+ * is dynamic (33+ providers) and must never be a closed enum.
+ */
 export const reviewPreparationModelProviderSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(128).optional(),
   configured: z.boolean(),
   defaultModel: z.string().optional()
 }).strict();
 
 export const reviewPreparationModelSchema = z.object({
   default: z.object({
-    provider: z.enum(["deepseek", "openai", "pi", "none"]),
+    provider: z.string().trim().min(1).max(64),
     model: z.string()
   }).strict(),
-  providers: z.object({
-    deepseek: reviewPreparationModelProviderSchema,
-    openai: reviewPreparationModelProviderSchema,
-    pi: reviewPreparationModelProviderSchema
-  }).strict(),
+  providers: z.array(reviewPreparationModelProviderSchema),
   pendingRestart: z.object({
-    provider: z.enum(["deepseek", "openai", "pi"]),
+    provider: z.string().trim().min(1).max(64),
     model: z.string().trim().min(1),
     credentialConfigured: z.boolean()
   }).strict().nullable()
+}).strict();
+
+/** GET /llm/catalog — safe Pi catalog metadata for Web dropdowns. */
+export type LlmCatalogResponse = z.infer<typeof llmCatalogResponseSchema>;
+
+export const llmCatalogResponseSchema = z.object({
+  providers: z.array(z.object({
+    id: z.string().trim().min(1).max(64),
+    label: z.string().trim().min(1).max(128),
+    modelCount: z.number().int().min(0),
+    models: z.array(z.object({
+      id: z.string().trim().min(1).max(256),
+      name: z.string().trim().min(1).max(256)
+    }).strict())
+  }).strict())
 }).strict();
 
 export const reviewPreparationRepositorySchema = z.object({

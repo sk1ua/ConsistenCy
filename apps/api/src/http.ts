@@ -112,6 +112,7 @@ import { listWorkflowNodeTypes } from "./workflow-runtime/registry";
 import type { LLMProvider } from "./review/llm/types";
 import {
   workflowRuntimeCopilotChatRequestSchema,
+  llmCatalogResponseSchema,
   workflowRuntimeCopilotChatResponseSchema,
   workflowRuntimeCopilotProposalRequestSchema,
   workflowRuntimeCopilotProposalResponseSchema,
@@ -707,9 +708,8 @@ export type ApiHealthDetails = {
   llmProvider: string;
   llmModel?: string;
   llmCapabilities?: {
-    deepseek?: { configured: boolean; defaultModel: string };
-    openai?: { configured: boolean; defaultModel: string };
-    pi?: { configured: boolean; defaultModel: string };
+    /** Dynamic projection over the bundled Pi catalog (33+ providers). */
+    providers?: Array<{ id: string; label?: string; configured: boolean; defaultModel?: string }>;
   };
   publicPrAnalysis?: boolean;
   publicPrAccessMode?: "anonymous" | "pat" | "disabled";
@@ -741,6 +741,8 @@ export type CreateApiServerOptions = {
   nodeEnv?: "development" | "test" | "production";
   allowedOrigins?: string[];
   healthDetails?: () => ApiHealthDetails;
+  /** Pi built-in catalog projection for dynamic provider lists (safe metadata). */
+  llmCatalogProviders?: () => Array<{ id: string; label: string; modelCount: number; models: Array<{ id: string; name: string }> }>;
   workspaceRoot?: string;
   settingsWritable?: boolean;
   settings?: {
@@ -753,7 +755,7 @@ export type CreateApiServerOptions = {
   publicRepositoryConnect?: (input: string) => Promise<Repository>;
   publicPrAnalysisEnabled?: boolean;
   llmProviderConfigured?: boolean | (() => boolean);
-  localReview?: (input: { repoPath: string; repositoryId?: string; baseRef?: string; headRef?: string; llmProvider?: "deepseek" | "openai" | "pi"; llmModel?: string }) => Promise<{ jobId: string }>;
+  localReview?: (input: { repoPath: string; repositoryId?: string; baseRef?: string; headRef?: string; llmProvider?: string; llmModel?: string }) => Promise<{ jobId: string }>;
   auditStore?: AuditDomainStore;
   auditPlanner?: AuditRunPlanner;
   automationScheduler?: { available: boolean };
@@ -1168,7 +1170,7 @@ const routes: Route[] = [
       if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
       if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1209,7 +1211,7 @@ const routes: Route[] = [
       const provider = options.copilotProvider?.(resolvedModel);
       if (!provider) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1242,7 +1244,7 @@ const routes: Route[] = [
       if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
       if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1283,7 +1285,7 @@ const routes: Route[] = [
       const provider = options.copilotProvider?.(resolvedModel);
       if (!provider) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能生成工作流提案。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           503
         );
@@ -1733,45 +1735,59 @@ const routes: Route[] = [
 
       const health = options.healthDetails?.();
       const settings = options.settings?.get();
-      const deepseekConfigured = health?.llmCapabilities?.deepseek?.configured === true;
-      const openaiConfigured = health?.llmCapabilities?.openai?.configured === true;
-      const piConfigured = health?.llmCapabilities?.pi?.configured === true;
-      const activeProvider = health?.llmProvider === "deepseek" || health?.llmProvider === "openai" || health?.llmProvider === "pi"
+      // Provider readiness comes from health's dynamic Pi-catalog projection;
+      // the catalog list (id/label) is shared with GET /llm/catalog.
+      const healthProviders = health?.llmCapabilities?.providers ?? [];
+      const catalogProviders = options.llmCatalogProviders?.() ?? [];
+      const providerSource = catalogProviders.length > 0
+        ? catalogProviders.map(provider => ({ id: provider.id, label: provider.label as string | undefined }))
+        : healthProviders.map(provider => ({ id: provider.id, label: provider.label }));
+      const providersPayload = providerSource.map(provider => {
+        const healthEntry = healthProviders.find(entry => entry.id === provider.id);
+        return {
+          id: provider.id,
+          label: provider.label,
+          configured: healthEntry?.configured === true,
+          ...(healthEntry?.defaultModel ? { defaultModel: healthEntry.defaultModel } : {})
+        };
+      });
+      const activeProvider = typeof health?.llmProvider === "string" && health.llmProvider !== "none"
         ? health.llmProvider
         : undefined;
       const hasConfiguredLlm = activeProvider !== undefined;
-      const piModel = health?.llmCapabilities?.pi?.defaultModel ?? "auto";
-      const defaultModelName = activeProvider === "openai"
-        ? health?.llmModel ?? health?.llmCapabilities?.openai?.defaultModel ?? "gpt-4.1-mini"
-        : activeProvider === "deepseek"
-          ? health?.llmModel ?? health?.llmCapabilities?.deepseek?.defaultModel ?? "deepseek-v4-flash"
-          : activeProvider === "pi"
-            ? health?.llmModel ?? health?.llmCapabilities?.pi?.defaultModel ?? "auto"
-            : "";
-      const pendingProvider = settings?.llm.provider === "deepseek" || settings?.llm.provider === "openai" || settings?.llm.provider === "pi"
+      const defaultModelName = activeProvider
+        ? health?.llmModel ?? healthProviders.find(entry => entry.id === activeProvider)?.defaultModel ?? ""
+        : "";
+      const pendingProvider = typeof settings?.llm.provider === "string" && settings.llm.provider !== "none"
         ? settings.llm.provider
         : undefined;
       const pendingRestart = settings?.restartRequired === true && pendingProvider
         ? {
             provider: pendingProvider,
-            model: pendingProvider === "deepseek"
-              ? settings.llm.deepseekModel
-              : pendingProvider === "openai"
-                ? settings.llm.openaiModel
-                : settings.llm.piModel ?? "auto",
+            model: settings.llm.llmModel
+              || (pendingProvider === "deepseek" ? settings.llm.deepseekModel : "")
+              || (pendingProvider === "openai" ? settings.llm.openaiModel : "")
+              || settings.llm.anthropicModel
+              || defaultModelName
+              || "catalog default",
             credentialConfigured: pendingProvider === "deepseek"
               ? settings.llm.deepseekApiKeyConfigured
               : pendingProvider === "openai"
                 ? settings.llm.openaiApiKeyConfigured
-                : piConfigured
+                : pendingProvider === "anthropic"
+                  ? settings.llm.anthropicApiKeyConfigured
+                  : settings.llm.llmApiKeyConfigured
           }
         : null;
 
       const blockingReasons: string[] = [];
       if (!hasConfiguredLlm) {
+        const pendingLabel = pendingRestart
+          ? providersPayload.find(entry => entry.id === pendingRestart.provider)?.label ?? pendingRestart.provider
+          : undefined;
         blockingReasons.push(pendingRestart
-          ? `已保存 ${pendingRestart.provider === "deepseek" ? "DeepSeek" : pendingRestart.provider === "openai" ? "OpenAI" : "Pi"} 配置，重启 API 后生效。`
-          : "尚未配置大语言模型 (DeepSeek、OpenAI 或 Pi)。请前往设置页配置。");
+          ? `已保存 ${pendingLabel} 配置，重启 API 后生效。`
+          : "尚未配置大语言模型。请前往设置页从 Pi 模型目录中选择服务商并配置密钥。");
       }
       if (!workingTree.available && !branchSource.available && !prSource.available) {
         blockingReasons.push("当前无可用的审查来源 (工作区无变更且未检测到分支差异)");
@@ -1796,20 +1812,7 @@ const routes: Route[] = [
             provider: activeProvider ?? "none",
             model: defaultModelName
           },
-          providers: {
-            deepseek: {
-              configured: deepseekConfigured,
-              defaultModel: health?.llmCapabilities?.deepseek?.defaultModel ?? "deepseek-v4-flash"
-            },
-            openai: {
-              configured: openaiConfigured,
-              defaultModel: health?.llmCapabilities?.openai?.defaultModel ?? "gpt-4.1-mini"
-            },
-            pi: {
-              configured: piConfigured,
-              defaultModel: piModel
-            }
-          },
+          providers: providersPayload,
           pendingRestart
         },
         canStartReview,
@@ -2223,7 +2226,7 @@ const routes: Route[] = [
       }
       if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能执行审查。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能执行审查。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           400
         );
@@ -2319,7 +2322,7 @@ const routes: Route[] = [
       }
       if (!isLlmProviderConfigured(options)) {
         throw new ApiError(
-          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Pi) 后才能执行审查。请前往设置页配置。",
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能执行审查。请前往设置页配置。",
           "LLM_NOT_CONFIGURED",
           400
         );
@@ -2613,6 +2616,15 @@ const routes: Route[] = [
     handler: ({ request, response, allowedOrigins, options }) => {
       if (!options.settings) throw new ApiError("Settings service is unavailable", "SETTINGS_UNAVAILABLE", 404);
       sendJson(request, response, 200, { settings: toRendererSettings(options.settings.get()) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/llm/catalog",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      const providers = options.llmCatalogProviders?.() ?? [];
+      sendJson(request, response, 200, llmCatalogResponseSchema.parse({ providers }), allowedOrigins);
     }
   },
   {

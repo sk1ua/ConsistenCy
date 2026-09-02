@@ -12,9 +12,10 @@ import { RuntimeSettingsSection } from "./settings/RuntimeSettingsSection";
 import { AppearanceSettingsSection } from "./settings/AppearanceSettingsSection";
 import { DesktopSettingsSection } from "./settings/DesktopSettingsSection";
 import { AboutSettingsSection } from "./settings/AboutSettingsSection";
+import { AdvancedSettingsDisclosure } from "./settings/AdvancedSettingsDisclosure";
 import { desktopBridge } from "../desktop";
 
-export type SettingsSectionId = "models" | "github" | "reviews" | "runtime" | "appearance" | "desktop" | "about";
+export type SettingsSectionId = "general" | "reviews" | "appearance" | "about";
 
 interface SettingsNavItem {
   id: SettingsSectionId;
@@ -23,12 +24,9 @@ interface SettingsNavItem {
 }
 
 const SECTION_ITEMS: readonly SettingsNavItem[] = [
-  { id: "models", labelKey: "Models", disabled: false },
-  { id: "github", labelKey: "GitHub", disabled: false },
+  { id: "general", labelKey: "General", disabled: false },
   { id: "reviews", labelKey: "Reviews", disabled: false },
-  { id: "runtime", labelKey: "Runtime", disabled: false },
   { id: "appearance", labelKey: "Appearance", disabled: false },
-  { id: "desktop", labelKey: "Desktop", disabled: false },
   { id: "about", labelKey: "About", disabled: false }
 ];
 
@@ -40,7 +38,7 @@ export interface SettingsDialogProps {
 
 export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps) {
   const { t } = useI18n();
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>("models");
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>("general");
 
   const form = useSettingsForm({ health });
 
@@ -100,17 +98,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
       <div className="settings-dialog-layout">
         <nav className="settings-dialog-nav" aria-label={t("Settings sections")}>
           {SECTION_ITEMS.map(item => (
-            <button
-              key={item.id}
-              type="button"
-              className={`settings-dialog-nav-item ${activeSection === item.id ? "settings-dialog-nav-item--active" : ""} ${item.disabled ? "settings-dialog-nav-item--disabled" : ""}`}
-              onClick={() => handleSectionClick(item)}
-              disabled={item.disabled}
-              aria-current={activeSection === item.id ? "true" : undefined}
-            >
-              <span>{t(item.labelKey)}</span>
-              {item.disabled && <small>{t("Coming soon")}</small>}
-            </button>
+            <Button key={item.id} type="button" variant="ghost" size="sm" fullWidth className={`settings-dialog-nav-item ${activeSection === item.id ? "settings-dialog-nav-item--active" : ""} ${item.disabled ? "settings-dialog-nav-item--disabled" : ""}`} onClick={() => handleSectionClick(item)} disabled={item.disabled} aria-current={activeSection === item.id ? "true" : undefined}><span>{t(item.labelKey)}</span>{item.disabled && <small>{t("Coming soon")}</small>}</Button>
           ))}
         </nav>
         <div className="settings-dialog-content">
@@ -121,8 +109,6 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
               About mirrors buildInfo and /health. */}
           {activeSection === "appearance" ? (
             <AppearanceSettingsSection />
-          ) : activeSection === "desktop" ? (
-            <DesktopSettingsSection />
           ) : activeSection === "about" ? (
             <AboutSettingsSection health={health} buildInfo={buildInfo} />
           ) : loading ? (
@@ -136,21 +122,13 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   <div className="settings-lifecycle-notice">
                     <span>{t("Configuration saved. Restart the API to apply.")}</span>
                     <small>
-                      {t("Saved configuration")}: {settings.llm.provider === "none" ? t("Not active") : <><strong>{settings.llm.provider === "deepseek" ? "DeepSeek" : settings.llm.provider === "openai" ? "OpenAI" : "Pi"}</strong> &middot; {settings.llm.provider === "deepseek" ? settings.llm.deepseekModel : settings.llm.provider === "openai" ? settings.llm.openaiModel : settings.llm.piModel || "auto"}</>}
+                      {t("Saved configuration")}: {settings.llm.provider === "none" ? t("Not active") : <><strong>{settings.llm.provider === "deepseek" ? "DeepSeek" : settings.llm.provider === "openai" ? "OpenAI" : "Anthropic"}</strong> &middot; {settings.llm.provider === "deepseek" ? settings.llm.deepseekModel : settings.llm.provider === "openai" ? settings.llm.openaiModel : settings.llm.anthropicModel || "catalog default"}</>}
                       {" | "}
                       {t("Active runtime")}: {health?.llmProvider === "none" || !health ? t("Not active") : <><strong>{health.llmProvider === "deepseek" ? "DeepSeek" : health.llmProvider === "openai" ? "OpenAI" : health.llmProvider}</strong> &middot; {health.llmModel}</>}
                     </small>
                   </div>
                   {desktopBridge()?.restartRuntime ? (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={restarting}
-                      onClick={() => void handleRestartRuntime()}
-                    >
-                      {restarting ? <LoaderCircle className="spinning" size={13} /> : <RotateCcw size={13} />}
-                      {t(restarting ? "Restarting..." : "Restart Runtime")}
-                    </button>
+                    <Button type="button" variant="outline" size="sm" icon={<RotateCcw size={13} />} loading={restarting} onClick={() => void handleRestartRuntime()}>{t(restarting ? "Restarting..." : "Restart Runtime")}</Button>
                   ) : (
                     <small className="settings-lifecycle-manual">
                       {t("Restart the terminal process to apply.")}
@@ -164,7 +142,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                 </div>
               )}
               {draft.overriddenByEnvironment.length > 0 && <div className="settings-message warning">{t("Environment variables override: {keys}", { keys: draft.overriddenByEnvironment.join(", ") })}</div>}
-              {activeSection === "models" && (
+              {activeSection === "general" && <div className="settings-general-stack">
                 <ModelSettingsSection
                   draft={draft}
                   settings={settings}
@@ -174,9 +152,8 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   updateSecret={updateSecret}
                   updateClear={updateClear}
                 />
-              )}
-              {activeSection === "github" && (
                 <GitHubSettingsSection
+                  mode="core"
                   draft={draft}
                   settings={settings}
                   secrets={secrets}
@@ -189,25 +166,26 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   health={health}
                   restartPending={restartNeeded}
                 />
-              )}
-              {activeSection === "reviews" && (
-                <ReviewsSettingsSection settings={settings} health={health} />
-              )}
-              {activeSection === "runtime" && (
-                <RuntimeSettingsSection
-                  draft={draft}
-                  settings={settings}
-                  health={health}
-                  updateRuntime={updateRuntime}
-                />
-              )}
-              {/* Appearance, Desktop and About cannot reach this branch — the
-                  ternary above routes them to renderer-local sections before
-                  the form guard. With Reviews enabled every nav id renders a
-                  real section, so the empty-state below is purely defensive. */}
-              {activeSection !== "models" && activeSection !== "github" && activeSection !== "reviews" && activeSection !== "runtime" && (
-                <div className="empty-state">{t("Coming soon")}</div>
-              )}
+                <AdvancedSettingsDisclosure>
+                  <RuntimeSettingsSection draft={draft} settings={settings} health={health} updateRuntime={updateRuntime} />
+                  <GitHubSettingsSection
+                    mode="advanced"
+                    draft={draft}
+                    settings={settings}
+                    secrets={secrets}
+                    clearSecrets={clearSecrets}
+                    updateGithub={updateGithub}
+                    updateSecret={updateSecret}
+                    updateClear={updateClear}
+                    applyGitHubOauthToken={applyGitHubOauthToken}
+                    applyGitHubDesktopOauth={applyGitHubDesktopOauth}
+                    health={health}
+                    restartPending={restartNeeded}
+                  />
+                  <DesktopSettingsSection />
+                </AdvancedSettingsDisclosure>
+              </div>}
+              {activeSection === "reviews" && <ReviewsSettingsSection settings={settings} health={health} />}
             </>
           )}
         </div>

@@ -46,16 +46,16 @@ export function createReviewSubmissionGate(): ReviewSubmissionGate {
 
 type ReviewComposerValidationInput = {
   preparation: ReviewPreparationResponse;
-  provider: "deepseek" | "openai" | "pi";
+  provider: string;
   model: string;
   useGlobalDefault: boolean;
   zh: boolean;
 };
 
-function providerLabel(provider: "deepseek" | "openai" | "pi"): string {
-  if (provider === "deepseek") return "DeepSeek";
-  if (provider === "openai") return "OpenAI";
-  return "Pi";
+/** Labels come from the API's Pi-catalog projection; ids are the fallback. */
+function providerLabel(provider: string, preparation?: ReviewPreparationResponse): string {
+  const entry = preparation?.model.providers.find(candidate => candidate.id === provider);
+  return entry?.label ?? provider;
 }
 
 export function buildLocalReviewRequest(
@@ -63,7 +63,7 @@ export function buildLocalReviewRequest(
   source: ReviewSource,
   preparation: ReviewPreparationResponse,
   useGlobalDefault: boolean,
-  customProvider: "deepseek" | "openai" | "pi",
+  customProvider: string,
   customModel: string
 ): LocalReviewRequest {
   const request: LocalReviewRequest = { repositoryId };
@@ -86,7 +86,7 @@ export function getReviewComposerValidationMessage({
   zh
 }: ReviewComposerValidationInput): string | null {
   if (useGlobalDefault) return null;
-  if (!preparation.model.providers[provider].configured) {
+  if (!preparation.model.providers.find(entry => entry.id === provider)?.configured) {
     return zh ? "该提供商尚未配置。" : "That provider is not configured.";
   }
   if (model.trim().length === 0) {
@@ -120,12 +120,12 @@ export function ReviewComposerDialog({
     : "branch";
   const [source, setSource] = useState<ReviewSource>(defaultSource);
   const [useGlobalDefault, setUseGlobalDefault] = useState(true);
-  const [customProvider, setCustomProvider] = useState<"deepseek" | "openai" | "pi">("deepseek");
+  const [customProvider, setCustomProvider] = useState("");
   const [customModel, setCustomModel] = useState("");
 
   const configuredProviders = useMemo(() => {
-    if (!preparation) return [] as Array<"deepseek" | "openai" | "pi">;
-    return (["deepseek", "openai", "pi"] as const).filter(provider => preparation.model.providers[provider].configured);
+    if (!preparation) return [] as string[];
+    return preparation.model.providers.filter(entry => entry.configured).map(entry => entry.id);
   }, [preparation]);
 
   const submissionGate = useState(createReviewSubmissionGate)[0];
@@ -144,10 +144,10 @@ export function ReviewComposerDialog({
           : preparation.sources.branch.available ? "branch" : "working-tree";
         setSource(nextSource);
 
-        const firstConfigured = (["deepseek", "openai", "pi"] as const).find(provider => preparation.model.providers[provider].configured);
+        const firstConfigured = preparation.model.providers.find(entry => entry.configured);
         if (firstConfigured) {
-          setCustomProvider(firstConfigured);
-          setCustomModel(preparation.model.providers[firstConfigured].defaultModel ?? "");
+          setCustomProvider(firstConfigured.id);
+          setCustomModel(firstConfigured.defaultModel ?? "");
         }
         setUseGlobalDefault(true);
       }
@@ -191,9 +191,9 @@ export function ReviewComposerDialog({
     setUseGlobalDefault(g);
     onClearError?.();
   };
-  const handleChangeProvider = (p: "deepseek" | "openai" | "pi") => {
+  const handleChangeProvider = (p: string) => {
     setCustomProvider(p);
-    setCustomModel(preparation?.model.providers[p].defaultModel ?? "");
+    setCustomModel(preparation?.model.providers.find(entry => entry.id === p)?.defaultModel ?? "");
     onClearError?.();
   };
   const handleChangeModel = (m: string) => {
@@ -274,7 +274,7 @@ export function ReviewComposerDialog({
                 <span>
                   <strong>{zh ? "使用全局默认" : "Use global default"}</strong>
                   <br />
-                  <span style={{ color: "var(--muted)" }}>{providerLabel(defaultProvider as "deepseek" | "openai" | "pi")} · {defaultModel}</span>
+                  <span style={{ color: "var(--muted)" }}>{providerLabel(defaultProvider ?? "", preparation)} · {defaultModel}</span>
                 </span>
               </label>
               <label style={{ display: "flex", gap: "8px", alignItems: "flex-start", padding: "8px 0" }}>
@@ -285,10 +285,10 @@ export function ReviewComposerDialog({
                 <div style={{ display: "grid", gap: "8px", margin: "4px 0 0 24px" }}>
                   <label>
                     <span style={{ display: "block", color: "var(--muted)", marginBottom: "4px" }}>{zh ? "提供商" : "Provider"}</span>
-                    <select className="ds-input ds-select" value={customProvider} onChange={event => handleChangeProvider(event.target.value as "deepseek" | "openai" | "pi")} disabled={pending || configuredProviders.length === 0}>
-                      {(["deepseek", "openai", "pi"] as const).map(provider => (
-                        <option key={provider} value={provider} disabled={!preparation?.model.providers[provider].configured}>
-                          {providerLabel(provider)}{preparation?.model.providers[provider].configured ? "" : ` (${zh ? "未配置" : "Not configured"})`}
+                    <select className="ds-input ds-select" value={customProvider} onChange={event => handleChangeProvider(event.target.value)} disabled={pending || configuredProviders.length === 0}>
+                      {(preparation?.model.providers ?? []).map(entry => (
+                        <option key={entry.id} value={entry.id} disabled={!entry.configured}>
+                          {entry.label ?? entry.id}{entry.configured ? "" : ` (${zh ? "未配置" : "Not configured"})`}
                         </option>
                       ))}
                     </select>
@@ -306,14 +306,14 @@ export function ReviewComposerDialog({
             <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", color: "var(--warning-strong)" }}>
               <CircleAlert size={15} />
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <span><strong>{providerLabel(pendingRestart.provider)}</strong> &middot; {pendingRestart.model}</span>
+                <span><strong>{providerLabel(pendingRestart.provider, preparation)}</strong> &middot; {pendingRestart.model}</span>
                 <span>{zh ? "配置已保存，需重启后端服务后生效。" : "Configuration saved. Restart the API to apply."}</span>
               </div>
             </div>
           ) : (
             <div style={{ display: "flex", gap: "8px", alignItems: "flex-start", color: "var(--warning-strong)" }}>
               <CircleAlert size={15} />
-              <span>{zh ? "尚未配置大语言模型。请先配置 DeepSeek、OpenAI 或 Pi。" : "No language model is configured. Configure DeepSeek, OpenAI, or Pi before running a review."}</span>
+              <span>{zh ? "尚未配置大语言模型。请先配置 DeepSeek、OpenAI 或 Anthropic。" : "No language model is configured. Configure DeepSeek, OpenAI, or Anthropic before running a review."}</span>
             </div>
           )}
         </fieldset>

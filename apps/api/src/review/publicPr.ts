@@ -56,7 +56,7 @@ export async function enqueuePublicPrReview(options: {
   url: string;
   jobs: ReviewJobStore;
   publicReadToken?: string;
-  llmProvider?: "deepseek" | "openai" | "pi";
+  llmProvider?: string;
   llmModel?: string;
   repositoryStore?: Pick<AuditDomainStore, "findRepositoryByRemoteFullName">;
   clientFactory?: (token?: string) => Pick<PullRequestClient, "getPullRequest">;

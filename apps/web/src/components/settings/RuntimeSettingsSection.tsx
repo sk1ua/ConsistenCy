@@ -26,7 +26,7 @@ export function RuntimeSettingsSection({
   const concurrencyDrift = activeConcurrency !== undefined && activeConcurrency !== settings.runtime.workerConcurrency;
 
   return <section className="settings-group section-block">
-    <div className="settings-group-title"><ServerCog size={18} /><div><span>{t("03 · Runtime")}</span><h3>{t("Local service")}</h3><p>{t("Control storage, workspace isolation and worker throughput.")}</p></div></div>
+    <div className="settings-group-title"><ServerCog size={18} /><div><h3>{t("Local service")}</h3><p>{t("Control storage, workspace isolation and worker throughput.")}</p></div></div>
     <div className="settings-fields">
       <div className="setting-field setting-note"><Database size={17} /><div><strong>{t("Database")}</strong><p>{t(draft.runtime.storage.kind === "memory" ? "In-memory storage configured" : "Local file storage configured")}</p><SettingHelp id="setting-database-help" text="The local filesystem location is owned by the API process and is never sent to the renderer." /></div></div>
       <div className="setting-field setting-note"><ServerCog size={17} /><div><strong>{t("Workspace")}</strong><p>{t(draft.runtime.workspace.configured ? "Review workspace configured" : "Review workspace not configured")}</p><SettingHelp id="setting-workspace-help" text="Choose local folders through the privileged desktop folder picker; raw paths do not cross into Web UI state." /></div></div>

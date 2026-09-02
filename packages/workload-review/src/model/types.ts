@@ -36,7 +36,7 @@ export interface ModelResult<T> {
 
 /** Generic ModelDriver contract. */
 export interface ModelDriver {
-  readonly provider: "mock" | "deepseek" | "openai" | "pi";
+  readonly provider: string;
   readonly model?: string;
   invokeStructured<T>(request: ModelStructuredRequest<T>): Promise<ModelResult<T>>;
   invokeAgentFindings(request: ModelAgentFindingsRequest): Promise<ModelResult<ReviewFinding[]>>;
@@ -48,7 +48,7 @@ export interface ModelDriver {
  * apps/api, so this package stays decoupled).
  */
 export interface LegacyProviderLike {
-  readonly name: "mock" | "deepseek" | "openai" | "pi";
+  readonly name: string;
   readonly model?: string;
   invokeWithSchema<T>(request: {
     schema: z.ZodType<T>;

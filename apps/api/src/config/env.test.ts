@@ -98,8 +98,10 @@ describe("loadEnv", () => {
     expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).LLM_PROVIDER).toBe("deepseek");
     expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).DEEPSEEK_MODEL).toBe("deepseek-v4-flash");
     expect(loadEnv({ OPENAI_API_KEY: "configured" }).LLM_PROVIDER).toBe("openai");
-    expect(() => loadEnv({ LLM_PROVIDER: "deepseek" })).toThrow(/DEEPSEEK_API_KEY/);
-    expect(() => loadEnv({ LLM_PROVIDER: "openai" })).toThrow(/OPENAI_API_KEY/);
+    // Provider ids are free-form Pi catalog ids; credential validation happens
+    // at provider creation (fail-closed typed error), not in the env schema.
+    expect(loadEnv({ LLM_PROVIDER: "deepseek" }).LLM_PROVIDER).toBe("deepseek");
+    expect(() => loadEnv({ LLM_PROVIDER: "Bad Id!" })).toThrow();
   });
 
   it("requires explicit public PR and Notebook enablement in production", () => {

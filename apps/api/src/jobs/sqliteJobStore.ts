@@ -641,7 +641,7 @@ export class SQLiteJobStore implements ReviewJobStore {
       baseSha: row.base_sha,
       headSha: row.head_sha,
       publicationPolicy: row.publication_policy === "disabled" ? "disabled" : "github_comment",
-      llmProvider: (row.llm_provider as "deepseek" | "openai" | "pi" | undefined) ?? (report?.llmProvider as "deepseek" | "openai" | "pi" | undefined) ?? undefined,
+      llmProvider: (row.llm_provider as string | undefined) ?? (report?.llmProvider as string | undefined) ?? undefined,
       llmModel: (row.llm_model as string | undefined) ?? report?.llmModel ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

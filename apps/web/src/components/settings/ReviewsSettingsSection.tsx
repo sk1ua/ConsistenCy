@@ -11,9 +11,11 @@ export interface ReviewsSettingsSectionProps {
 }
 
 function providerLabel(provider: string): string {
+  // Canonical labels for the historical defaults; any other Pi catalog id
+  // renders as its id.
   if (provider === "deepseek") return "DeepSeek";
   if (provider === "openai") return "OpenAI";
-  if (provider === "pi") return "Pi";
+  if (provider === "anthropic") return "Anthropic";
   return provider;
 }
 
@@ -33,7 +35,7 @@ function providerLabel(provider: string): string {
 export function ReviewsSettingsSection({ settings, health }: ReviewsSettingsSectionProps) {
   const { t } = useI18n();
 
-  const activeConfigured = health?.llmProvider === "deepseek" || health?.llmProvider === "openai" || health?.llmProvider === "pi";
+  const activeConfigured = health?.llmProvider === "deepseek" || health?.llmProvider === "openai" || health?.llmProvider === "anthropic";
   const activeModelLabel = !health || !activeConfigured
     ? t("Not configured")
     : `${providerLabel(health.llmProvider)}${health.llmModel ? ` · ${health.llmModel}` : ""}`;
@@ -43,10 +45,10 @@ export function ReviewsSettingsSection({ settings, health }: ReviewsSettingsSect
     ? settings?.llm.deepseekModel
     : savedProvider === "openai"
       ? settings?.llm.openaiModel
-      : savedProvider === "pi"
-        ? settings?.llm.piModel
+      : savedProvider === "anthropic"
+        ? settings?.llm.anthropicModel
         : undefined;
-  const savedModelLabel = !settings || (savedProvider !== "deepseek" && savedProvider !== "openai" && savedProvider !== "pi")
+  const savedModelLabel = !settings || (savedProvider !== "deepseek" && savedProvider !== "openai" && savedProvider !== "anthropic")
     ? t("Not active")
     : `${providerLabel(savedProvider)}${savedModel ? ` · ${savedModel}` : ""}`;
   const modelDrift = health !== undefined && settings !== undefined

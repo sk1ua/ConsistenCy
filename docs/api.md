@@ -106,7 +106,7 @@ Content-Type: application/json
 
 - Accepts canonical `https://github.com/{owner}/{repo}/pull/{number}` URLs only through the shared GitHub identity/PR URL parser. The raw input must equal the parser's exact canonical reconstruction; credentials, explicit ports (including `:443`), query strings, fragments, percent-encoded ambiguity, dot segments, parent-segment normalization, backslashes, dirty input, malformed coordinates, leading-zero numbers, non-safe-integer numbers, and every other WHATWG normalization difference are rejected.
 - Creates an analysis-only job (`accessMode=public_read`, `publicationPolicy=disabled`).
-- Requires a configured real LLM provider (DeepSeek, OpenAI, or Pi) to execute analysis.
+- Requires a configured real LLM provider (DeepSeek, OpenAI, or Anthropic) to execute analysis.
 
 Standalone public PR URL ingestion is separate from repository workspace listing. It is read-only and does not use a GitHub App installation token merely because an App is configured.
 

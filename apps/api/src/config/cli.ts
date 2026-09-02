@@ -11,13 +11,14 @@ type ConfigAlias = {
 };
 
 const aliases: Record<string, ConfigAlias> = {
-  "llm.provider": { secret: false, patch: value => ({ llm: { provider: (value === "deepseek" || value === "openai" || value === "pi" ? value : undefined) } }) },
-  "llm.pi-model": { secret: false, patch: value => ({ llm: { piModel: value ?? undefined } }) },
+  "llm.provider": { secret: false, patch: value => ({ llm: { provider: (value === "deepseek" || value === "openai" || value === "anthropic" ? value : undefined) } }) },
+  "llm.anthropic-model": { secret: false, patch: value => ({ llm: { anthropicModel: value ?? undefined } }) },
   "llm.deepseek-base-url": { secret: false, patch: value => ({ llm: { deepseekBaseUrl: value ?? undefined } }) },
   "llm.deepseek-model": { secret: false, patch: value => ({ llm: { deepseekModel: value ?? undefined } }) },
   "llm.openai-model": { secret: false, patch: value => ({ llm: { openaiModel: value ?? undefined } }) },
   "llm.deepseek-api-key": { secret: true, patch: value => ({ llm: { deepseekApiKey: value } }) },
   "llm.openai-api-key": { secret: true, patch: value => ({ llm: { openaiApiKey: value } }) },
+  "llm.anthropic-api-key": { secret: true, patch: value => ({ llm: { anthropicApiKey: value } }) },
   "github.app-id": { secret: false, patch: value => ({ github: { appId: value } }) },
   "github.private-key": { secret: true, patch: value => ({ github: { privateKey: value } }) },
   "github.webhook-secret": { secret: true, patch: value => ({ github: { webhookSecret: value } }) },
@@ -71,9 +72,10 @@ function printSnapshot(store: SettingsStore, json = false): void {
   if (json) { stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`); return; }
   stdout.write([
     `LLM provider       ${snapshot.llm.provider}`,
-    ...(snapshot.llm.provider === "pi" ? [`Pi model          ${snapshot.llm.piModel || "auto"}`] : []),
+    ...(snapshot.llm.provider === "anthropic" ? [`Anthropic model    ${snapshot.llm.anthropicModel || "catalog default"}`] : []),
     `DeepSeek key       ${snapshot.llm.deepseekApiKeyConfigured ? "configured" : "missing"}`,
     `OpenAI key         ${snapshot.llm.openaiApiKeyConfigured ? "configured" : "missing"}`,
+    `Anthropic key      ${snapshot.llm.anthropicApiKeyConfigured ? "configured" : "missing"}`,
     `GitHub App ID      ${snapshot.github.appId || "missing"}`,
     `GitHub private key ${snapshot.github.privateKeyConfigured ? "configured" : "missing"}`,
     `Webhook secret     ${snapshot.github.webhookSecretConfigured ? "configured" : "missing"}`,
@@ -89,19 +91,18 @@ async function setup(store: SettingsStore): Promise<void> {
   const current = store.snapshot(process.env);
   const rl = createInterface({ input: stdin, output: stdout });
   stdout.write("\nConsistenCy setup\nPress Enter to keep the value shown in brackets.\n\n");
-  const providerInput = await rl.question(`LLM provider deepseek/openai/pi [${current.llm.provider}]: `);
+  const providerInput = await rl.question(`LLM provider deepseek/openai/anthropic [${current.llm.provider}]: `);
   const providerValue = providerInput.trim() || current.llm.provider;
-  const provider = (providerValue === "deepseek" || providerValue === "openai" || providerValue === "pi" ? providerValue : undefined) as "deepseek" | "openai" | "pi" | undefined;
+  const provider = (providerValue === "deepseek" || providerValue === "openai" || providerValue === "anthropic" ? providerValue : undefined) as "deepseek" | "openai" | "anthropic" | undefined;
   const patch: SettingsPatch = { llm: { provider }, github: {}, runtime: {} };
   if (provider === "deepseek") {
     patch.llm!.deepseekBaseUrl = (await rl.question(`DeepSeek base URL [${current.llm.deepseekBaseUrl}]: `)).trim() || current.llm.deepseekBaseUrl;
     patch.llm!.deepseekModel = (await rl.question(`DeepSeek model [${current.llm.deepseekModel}]: `)).trim() || current.llm.deepseekModel;
   } else if (provider === "openai") {
     patch.llm!.openaiModel = (await rl.question(`OpenAI model [${current.llm.openaiModel}]: `)).trim() || current.llm.openaiModel;
-  } else if (provider === "pi") {
-    const piModel = (await rl.question(`Pi model provider/model [${current.llm.piModel || "auto"}]: `)).trim();
-    patch.llm!.piModel = piModel || current.llm.piModel || undefined;
-    stdout.write("Pi reads its own models.json and auth.json; no Pi credential is requested here.\n");
+  } else if (provider === "anthropic") {
+    const anthropicModel = (await rl.question(`Anthropic model [${current.llm.anthropicModel || "catalog default"}]: `)).trim();
+    patch.llm!.anthropicModel = anthropicModel || undefined;
   }
   patch.github!.appId = (await rl.question(`GitHub App ID [${current.github.appId || "not configured"}]: `)).trim() || undefined;
   patch.runtime!.databasePath = (await rl.question(`Database path [${current.runtime.databasePath}]: `)).trim() || current.runtime.databasePath;
@@ -113,6 +114,7 @@ async function setup(store: SettingsStore): Promise<void> {
 
   if (provider === "deepseek" && !current.llm.deepseekApiKeyConfigured) patch.llm!.deepseekApiKey = await hiddenQuestion("DeepSeek API key: ");
   if (provider === "openai" && !current.llm.openaiApiKeyConfigured) patch.llm!.openaiApiKey = await hiddenQuestion("OpenAI API key: ");
+  if (provider === "anthropic" && !current.llm.anthropicApiKeyConfigured) patch.llm!.anthropicApiKey = await hiddenQuestion("Anthropic API key: ");
   if (!current.github.privateKeyConfigured) patch.github!.privateKey = await hiddenQuestion("GitHub private key path or PEM (optional): ") || undefined;
   if (!current.github.webhookSecretConfigured) patch.github!.webhookSecret = await hiddenQuestion("GitHub webhook secret (optional): ") || undefined;
 

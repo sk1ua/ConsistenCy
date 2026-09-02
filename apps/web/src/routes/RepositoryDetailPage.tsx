@@ -321,7 +321,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                    : (zh ? "正在读取审查准备状态" : "Loading review preparation")}
                </span>
                {prep?.canStartReview && prep.model.default.provider !== "none" && (
-                 <span style={{ color: "var(--muted-strong)" }}>· {prep.model.default.provider === "deepseek" ? "DeepSeek" : prep.model.default.provider === "openai" ? "OpenAI" : "Pi"} · {prep.model.default.model}</span>
+                 <span style={{ color: "var(--muted-strong)" }}>· {prep.model.default.provider === "deepseek" ? "DeepSeek" : prep.model.default.provider === "openai" ? "OpenAI" : "Anthropic"} · {prep.model.default.model}</span>
                )}
                {prep && !prep.canStartReview && prep.blockingReasons[0] && (
                  <span style={{ color: "var(--warning-strong)" }}>· {prep.blockingReasons[0]}</span>

@@ -4,6 +4,7 @@ import type { GitHubOauthDevicePollResponse } from "@consistency/schema";
 import { api } from "../../api/client";
 import { openExternalUrl, type DesktopGitHubOAuthBridge } from "../../desktop";
 import { useI18n } from "../../i18n";
+import { Button } from "../../design-system/Button";
 
 export interface GitHubOauthSignInProps {
   /** True while saved settings await a restart; the new token needs one too. */
@@ -176,7 +177,7 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
         {phase.phase === "desktop-awaiting" && (
           <div className="github-oauth-pending" role="status">
             <p><LoaderCircle className="spinning" size={13} /> {t("Complete authorization in your browser…")}</p>
-            <button type="button" className="secondary-button" onClick={() => void cancelSignIn()}>{t("Cancel")}</button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void cancelSignIn()}>{t("Cancel")}</Button>
           </div>
         )}
         {phase.phase === "awaiting" && (
@@ -184,32 +185,34 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
             <p>
               {t("Enter this code on GitHub:")}{" "}
               <code className="github-oauth-user-code">{phase.userCode}</code>
-              <button type="button" className="secondary-button" onClick={copyUserCode}>
+              <Button type="button" variant="outline" size="sm" onClick={copyUserCode}>
                 {copied ? t("Copied") : t("Copy code")}
-              </button>
+              </Button>
             </p>
             <p>
-              <button
+              <Button
                 type="button"
-                className="secondary-button"
+                variant="outline"
+                size="sm"
                 onClick={() => openExternalUrl(phase.verificationUri)}
               >
                 {t("Open github.com/login/device")}
-              </button>
+              </Button>
               <LoaderCircle className="spinning" size={13} /> {t("Waiting for authorization…")}
             </p>
           </div>
         )}
-        <button
+        <Button
           type="button"
           id="setting-github-oauth-start"
-          className="secondary-button"
+          variant="outline"
+          size="sm"
           disabled={phase.phase === "starting" || phase.phase === "awaiting" || phase.phase === "desktop-awaiting"}
           onClick={() => void startSignIn()}
         >
           {phase.phase === "starting" ? <LoaderCircle className="spinning" size={13} /> : <Github size={13} />}
           {t(phase.phase === "starting" ? "Starting…" : "Sign in with GitHub")}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ export const RUNTIME_COPILOT_I18N_KEYS = [
   "Describe the change in your own words; every edit still goes through Apply, validate, and save",
   "Send message",
   "Copilot proposal failed",
-  "LLM is not configured; configure DeepSeek, OpenAI, or Pi to generate proposals",
+  "LLM is not configured; configure DeepSeek, OpenAI, or Anthropic to generate proposals",
   "The selected LLM provider is not configured; configure its API key first",
   "The configured review model is invalid",
   "The proposal failed server validation",
@@ -53,7 +53,7 @@ export function copilotErrorMessage(error: unknown, t: (key: string, params?: Re
   if (!error) return "";
   const code = error instanceof ApiRequestError ? error.code : undefined;
   switch (code) {
-    case "LLM_NOT_CONFIGURED": return t("LLM is not configured; configure DeepSeek, OpenAI, or Pi to generate proposals");
+    case "LLM_NOT_CONFIGURED": return t("LLM is not configured; configure DeepSeek, OpenAI, or Anthropic to generate proposals");
     case "LLM_PROVIDER_NOT_CONFIGURED": return t("The selected LLM provider is not configured; configure its API key first");
     case "INVALID_REVIEW_MODEL": return t("The configured review model is invalid");
     case "WORKFLOW_PATCH_INVALID": {

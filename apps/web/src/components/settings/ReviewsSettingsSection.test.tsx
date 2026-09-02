@@ -24,6 +24,10 @@ import { ReviewsSettingsSection } from "./ReviewsSettingsSection";
 const savedSettings: SettingsSnapshot = {
   llm: {
     provider: "deepseek",
+        anthropicModel: "",
+        anthropicApiKeyConfigured: false,
+        llmApiKeyConfigured: false,
+        llmModel: "",
     deepseekBaseUrl: "https://api.deepseek.com",
     deepseekModel: "deepseek-chat",
     openaiModel: "",

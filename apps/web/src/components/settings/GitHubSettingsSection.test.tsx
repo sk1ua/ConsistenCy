@@ -52,6 +52,10 @@ const testConnectionMock = vi.mocked(api.testGitHubConnection);
 const draftSettings: SettingsSnapshot = {
   llm: {
     provider: "deepseek",
+        anthropicModel: "",
+        anthropicApiKeyConfigured: false,
+        llmApiKeyConfigured: false,
+        llmModel: "",
     deepseekBaseUrl: "https://api.deepseek.com",
     deepseekModel: "deepseek-chat",
     openaiModel: "",
@@ -290,7 +294,8 @@ describe("GitHubSettingsSection unsaved draft token probe", () => {
       secrets: { ...emptySecrets, publicReadToken: "ghp_draft_fake" }
     });
     const armedButton = armedHtml.match(/<button[^>]*id="setting-github-test-draft"[^>]*>/)?.[0] ?? "";
-    expect(armedButton).not.toContain("disabled");
+    expect(armedButton).not.toContain(' disabled=""');
+    expect(armedButton).toContain('aria-disabled="false"');
   });
 
   it("probes exactly one unsaved draft per click through the schema body and renders the sanitized result", async () => {

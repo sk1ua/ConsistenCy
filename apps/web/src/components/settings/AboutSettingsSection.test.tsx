@@ -89,7 +89,6 @@ afterEach(() => {
 describe("AboutSettingsSection structure", () => {
   it("renders the stable row ids and the section title", () => {
     const html = renderSection({ health, buildInfo });
-    expect(html).toContain("06 · About");
     expect(html).toContain("Version and environment");
     expect(html).toContain('id="setting-about-version"');
     expect(html).toContain('id="setting-about-build"');
@@ -259,7 +258,6 @@ describe("AboutSettingsSection open-logs action (Slice 6)", () => {
 describe("AboutSettingsSection zh-CN coverage", () => {
   it("translates every newly introduced user-visible string without English fallback", () => {
     const html = renderSection({ health, buildInfo }, "zh-CN");
-    expect(html).toContain("06 · 关于");
     expect(html).toContain("版本与环境");
     expect(html).toContain("ConsistenCy 版本");
     expect(html).toContain("构建标识");

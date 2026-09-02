@@ -29,7 +29,7 @@ $$\text{ConsistenCy v3} = \text{Kernel} + \text{Cordis Harness} + \text{Evidence
 
 ## 3. Product Boundaries & Invariants
 
-- **Real-Data Runtime**: No synthetic demo modes or runtime mock LLMs. Review execution requires a configured real LLM provider (DeepSeek, OpenAI, or Pi).
+- **Real-Data Runtime**: No synthetic demo modes or runtime mock LLMs. Review execution requires a configured real LLM provider (DeepSeek, OpenAI, or Anthropic).
 - **Repository-First Workspace**: The repository is the root entity, uniting local Git state with remote GitHub PR context.
 - **Evidence-Grounded**: Risk scores and findings serve as triage signals grounded in file paths and line numbers; they do not replace human review decisions.
 

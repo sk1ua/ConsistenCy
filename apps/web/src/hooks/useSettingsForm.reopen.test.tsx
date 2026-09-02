@@ -22,6 +22,10 @@ function makeSettings(provider: "deepseek" | "openai", model: string): SettingsS
   return {
     llm: {
       provider,
+      anthropicModel: "",
+      anthropicApiKeyConfigured: false,
+      llmApiKeyConfigured: false,
+      llmModel: model,
       deepseekBaseUrl: "https://api.deepseek.com",
       deepseekModel: provider === "deepseek" ? model : "",
       openaiModel: provider === "openai" ? model : "",
@@ -96,7 +100,7 @@ describe("SettingsDialog atomic reopen lifecycle (Phase 1.2)", () => {
       firstFetch.resolve(persistedA);
       await firstFetch.promise;
     });
-    const modelInput = () => container.querySelector<HTMLInputElement>("#setting-deepseek-model");
+    const modelInput = () => container.querySelector<HTMLInputElement>("#setting-llm-model");
     expect(modelInput()?.value).toBe("persisted-A");
 
     await act(async () => {
@@ -125,7 +129,7 @@ describe("SettingsDialog atomic reopen lifecycle (Phase 1.2)", () => {
       secondFetch.resolve(persistedC);
       await secondFetch.promise;
     });
-    expect(container.querySelector<HTMLInputElement>("#setting-openai-model")?.value).toBe("persisted-C");
+    expect(container.querySelector<HTMLInputElement>("#setting-llm-model")?.value).toBe("persisted-C");
     expect(container.textContent).not.toContain("unsaved-B");
 
     await act(async () => {

@@ -52,7 +52,8 @@ export const notebookMessageSchema = z.object({
   updatedAt: z.string().datetime(),
   sourceJobIds: z.array(z.string().trim().min(1)),
   citations: z.array(notebookCitationSchema),
-  provider: z.enum(["mock", "deepseek", "openai", "pi"]).optional(),
+  /** Pi catalog provider id ("mock" reserved for deterministic tests). */
+  provider: z.string().trim().min(1).max(64).optional(),
   model: z.string().trim().min(1).optional(),
   tokenUsage: tokenUsageSchema.optional(),
   error: z.string().trim().min(1).optional()
@@ -68,7 +69,8 @@ export const notebookCardSchema = z.object({
   citations: z.array(notebookCitationSchema),
   status: z.enum(["generated", "degraded", "failed"]),
   createdAt: z.string().datetime(),
-  provider: z.enum(["mock", "deepseek", "openai", "pi"]).optional(),
+  /** Pi catalog provider id ("mock" reserved for deterministic tests). */
+  provider: z.string().trim().min(1).max(64).optional(),
   model: z.string().trim().min(1).optional()
 }).strict();
 

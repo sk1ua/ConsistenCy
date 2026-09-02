@@ -1,5 +1,5 @@
 import { Bell, Globe2, Inbox, Minimize2, Monitor, Power } from "lucide-react";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   desktopBridge,
   type DesktopPreferenceKey,
@@ -28,18 +28,6 @@ const DEFAULT_PREFERENCES: DesktopPreferences = Object.freeze({
   launchAtLogin: false
 });
 
-const DESKTOP_SWITCH_STYLE: CSSProperties = {
-  width: "36px",
-  height: "20px",
-  position: "relative",
-  flexShrink: 0,
-  padding: 0,
-  borderRadius: "999px",
-  border: "1px solid var(--border-strong)",
-  background: "var(--surface-muted)",
-  cursor: "pointer"
-};
-
 function DesktopSwitch({
   checked,
   disabled,
@@ -65,25 +53,11 @@ function DesktopSwitch({
       aria-describedby={describedBy}
       disabled={disabled}
       onClick={() => onToggle(!checked)}
-      style={{
-        ...DESKTOP_SWITCH_STYLE,
-        ...(checked ? { background: "var(--primary)", borderColor: "var(--primary)" } : {}),
-        ...(disabled ? { opacity: 0.55, cursor: "not-allowed" } : {})
-      }}
+      className={`settings-switch${checked ? " is-checked" : ""}`}
     >
       <span
         aria-hidden="true"
-        style={{
-          position: "absolute",
-          top: "2px",
-          left: checked ? "18px" : "2px",
-          width: "14px",
-          height: "14px",
-          borderRadius: "50%",
-          background: "#ffffff",
-          boxShadow: "0 1px 2px var(--shadow-soft)",
-          transition: "left var(--duration-fast) var(--ease-standard)"
-        }}
+        className="settings-switch-knob"
       />
     </button>
   );
@@ -110,12 +84,12 @@ function SwitchRow({
 }) {
   const { t } = useI18n();
   return (
-    <div className="setting-field" id={rowId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", minWidth: 0 }}>
-        <span style={{ display: "inline-flex", flexShrink: 0, marginTop: "2px", color: "var(--muted)" }}>{icon}</span>
-        <div style={{ minWidth: 0 }}>
+    <div className="setting-field settings-switch-row" id={rowId}>
+      <div className="settings-switch-copy">
+        <span className="settings-switch-row-icon">{icon}</span>
+        <div>
           <strong id={`${rowId}-label`}>{t(label)}</strong>
-          <p style={{ margin: "2px 0 0" }}>{t(statusText)}</p>
+          <p>{t(statusText)}</p>
           <SettingHelp id={`${rowId}-help`} text={helpText} />
         </div>
       </div>
@@ -181,7 +155,7 @@ export function DesktopSettingsSection() {
     resolved(key) ? enabledText : disabledText;
 
   return <section className="settings-group section-block">
-    <div className="settings-group-title"><Monitor size={18} /><div><span>{t("05 · Desktop")}</span><h3>{t("Desktop app behavior")}</h3><p>{t("Behavior of the desktop host. Toggles apply immediately inside the desktop app and are stored locally.")}</p></div></div>
+    <div className="settings-group-title"><Monitor size={18} /><div><h3>{t("Desktop app behavior")}</h3><p>{t("Behavior of the desktop host. Toggles apply immediately inside the desktop app and are stored locally.")}</p></div></div>
     <div className="settings-fields">
       {!inDesktopShell && (
         <div className="setting-field setting-field-wide setting-note" id="setting-desktop-browser-note"><Globe2 size={17} /><div><strong>{t("Browser mode")}</strong><p>{t("Browser mode: these rows describe the desktop app and only apply when running inside it.")}</p></div></div>

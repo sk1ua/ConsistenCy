@@ -21,11 +21,10 @@ describe("diagnoseConfiguration", () => {
     expect(result.checks.find(check => check.id === "llm")?.status).toBe("pass");
   });
 
-  it("reports incomplete provider configuration", async () => {
+  it("reports incomplete provider configuration as a fail on the llm check", async () => {
     const result = await diagnoseConfiguration({ LLM_PROVIDER: "deepseek" });
     expect(result.ok).toBe(false);
-    expect(result.checks[0]?.id).toBe("schema");
-    expect(result.checks[0]?.status).toBe("fail");
+    expect(result.checks.find(check => check.id === "llm")?.status).toBe("fail");
   });
 
   it("warns when real integrations are intentionally absent", async () => {

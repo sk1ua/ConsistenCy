@@ -121,9 +121,11 @@ ConsistenCy v3 is a **real-LLM-only runtime** (no demo/mock runtime modes). Revi
 
 - **DeepSeek**: Set `DEEPSEEK_API_KEY` (and optional `DEEPSEEK_MODEL`, default: `deepseek-v4-flash`).
 - **OpenAI**: Set `OPENAI_API_KEY` (and optional `OPENAI_MODEL`, default: `gpt-4.1-mini`).
-- **Pi**: Set `LLM_PROVIDER=pi` to reuse Pi's official model/auth runtime. ConsistenCy reads Pi's `~/.pi/agent/models.json` and `~/.pi/agent/auth.json` on the API side. Optionally set `CONSISTENCY_PI_MODEL=provider/model-id` to pin a model; Pi credentials never enter Web UI payloads or renderer state.
+- **Anthropic**: Set `ANTHROPIC_API_KEY` (and optional `ANTHROPIC_MODEL`, default: `claude-sonnet-4-5`).
 
-You can configure DeepSeek/OpenAI keys directly in the Web/Desktop **Settings** page, via CLI (`npm run config -- set llm.deepseek-api-key`), or through `.env`. Pi credentials and model catalogs are owned by Pi and are read server-side; ConsistenCy does not ask the user to copy them into Settings. When running without an LLM configured, local repository and Git browsing remain fully accessible; review runs are disabled until credentials are provided.
+All providers are executed by ConsistenCy's bundled official Pi model runtime (`@earendil-works/pi-ai`): model catalogs, request formatting, and streaming come from Pi's built-in catalog, while API keys are injected in-memory at runtime and stored only in ConsistenCy's encrypted settings. No local Pi installation and no Pi config files are required; provider keys never enter Web UI payloads or renderer state.
+
+You can configure DeepSeek/OpenAI/Anthropic keys directly in the Web/Desktop **Settings** page, via CLI (`npm run config -- set llm.deepseek-api-key`), or through `.env`. Pi credentials and model catalogs are owned by Pi and are read server-side; ConsistenCy does not ask the user to copy them into Settings. When running without an LLM configured, local repository and Git browsing remain fully accessible; review runs are disabled until credentials are provided.
 
 ---
 

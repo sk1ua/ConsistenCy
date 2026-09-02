@@ -97,7 +97,8 @@ export const agentRunSchema = z.object({
   findings: z.array(reviewFindingSchema),
   error: nonEmpty.optional(),
   tokenUsage: tokenUsageSchema.optional(),
-  provider: z.enum(["mock", "deepseek", "openai", "pi"]).optional(),
+  /** Pi catalog provider id ("mock" reserved for deterministic tests). */
+  provider: z.string().trim().min(1).max(64).optional(),
   model: nonEmpty.optional()
 }).strict();
 

@@ -118,5 +118,5 @@ The About section of Settings exposes an **[Open logs folder]** button (desktop 
 ## 5. Limitations & Boundaries
 
 - **Supported Platform**: Desktop v1 targets Windows x64.
-- **Real LLM Required**: Review execution requires a real configured provider (DeepSeek, OpenAI, or Pi). Mock runtime is absent.
+- **Real LLM Required**: Review execution requires a real configured provider (DeepSeek, OpenAI, or Anthropic). Mock runtime is absent.
 - **OS Containment**: Electron sandboxes the renderer, but the API child process runs with standard user OS permissions.

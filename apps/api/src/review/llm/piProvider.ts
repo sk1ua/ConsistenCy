@@ -1,11 +1,27 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { BaseLLMProvider, parseTokenUsage } from "./provider";
+import { piRuntime } from "./piCatalog";
+import type { AppConfig } from "../../config/env";
 import type { LLMProvider, LLMStreamRequest } from "./types";
+
+export type PiManagedProviderId = string;
+
+export interface PiManagedOptions {
+  /** Isolated auth-storage path inside the ConsistenCy data directory. */
+  authPath: string;
+  provider: PiManagedProviderId;
+  /** Provider API key injected in-memory; never persisted to Pi config. */
+  apiKey: string;
+  /** Optional pinned model id from Pi's built-in catalog. */
+  model?: string;
+}
 
 export interface PiRuntimeOptions {
   authPath?: string;
-  modelsPath?: string;
+  modelsPath?: string | null;
   modelsStorePath?: string;
+  /** Restricts auto-selection to this provider id from Pi's catalog. */
+  providerId?: string;
   model?: string;
   refreshOnStart?: boolean;
 }
@@ -60,15 +76,21 @@ function errorText(_message: PiMessage): string {
   return "Pi LLM request failed";
 }
 
-async function selectModel(runtime: ModelRuntime, requested?: string): Promise<PiModel> {
+async function selectModel(runtime: ModelRuntime, providerId: string | undefined, requested?: string): Promise<PiModel> {
   if (!requested || requested === "auto") {
-    const available = await runtime.getAvailable();
+    const available = await runtime.getAvailable(providerId);
     const selected = available[0];
-    if (!selected) throw new Error("Pi has no configured model");
+    if (!selected) {
+      throw new Error(providerId
+        ? `Pi has no authenticated model for provider '${providerId}'`
+        : "Pi has no configured model");
+    }
     return selected;
   }
 
-  const reference = parseReference(requested);
+  // A bare model id resolves within the configured provider; a full
+  // "provider/model" reference resolves across the catalog.
+  const reference = parseReference(requested) ?? (providerId ? { provider: providerId, model: requested } : undefined);
   if (!reference) throw new Error("Pi model must use provider/model format");
   const available = await runtime.getAvailable(reference.provider);
   const selected = available.find(model => model.id === reference.model);
@@ -77,19 +99,24 @@ async function selectModel(runtime: ModelRuntime, requested?: string): Promise<P
 }
 
 export class PiRuntimeProvider extends BaseLLMProvider {
-  readonly name = "pi" as const;
+  override readonly name: string;
   override model: string;
   private readonly runtimePromise: Promise<ModelRuntime>;
   private readonly selectedModelPromise: Promise<PiModel>;
   private configured = false;
   private initializationError: string | undefined;
 
-  private constructor(runtimePromise: Promise<ModelRuntime>, requestedModel?: string) {
+  private constructor(
+    runtimePromise: Promise<ModelRuntime>,
+    private readonly providerId: string | undefined,
+    requestedModel?: string
+  ) {
     super();
+    this.name = providerId ?? "pi";
     this.runtimePromise = runtimePromise;
     this.model = "auto";
     this.selectedModelPromise = runtimePromise
-      .then(runtime => selectModel(runtime, requestedModel))
+      .then(runtime => selectModel(runtime, providerId, requestedModel))
       .then(selected => {
         this.configured = true;
         this.model = `${selected.provider}/${selected.id}`;
@@ -101,6 +128,31 @@ export class PiRuntimeProvider extends BaseLLMProvider {
       });
   }
 
+  /**
+   * Adapter over the shared API-wide runtime (piCatalog.ts). The runtime
+   * already carries every settings-injected provider key; the adapter only
+   * pins the provider/model selection. With no pinned model the runtime
+   * selects the provider's first authenticated catalog model.
+   */
+  static fromShared(config: AppConfig, provider: string, model?: string): PiRuntimeProvider {
+    return new PiRuntimeProvider(piRuntime(config), provider, model);
+  }
+
+  static createManaged(options: PiManagedOptions): PiRuntimeProvider {
+    const runtimePromise = ModelRuntime.create({
+      authPath: options.authPath,
+      modelsPath: null,
+      allowModelNetwork: false,
+      refreshOnCreate: false
+    }).then(async runtime => {
+      // setRuntimeApiKey is a non-persistent in-memory credential (see Pi's
+      // RuntimeCredentials); it never touches disk.
+      await runtime.setRuntimeApiKey(options.provider, options.apiKey);
+      return runtime;
+    });
+    return new PiRuntimeProvider(runtimePromise, options.provider, options.model);
+  }
+
   static fromOptions(options: PiRuntimeOptions = {}): PiRuntimeProvider {
     return new PiRuntimeProvider(
       ModelRuntime.create({
@@ -110,6 +162,7 @@ export class PiRuntimeProvider extends BaseLLMProvider {
         refreshOnCreate: options.refreshOnStart === true,
         allowModelNetwork: false
       }),
+      options.providerId,
       options.model
     );
   }
@@ -165,7 +218,6 @@ export class PiRuntimeProvider extends BaseLLMProvider {
   }
 
   async descriptor(): Promise<PiModelDescriptor> {
-    const runtime = await this.runtimePromise;
     const selected = await this.selectedModelPromise;
     return {
       provider: selected.provider,
@@ -186,15 +238,44 @@ export class PiRuntimeProvider extends BaseLLMProvider {
   }): Promise<{ content: string; tokenUsage?: ReturnType<typeof parseTokenUsage> }> {
     try {
       const runtime = await this.runtimePromise;
-      const message = await runtime.complete(await this.selectedModelPromise, {
-        systemPrompt: input.systemPrompt,
-        messages: [{ role: "user", content: input.userPrompt, timestamp: Date.now() }]
-      });
+      const toolName = `submit_${input.schemaName.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 48)}`;
+      // zod-to-json-schema(name) returns a {$ref, definitions} wrapper. Tool
+      // parameters must be the referenced object schema itself (providers
+      // reject a wrapper whose top-level type is absent).
+      const wrappedSchema = input.jsonSchema as { definitions?: Record<string, unknown>; $defs?: Record<string, unknown> } | undefined;
+      const toolSchema = wrappedSchema?.definitions?.[input.schemaName]
+        ?? wrappedSchema?.$defs?.[input.schemaName]
+        ?? input.jsonSchema;
+      const message = await runtime.completeSimple(await this.selectedModelPromise, {
+        systemPrompt: `${input.systemPrompt}
+
+You must return the answer by calling the ${toolName} tool exactly once. Do not write prose outside the tool call.`,
+        messages: [{ role: "user", content: input.userPrompt, timestamp: Date.now() }],
+        tools: [{
+          name: toolName,
+          description: `Submit the schema-valid ${input.schemaName} response.`,
+          // Pi consumes TypeBox/JSON Schema structurally; ConsistenCy's schema
+          // is already a strict JSON Schema object generated by Zod.
+          parameters: toolSchema as never
+        }]
+      }, { toolChoice: "auto" });
       if (message.stopReason === "error" || message.stopReason === "aborted") {
+        if (process.env.CONSISTENCY_LLM_SMOKE_DEBUG === "true") {
+          const detail = cleanText(message.errorMessage, 500) ?? "no provider detail";
+          process.stderr.write(`[llm-smoke-provider-detail] ${detail.replace(/(?:sk|key|token)[-_][A-Za-z0-9_-]+/gi, "[REDACTED]")}
+`);
+        }
         throw new Error(errorText(message));
       }
-      return { content: textContent(message), tokenUsage: usageFromMessage(message) };
-    } catch {
+      const toolCall = message.content.find((part): part is { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> } => part.type === "toolCall" && part.name === toolName);
+      const content = toolCall ? JSON.stringify(toolCall.arguments) : textContent(message);
+      return { content, tokenUsage: usageFromMessage(message) };
+    } catch (error) {
+      if (process.env.CONSISTENCY_LLM_SMOKE_DEBUG === "true") {
+        const message = error instanceof Error ? error.message : "unknown";
+        process.stderr.write(`[llm-smoke-debug] ${message.replace(/(?:sk|key|token)[-_][A-Za-z0-9_-]+/gi, "[REDACTED]").slice(0, 500)}
+`);
+      }
       throw new Error("Pi LLM request failed");
     }
   }
@@ -218,7 +299,7 @@ export class PiRuntimeProvider extends BaseLLMProvider {
       }
       if (!completed) yield { kind: "degraded", reason: "Pi stream ended without a completed assistant response" };
       yield { kind: "completed" };
-    } catch (error) {
+    } catch {
       yield { kind: "failed", error: "Pi LLM stream failed" };
     }
   }

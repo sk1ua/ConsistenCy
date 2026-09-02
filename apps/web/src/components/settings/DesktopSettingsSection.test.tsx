@@ -83,7 +83,6 @@ afterEach(() => {
 describe("DesktopSettingsSection structure", () => {
   it("renders the stable row ids and the section title", () => {
     const html = renderSection();
-    expect(html).toContain("05 · Desktop");
     expect(html).toContain("Desktop app behavior");
     expect(html).toContain('id="setting-desktop-close"');
     expect(html).toContain('id="setting-desktop-tray"');
@@ -185,7 +184,6 @@ describe("DesktopSettingsSection truthful presentation", () => {
 describe("DesktopSettingsSection zh-CN coverage", () => {
   it("translates every newly introduced user-visible string without English fallback", () => {
     const html = renderSection("zh-CN");
-    expect(html).toContain("05 · 桌面端");
     expect(html).toContain("桌面端行为");
     // Default state: close-to-tray on, tray on, login launch off.
     expect(html).toContain("关闭窗口时驻留系统托盘");

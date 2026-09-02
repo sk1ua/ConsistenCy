@@ -132,8 +132,10 @@ describe("Backend Contract Acceptance — Headless Review Lifecycle without Reac
         llmProvider: "deepseek",
         llmModel: "deepseek-v4-flash",
         llmCapabilities: {
-          deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-          openai: { configured: true, defaultModel: "gpt-4.1-mini" }
+          providers: [
+            { id: "deepseek", label: "DeepSeek", configured: true, defaultModel: "deepseek-v4-flash" },
+            { id: "openai", label: "OpenAI", configured: true, defaultModel: "gpt-4.1-mini" }
+          ]
         },
         publicPrAccessMode: "anonymous",
         configuration: {

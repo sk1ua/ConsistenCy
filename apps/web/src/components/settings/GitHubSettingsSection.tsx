@@ -9,6 +9,7 @@ import { useI18n } from "../../i18n";
 import { SettingHelp, SETTING_HELP_LINKS } from "../SettingHelp";
 import { GitHubOauthSignIn } from "./GitHubOauthSignIn";
 import { SecretField } from "./SecretField";
+import { Button } from "../../design-system/Button";
 
 export interface GitHubSettingsSectionProps {
   draft: SettingsSnapshot;
@@ -26,6 +27,8 @@ export interface GitHubSettingsSectionProps {
   health?: HealthResponse;
   /** True while saved settings await a restart; the probe tests the running config. */
   restartPending?: boolean;
+  /** Core shows OAuth + anonymous/read status; advanced shows GitHub App/PAT fields. */
+  mode?: "all" | "core" | "advanced";
 }
 
 type ConnectionTestState =
@@ -77,7 +80,8 @@ export function GitHubSettingsSection({
   applyGitHubOauthToken,
   applyGitHubDesktopOauth,
   health,
-  restartPending
+  restartPending,
+  mode = "all"
 }: GitHubSettingsSectionProps) {
   const { t } = useI18n();
   const [testState, setTestState] = useState<ConnectionTestState>({ phase: "idle" });
@@ -125,7 +129,7 @@ export function GitHubSettingsSection({
           onDesktopConnected={applyGitHubDesktopOauth}
           onConnected={applyGitHubOauthToken}
         />
-        <div className="source-mode-guide setting-field-wide" aria-label={t("GitHub connection modes")}>
+        {mode !== "core" && <><div className="source-mode-guide setting-field-wide" aria-label={t("GitHub connection modes")}>
           <span><strong>{t("Anonymous public PR")}</strong><small>{t("Recommended for trying ConsistenCy. No GitHub App or token is required.")}</small></span>
           <span><strong>{t("Public read token")}</strong><small>{t("Optional. Adds authenticated read capacity for selected public repositories.")}</small></span>
           <span><strong>{t("GitHub App automation")}</strong><small>{t("Only needed for signed webhooks and installation-based repository access.")}</small></span>
@@ -133,17 +137,7 @@ export function GitHubSettingsSection({
         <div className="setting-field"><label htmlFor="setting-app-id">{t("GitHub App ID")}</label><input id="setting-app-id" aria-describedby="setting-app-id-help" value={draft.github.appId} onChange={event => updateGithub({ appId: event.target.value })} placeholder={t("Only for GitHub App mode")} /><SettingHelp id="setting-app-id-help" text="Find the numeric App ID on the GitHub App settings page. Skip this for anonymous or PAT read-only mode." href={SETTING_HELP_LINKS.githubApp} /></div>
         <SecretField name="publicReadToken" label="Public read token" configured={settings.github.publicReadTokenConfigured} value={secrets.publicReadToken} clear={clearSecrets.publicReadToken} help="Optional: use a fine-grained PAT limited to selected repositories and read-only contents/metadata permissions." helpHref={SETTING_HELP_LINKS.githubPat} onValue={updateSecret} onClear={updateClear} />
         <div className="setting-field-wide github-draft-test">
-          <button
-            type="button"
-            id="setting-github-test-draft"
-            className="secondary-button"
-            aria-describedby="setting-publicReadToken-help"
-            disabled={!draftTokenEligible || draftTestState.phase === "testing"}
-            onClick={() => void runDraftConnectionTest()}
-          >
-            {draftTestState.phase === "testing" ? <LoaderCircle className="spinning" size={13} /> : <PlugZap size={13} />}
-            {t(draftTestState.phase === "testing" ? "Testing…" : "Test this token")}
-          </button>
+          <Button type="button" id="setting-github-test-draft" variant="outline" size="sm" icon={<PlugZap size={13} />} loading={draftTestState.phase === "testing"} aria-describedby="setting-publicReadToken-help" disabled={!draftTokenEligible} onClick={() => void runDraftConnectionTest()}>{t(draftTestState.phase === "testing" ? "Testing…" : "Test this token")}</Button>
           <p id="setting-github-draft-result" role="status">
             {draftTestState.phase === "idle" && t("Not tested yet")}
             {draftTestState.phase === "testing" && t("Testing…")}
@@ -153,10 +147,10 @@ export function GitHubSettingsSection({
           <SettingHelp id="setting-github-test-draft-help" text="Runs one read-only request against this unsaved token without storing or displaying it." href={SETTING_HELP_LINKS.githubPat} />
         </div>
         <SecretField name="webhookSecret" label="Webhook secret" configured={settings.github.webhookSecretConfigured} value={secrets.webhookSecret} clear={clearSecrets.webhookSecret} help="Create a random webhook secret in your GitHub App and enter the same value here." helpHref={SETTING_HELP_LINKS.githubWebhook} onValue={updateSecret} onClear={updateClear} />
-        <div className="setting-field-wide"><SecretField name="privateKey" label="Private key" configured={settings.github.privateKeyConfigured} value={secrets.privateKey} clear={clearSecrets.privateKey} help="Paste the GitHub App PEM private key or a readable local file path. Never commit the PEM file." helpHref={SETTING_HELP_LINKS.githubPrivateKey} multiline onValue={updateSecret} onClear={updateClear} /></div>
+        <div className="setting-field-wide"><SecretField name="privateKey" label="Private key" configured={settings.github.privateKeyConfigured} value={secrets.privateKey} clear={clearSecrets.privateKey} help="Paste the GitHub App PEM private key or a readable local file path. Never commit the PEM file." helpHref={SETTING_HELP_LINKS.githubPrivateKey} multiline onValue={updateSecret} onClear={updateClear} /></div></>}
       </div>
     </section>
-    <section className="settings-group section-block" aria-label={t("Connection status")}>
+    {mode !== "advanced" && <section className="settings-group section-block" aria-label={t("Connection status")}>
       <div className="settings-group-title"><PlugZap size={18} /><div><h3>{t("Connection status")}</h3><p>{t("Read-only status of the running GitHub configuration.")}</p></div></div>
       <div className="settings-fields">
         {health && (
@@ -180,21 +174,11 @@ export function GitHubSettingsSection({
             {restartPending && (
               <p className="github-restart-hint">{t("Tests use the running configuration. Restart to apply saved changes.")}</p>
             )}
-            <button
-              type="button"
-              id="setting-github-test"
-              className="secondary-button"
-              aria-describedby="setting-github-test-help"
-              disabled={testState.phase === "testing"}
-              onClick={() => void runConnectionTest()}
-            >
-              {testState.phase === "testing" ? <LoaderCircle className="spinning" size={13} /> : <PlugZap size={13} />}
-              {t(testState.phase === "testing" ? "Testing…" : "Test Connection")}
-            </button>
+            <Button type="button" id="setting-github-test" variant="outline" size="sm" icon={<PlugZap size={13} />} loading={testState.phase === "testing"} aria-describedby="setting-github-test-help" onClick={() => void runConnectionTest()}>{t(testState.phase === "testing" ? "Testing…" : "Test Connection")}</Button>
             <SettingHelp id="setting-github-test-help" text="Runs one read-only request against the credential the API is actually using. Saved changes apply only after a restart." href={SETTING_HELP_LINKS.githubApp} />
           </div>
         </div>
       </div>
-    </section>
+    </section>}
   </>;
 }

@@ -9,8 +9,13 @@ const baseConfig = {
   DEEPSEEK_API_KEY: "configured",
   DEEPSEEK_MODEL: "deepseek-v4-flash",
   OPENAI_API_KEY: "",
-  OPENAI_MODEL: "gpt-4.1-mini"
-} as AppConfig;
+  OPENAI_MODEL: "gpt-4.1-mini",
+  ANTHROPIC_API_KEY: "",
+  ANTHROPIC_MODEL: "",
+  LLM_API_KEY: "",
+  LLM_MODEL: "",
+  piConfigDir: ".consistency"
+} as unknown as AppConfig;
 
 const configWith = (overrides: Partial<AppConfig>): AppConfig => ({ ...baseConfig, ...overrides });
 
@@ -20,19 +25,23 @@ describe("resolveReviewModel", () => {
       .toThrowError(ReviewModelResolutionError);
   });
 
-  it("rejects an override provider whose credential is not configured", () => {
-    expect(() => resolveReviewModel({ config: baseConfig, override: { provider: "openai", model: "gpt-4.1-mini" } }))
-      .toThrowError(ReviewModelResolutionError);
+  it("accepts any Pi catalog provider id and leaves model selection to the runtime when unpinned", () => {
+    expect(resolveReviewModel({ config: configWith({ LLM_PROVIDER: "moonshotai" }) }))
+      .toEqual({ provider: "moonshotai", model: "" });
+    expect(resolveReviewModel({ config: baseConfig }))
+      .toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
   });
 
-  it("rejects an empty model name before execution", () => {
-    expect(() => resolveReviewModel({ config: baseConfig, override: { provider: "deepseek", model: "   " } }))
-      .toThrowError(ReviewModelResolutionError);
+  it("uses the provider-specific model pin when configured", () => {
+    expect(resolveReviewModel({
+      config: configWith({ LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "configured", ANTHROPIC_MODEL: "claude-opus-4-5" })
+    })).toEqual({ provider: "anthropic", model: "claude-opus-4-5" });
   });
 
-  it("rejects an unsupported provider with a sanitized error", () => {
-    expect(() => resolveReviewModel({ config: baseConfig, override: { provider: "mock" as "deepseek", model: "anything" } }))
-      .toThrowError(/Unsupported provider/);
+  it("uses the generic model pin for non-default providers", () => {
+    expect(resolveReviewModel({
+      config: configWith({ LLM_PROVIDER: "openrouter", LLM_MODEL: "anthropic/claude-sonnet-4.5" })
+    })).toEqual({ provider: "openrouter", model: "anthropic/claude-sonnet-4.5" });
   });
 
   it("resolves a configured override to the trimmed pair and never touches global settings", () => {
@@ -40,7 +49,8 @@ describe("resolveReviewModel", () => {
     expect(resolved).toEqual({ provider: "deepseek", model: "deepseek-v4-turbo" });
   });
 
-  it("falls back to the active configured model when no override is sent", () => {
-    expect(resolveReviewModel({ config: baseConfig })).toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
+  it("lowercases and trims the provider id", () => {
+    expect(resolveReviewModel({ config: configWith({ LLM_PROVIDER: "  DeepSeek  " }) }))
+      .toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
   });
 });
