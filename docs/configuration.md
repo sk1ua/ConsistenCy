@@ -95,7 +95,7 @@ When configuration changes are saved via the Web UI Settings page (`PUT /api/set
 | `ANTHROPIC_MODEL` | *empty* | Optional Anthropic model id; empty uses the catalog default (`claude-sonnet-4-5`) |
 | `CONSISTENCY_PI_CONFIG_DIR` | `<database-dir>/pi` | Server-side isolation directory for the bundled Pi runtime's auth storage; never returned to the renderer |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
-| `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the browser Device Flow compatibility path only |
+| `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow path (browser deployments, and Desktop builds via pack-time `CONSISTENCY_GITHUB_OAUTH_CLIENT_ID`) |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the product-operated Desktop OAuth broker; configure on the API/broker service, not in user Settings |
 | `CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID` | *empty* | Product-owned GitHub OAuth App client id used by the Desktop broker |
 | `CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET` | *empty* | Product-owned GitHub OAuth App secret used only server-side by the Desktop broker; never ship to Desktop |
@@ -124,6 +124,16 @@ Product deployment (one time):
 3. Build the Desktop with only `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL`; the packer
    rejects non-HTTPS origins and never stages either client credential.
 
+Brokerless Desktop builds keep GitHub sign-in available: when no broker origin
+is baked in, the packer can instead embed the public Device Flow client id with
+`CONSISTENCY_GITHUB_OAUTH_CLIENT_ID` at pack time (a client id is public; the
+packer rejects anything that is not a plain id). In that mode the Desktop main
+process proxies the embedded API's Device Flow — the renderer shows the same
+verification URL and user code as the browser, while the access token is
+consumed inside main and written to `safeStorage`; it never crosses into the
+renderer. With neither a broker nor a baked client id, the sign-in button shows
+an honest not-configured status.
+
 End users only click **Sign in with GitHub** and **Authorize**. They do not
 register an OAuth App or enter any OAuth credential.
 
@@ -147,8 +157,10 @@ not use the Desktop client secret. It retains the existing GitHub Device Flow
 compatibility path: enable **Enable Device Flow** on the OAuth App, configure the
 public Client ID, then the browser shows GitHub's verification URL and a
 one-time user code. The API keeps the device code server-side and the token is
-stored through the Web encrypted settings path. Desktop renderers are blocked
-from these Device Flow routes and use the main-process browser flow instead.
+stored through the Web encrypted settings path. Desktop renderers stay blocked
+from these Device Flow routes: brokerless Desktop builds reach the same flow
+through the main process instead (see §4.1), which also keeps the token out of
+the renderer.
 
 `GITHUB_PUBLIC_READ_TOKEN` remains a fallback for self-hosted deployments that
 have not configured OAuth sign-in. It is optional and is not required for the

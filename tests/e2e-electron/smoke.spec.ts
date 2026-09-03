@@ -169,7 +169,7 @@ test.describe("desktop shell", () => {
         "showFromTray",
         "updates"
       ]);
-      expect(boundary.oauthMethods).toEqual(["cancel", "start"]);
+      expect(boundary.oauthMethods).toEqual(["cancel", "pollDeviceFlow", "start"]);
       expect(boundary.updateMethods).toEqual([
         "check",
         "download",

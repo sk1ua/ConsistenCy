@@ -1,6 +1,5 @@
 import { Github, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GitHubOauthDevicePollResponse } from "@consistency/schema";
 import { api } from "../../api/client";
 import { openExternalUrl, type DesktopGitHubOAuthBridge } from "../../desktop";
 import { useI18n } from "../../i18n";
@@ -30,8 +29,9 @@ const MAX_CONSECUTIVE_POLL_ERRORS = 3;
  * GitHub OAuth Device Flow sign-in for Settings. The access token crosses this
  * component exactly once (connected poll → onConnected) and is never stored in
  * state, rendered, or logged; polling stops on unmount and on every terminal
- * status. Desktop builds use the product-operated broker; browser deployments
- * retain Device Flow.
+ * status. Desktop builds use the product-operated broker when one is baked in;
+ * when the broker is absent the desktop falls back to this Device Flow against
+ * the embedded local API, exactly like browser deployments.
  */
 export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, onDesktopConnected }: GitHubOauthSignInProps) {
   const { t } = useI18n();
@@ -54,7 +54,9 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
 
   const pollLoop = useCallback(async (flowId: string, intervalSeconds: number, errors = 0) => {
     try {
-      const result: GitHubOauthDevicePollResponse = await api.pollGitHubOauthDeviceFlow({ flowId });
+      const result = desktopOAuth
+        ? await desktopOAuth.pollDeviceFlow({ flowId })
+        : await api.pollGitHubOauthDeviceFlow({ flowId });
       if (!mountedRef.current) return;
       if (result.status === "pending") {
         timerRef.current = window.setTimeout(
@@ -66,7 +68,14 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
       if (result.status === "connected") {
         setPhase({ phase: "connected", login: result.login });
         try {
-          await onConnected(result.publicReadToken);
+          // Web poll responses carry the one-time token for the renderer save
+          // path; desktop polls consume it inside main, so only the login
+          // crosses here.
+          if ("publicReadToken" in result && typeof result.publicReadToken === "string") {
+            await onConnected(result.publicReadToken);
+          } else {
+            await onDesktopConnected?.(result.login);
+          }
         } catch {
           if (mountedRef.current) setPhase({ phase: "failed", messageKey: "Could not save settings" });
         }
@@ -91,7 +100,7 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
         intervalSeconds * 1_000
       );
     }
-  }, [onConnected]);
+  }, [desktopOAuth, onConnected, onDesktopConnected]);
 
   async function startSignIn(): Promise<void> {
     clearTimer();
@@ -107,18 +116,39 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
           await onDesktopConnected?.(result.login);
           return;
         }
-        const failureKeys: Record<Exclude<typeof result.status, "connected">, string> = {
-          not_configured: "This ConsistenCy desktop build has no GitHub sign-in service configured.",
-          denied: "Authorization was denied.",
-          cancelled: "GitHub sign-in was cancelled.",
-          expired: "GitHub sign-in expired. Start again.",
-          unavailable: "GitHub sign-in is unavailable."
-        };
-        setPhase({ phase: "failed", messageKey: failureKeys[result.status] });
+        if (result.status === "device-awaiting") {
+          // Brokerless desktop build: main proxies the embedded API's Device
+          // Flow and consumes the token; the renderer sees only the code UI.
+          setPhase({
+            phase: "awaiting",
+            flowId: result.flowId,
+            userCode: result.userCode,
+            verificationUri: result.verificationUri,
+            intervalSeconds: result.intervalSeconds
+          });
+          timerRef.current = window.setTimeout(
+            () => void pollLoop(result.flowId, result.intervalSeconds),
+            result.intervalSeconds * 1_000
+          );
+          return;
+        }
+        if (result.status !== "not_configured") {
+          const failureKeys: Record<Exclude<typeof result.status, "connected" | "device-awaiting" | "not_configured">, string> = {
+            denied: "Authorization was denied.",
+            cancelled: "GitHub sign-in was cancelled.",
+            expired: "GitHub sign-in expired. Start again.",
+            unavailable: "GitHub sign-in is unavailable."
+          };
+          setPhase({ phase: "failed", messageKey: failureKeys[result.status] });
+          return;
+        }
+        // not_configured: no product broker and no baked Device Flow client id.
+        setPhase({ phase: "failed", messageKey: "This ConsistenCy desktop build has no GitHub sign-in service configured." });
+        return;
       } catch {
         if (mountedRef.current) setPhase({ phase: "failed", messageKey: "GitHub sign-in is unavailable." });
+        return;
       }
-      return;
     }
     try {
       const started = await api.startGitHubOauthDeviceFlow();

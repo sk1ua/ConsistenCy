@@ -10,7 +10,7 @@
   "consistencyDesktopDistribution": "manual",
   "scripts": {
     "start": "electron .",
-    "test": "vitest run src/github-oauth.test.ts"
+    "test": "vitest run src/github-oauth.test.ts src/device-flow.test.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^1.8.0",

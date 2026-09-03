@@ -21,6 +21,10 @@ const updates = Object.freeze({
 // keys are ever persisted there.
 const githubOAuth = Object.freeze({
   start: () => ipcRenderer.invoke("github-oauth:start"),
+  // Device Flow fallback polling: main proxies the embedded API and consumes
+  // the one-time token into safeStorage; the renderer only ever sees statuses
+  // and the sanitized login.
+  pollDeviceFlow: input => ipcRenderer.invoke("github-oauth:poll", input),
   cancel: () => ipcRenderer.invoke("github-oauth:cancel")
 });
 

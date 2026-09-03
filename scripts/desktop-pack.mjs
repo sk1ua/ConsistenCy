@@ -80,6 +80,12 @@ if (desktopOAuthBrokerUrl) {
     throw new Error("CONSISTENCY_DESKTOP_OAUTH_BROKER_URL must be an HTTPS origin without credentials or a path");
   }
 }
+// Public OAuth App client id baked for the desktop Device Flow fallback. A
+// client id is public by design; a client secret must never be supplied here.
+const githubOauthClientId = (process.env.CONSISTENCY_GITHUB_OAUTH_CLIENT_ID ?? "").trim();
+if (githubOauthClientId && !/^[A-Za-z0-9_-]{1,64}$/.test(githubOauthClientId)) {
+  throw new Error("CONSISTENCY_GITHUB_OAUTH_CLIENT_ID must be a public OAuth App client id (alphanumeric, dash, underscore)");
+}
 
 console.log(`Building same-origin renderer and bundled API (version=${desktopManifest.version}, sha=${gitCommitSha}) ...`);
 runNpm(["run", "build", "-w", "@consistency/web", "--", "--base=/"], root, {
@@ -98,7 +104,8 @@ writeFileSync(join(staged, "package.json"), JSON.stringify({
   type: "commonjs"
 }, null, 2));
 writeFileSync(join(staged, "desktop-config.json"), JSON.stringify({
-  desktopOAuthBrokerUrl
+  desktopOAuthBrokerUrl,
+  githubOauthClientId
 }, null, 2));
 writeFileSync(join(staged, "build-info.json"), JSON.stringify({
   version: desktopManifest.version,

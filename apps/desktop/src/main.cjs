@@ -30,6 +30,7 @@ const {
   selectAndRegisterRepository
 } = require("./security-boundary.cjs");
 const { GitHubOAuthFlow } = require("./github-oauth.cjs");
+const { createDeviceFlowProxy } = require("./device-flow.cjs");
 const {
   NSIS_INSTALL_MARKER,
   createUpdateCoordinator,
@@ -143,6 +144,15 @@ let intentionalExit = false;
 let restarting = false;
 let quitting = false;
 let githubOAuthFlow = null;
+
+// Device Flow fallback for brokerless builds (device-flow.cjs). The proxy
+// keeps the access token inside main — only statuses and the sanitized login
+// ever reach the renderer.
+const deviceFlowProxy = createDeviceFlowProxy({
+  apiFetch,
+  writeCredential,
+  hasClientId: () => Boolean(githubOauthClientIdValue())
+});
 
 function stopChildProcess(child, timeoutMs = 5000) {
   return new Promise(resolve => {
@@ -309,24 +319,43 @@ function desktopOAuthBrokerUrl() {
   return process.env.CONSISTENCY_DESKTOP_OAUTH_BROKER_URL || "";
 }
 
+// Public OAuth App client id baked at pack time for the Device Flow fallback.
+// A client id is not a secret; no client secret ever crosses this boundary.
+function bakedGithubOauthClientId() {
+  if (app.isPackaged) {
+    try {
+      const metadata = JSON.parse(fs.readFileSync(path.join(stagedRoot(), "desktop-config.json"), "utf8"));
+      return typeof metadata.githubOauthClientId === "string" ? metadata.githubOauthClientId : "";
+    } catch {
+      return "";
+    }
+  }
+  return process.env.CONSISTENCY_GITHUB_OAUTH_CLIENT_ID || "";
+}
+
+function githubOauthClientIdValue() {
+  return process.env.GITHUB_OAUTH_CLIENT_ID || bakedGithubOauthClientId();
+}
+
 async function startGitHubOAuth() {
   const brokerUrl = desktopOAuthBrokerUrl();
   if (!githubOAuthFlow) githubOAuthFlow = new GitHubOAuthFlow({ fetchImpl: electronNet.fetch });
-  if (!brokerUrl) return { status: "not_configured" };
-
-  const result = await githubOAuthFlow.start({
-    brokerUrl,
-    openExternal: url => shell.openExternal(url)
-  });
-  if (result.status !== "connected" || typeof result.accessToken !== "string") {
-    return result.status === "connected" ? { status: "unavailable" } : result;
+  if (brokerUrl) {
+    const result = await githubOAuthFlow.start({
+      brokerUrl,
+      openExternal: url => shell.openExternal(url)
+    });
+    if (result.status !== "connected" || typeof result.accessToken !== "string") {
+      return result.status === "connected" ? { status: "unavailable" } : result;
+    }
+    try {
+      await writeCredential("GITHUB_PUBLIC_READ_TOKEN", result.accessToken);
+    } catch {
+      return { status: "unavailable" };
+    }
+    return { status: "connected", login: result.login };
   }
-  try {
-    await writeCredential("GITHUB_PUBLIC_READ_TOKEN", result.accessToken);
-  } catch {
-    return { status: "unavailable" };
-  }
-  return { status: "connected", login: result.login };
+  return deviceFlowProxy.start();
 }
 
 async function cancelGitHubOAuth() {
@@ -550,6 +579,9 @@ function startApi(nodeHelper, python) {
   }
 
   const userData = app.getPath("userData");
+  // Explicit environment wins over the pack-baked public client id; the two
+  // never coexist with a client secret in this process.
+  const githubOauthClientId = githubOauthClientIdValue();
   const env = {
     ...inheritedApiEnvironment(),
     ...credentialEnvironment(),
@@ -570,6 +602,7 @@ function startApi(nodeHelper, python) {
     CONSISTENCY_SETTINGS_WRITABLE: "true",
     CONSISTENCY_WORKERS_ENABLED: process.env.CONSISTENCY_WORKERS_ENABLED ?? "true",
     CONSISTENCY_HEARTBEAT_ENABLED: process.env.CONSISTENCY_HEARTBEAT_ENABLED ?? "false",
+    ...(githubOauthClientId ? { GITHUB_OAUTH_CLIENT_ID: githubOauthClientId } : {}),
     ...(process.env.LLM_PROVIDER ? { LLM_PROVIDER: process.env.LLM_PROVIDER } : {})
   };
 
@@ -828,6 +861,10 @@ function registerIpc() {
   ipcMain.handle("github-oauth:start", async event => {
     assertTrustedSender(event);
     return startGitHubOAuth();
+  });
+  ipcMain.handle("github-oauth:poll", async (event, input) => {
+    assertTrustedSender(event);
+    return deviceFlowProxy.poll(input);
   });
   ipcMain.handle("github-oauth:cancel", async event => {
     assertTrustedSender(event);

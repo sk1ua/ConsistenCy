@@ -125,7 +125,13 @@ test.describe("desktop repository security boundary", () => {
     expect(main).toContain("...inheritedApiEnvironment(),");
     expect(main).not.toContain("...inheritedEnvironment,");
     expect(main).toContain("function desktopOAuthBrokerUrl()");
+    expect(main).toContain("function bakedGithubOauthClientId()");
+    expect(main).toContain('require("./device-flow.cjs")');
     expect(main).toContain('path.join(stagedRoot(), "desktop-config.json")');
+    // Device Flow fallback: only the PUBLIC client id crosses into the helper
+    // environment, and only when present; no client secret value may appear.
+    expect(main).toContain("...(githubOauthClientId ? { GITHUB_OAUTH_CLIENT_ID: githubOauthClientId } : {})");
+    expect(main).not.toMatch(/GITHUB_OAUTH_CLIENT_SECRET/);
     expect(main).toContain("for (const key of API_CREDENTIAL_KEYS)");
     expect(main).not.toContain('CONSISTENCY_API_TOKEN: DEV_URL ? "" : apiToken');
     expect(main).toContain('apiFetch("/internal/repositories/local"');

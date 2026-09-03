@@ -15,10 +15,19 @@ export type DesktopCredentialStatus = Record<DesktopCredentialKey, boolean>;
 
 export type DesktopGitHubOAuthResult =
   | { status: "connected"; login: string }
+  // Device Flow fallback: main proxies the embedded API and consumes the
+  // one-time token into safeStorage; these payloads carry no credential.
+  | { status: "device-awaiting"; flowId: string; userCode: string; verificationUri: string; intervalSeconds: number }
   | { status: "not_configured" | "denied" | "cancelled" | "expired" | "unavailable" };
+
+export type DesktopGitHubOAuthDevicePollResult =
+  | { status: "pending"; retryAfterSeconds: number }
+  | { status: "connected"; login: string }
+  | { status: "denied" | "expired" | "unavailable" };
 
 export type DesktopGitHubOAuthBridge = {
   start: () => Promise<DesktopGitHubOAuthResult>;
+  pollDeviceFlow: (input: { flowId: string }) => Promise<DesktopGitHubOAuthDevicePollResult>;
   cancel: () => Promise<{ status: "cancelled" }>;
 };
 export type DesktopRepositorySelection =

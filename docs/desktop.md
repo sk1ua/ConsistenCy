@@ -110,6 +110,18 @@ The Client Secret and GitHub authorization code stay on the product broker. The 
 
 Normal browser deployments do not expose this callback and keep the existing Device Flow compatibility routes. Those routes require a server-configured public Client ID and show GitHub's verification URL and user code; they are not the Desktop automatic-return experience. Desktop renderers are blocked from those routes and can only use the main-process broker capability.
 
+### 4.4.1 Brokerless Desktop fallback (main-proxied Device Flow)
+
+Desktop builds packed without `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` keep GitHub
+sign-in available when the packer baked a public Device Flow client id
+(`CONSISTENCY_GITHUB_OAUTH_CLIENT_ID`). The sign-in button then starts a Device
+Flow through the embedded API, but the main process — not the renderer — calls
+the API's start and poll routes and consumes the one-time access token into
+`safeStorage`. The renderer only ever receives the verification URL, the user
+code, sanitized statuses, and the final GitHub login; the token crosses the
+same main-process boundary as the broker flow. With neither a broker nor a
+baked client id, the button reports an honest not-configured status.
+
 ### 4.5 Open Logs Folder (Semantic Action)
 The About section of Settings exposes an **[Open logs folder]** button (desktop only; browsers show a not-available note). This is a semantic privileged action, not a filesystem capability: the `logs:open` IPC method takes **no arguments**, the main process resolves the `userData` folder itself — the documented home of `consistency.log` and `api.log` — opens it in the OS file manager via `shell.openPath`, and returns only `{ ok: boolean }` to the renderer. The renderer never receives arbitrary path-opening authority, never learns the resolved folder path, and never sees `shell.openPath`'s error description (which may embed local paths). There is no generic `openPath(pathFromRenderer)` API.
 

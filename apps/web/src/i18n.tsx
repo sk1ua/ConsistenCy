@@ -286,6 +286,7 @@ export const zh: Record<string, string> = {
   "Complete authorization in your browser…": "请在浏览器中完成授权…",
   "Cancel": "取消",
   "Signed in as {login}. Restart the runtime to use the new credential.": "已登录为 {login}。请重启运行时以启用新凭据。",
+  "This ConsistenCy desktop build has no GitHub sign-in service configured.": "此 ConsistenCy 桌面版尚未配置 GitHub 登录服务。",
   "Starting…": "正在启动…",
   "Sign in with GitHub": "使用 GitHub 登录",
   "Commit risk trend on a 0 to 1 model scale": "0 到 1 模型刻度上的提交风险趋势",

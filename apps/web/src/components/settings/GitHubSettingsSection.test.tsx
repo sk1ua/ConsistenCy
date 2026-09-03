@@ -16,13 +16,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitHubConnectionTestResponse } from "@consistency/schema";
 import { api, type HealthResponse, type SettingsSnapshot } from "../../api/client";
 import { emptySecrets, keepSecrets, type ClearSecrets, type SecretDrafts } from "../../hooks/useSettingsForm";
+import type { DesktopGitHubOAuthDevicePollResult, DesktopGitHubOAuthResult } from "../../desktop";
 import { I18nProvider } from "../../i18n";
 import { GitHubSettingsSection } from "./GitHubSettingsSection";
 
 const originalDesktopDescriptor = Object.getOwnPropertyDescriptor(window, "consistencyDesktop");
 
 type DesktopOAuthFixture = {
-  start: () => Promise<{ status: "connected"; login: string }>;
+  start: () => Promise<DesktopGitHubOAuthResult>;
+  pollDeviceFlow: (input: { flowId: string }) => Promise<DesktopGitHubOAuthDevicePollResult>;
   cancel: () => Promise<{ status: "cancelled" }>;
 };
 
@@ -387,8 +389,9 @@ describe("GitHub OAuth sign-in card", () => {
 
   it("uses the desktop browser flow without exposing device code or client secret on the renderer", async () => {
     const start = vi.fn().mockResolvedValue({ status: "connected", login: "octocat" });
+    const pollDeviceFlow = vi.fn();
     const cancel = vi.fn().mockResolvedValue({ status: "cancelled" });
-    installDesktopOAuth({ start, cancel });
+    installDesktopOAuth({ start, pollDeviceFlow, cancel });
     const onDesktopConnected = vi.fn().mockResolvedValue(undefined);
     const { container, root } = await mountSection({ applyGitHubDesktopOauth: onDesktopConnected });
     expect(container.querySelector("#setting-oauthClientSecret")).toBeNull();
@@ -408,8 +411,9 @@ describe("GitHub OAuth sign-in card", () => {
   it("shows the desktop browser waiting state and cancellation without a token callback", async () => {
     let resolveStart!: (value: { status: "connected"; login: string }) => void;
     const start = vi.fn().mockReturnValue(new Promise(resolve => { resolveStart = resolve; }));
+    const pollDeviceFlow = vi.fn();
     const cancel = vi.fn().mockResolvedValue({ status: "cancelled" });
-    installDesktopOAuth({ start, cancel });
+    installDesktopOAuth({ start, pollDeviceFlow, cancel });
     const { container, root } = await mountSection();
     await act(async () => { click(container, "setting-github-oauth-start"); });
     expect(container.textContent).toContain("Complete authorization in your browser");
@@ -421,6 +425,56 @@ describe("GitHub OAuth sign-in card", () => {
     expect(cancel).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain("Complete authorization in your browser");
     resolveStart({ status: "connected", login: "octocat" });
+
+    await act(async () => { root.unmount(); });
+    document.body.removeChild(container);
+  });
+
+  it("falls back to the main-proxied Device Flow when the desktop build ships no broker", async () => {
+    const start = vi.fn().mockResolvedValue({
+      status: "device-awaiting",
+      flowId: "flow-fixture-1",
+      userCode: "ABCD-1234",
+      verificationUri: "https://github.com/login/device",
+      intervalSeconds: 5
+    });
+    const pollDeviceFlow = vi.fn().mockResolvedValue({ status: "pending", retryAfterSeconds: 5 });
+    const cancel = vi.fn().mockResolvedValue({ status: "cancelled" });
+    installDesktopOAuth({ start, pollDeviceFlow, cancel });
+    // The renderer itself must never touch the device-flow HTTP routes: the
+    // desktop security boundary blocks them and main owns the token handoff.
+    const startDevice = vi.spyOn(api, "startGitHubOauthDeviceFlow");
+    const pollDevice = vi.spyOn(api, "pollGitHubOauthDeviceFlow");
+    const { container, root } = await mountSection();
+
+    await act(async () => { click(container, "setting-github-oauth-start"); });
+    expect(start).toHaveBeenCalledOnce();
+    expect(startDevice).not.toHaveBeenCalled();
+    expect(pollDevice).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Enter this code on GitHub:");
+    expect(container.textContent).toContain("ABCD-1234");
+    expect(container.textContent).toContain("github.com/login/device");
+    // The fallback never surfaces a client secret field.
+    expect(container.querySelector("#setting-oauthClientSecret")).toBeNull();
+
+    await act(async () => { root.unmount(); });
+    startDevice.mockRestore();
+    pollDevice.mockRestore();
+    document.body.removeChild(container);
+  });
+
+  it("keeps the honest not-configured failure when neither broker nor Device Flow client id exists", async () => {
+    const start = vi.fn().mockResolvedValue({ status: "not_configured" });
+    const pollDeviceFlow = vi.fn();
+    const cancel = vi.fn().mockResolvedValue({ status: "cancelled" });
+    installDesktopOAuth({ start, pollDeviceFlow, cancel });
+    const { container, root } = await mountSection();
+
+    await act(async () => { click(container, "setting-github-oauth-start"); });
+    expect(start).toHaveBeenCalledOnce();
+    expect(pollDeviceFlow).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("This ConsistenCy desktop build has no GitHub sign-in service configured.");
+    expect(container.textContent).not.toContain("Enter this code on GitHub");
 
     await act(async () => { root.unmount(); });
     document.body.removeChild(container);
