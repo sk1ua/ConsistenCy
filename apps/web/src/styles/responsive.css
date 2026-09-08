@@ -253,24 +253,6 @@
   .agent-meta {
     display: none;
   }
-  .settings-intro {
-    padding: 21px;
-    grid-template-columns: 1fr;
-  }
-  .readiness-score {
-    padding: 13px 0 0;
-    border-top: 1px solid var(--primary-faint);
-    border-left: 0;
-  }
-  .readiness-score span {
-    max-width: none;
-  }
-  .setup-rail {
-    gap: 4px;
-  }
-  .setup-rail span {
-    font-size: 11px;
-  }
   .settings-group {
     grid-template-columns: 1fr;
   }
@@ -286,17 +268,6 @@
   }
   .setting-field-wide {
     grid-column: auto;
-  }
-  .settings-actions {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-  .settings-actions > span {
-    width: 100%;
-    margin-right: 0;
-  }
-  .secondary-button, .save-settings {
-    flex: 1;
   }
   .public-pr-intake {
     grid-template-columns: 1fr;
@@ -358,18 +329,6 @@
   .filter-bar select {
     flex: 1 1 130px;
     min-width: 0;
-  }
-  .settings-intro h2 {
-    font-size: 27px;
-  }
-  .setup-rail span::after {
-    display: none;
-  }
-  .settings-actions > span {
-    display: none;
-  }
-  .secondary-button, .save-settings {
-    padding: 0 9px;
   }
 }
 

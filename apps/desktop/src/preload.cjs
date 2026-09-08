@@ -28,6 +28,9 @@ const githubOAuth = Object.freeze({
   cancel: () => ipcRenderer.invoke("github-oauth:cancel")
 });
 
+// Short UI values only (device-flow user code); main validates and size-caps.
+const copyText = text => ipcRenderer.invoke("clipboard:write", text);
+
 const preferences = Object.freeze({
   get: () => ipcRenderer.invoke("preferences:get"),
   set: patch => {
@@ -44,6 +47,7 @@ contextBridge.exposeInMainWorld("consistencyDesktop", Object.freeze({
   selectRepository: () => ipcRenderer.invoke("repositories:select"),
   credentialStatus: () => ipcRenderer.invoke("credentials:status"),
   setCredential: (key, value) => ipcRenderer.invoke("credentials:set", { key, value }),
+  copyText,
   githubOAuth,
   showFromTray: () => ipcRenderer.invoke("tray:show"),
   preferences,

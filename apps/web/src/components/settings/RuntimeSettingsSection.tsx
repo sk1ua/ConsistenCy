@@ -40,6 +40,7 @@ export function RuntimeSettingsSection({
           <Activity size={17} />
           <div>
             <strong>{t("Active runtime")}</strong>
+            <p>{t("Model")}: {health.llmProvider === "none" ? t("Not active") : <>{health.llmProvider}{health.llmModel ? ` · ${health.llmModel}` : ""}</>}</p>
             <p>{t("Worker")}: {t(health.worker.running ? "Running · concurrency {count} · {jobs} active jobs" : "Stopped · concurrency {count}", { count: health.worker.concurrency, jobs: health.worker.activeJobs })}</p>
             <p>{t("Database")}: {t(health.configuration.storage.kind === "memory" ? "In-memory storage" : "Local file storage")}</p>
             {concurrencyDrift && (

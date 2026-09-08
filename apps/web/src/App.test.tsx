@@ -7,7 +7,6 @@ import { I18nProvider, type Locale } from "./i18n";
 import { DashboardPage } from "./pages/DashboardPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ReportPage } from "./pages/ReportPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { createWorkspaceQueryClient } from "./query/client";
 import { testJobs, testReports, testStats } from "./test/testFixtures";
 
@@ -45,24 +44,12 @@ describe("App", () => {
     expect(renderToString(<MemoryRouter><ReportPage job={testJobs[0]} report={testReports[0]} onBack={() => {}} /></MemoryRouter>)).toContain("Findings");
   });
 
-  it("renders the settings editor loading state without exposing configuration", () => {
-    const html = renderToString(<SettingsPage health={{
-      ok: true,
-      service: "consistency-api",
-      database: { ok: true },
-      worker: { running: true, activeJobs: 0, concurrency: 1 },
-      llmProvider: "none",
-      configuration: {
-        githubAppConfigured: false,
-        webhookSecretConfigured: false,
-        publicReadTokenConfigured: false,
-        storage: { kind: "file", configured: true },
-        workerConcurrency: 1
-      }
-    }} />);
-
-    expect(html).toContain("Loading configuration");
+  it("renders the settings gear without exposing configuration values", () => {
+    const html = renderApp();
+    // The ablated /settings page is gone; settings live in the dialog behind
+    // the shell gear and never render configuration plaintext in the shell.
     expect(html).not.toContain("API key");
+    expect(html).not.toContain("deepseek");
   });
 
   it("renders the Chinese workbench labels when zh-CN is selected", () => {

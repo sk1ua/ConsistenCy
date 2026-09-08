@@ -58,9 +58,6 @@ export function ModelSettingsSection({
         <div className="setting-field setting-field-wide"><label htmlFor="setting-llm-model">{t("Model")}</label><input id="setting-llm-model" aria-describedby="setting-llm-model-help" list="setting-llm-model-options" value={draft.llm.llmModel ?? ""} onChange={event => updateLlm({ llmModel: event.target.value })} placeholder={t("Catalog default")} /><datalist id="setting-llm-model-options">{catalogModels.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist><SettingHelp id="setting-llm-model-help" text="Leave empty to use the provider's first available catalog model." /></div>
         <SecretField name="llmApiKey" label="Provider API key" configured={settings.llm.llmApiKeyConfigured} value={secrets.llmApiKey} clear={clearSecrets.llmApiKey} help="Create a key with the selected provider. It is stored encrypted and injected in-memory at runtime." helpHref={SETTING_HELP_LINKS.openaiApiKeys} onValue={updateSecret} onClear={updateClear} />
       </>}
-      {draft.llm.provider === "deepseek" && <>
-        <div className="setting-field setting-field-wide"><label htmlFor="setting-deepseek-url">{t("Base URL")}</label><input id="setting-deepseek-url" aria-describedby="setting-deepseek-url-help" type="url" value={draft.llm.deepseekBaseUrl} onChange={event => updateLlm({ deepseekBaseUrl: event.target.value })} /><SettingHelp id="setting-deepseek-url-help" text="Keep the official endpoint unless your organization provides a compatible gateway." /></div>
-      </>}
     </div>
   </section>;
 }

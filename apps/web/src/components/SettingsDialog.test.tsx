@@ -80,11 +80,14 @@ describe("SettingsDialog", () => {
     expect(renderDialog(false)).not.toContain("ds-dialog");
   });
 
-  it("renders a four-section workbench navigation", () => {
+  it("renders a three-section workbench navigation", () => {
     const html = renderDialog(true);
     expect(html).toContain("ds-dialog--settings");
-    for (const label of ["General", "Reviews", "Appearance", "About"]) expect(html).toContain(label);
-    expect(html.match(/<button[^>]*settings-dialog-nav-item[^>]*>/g) ?? []).toHaveLength(4);
+    for (const label of ["General", "Appearance", "About"]) expect(html).toContain(label);
+    // The read-only Reviews section was ablated: it carried no interactive
+    // setting and duplicated runtime/model status shown elsewhere.
+    expect(html).not.toContain("Reviews");
+    expect(html.match(/<button[^>]*settings-dialog-nav-item[^>]*>/g) ?? []).toHaveLength(3);
     expect(html).not.toContain("settings-dialog-nav-item--disabled");
     expect(html).not.toContain("Coming soon");
   });
@@ -121,7 +124,7 @@ describe("SettingsDialog", () => {
     document.body.removeChild(container);
   });
 
-  it("renders Reviews, Appearance and About through their four nav items", async () => {
+  it("renders Appearance and About through their three nav items", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const settingsSpy = vi.spyOn(api, "settings").mockResolvedValue(configuredSettings);
     window.localStorage.clear?.();
@@ -134,12 +137,9 @@ describe("SettingsDialog", () => {
     });
 
     const nav = () => [...container.querySelectorAll<HTMLButtonElement>(".settings-dialog-nav-item")];
-    await act(async () => { nav().find(button => button.textContent?.startsWith("Reviews"))?.click(); });
-    expect(container.querySelector("#setting-reviews-model")).toBeTruthy();
-
     await act(async () => { nav().find(button => button.textContent?.startsWith("Appearance"))?.click(); });
     expect(container.querySelectorAll(".settings-dialog-content .ds-select-menu")).toHaveLength(2);
-    expect(container.querySelector("#setting-density")).toBeTruthy();
+    expect(container.querySelector("#setting-density")).toBeNull();
 
     await act(async () => { nav().find(button => button.textContent?.startsWith("About"))?.click(); });
     expect(container.querySelector("#setting-about-service")?.textContent).toContain("consistency-api");

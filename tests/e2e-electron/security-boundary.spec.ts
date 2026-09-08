@@ -141,6 +141,10 @@ test.describe("desktop repository security boundary", () => {
     expect(main.match(/randomBytes\(32\)\.toString\("base64url"\)/g)?.length).toBeGreaterThanOrEqual(2);
     expect(main).toContain('ipcMain.handle("runtime:restart"');
     expect(main).toContain('ipcMain.handle("app:build-info"');
+    // Clipboard IPC: string-only, size-capped, sender-checked — a UI-value
+    // sink (device-flow user code), never a secret channel.
+    expect(main).toContain('ipcMain.handle("clipboard:write"');
+    expect(main).toContain('if (typeof text !== "string" || text.length === 0 || text.length > 4096)');
     expect(main).toContain("async function restartApi()");
     expect(main).toContain("function stopChildProcess(");
     expect(main).toContain("if (child !== apiProcess || quitting || intentionalExit || restarting) return;");

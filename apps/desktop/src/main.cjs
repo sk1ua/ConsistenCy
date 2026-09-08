@@ -6,6 +6,7 @@
 const {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -857,6 +858,14 @@ function registerIpc() {
     assertTrustedSender(event);
     if (!input || typeof input !== "object") throw new Error("Credential input is invalid");
     return writeCredential(input.key, input.value);
+  });
+  // Renderer-initiated clipboard write for short UI values (the device-flow
+  // user code). Size-capped, string-only, never used for secrets.
+  ipcMain.handle("clipboard:write", (event, text) => {
+    assertTrustedSender(event);
+    if (typeof text !== "string" || text.length === 0 || text.length > 4096) throw new Error("Clipboard input is invalid");
+    clipboard.writeText(text);
+    return { ok: true };
   });
   ipcMain.handle("github-oauth:start", async event => {
     assertTrustedSender(event);

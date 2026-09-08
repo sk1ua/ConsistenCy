@@ -35,6 +35,7 @@ import {
   createRepositoryReviewsQueryOptions,
   RepositoryReviewsView
 } from "./RepositoryReviewsView";
+import { openSettingsDialog } from "../settingsDialogStore";
 
 export interface RepositoryDetailPageProps {
   jobs: ReviewJob[];
@@ -328,7 +329,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                )}
              </div>
              {prep && prep.model.default.provider === "none" && (
-               <Button variant="outline" size="sm" onClick={() => navigate("/settings")}>{zh ? "配置模型" : "Configure model"}</Button>
+               <Button variant="outline" size="sm" onClick={openSettingsDialog}>{zh ? "配置模型" : "Configure model"}</Button>
              )}
           </div>
 
@@ -510,7 +511,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
         pending={triggerReview.isPending}
         onSubmit={(request) => triggerReview.mutate(request)}
         zh={zh}
-        onConfigureModel={() => navigate("/settings")}
+        onConfigureModel={openSettingsDialog}
         error={reviewError}
         onClearError={() => setReviewError(null)}
       />

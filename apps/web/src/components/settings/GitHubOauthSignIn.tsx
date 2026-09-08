@@ -1,7 +1,7 @@
 import { Github, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
-import { openExternalUrl, type DesktopGitHubOAuthBridge } from "../../desktop";
+import { desktopBridge, openExternalUrl, type DesktopGitHubOAuthBridge } from "../../desktop";
 import { useI18n } from "../../i18n";
 import { Button } from "../../design-system/Button";
 
@@ -25,6 +25,33 @@ type OauthPhase =
 
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
 
+async function writeClipboard(text: string): Promise<void> {
+  // Desktop shell first: navigator.clipboard is unreliable under the custom
+  // app protocol, so main owns the OS clipboard through a size-capped IPC.
+  const bridge = desktopBridge();
+  if (bridge?.copyText) {
+    await bridge.copyText(text);
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // Last resort for non-secure contexts: the legacy execCommand path.
+  const scratch = document.createElement("textarea");
+  scratch.value = text;
+  scratch.setAttribute("readonly", "");
+  scratch.style.position = "fixed";
+  scratch.style.opacity = "0";
+  document.body.appendChild(scratch);
+  scratch.select();
+  try {
+    if (!document.execCommand("copy")) throw new Error("execCommand copy failed");
+  } finally {
+    document.body.removeChild(scratch);
+  }
+}
+
 /**
  * GitHub OAuth Device Flow sign-in for Settings. The access token crosses this
  * component exactly once (connected poll → onConnected) and is never stored in
@@ -37,6 +64,7 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
   const { t } = useI18n();
   const [phase, setPhase] = useState<OauthPhase>({ phase: "idle" });
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const timerRef = useRef<number | undefined>(undefined);
   const mountedRef = useRef(true);
 
@@ -47,9 +75,15 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
     }
   }, []);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    clearTimer();
+  // StrictMode-safe liveness flag: the setup must re-arm the flag because
+  // React dev runs setup → cleanup → setup on mount; a cleanup-only flag
+  // would stay false forever and swallow every state update after an await.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimer();
+    };
   }, [clearTimer]);
 
   const pollLoop = useCallback(async (flowId: string, intervalSeconds: number, errors = 0) => {
@@ -179,10 +213,14 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
 
   function copyUserCode(): void {
     if (phase.phase !== "awaiting") return;
-    void navigator.clipboard?.writeText(phase.userCode).then(() => {
+    writeClipboard(phase.userCode).then(() => {
+      if (!mountedRef.current) return;
       setCopied(true);
+      setCopyFailed(false);
       window.setTimeout(() => setCopied(false), 2_000);
-    }).catch(() => {});
+    }).catch(() => {
+      if (mountedRef.current) setCopyFailed(true);
+    });
   }
 
   return (
@@ -216,7 +254,7 @@ export function GitHubOauthSignIn({ restartPending, onConnected, desktopOAuth, o
               {t("Enter this code on GitHub:")}{" "}
               <code className="github-oauth-user-code">{phase.userCode}</code>
               <Button type="button" variant="outline" size="sm" onClick={copyUserCode}>
-                {copied ? t("Copied") : t("Copy code")}
+                {copyFailed ? t("Could not copy — select the code manually") : copied ? t("Copied") : t("Copy code")}
               </Button>
             </p>
             <p>

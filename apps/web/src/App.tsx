@@ -16,7 +16,6 @@ import { useTheme } from "./theme";
 
 const DashboardPage = lazy(() => import("./pages/DashboardPage").then(module => ({ default: module.DashboardPage })));
 const JobsPage = lazy(() => import("./pages/JobsPage").then(module => ({ default: module.JobsPage })));
-const SettingsPage = lazy(() => import("./pages/SettingsPage").then(module => ({ default: module.SettingsPage })));
 const WorkflowPage = lazy(() => import("./pages/WorkflowPage").then(module => ({ default: module.WorkflowPage })));
 const RepositoriesPage = lazy(() => import("./routes/RepositoriesPage").then(module => ({ default: module.RepositoriesPage })));
 const ReportRoute = lazy(() => import("./routes/ReportRoute").then(module => ({ default: module.ReportRoute })));
@@ -146,7 +145,6 @@ export function App() {
     const isRepositories = location.pathname.startsWith("/repositories");
     const isJobs = location.pathname === "/runs" || location.pathname.startsWith("/jobs");
     const isReports = /^\/(?:runs\/[^/]+|reports)/.test(location.pathname);
-    const isSettings = location.pathname.startsWith("/settings");
 
     if ((isOverview || isRepositories || isJobs) && queries.jobs.error) {
       add("jobs", zh ? "审查队列暂不可用" : "Review queue unavailable", queries.jobs.error);
@@ -157,7 +155,7 @@ export function App() {
     if (isOverview && queries.stats.error) {
       add("stats", zh ? "统计数据暂不可用" : "Review statistics unavailable", queries.stats.error);
     }
-    if ((isOverview || isRepositories || isReports || isSettings) && queries.health.error) {
+    if ((isOverview || isRepositories || isReports) && queries.health.error) {
       add("health", zh ? "运行状态暂不可用" : "Runtime status unavailable", queries.health.error);
     }
     return visible;
@@ -241,7 +239,6 @@ export function App() {
           changingAutomationId={setAutomationEnabled.variables?.automationId}
           onSetEnabled={(automation, enabled) => setAutomationEnabled.mutate({ automationId: automation.id, enabled })}
         />} />
-        <Route path="/settings" element={<SettingsPage health={health} />} />
         <Route path="*" element={<Navigate replace to="/inbox" />} />
       </Routes>
     </Suspense>

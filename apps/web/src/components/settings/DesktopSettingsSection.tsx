@@ -10,7 +10,7 @@ import { useI18n } from "../../i18n";
 import { SettingHelp } from "../SettingHelp";
 
 /**
- * Desktop section for the Settings Dialog and the /settings page. Close
+ * Desktop section for the Settings Dialog. Close
  * behavior, tray visibility and login launch are REAL toggles: each change
  * is applied immediately through the desktop bridge (main-process
  * desktop-preferences.json) and survives an application restart. There is no

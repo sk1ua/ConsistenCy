@@ -45,6 +45,7 @@ import type { BadgeVariant } from "../design-system/Badge";
 import { Breadcrumb, type BreadcrumbItem } from "../design-system/Breadcrumb";
 import { Dialog } from "../design-system/Dialog";
 import { SettingsDialog } from "../components/SettingsDialog";
+import { closeSettingsDialog, openSettingsDialog, useSettingsDialogOpen } from "../settingsDialogStore";
 import { desktopBridge, type DesktopBuildInfo } from "../desktop";
 import { useSidebarLayout, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH_BOUNDS } from "./useSidebarLayout";
 
@@ -143,7 +144,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   const zh = locale === "zh-CN";
 
   const [isConnectOpen, setIsConnectOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const isSettingsOpen = useSettingsDialogOpen();
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -309,8 +310,6 @@ export const AppShell: React.FC<AppShellProps> = ({
       items.push({ label: zh ? "审查发现" : "Findings" });
     } else if (path.startsWith("/workflows")) {
       items.push({ label: zh ? "工作流" : "Workflows" });
-    } else if (path.startsWith("/settings")) {
-      items.push({ label: zh ? "系统设置" : "Settings" });
     } else if (path.startsWith("/inbox")) {
       items.push({ label: zh ? "收件箱" : "Inbox" });
     }
@@ -515,7 +514,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               label={zh ? "设置" : "Settings"}
               size="sm"
               variant="ghost"
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={openSettingsDialog}
             />
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <span
@@ -830,7 +829,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       {isSettingsOpen && (
         <SettingsDialog
           isOpen
-          onClose={() => setIsSettingsOpen(false)}
+          onClose={closeSettingsDialog}
           health={health}
         />
       )}
@@ -878,7 +877,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               size="sm"
               style={{ justifyContent: "flex-start" }}
               onClick={() => {
-                navigate("/settings");
+                openSettingsDialog();
                 setIsCommandOpen(false);
               }}
             >

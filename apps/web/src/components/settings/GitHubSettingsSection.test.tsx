@@ -1,7 +1,7 @@
 /**
  * Shared GitHubSettingsSection contract tests for CKPT4 Slice 2.
  *
- * The section is the single GitHub presentation used by both the /settings
+ * The section is the single GitHub presentation used by the settings
  * page and the Settings Dialog. These tests pin the stable status element
  * ids, the ACTIVE (health-derived) read-only summary rows, the explicit-only
  * Test Connection action (no auto-run, no polling), sanitized result states,
@@ -109,6 +109,7 @@ function sectionProps(options?: {
   clearSecrets?: ClearSecrets;
   settings?: SettingsSnapshot;
   applyGitHubDesktopOauth?: (login: string) => Promise<void>;
+  mode?: "all" | "core" | "advanced";
 }) {
   const {
     health,
@@ -116,7 +117,8 @@ function sectionProps(options?: {
     secrets = emptySecrets,
     clearSecrets = keepSecrets,
     settings,
-    applyGitHubDesktopOauth = async () => undefined
+    applyGitHubDesktopOauth = async () => undefined,
+    mode
   } = options ?? {};
   return {
     draft: draftSettings,
@@ -129,7 +131,8 @@ function sectionProps(options?: {
     applyGitHubOauthToken: async () => undefined,
     applyGitHubDesktopOauth,
     ...(health === undefined ? {} : { health }),
-    ...(restartPending === undefined ? {} : { restartPending })
+    ...(restartPending === undefined ? {} : { restartPending }),
+    ...(mode === undefined ? {} : { mode })
   };
 }
 
@@ -140,6 +143,7 @@ function renderSection(options?: {
   secrets?: SecretDrafts;
   settings?: SettingsSnapshot;
   applyGitHubDesktopOauth?: (login: string) => Promise<void>;
+  mode?: "all" | "core" | "advanced";
 }): string {
   const { locale = "en-US", ...rest } = options ?? {};
   return renderToStaticMarkup(
@@ -178,45 +182,33 @@ beforeEach(() => {
   testConnectionMock.mockReset();
 });
 
-describe("GitHubSettingsSection connection status rows", () => {
-  it("renders the stable status row ids from ACTIVE health truth", () => {
+describe("GitHubSettingsSection surface composition", () => {
+  it("renders OAuth, the live test and the GitHub App fields in the default mode", () => {
     const html = renderSection({ health: makeHealth() });
-    expect(html).toContain('id="setting-github-status-access"');
-    expect(html).toContain('id="setting-github-status-app"');
-    expect(html).toContain('id="setting-github-status-webhook"');
-    expect(html).toContain('id="setting-github-status-token"');
-    expect(html).toContain("Anonymous read");
-    expect(html).toContain("Not configured");
-    expect(html).toContain("Configured");
-  });
-
-  it("labels the PAT access mode truthfully", () => {
-    const health = { ...makeHealth(), publicPrAccessMode: "pat" as const };
-    expect(renderSection({ health })).toContain("PAT read");
-    const disabled = { ...makeHealth(), publicPrAccessMode: "disabled" as const };
-    expect(renderSection({ health: disabled })).toContain("Disabled");
-    // Legacy payloads without the field fail closed to "Disabled" as well.
-    const legacy = { ...makeHealth(), publicPrAccessMode: undefined };
-    expect(renderSection({ health: legacy })).toContain("Disabled");
-  });
-
-  it("hides the summary rows when health is absent but keeps the explicit test action", () => {
-    const html = renderSection();
-    expect(html).not.toContain("setting-github-status-access");
-    expect(html).not.toContain("setting-github-status-app");
-    expect(html).not.toContain("setting-github-status-webhook");
-    expect(html).not.toContain("setting-github-status-token");
+    expect(html).toContain('id="setting-github-oauth"');
+    expect(html).toContain('id="setting-github-status-test"');
     expect(html).toContain('id="setting-github-test"');
-    expect(html).toContain("Not tested yet");
-  });
-
-  it("keeps the existing mode guide and secret field behavior unchanged", () => {
-    const html = renderSection({ health: makeHealth() });
-    expect(html).toContain('class="source-mode-guide');
     expect(html).toContain('id="setting-app-id"');
-    expect(html).toContain('id="setting-publicReadToken"');
     expect(html).toContain('id="setting-webhookSecret"');
     expect(html).toContain('id="setting-privateKey"');
+    // The PAT fallback field and the mode guide were ablated: OAuth sign-in
+    // writes the same credential slot and the guide duplicated section copy.
+    expect(html).not.toContain('id="setting-publicReadToken"');
+    expect(html).not.toContain("source-mode-guide");
+    expect(html).not.toContain('id="setting-github-test-draft"');
+    // The duplicated connection-status section is gone; only the in-card
+    // live test remains.
+    expect(html).not.toContain('id="setting-github-status-access"');
+    expect(html).not.toContain('aria-label="Connection status"');
+  });
+
+  it("hides the GitHub App fields in core mode and the live test in advanced mode", () => {
+    const core = renderSection({ health: makeHealth(), mode: "core" });
+    expect(core).toContain('id="setting-github-status-test"');
+    expect(core).not.toContain('id="setting-app-id"');
+    const advanced = renderSection({ health: makeHealth(), mode: "advanced" });
+    expect(advanced).toContain('id="setting-app-id"');
+    expect(advanced).not.toContain('id="setting-github-test"');
   });
 });
 
@@ -285,92 +277,29 @@ describe("GitHubSettingsSection Test Connection action", () => {
   });
 });
 
-describe("GitHubSettingsSection unsaved draft token probe", () => {
-  it("keeps the draft-token probe disabled until a non-empty token draft exists", () => {
-    const idleHtml = renderSection({ health: makeHealth() });
-    const idleButton = idleHtml.match(/<button[^>]*id="setting-github-test-draft"[^>]*>/)?.[0] ?? "";
-    expect(idleButton).toContain("disabled");
-
-    const armedHtml = renderSection({
-      health: makeHealth(),
-      secrets: { ...emptySecrets, publicReadToken: "ghp_draft_fake" }
-    });
-    const armedButton = armedHtml.match(/<button[^>]*id="setting-github-test-draft"[^>]*>/)?.[0] ?? "";
-    expect(armedButton).not.toContain(' disabled=""');
-    expect(armedButton).toContain('aria-disabled="false"');
-  });
-
-  it("probes exactly one unsaved draft per click through the schema body and renders the sanitized result", async () => {
-    testConnectionMock.mockResolvedValue(connectedResult);
-    const { container, root } = await mountSection({
-      health: makeHealth(),
-      secrets: { ...emptySecrets, publicReadToken: "ghp_draft_fake" }
-    });
-
-    await act(async () => { click(container, "setting-github-test-draft"); });
-    await act(async () => { click(container, "setting-github-test-draft"); });
-
-    expect(testConnectionMock).toHaveBeenCalledTimes(2);
-    expect(testConnectionMock).toHaveBeenCalledWith(undefined, { publicReadToken: "ghp_draft_fake" });
-    const result = container.querySelector("#setting-github-draft-result");
-    expect(result?.textContent).toContain("Connected");
-    // The typed draft lives only in its own password input; the probe output
-    // must never echo the token back.
-    expect(result?.innerHTML).not.toContain("ghp_draft_fake");
-    const statusSection = container.innerHTML.slice(container.innerHTML.indexOf('aria-label="Connection status"'));
-    expect(statusSection).not.toContain("ghp_draft_fake");
-
-    await act(async () => { root.unmount(); });
-    document.body.removeChild(container);
-  });
-
-  it("maps a failed draft probe to the generic unavailable message without echoing the token", async () => {
-    testConnectionMock.mockRejectedValueOnce(new Error("API request failed ghp_draft_fake"));
-    const { container, root } = await mountSection({
-      health: makeHealth(),
-      secrets: { ...emptySecrets, publicReadToken: "ghp_draft_fake" }
-    });
-
-    await act(async () => { click(container, "setting-github-test-draft"); });
-    const result = container.querySelector("#setting-github-draft-result");
-    expect(result?.textContent).toContain("Connection test unavailable");
-    expect(result?.innerHTML).not.toContain("ghp_draft_fake");
-    expect(container.innerHTML).not.toContain("API request failed");
-
-    await act(async () => { root.unmount(); });
-    document.body.removeChild(container);
-  });
-});
-
 describe("GitHubSettingsSection security surface", () => {
-  it("renders no secret values and no filesystem paths in the connection status output", () => {
+  it("keeps secret drafts and filesystem paths out of the live test output", () => {
     const html = renderSection({
       health: makeHealth(),
       secrets: { ...emptySecrets, publicReadToken: "ghp_test_fake", webhookSecret: "whsec_test_fake" }
     });
-    // Secret drafts live only in their own editable password fields; the
-    // read-only connection status section must never echo them.
-    const statusSection = html.slice(html.indexOf('aria-label="Connection status"'));
-    expect(statusSection).not.toContain("ghp_test_fake");
-    expect(statusSection).not.toContain("whsec_test_fake");
-    expect(statusSection).not.toMatch(/type="password"/);
-    expect(statusSection).not.toMatch(/[A-Za-z]:\\/);
-    expect(statusSection).not.toMatch(/\/(?:home|Users|root|var|tmp)\//);
+    const result = html.slice(html.indexOf('id="setting-github-status-result"'), html.indexOf('id="setting-app-id"'));
+    expect(result).not.toContain("ghp_test_fake");
+    expect(result).not.toContain("whsec_test_fake");
+    expect(result).not.toMatch(/[A-Za-z]:\\/);
+    expect(result).not.toMatch(/\/(?:home|Users|root|var|tmp)\//);
   });
 });
 
 describe("GitHubSettingsSection zh-CN coverage", () => {
   it("translates every newly introduced user-visible string without English fallback", () => {
     const html = renderSection({ health: makeHealth(), restartPending: true, locale: "zh-CN" });
-    expect(html).toContain("连接状态");
-    expect(html).toContain("匿名读取");
     expect(html).toContain("尚未测试");
     expect(html).toContain("测试连接");
-    expect(html).toContain("试连此令牌");
-    expect(html).toContain("仅对这条未保存的令牌发起一次只读请求；不会存储或回显该令牌。");
-    expect(html).toContain("测试针对当前运行中的配置；重启后才会应用已保存的更改。");
+    expect(html).toContain("通过 github.com 登录；仅在需要 GitHub App 自动化时才添加。");
     expect(html).toContain("GitHub 登录（OAuth）");
     expect(html).toContain("通过 github.com 一键登录。仅授予身份标识与更高的读取速率配额——不授予任何仓库权限。");
+    expect(html).toContain("测试针对当前运行中的配置；重启后才会应用已保存的更改。");
     expect(html).not.toContain("Not tested yet");
     expect(html).not.toContain("Test Connection");
     expect(html).not.toContain("Test this token");

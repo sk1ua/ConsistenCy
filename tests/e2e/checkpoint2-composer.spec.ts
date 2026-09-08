@@ -9,10 +9,10 @@ const basePreparation = {
   },
   model: {
     default: { provider: "deepseek", model: "deepseek-v4-flash" },
-    providers: {
-      deepseek: { configured: true, defaultModel: "deepseek-v4-flash" },
-      openai: { configured: true, defaultModel: "gpt-4.1-mini" }
-    },
+    providers: [
+      { id: "deepseek", configured: true, defaultModel: "deepseek-v4-flash" },
+      { id: "openai", configured: true, defaultModel: "gpt-4.1-mini" }
+    ],
     pendingRestart: null
   },
   canStartReview: true,
@@ -104,7 +104,7 @@ async function installMatrix(page: Page, matrix: Matrix): Promise<void> {
     }
     if (path === "/api/settings" && request.method() === "PUT") {
       matrix.settingsMutations += 1;
-      await route.fulfill({ json: { settings: { llm: { provider: "none", deepseekBaseUrl: "", deepseekModel: "", openaiModel: "", deepseekApiKeyConfigured: false, openaiApiKeyConfigured: false }, github: { appId: "", privateKeyConfigured: false, webhookSecretConfigured: false, publicReadTokenConfigured: false }, runtime: { storage: { kind: "memory", configured: true }, workspace: { configured: true }, localReview: { configured: true, rootCount: 1 }, workerConcurrency: 1, workerPollIntervalMs: 1000, webUrl: "http://localhost:5173", apiTokenConfigured: false }, overriddenByEnvironment: [], restartRequired: false } } });
+      await route.fulfill({ json: { settings: { llm: { provider: "none", llmApiKeyConfigured: false, llmModel: "", anthropicModel: "", anthropicApiKeyConfigured: false, deepseekBaseUrl: "", deepseekModel: "", openaiModel: "", deepseekApiKeyConfigured: false, openaiApiKeyConfigured: false }, github: { appId: "", privateKeyConfigured: false, webhookSecretConfigured: false, publicReadTokenConfigured: false }, runtime: { storage: { kind: "memory", configured: true }, workspace: { configured: true }, localReview: { configured: true, rootCount: 1 }, workerConcurrency: 1, workerPollIntervalMs: 1000, webUrl: "http://localhost:5173", apiTokenConfigured: false }, overriddenByEnvironment: [], restartRequired: false } } });
       return;
     }
     if (path === `/api/repositories/${repositoryId}/review-preparation` && request.method() === "GET") {
@@ -201,7 +201,7 @@ async function installMatrix(page: Page, matrix: Matrix): Promise<void> {
       return;
     }
     if (path === "/api/settings" && request.method() === "GET") {
-      await route.fulfill({ json: { settings: { llm: { provider: "none", deepseekBaseUrl: "", deepseekModel: "", openaiModel: "", deepseekApiKeyConfigured: false, openaiApiKeyConfigured: false }, github: { appId: "", privateKeyConfigured: false, webhookSecretConfigured: false, publicReadTokenConfigured: false }, runtime: { storage: { kind: "memory", configured: true }, workspace: { configured: true }, localReview: { configured: true, rootCount: 1 }, workerConcurrency: 1, workerPollIntervalMs: 1000, webUrl: "http://localhost:5173", apiTokenConfigured: false }, overriddenByEnvironment: [], restartRequired: false } } });
+      await route.fulfill({ json: { settings: { llm: { provider: "none", llmApiKeyConfigured: false, llmModel: "", anthropicModel: "", anthropicApiKeyConfigured: false, deepseekBaseUrl: "", deepseekModel: "", openaiModel: "", deepseekApiKeyConfigured: false, openaiApiKeyConfigured: false }, github: { appId: "", privateKeyConfigured: false, webhookSecretConfigured: false, publicReadTokenConfigured: false }, runtime: { storage: { kind: "memory", configured: true }, workspace: { configured: true }, localReview: { configured: true, rootCount: 1 }, workerConcurrency: 1, workerPollIntervalMs: 1000, webUrl: "http://localhost:5173", apiTokenConfigured: false }, overriddenByEnvironment: [], restartRequired: false } } });
       return;
     }
     matrix.unexpectedApiRequests.push(`${request.method()} ${path}`);
@@ -317,7 +317,7 @@ test.describe("Checkpoint 2 Composer matrix and Repository Changes", () => {
       ...structuredClone(basePreparation),
       model: {
         ...structuredClone(basePreparation.model),
-        providers: { deepseek: { configured: false }, openai: { configured: false } }
+        providers: [{ id: "deepseek", configured: false }, { id: "openai", configured: false }]
       }
     };
     await page.reload();
@@ -384,7 +384,7 @@ test.describe("Checkpoint 2 Composer matrix and Repository Changes", () => {
       ...structuredClone(basePreparation),
       model: {
         default: { provider: "none", model: "" },
-        providers: { deepseek: { configured: false }, openai: { configured: false } },
+        providers: [{ id: "deepseek", configured: false }, { id: "openai", configured: false }],
         pendingRestart: null
       },
       canStartReview: true,
@@ -392,7 +392,9 @@ test.describe("Checkpoint 2 Composer matrix and Repository Changes", () => {
     };
     await openComposer(page);
     await composer(page).getByRole("button", { name: "Configure model", exact: true }).click();
-    await expect(page).toHaveURL(/#\/settings$/);
+    // The /settings page was ablated: "Configure model" opens the settings
+    // dialog in place instead of navigating.
+    await expect(page.locator(".ds-dialog--settings")).toBeVisible();
     expect(matrix.settingsMutations).toBe(0);
   });
 

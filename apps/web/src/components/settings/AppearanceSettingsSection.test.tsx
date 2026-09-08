@@ -1,13 +1,13 @@
 /**
- * Shared AppearanceSettingsSection contract tests for CKPT4 Slice 3.
+ * Shared AppearanceSettingsSection contract tests.
  *
  * The section surfaces the EXISTING renderer-local theme and locale
  * capabilities with immediate effect (no draft/save lifecycle — they never
- * round-trip the server settings form) and displays Density truthfully as
- * not-yet-available with no fake control. These tests pin the stable element
- * ids, the immediate-effect semantics through the real ThemeProvider /
- * I18nProvider, the resolved-theme truth row, and zh-CN coverage for every
- * new user-visible string.
+ * round-trip the server settings form). The density row and the resolved
+ * theme row were ablated: density has no contract, and the resolved theme
+ * lives in the theme help text. These tests pin the lean structure, the
+ * immediate-effect semantics through the real ThemeProvider / I18nProvider,
+ * and zh-CN coverage.
  */
 // @vitest-environment happy-dom
 import { renderToStaticMarkup } from "react-dom/server";
@@ -18,8 +18,6 @@ import { I18nProvider } from "../../i18n";
 import { ThemeProvider } from "../../theme";
 import { AppearanceSettingsSection } from "./AppearanceSettingsSection";
 
-// happy-dom reports prefers-color-scheme: dark as unmatched, so the resolved
-// theme under the "system" preference is deterministic: light.
 function renderSection(locale: "en-US" | "zh-CN" = "en-US"): string {
   return renderToStaticMarkup(
     <ThemeProvider>
@@ -61,13 +59,15 @@ beforeEach(() => {
 });
 
 describe("AppearanceSettingsSection structure", () => {
-  it("renders the stable field ids for theme, locale, resolved theme and density", () => {
+  it("renders exactly the theme and language controls with no placeholder rows", () => {
     const html = renderSection();
     expect(html).toContain('aria-label="Theme"');
     expect(html).toContain('aria-label="Language"');
-    expect(html).toContain('id="setting-theme-resolved"');
-    expect(html).toContain('id="setting-density"');
     expect(html).toContain("Theme and language");
+    // Ablated: no density placeholder row, no resolved-theme card.
+    expect(html).not.toContain('id="setting-density"');
+    expect(html).not.toContain('id="setting-theme-resolved"');
+    expect(html).not.toContain("Not available yet");
   });
 
   it("localizes the theme and locale options and states the immediate/local effect", () => {
@@ -77,27 +77,10 @@ describe("AppearanceSettingsSection structure", () => {
     expect(html).toContain("Applies immediately and is stored locally.");
   });
 
-  it("shows the resolved theme truthfully for the system preference", () => {
-    const html = renderSection();
-    expect(html).toContain("Resolved theme");
-    // system preference + happy-dom light OS signal → resolved light.
-    expect(html).toContain("Currently Light (following the system setting)");
-  });
-
-  it("renders density as a read-only not-available row with no fake control", () => {
-    const html = renderSection();
-    expect(html).toContain("Density");
-    expect(html).toContain("Not available yet");
-    expect(html).toContain("No density contract exists yet, so no option is offered.");
-  });
-
   it("exposes exactly two design-system select menus and no save command", async () => {
     const { container, root } = await mountSection();
     expect(container.querySelectorAll(".ds-select-menu")).toHaveLength(2);
     expect(container.querySelectorAll(".ds-select-menu-trigger")).toHaveLength(2);
-    const densityRow = container.querySelector("#setting-density")!;
-    expect(densityRow).toBeTruthy();
-    expect(densityRow.querySelector("select, input, button, textarea")).toBeNull();
 
     await act(async () => { root.unmount(); });
     document.body.removeChild(container);
@@ -116,9 +99,6 @@ describe("AppearanceSettingsSection immediate-effect semantics", () => {
     expect(themeTrigger.textContent).toContain("Dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(window.localStorage.getItem("consistency.theme.v1")).toBe("dark");
-    // Forced preference: resolved row follows without the system qualifier.
-    expect(container.querySelector("#setting-theme-resolved")?.textContent).toContain("Currently Dark");
-    expect(container.querySelector("#setting-theme-resolved")?.textContent).not.toContain("following the system setting");
 
     await act(async () => { root.unmount(); });
     document.body.removeChild(container);
@@ -132,7 +112,6 @@ describe("AppearanceSettingsSection immediate-effect semantics", () => {
 
     expect(container.textContent).toContain("主题");
     expect(container.textContent).toContain("跟随系统");
-    expect(container.querySelector("#setting-density")?.textContent).toContain("暂未提供");
     expect(document.documentElement.lang).toBe("zh-CN");
     expect(window.localStorage.getItem("consistency.locale.v1")).toBe("zh-CN");
 
@@ -147,14 +126,10 @@ describe("AppearanceSettingsSection zh-CN coverage", () => {
     expect(html).toContain("主题与语言");
     expect(html).toContain("跟随系统");
     expect(html).toContain("立即生效，并保存在本地。");
-    expect(html).toContain("当前生效主题");
-    expect(html).toContain("当前生效：浅色（跟随系统）");
-    expect(html).toContain("界面密度");
-    expect(html).toContain("暂未提供");
-    expect(html).toContain("界面密度尚未定义契约，因此暂不提供选项。");
+    expect(html).toContain("实时跟随操作系统");
     expect(html).not.toContain("Follow system");
-    expect(html).not.toContain("Not available yet");
-    expect(html).not.toContain("Currently Light");
-    expect(html).not.toContain("Density");
+    expect(html).not.toContain("Applies immediately");
+    expect(html).not.toContain("界面密度");
+    expect(html).not.toContain("暂未提供");
   });
 });

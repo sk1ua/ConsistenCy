@@ -1,121 +1,4 @@
 /* ===== Settings ===== */
-.settings-editor {
-  display: grid;
-  gap: 14px;
-}
-.settings-intro {
-  position: relative;
-  overflow: hidden;
-  min-height: 188px;
-  padding: 26px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 170px;
-  gap: 20px 34px;
-  border: 1px solid var(--primary-faint);
-  border-radius: 10px;
-  background: linear-gradient(122deg, var(--primary-soft) 0%, var(--primary-soft) 67%, var(--primary-soft) 100%);
-}
-.settings-intro::after {
-  display: none;
-}
-.settings-intro > * {
-  position: relative;
-  z-index: 1;
-}
-.settings-intro .eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--primary-strong);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.settings-intro h2 {
-  max-width: 650px;
-  margin: 9px 0 8px;
-  font-family: var(--font-display);
-  font-size: clamp(25px, 3vw, 35px);
-  line-height: 1.1;
-}
-.settings-intro p {
-  max-width: 690px;
-  margin-bottom: 0;
-  color: var(--muted-strong);
-  font-size: 13px;
-  line-height: 1.55;
-}
-.readiness-score {
-  align-self: center;
-  padding-left: 24px;
-  border-left: 1px solid var(--primary-faint);
-}
-.readiness-score strong, .readiness-score span {
-  display: block;
-}
-.readiness-score strong {
-  font-family: var(--font-display);
-  font-size: 36px;
-  line-height: 1.15;
-}
-.readiness-score span {
-  max-width: 100px;
-  margin-top: 7px;
-  color: var(--muted-strong);
-  font-size: 12px;
-  line-height: 1.35;
-}
-.setup-rail {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 12px 16px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background: var(--surface-muted);
-}
-.setup-rail span {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-strong);
-  font-size: 12px;
-  font-weight: 700;
-}
-.setup-rail span::after {
-  height: 2px;
-  flex: 1;
-  background: var(--primary-faint);
-  content: "";
-}
-.setup-rail span:last-child::after {
-  display: none;
-}
-.setup-rail i {
-  width: 21px;
-  height: 21px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  border: 1px solid var(--primary-faint);
-  border-radius: 50%;
-  background: var(--primary-soft);
-  font-size: 11px;
-  font-style: normal;
-}
-.setup-rail span.ready {
-  color: var(--success-strong);
-}
-.setup-rail span.ready i {
-  border-color: var(--success-faint);
-  background: var(--success-soft);
-}
-.setup-rail span.ready::after {
-  background: var(--success-faint);
-}
 .settings-message {
   padding: 11px 14px;
   border: 1px solid;
@@ -257,22 +140,19 @@
   accent-color: var(--danger);
 }
 .setting-note {
-  min-height: 74px;
-  padding: 12px 14px;
+  padding: 0;
   grid-template-columns: 22px minmax(0, 1fr);
   align-items: start;
-  border: 1px dashed var(--border-strong);
-  border-radius: 7px;
-  background: var(--surface-subtle);
 }
 .setting-note > svg {
+  margin-top: 1px;
   color: var(--muted);
 }
 .setting-note strong {
   font-size: 12px;
 }
 .setting-note p {
-  margin: 3px 0 7px;
+  margin: 3px 0 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
@@ -284,14 +164,14 @@
 /* Desired-vs-active runtime drift inside the shared Runtime section.
    Data-derived echo of the authoritative restart banner, not new state. */
 .runtime-active-note .runtime-drift-notice {
-  margin: 3px 0 7px;
+  margin: 5px 0;
   color: var(--warning-strong);
   font-weight: 700;
 }
 /* Restart hint inside the GitHub connection-test row — the same
    data-derived echo semantics as the runtime drift notice. */
 .github-restart-hint {
-  margin: 3px 0 7px;
+  margin: 5px 0;
   color: var(--warning-strong);
   font-weight: 700;
 }
@@ -312,72 +192,6 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-subtle);
-}
-.settings-status {
-  padding: 18px;
-}
-.settings-actions {
-  position: sticky;
-  bottom: 12px;
-  z-index: 10;
-  min-height: 56px;
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 9px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 4px 20px var(--shadow-card);
-  backdrop-filter: blur(8px);
-}
-.settings-build-badge {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--muted);
-}
-.settings-build-badge code {
-  font-size: 11.5px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
-}
-.settings-actions > span {
-  margin-right: auto;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.secondary-button, .save-settings {
-  min-height: 38px;
-  padding: 0 13px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 750;
-}
-.secondary-button {
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-}
-.secondary-button:hover {
-  background: var(--surface-subtle);
-}
-.save-settings {
-  border: 1px solid var(--primary-strong);
-  background: var(--primary);
-  color: var(--surface);
-}
-.save-settings:hover {
-  background: var(--primary-strong);
 }
 
 .settings-lifecycle-banner {
@@ -528,17 +342,6 @@
 .settings-dialog-content .settings-fields {
   padding: 0;
   gap: 14px;
-}
-
-.settings-dialog-content .source-mode-guide {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 10px 20px;
-  padding: 12px 14px;
-}
-
-.settings-dialog-content .source-mode-guide > span {
-  flex: 1 1 200px;
 }
 
 /* ===== Simplified settings architecture ===== */

@@ -12,7 +12,7 @@ export interface AboutSettingsSectionProps {
 }
 
 /**
- * Shared About presentation for the Settings Dialog and the /settings page.
+ * Shared About presentation for the Settings Dialog.
  * Every row is grounded in an existing capability: build identity comes from
  * the desktop buildInfo bridge (undefined in the browser, which degrades to an
  * explicit not-available note), service / engine / schema version come

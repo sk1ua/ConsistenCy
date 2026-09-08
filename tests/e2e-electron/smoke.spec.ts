@@ -159,6 +159,7 @@ test.describe("desktop shell", () => {
       expect(boundary.methods).toEqual([
         "appVersion",
         "buildInfo",
+        "copyText",
         "credentialStatus",
         "githubOAuth",
         "openLogsFolder",

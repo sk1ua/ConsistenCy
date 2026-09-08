@@ -67,6 +67,8 @@ export type ConsistencyDesktopBridge = {
   selectRepository: () => Promise<DesktopRepositorySelection>;
   credentialStatus: () => Promise<DesktopCredentialStatus>;
   setCredential: (key: DesktopCredentialKey, value: string | null) => Promise<DesktopCredentialStatus>;
+  /** Short UI values only (device-flow user code); main validates and size-caps. */
+  copyText?: (text: string) => Promise<void>;
   githubOAuth?: DesktopGitHubOAuthBridge;
   showFromTray: () => Promise<{ visible: boolean }>;
   /** Desktop behavior preferences. The main process validates the patch and

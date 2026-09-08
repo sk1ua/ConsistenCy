@@ -7,15 +7,15 @@ import { useI18n } from "../i18n";
 import { useSettingsForm } from "../hooks/useSettingsForm";
 import { ModelSettingsSection } from "./settings/ModelSettingsSection";
 import { GitHubSettingsSection } from "./settings/GitHubSettingsSection";
-import { ReviewsSettingsSection } from "./settings/ReviewsSettingsSection";
 import { RuntimeSettingsSection } from "./settings/RuntimeSettingsSection";
 import { AppearanceSettingsSection } from "./settings/AppearanceSettingsSection";
 import { DesktopSettingsSection } from "./settings/DesktopSettingsSection";
 import { AboutSettingsSection } from "./settings/AboutSettingsSection";
 import { AdvancedSettingsDisclosure } from "./settings/AdvancedSettingsDisclosure";
+import { closeSettingsDialog } from "../settingsDialogStore";
 import { desktopBridge } from "../desktop";
 
-export type SettingsSectionId = "general" | "reviews" | "appearance" | "about";
+export type SettingsSectionId = "general" | "appearance" | "about";
 
 interface SettingsNavItem {
   id: SettingsSectionId;
@@ -25,7 +25,6 @@ interface SettingsNavItem {
 
 const SECTION_ITEMS: readonly SettingsNavItem[] = [
   { id: "general", labelKey: "General", disabled: false },
-  { id: "reviews", labelKey: "Reviews", disabled: false },
   { id: "appearance", labelKey: "Appearance", disabled: false },
   { id: "about", labelKey: "About", disabled: false }
 ];
@@ -142,8 +141,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                 </div>
               )}
               {draft.overriddenByEnvironment.length > 0 && <div className="settings-message warning">{t("Environment variables override: {keys}", { keys: draft.overriddenByEnvironment.join(", ") })}</div>}
-              {activeSection === "general" && <div className="settings-general-stack">
-                <ModelSettingsSection
+              {activeSection === "general" && <div className="settings-general-stack">                <ModelSettingsSection
                   draft={draft}
                   settings={settings}
                   secrets={secrets}
@@ -185,7 +183,6 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
                   <DesktopSettingsSection />
                 </AdvancedSettingsDisclosure>
               </div>}
-              {activeSection === "reviews" && <ReviewsSettingsSection settings={settings} health={health} />}
             </>
           )}
         </div>
