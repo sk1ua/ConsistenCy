@@ -67,6 +67,6 @@ npm run config -- set llm.deepseek-api-key
 ## 开发约定
 
 - 生成物不进 Git：本地数据库、评估输出、clone 仓库、pytest 缓存及打包产物已全部忽略。
-- 保证确定性与真实性：核心分析层无 LLM key 时也可复现；审查运行必须配置真实 DeepSeek/OpenAI 模型（无运行时 Mock/Demo 模式）。
+- 保证确定性与真实性：核心分析层无 LLM key 时也可复现；审查运行必须配置真实 DeepSeek / OpenAI / Anthropic 模型（产品无运行时 Mock/Demo 模式；CI 与单测可用内部 mock double）。
 - 文档保持聚焦：优先更新 `README.md`、`docs/architecture.md`、`docs/security.md` 或 `docs/configuration.md`。
 - 修改 TypeScript 或 Python 契约时，同步补充或更新对应的单元测试。
