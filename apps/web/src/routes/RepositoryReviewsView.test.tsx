@@ -33,7 +33,7 @@ import {
 
 function job(partial: Partial<ReviewJob> & Pick<ReviewJob, "id" | "repositoryId">): ReviewJob {
   return {
-    type: "review",
+    type: "PR_REVIEW",
     status: "succeeded",
     repositoryFullName: "octo/demo",
     accessMode: "local_git",
