@@ -8,7 +8,8 @@ import type { Repository, ReviewJob } from "@consistency/schema";
 import { RelatedCards } from "./RelatedCards";
 import { RepoDirectoryPanel } from "./RepoDirectoryPanel";
 import { ReviewWorkbench } from "./ReviewWorkbench";
-import { ComingSoonPage } from "../routes/ComingSoonPage";
+import { AutomationPage } from "../routes/AutomationPage";
+import { PluginsPage } from "../routes/PluginsPage";
 import { I18nProvider } from "../i18n";
 import { api } from "../api/client";
 
@@ -186,6 +187,40 @@ beforeEach(() => {
       ]
     } as never;
   });
+  vi.spyOn(api, "repositoryFileContent").mockImplementation(async (_id: string, path: string) => {
+    if (path === "clean.ts") {
+      return {
+        repositoryId: demoRepo.id,
+        path: "clean.ts",
+        available: true,
+        encoding: "utf-8",
+        truncated: false,
+        size: 32,
+        content: "export const clean = true;\n",
+        binary: false
+      } as never;
+    }
+    return {
+      repositoryId: demoRepo.id,
+      path,
+      available: true,
+      encoding: "utf-8",
+      truncated: false,
+      size: 12,
+      content: "// preview\n",
+      binary: false
+    } as never;
+  });
+  vi.spyOn(api, "engineAllowlistCatalog").mockResolvedValue({
+    catalog: {
+      analyzers: ["engine.style", "engine.security"],
+      verifiers: ["verify.syntax"],
+      synthesizerKinds: ["synthesize.review_report"],
+      builtinWorkflows: [],
+      engineLegacyBuiltins: [],
+      runtimeVerifiedBuiltins: []
+    }
+  } as never);
   vi.spyOn(api, "repositoryReviews").mockResolvedValue([demoJob] as never);
   vi.spyOn(api, "workflowRuntimeBindings").mockResolvedValue([
     {
@@ -365,7 +400,7 @@ describe("shell navigation happy path", () => {
     expect(lastState).toEqual({ highlightPath: "README.md" });
   });
 
-  it("directory panel shows tree and clean-file preview stub", async () => {
+  it("directory panel shows tree and clean-file content preview", async () => {
     const host = await mount(
       <RepoDirectoryPanel
         isOpen
@@ -389,9 +424,17 @@ describe("shell navigation happy path", () => {
       cleanBtn!.click();
     });
     expect(pathOf(host)).toBe("/inbox");
+    for (let i = 0; i < 30; i++) {
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 10));
+      });
+      if (host.querySelector("[data-testid=repo-directory-preview-code]")) break;
+    }
     const preview = host.querySelector("[data-testid=repo-directory-preview]");
     expect(preview?.textContent).toMatch(/clean\.ts/);
-    expect(preview?.textContent).toMatch(/预览即将|元信息|干净/);
+    expect(preview?.textContent).toMatch(/干净|Clean/);
+    const code = host.querySelector("[data-testid=repo-directory-preview-code]");
+    expect(code?.textContent).toMatch(/export const clean/);
   });
 
   it("workbench surfaces and review rows navigate correctly", async () => {
@@ -432,13 +475,25 @@ describe("shell navigation happy path", () => {
     expect(pathOf(host)).toBe("/runs/job_abc123/overview");
   });
 
-  it("automation stub exposes a clear back path to the workbench", async () => {
-    const host = await mount(<ComingSoonPage kind="automation" />, "/automation");
+  it("automation page exposes a clear back path to the workbench", async () => {
+    const host = await mount(<AutomationPage automations={[]} repositories={[]} />, "/automation");
     const back = [...host.querySelectorAll("a")].find(a =>
       a.textContent?.includes("返回审查工作台") || a.textContent?.includes("返回工作台")
     );
     expect(back).toBeTruthy();
     expect(back!.getAttribute("href")).toContain("/inbox");
+  });
+
+  it("plugins page lists builtin analyzers without a fake marketplace", async () => {
+    const host = await mount(<PluginsPage />, "/plugins");
+    expect(host.querySelector('[data-testid="plugins-page"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="plugin-builtin-style"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="plugin-builtin-secret"]')).toBeTruthy();
+    expect(host.textContent).toMatch(/第三方市场稍后|third-party marketplace later/i);
+    const back = [...host.querySelectorAll("a")].find(a =>
+      a.textContent?.includes("返回审查工作台") || a.textContent?.includes("返回工作台")
+    );
+    expect(back).toBeTruthy();
   });
 
   it("related evidence card jumps to run evidence", async () => {

@@ -1,11 +1,11 @@
 import { request, ServerResponse } from "node:http";
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, repositoryTreeResponseSchema, reviewPreparationResponseSchema, workflowRuntimeCopilotChatResponseSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeDefinitionsResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
+import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, repositoryTreeResponseSchema, repositoryFileContentResponseSchema, reviewPreparationResponseSchema, workflowRuntimeCopilotChatResponseSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeDefinitionsResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
 import { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createApiServer, ApiError } from "./http";
@@ -701,6 +701,92 @@ describe("createApiServer", () => {
       available: false,
       reason: "local repository path unavailable",
       entries: []
+    });
+  });
+
+
+  it("previews sandboxed repository file content and rejects unsafe paths", async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), "consistency-http-file-"));
+    tempDirectories.push(repositoryPath);
+    const outsideDir = mkdtempSync(join(tmpdir(), "consistency-http-file-outside-"));
+    tempDirectories.push(outsideDir);
+    writeFileSync(join(outsideDir, "secret.txt"), "should-not-leak\n", "utf8");
+    execFileSync("git", ["init", "--quiet"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "audit@example.com"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Auditor"], { cwd: repositoryPath, stdio: "ignore" });
+    mkdirSync(join(repositoryPath, "src"), { recursive: true });
+    writeFileSync(join(repositoryPath, "README.md"), "# hello preview\nline two\n", "utf8");
+    writeFileSync(join(repositoryPath, "src", "index.ts"), "export const ok = true;\n", "utf8");
+    writeFileSync(join(repositoryPath, "blob.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
+    execFileSync("git", ["add", "."], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["commit", "--quiet", "-m", "Initial repository"], { cwd: repositoryPath, stdio: "ignore" });
+    try {
+      symlinkSync(join(outsideDir, "secret.txt"), join(repositoryPath, "leak.link"));
+    } catch {
+      // platforms without symlink support still cover path traversal below
+    }
+
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("File preview checkout", repositoryPath);
+    const server = createApiServer({ auditStore });
+    servers.push(server);
+    const port = await listen(server);
+
+    const okRes = await getJson(port, `/repositories/${repository.id}/git/file?path=README.md`);
+    expect(okRes.status).toBe(200);
+    const okBody = repositoryFileContentResponseSchema.parse(okRes.body);
+    expect(okBody).toMatchObject({
+      repositoryId: repository.id,
+      path: "README.md",
+      available: true,
+      encoding: "utf-8",
+      truncated: false,
+      binary: false
+    });
+    if (!("content" in okBody)) throw new Error("expected text content");
+    expect(okBody.content).toContain("hello preview");
+    expect(JSON.stringify(okBody)).not.toContain(repositoryPath);
+
+    const nested = repositoryFileContentResponseSchema.parse(
+      (await getJson(port, `/repositories/${repository.id}/git/file?path=src%2Findex.ts`)).body
+    );
+    expect(nested).toMatchObject({ available: true, path: "src/index.ts" });
+    if ("content" in nested) expect(nested.content).toContain("export const ok");
+
+    const binary = repositoryFileContentResponseSchema.parse(
+      (await getJson(port, `/repositories/${repository.id}/git/file?path=blob.bin`)).body
+    );
+    expect(binary).toMatchObject({ available: true, binary: true });
+    expect(JSON.stringify(binary)).not.toContain("content");
+
+    const traversal = await getJson(port, `/repositories/${repository.id}/git/file?path=../secret`);
+    expect(traversal.status).toBe(400);
+
+    const absolute = await getJson(port, `/repositories/${repository.id}/git/file?path=${encodeURIComponent("/etc/passwd")}`);
+    expect(absolute.status).toBe(400);
+
+    if (existsSync(join(repositoryPath, "leak.link"))) {
+      const symlinkEscape = await getJson(port, `/repositories/${repository.id}/git/file?path=leak.link`);
+      // Either rejected (400) or unavailable — never returns outside content.
+      if (symlinkEscape.status === 200) {
+        const body = repositoryFileContentResponseSchema.parse(symlinkEscape.body);
+        expect(JSON.stringify(body)).not.toContain("should-not-leak");
+        if ("content" in body) expect(body.content).not.toContain("should-not-leak");
+      } else {
+        expect(symlinkEscape.status).toBe(400);
+      }
+    }
+
+    const missingFile = repositoryFileContentResponseSchema.parse(
+      (await getJson(port, `/repositories/${repository.id}/git/file?path=missing.ts`)).body
+    );
+    expect(missingFile).toMatchObject({ available: false });
+
+    const missingRepo = await getJson(port, "/repositories/unknown-file-repo/git/file?path=README.md");
+    expect(missingRepo.status).toBe(200);
+    expect(repositoryFileContentResponseSchema.parse(missingRepo.body)).toMatchObject({
+      available: false,
+      reason: "local repository path unavailable"
     });
   });
 

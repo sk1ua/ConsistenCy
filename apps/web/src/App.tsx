@@ -13,7 +13,8 @@ import { useWorkspaceQueries } from "./query/useWorkspaceQueries";
 import { routeMeta } from "./routes/meta";
 import { AppShell, safeDecodeURIComponent, type DataNotice } from "./shell/AppShell";
 import { ReviewWorkbench } from "./shell/ReviewWorkbench";
-import { ComingSoonPage } from "./routes/ComingSoonPage";
+import { AutomationPage } from "./routes/AutomationPage";
+import { PluginsPage } from "./routes/PluginsPage";
 import { useTheme } from "./theme";
 
 const JobsPage = lazy(() => import("./pages/JobsPage").then(module => ({ default: module.JobsPage })));
@@ -178,8 +179,15 @@ function openJob(job: ReviewJob) {
           jobs={jobs}
           reports={reports}
         />} />
-        <Route path="/automation" element={<ComingSoonPage kind="automation" automations={automations} />} />
-        <Route path="/plugins" element={<ComingSoonPage kind="plugins" />} />
+        <Route path="/automation" element={<AutomationPage
+          automations={automations}
+          repositories={repositories}
+          capabilities={queries.auditCapabilities.data}
+          actionError={setAutomationEnabled.error ? safeRequestError(setAutomationEnabled.error) : undefined}
+          changingAutomationId={setAutomationEnabled.variables?.automationId}
+          onSetEnabled={(automation, enabled) => setAutomationEnabled.mutate({ automationId: automation.id, enabled })}
+        />} />
+        <Route path="/plugins" element={<PluginsPage />} />
         <Route path="/repositories" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository sources"} /> : <RepositoriesPage
           jobs={jobs}
           pulse={heartbeatPulse}

@@ -32,3 +32,6 @@ export { StyleAnalyzer, STYLE_ANALYZER_VERSION, DEFAULT_STYLE_CONFIG } from "./s
 export type { StyleAnalyzerConfig } from "./style/analyzer.js";
 
 export { SecretAnalyzer, SECRET_ANALYZER_VERSION } from "./secret/analyzer.js";
+
+export { BUILTIN_ANALYZER_REGISTRY } from "./registry.js";
+export type { BuiltinAnalyzerMeta, BuiltinAnalyzerKind } from "./registry.js";

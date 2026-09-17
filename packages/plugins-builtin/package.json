@@ -19,5 +19,9 @@
     "@types/node": "^22.10.7",
     "typescript": "^5.7.3",
     "vitest": "^4.1.10"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./registry": "./src/registry.ts"
   }
 }

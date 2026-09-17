@@ -16,6 +16,7 @@ export const workspaceQueryKeys = {
   repositoryIssues: (repositoryId: string) => ["workspace", "repositories", repositoryId, "issues"] as const,
   repositoryGitStatus: (repositoryId: string) => ["workspace", "repositories", repositoryId, "git-status"] as const,
   repositoryTree: (repositoryId: string, path = "") => ["workspace", "repositories", repositoryId, "git-tree", path] as const,
+  repositoryFileContent: (repositoryId: string, path: string) => ["workspace", "repositories", repositoryId, "git-file", path] as const,
   repositoryCommits: (repositoryId: string) => ["workspace", "repositories", repositoryId, "commits"] as const,
   repositoryReviews: (repositoryId: string) => ["workspace", "repositories", repositoryId, "reviews"] as const,
   repositoryPullRequests: (repositoryId: string) => ["workspace", "repositories", repositoryId, "pull-requests"] as const,
