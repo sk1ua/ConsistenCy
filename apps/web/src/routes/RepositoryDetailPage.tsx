@@ -92,6 +92,11 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
     navigate(`/repositories/${encodeURIComponent(repositoryId)}/${tabId}`);
   };
 
+  const highlightPath = useMemo(() => {
+    const state = location.state as { highlightPath?: string } | null;
+    return typeof state?.highlightPath === "string" ? state.highlightPath : null;
+  }, [location.state]);
+
   // Queries for repository git status, commits, PRs, review preparation
   const gitStatusKey = ["repository-git-status", repositoryId] as const;
   const gitStatusQuery = useQuery({
@@ -240,6 +245,11 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
           icon={<PlayCircle size={14} />}
           onClick={() => setIsReviewDialogOpen(true)}
           disabled={isReviewStartDisabled(prep)}
+          title={
+            isReviewStartDisabled(prep)
+              ? (prep?.blockingReasons[0] ?? (zh ? "审查尚未就绪" : "Review is not ready"))
+              : (zh ? "开始审查" : "Start review")
+          }
         >
           {zh ? "开始审查" : "Start review"}
         </Button>
@@ -405,6 +415,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
           <RepositoryChangesView
             loading={gitStatusLoading}
             data={gitStatusData}
+            highlightPath={highlightPath}
           />
         </div>
       ) : activeTab === "history" ? (

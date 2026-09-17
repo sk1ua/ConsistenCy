@@ -21,7 +21,7 @@ export interface RepoDirectoryPanelProps {
 /**
  * Directory panel for a repository.
  * Full VCS tree API is not exposed yet — present working-tree changed + untracked
- * paths clearly as "变更文件" / changed files. Clicking a file opens the changes tab.
+ * paths in clear sections. Clicking a file opens the changes tab with highlightPath.
  */
 export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
   isOpen,
@@ -42,10 +42,7 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
 
   const changed = gitStatusQuery.data?.changedFiles ?? [];
   const untracked = gitStatusQuery.data?.untrackedFiles ?? [];
-  const entries = [
-    ...changed.map(f => ({ path: f.path, kind: "changed" as const })),
-    ...untracked.map(path => ({ path, kind: "untracked" as const }))
-  ];
+  const hasEntries = changed.length + untracked.length > 0;
 
   const openFile = (path: string) => {
     if (onOpenFile) {
@@ -58,15 +55,48 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
     });
   };
 
+  const renderSection = (
+    title: string,
+    items: Array<{ path: string; kind: "changed" | "untracked" }>
+  ) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="repo-directory-section">
+        <div className="repo-directory-section__label">
+          <span>{title}</span>
+          <Badge variant="neutral" size="sm">{items.length}</Badge>
+        </div>
+        <ul className="repo-directory-list" aria-label={title}>
+          {items.map(entry => (
+            <li key={`${entry.kind}-${entry.path}`}>
+              <button
+                type="button"
+                className="repo-directory-list__item"
+                onClick={() => openFile(entry.path)}
+                title={zh ? "在变更视图中打开并高亮" : "Open and highlight in changes view"}
+              >
+                <FileCode2 size={13} />
+                <span className="mono">{entry.path}</span>
+                <Badge variant="neutral" size="sm">
+                  {entry.kind === "untracked" ? (zh ? "未跟踪" : "untracked") : (zh ? "变更" : "changed")}
+                </Badge>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+
   return (
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
-      title={zh ? `变更文件 · ${displayName}` : `Changed files · ${displayName}`}
+      title={zh ? `工作区文件 · ${displayName}` : `Working tree · ${displayName}`}
       description={
         zh
-          ? "完整目录树尚未接入；当前列出工作区变更与未跟踪文件。点击文件可打开变更视图。"
-          : "Full tree API not available yet — listing working-tree changes and untracked files. Click a file to open the changes view."
+          ? "完整目录树尚未接入；当前按变更 / 未跟踪分区列出。点击文件可打开变更视图并高亮该行。"
+          : "Full tree API not available yet — listing changed and untracked files in sections. Click a file to open Changes with that row highlighted."
       }
     >
       {gitStatusQuery.isLoading ? (
@@ -74,15 +104,15 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
           <Loader2 size={14} className="ds-spin" />
           {zh ? "加载中…" : "Loading…"}
         </div>
-      ) : entries.length === 0 ? (
+      ) : !hasEntries ? (
         <EmptyState
           compact
           icon={<FolderTree size={20} />}
           title={zh ? "工作区干净" : "Clean working tree"}
           description={
             zh
-              ? "暂无变更文件。完整目录树即将接入；可前往变更标签确认。"
-              : "No changed files. Full directory tree coming soon — open the Changes tab to confirm."
+              ? "暂无变更或未跟踪文件。完整目录树即将接入。"
+              : "No changed or untracked files. Full directory tree coming soon."
           }
           action={
             <button
@@ -98,24 +128,16 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
           }
         />
       ) : (
-        <ul className="repo-directory-list" aria-label={zh ? "变更文件" : "Changed files"}>
-          {entries.map(entry => (
-            <li key={`${entry.kind}-${entry.path}`}>
-              <button
-                type="button"
-                className="repo-directory-list__item"
-                onClick={() => openFile(entry.path)}
-                title={zh ? "在变更视图中打开" : "Open in changes view"}
-              >
-                <FileCode2 size={13} />
-                <span className="mono">{entry.path}</span>
-                <Badge variant="neutral" size="sm">
-                  {entry.kind === "untracked" ? (zh ? "未跟踪" : "untracked") : (zh ? "变更" : "changed")}
-                </Badge>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="repo-directory-sections">
+          {renderSection(
+            zh ? "已变更" : "Changed",
+            changed.map(f => ({ path: f.path, kind: "changed" as const }))
+          )}
+          {renderSection(
+            zh ? "未跟踪" : "Untracked",
+            untracked.map(path => ({ path, kind: "untracked" as const }))
+          )}
+        </div>
       )}
     </Dialog>
   );

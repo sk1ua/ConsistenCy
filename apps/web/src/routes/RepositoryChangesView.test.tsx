@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderToString } from "react-dom/server";
-import { RepositoryChangesView, buildEntries, statusLabel, getNextSelection } from "./RepositoryChangesView";
+import { RepositoryChangesView, buildEntries, statusLabel, getNextSelection, resolveHighlightKey } from "./RepositoryChangesView";
 import type { RepositoryGitStatusResponse, VcsChangedFile } from "@consistency/schema";
 import { I18nProvider } from "../i18n";
 
@@ -56,6 +56,15 @@ describe("RepositoryChangesView helpers", () => {
   it("statusLabel returns correct initials", () => {
     expect(statusLabel("added")).toBe("A");
     expect(statusLabel("renamed")).toBe("R");
+  });
+
+
+  it("resolveHighlightKey prefers tracked then untracked paths", () => {
+    const entries = buildEntries(mockData);
+    expect(resolveHighlightKey(entries, "src/main.ts")).toBe("tracked:src/main.ts");
+    expect(resolveHighlightKey(entries, "new-file.txt")).toBe("untracked:new-file.txt");
+    expect(resolveHighlightKey(entries, "missing.ts")).toBeNull();
+    expect(resolveHighlightKey(entries, null)).toBeNull();
   });
 
   it("getNextSelection handles up and down correctly", () => {
