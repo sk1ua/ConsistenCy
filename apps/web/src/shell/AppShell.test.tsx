@@ -262,7 +262,43 @@ describe("Locked three-column AppShell", () => {
     expect(html).toContain("打开工作流绑定");
   });
 
-    it("safely handles malformed percent-encoded path segments without throwing", () => {
+
+  it("keeps related rail on run detail routes", () => {
+    const job = {
+      id: "job_abc123",
+      type: "PR_REVIEW" as const,
+      repositoryId: demoRepo.id,
+      repositoryFullName: demoRepo.displayName,
+      status: "succeeded" as const,
+      accessMode: "local_git" as const,
+      publicationPolicy: "disabled" as const,
+      createdAt: "2026-08-18T01:00:00.000Z",
+      headSha: "abcdef1234567890abcdef1234567890abcdef12",
+      baseSha: "1234567890abcdef1234567890abcdef12345678",
+      report: {
+        jobId: "job_abc123",
+        repositoryFullName: demoRepo.displayName,
+        baseSha: "1234567890abcdef1234567890abcdef12345678",
+        headSha: "abcdef1234567890abcdef1234567890abcdef12",
+        score: 88,
+        riskLevel: "low" as const,
+        findings: [],
+        agentRuns: [],
+        summary: "ok",
+        createdAt: "2026-08-18T01:05:00.000Z"
+      }
+    };
+    const html = renderShell("/runs/job_abc123/overview", {
+      locale: "zh-CN",
+      repositories: [demoRepo],
+      jobs: [job as never]
+    });
+    expect(html).toContain("related-cards-rail");
+    expect(html).toContain("agent-shell");
+    expect(html).toContain("当前运行");
+  });
+
+  it("safely handles malformed percent-encoded path segments without throwing", () => {
     const htmlMalformedRepo = renderShell("/repositories/%A/history", { repositories: [] });
     expect(htmlMalformedRepo).toContain("Invalid repository ID");
     expect(htmlMalformedRepo).toContain("location-breadcrumbs");

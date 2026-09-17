@@ -215,12 +215,64 @@ describe("shell navigation happy path", () => {
         b.textContent?.includes("README.md")
       );
     }
-    expect(host.textContent).toContain("变更文件");
+    expect(host.textContent).toMatch(/已变更|未跟踪/);
     expect(fileBtn).toBeTruthy();
     await act(async () => {
       fileBtn!.click();
     });
     expect(pathOf(host)).toBe("/repositories/repo_1/changes");
+  });
+
+  it("directory panel navigates with highlightPath state", async () => {
+    let lastState: unknown;
+    function StateProbe() {
+      const location = useLocation();
+      lastState = location.state;
+      return null;
+    }
+    const host = document.createElement("div");
+    document.body.append(host);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } }
+    });
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <QueryClientProvider client={client}>
+          <I18nProvider initialLocale="zh-CN">
+            <MemoryRouter initialEntries={["/inbox"]}>
+              <Routes>
+                <Route path="*" element={<>
+                  <RepoDirectoryPanel
+                    isOpen
+                    onClose={() => undefined}
+                    repositoryId={demoRepo.id}
+                    displayName={demoRepo.displayName}
+                    locale="zh-CN"
+                  />
+                  <StateProbe />
+                  <LocationProbe />
+                </>} />
+              </Routes>
+            </MemoryRouter>
+          </I18nProvider>
+        </QueryClientProvider>
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 30));
+    });
+    const fileBtn = [...host.querySelectorAll<HTMLButtonElement>(".repo-directory-list__item")].find(b =>
+      b.textContent?.includes("README.md")
+    );
+    expect(fileBtn).toBeTruthy();
+    await act(async () => {
+      fileBtn!.click();
+    });
+    expect(pathOf(host)).toBe("/repositories/repo_1/changes");
+    expect(lastState).toEqual({ highlightPath: "README.md" });
   });
 
   it("workbench surfaces and review rows navigate correctly", async () => {
@@ -269,4 +321,65 @@ describe("shell navigation happy path", () => {
     expect(back).toBeTruthy();
     expect(back!.getAttribute("href")).toContain("/inbox");
   });
+
+  it("related evidence card jumps to run evidence", async () => {
+    const host = await mount(
+      <RelatedCards locale="zh-CN" repository={demoRepo} jobs={[demoJob]} />
+    );
+    const jump = [...host.querySelectorAll<HTMLButtonElement>(".related-card__jump")].find(b =>
+      b.textContent?.includes("查看证据")
+    );
+    expect(jump).toBeTruthy();
+    await act(async () => {
+      jump!.click();
+    });
+    expect(pathOf(host)).toBe("/runs/job_abc123/evidence");
+  });
+
+  it("workbench change row navigates with highlightPath", async () => {
+    let lastState: unknown;
+    function StateProbe() {
+      const location = useLocation();
+      lastState = location.state;
+      return null;
+    }
+    const host = document.createElement("div");
+    document.body.append(host);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } }
+    });
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <QueryClientProvider client={client}>
+          <I18nProvider initialLocale="zh-CN">
+            <MemoryRouter initialEntries={["/inbox"]}>
+              <Routes>
+                <Route path="*" element={<>
+                  <ReviewWorkbench locale="zh-CN" repository={demoRepo} jobs={[demoJob]} />
+                  <StateProbe />
+                  <LocationProbe />
+                </>} />
+              </Routes>
+            </MemoryRouter>
+          </I18nProvider>
+        </QueryClientProvider>
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 20));
+    });
+    const row = [...host.querySelectorAll<HTMLButtonElement>(".review-workbench__row")].find(b =>
+      b.textContent?.includes("README.md")
+    );
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row!.click();
+    });
+    expect(pathOf(host)).toBe("/repositories/repo_1/changes");
+    expect(lastState).toEqual({ highlightPath: "README.md" });
+  });
+
 });

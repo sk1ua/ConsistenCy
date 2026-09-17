@@ -160,6 +160,11 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           size="sm"
           icon={<PlayCircle size={14} />}
           disabled={isReviewStartDisabled(prep)}
+          title={
+            isReviewStartDisabled(prep)
+              ? (prep?.blockingReasons[0] ?? (zh ? "审查尚未就绪" : "Review is not ready"))
+              : (zh ? "开始审查" : "Start review")
+          }
           onClick={() => setIsReviewOpen(true)}
         >
           {zh ? "开始审查" : "Start review"}
@@ -258,8 +263,10 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
                         : (zh ? "工作区审查" : "Working tree")}
                     </span>
                     {report?.findings?.length ? (
-                      <span className="review-workbench__muted">
-                        {zh ? `${report.findings.length} 项发现` : `${report.findings.length} findings`}
+                      <span className="review-workbench__muted" title={report.findings[0]?.title}>
+                        {zh
+                          ? `${report.findings.length} 项发现 · ${report.findings[0]?.title ?? ""}`
+                          : `${report.findings.length} findings · ${report.findings[0]?.title ?? ""}`}
                       </span>
                     ) : null}
                     {report?.score !== undefined && (

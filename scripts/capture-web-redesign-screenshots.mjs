@@ -105,6 +105,7 @@ async function main() {
   await page.addInitScript(() => {
     localStorage.setItem("consistency.theme.v1", "light");
     localStorage.setItem("consistency.locale.v1", "zh-CN");
+    try { sessionStorage.setItem("consistency.selectedRepo.v1", "repo-demo"); } catch {}
   });
 
   await page.route("**/api/**", async route => {
@@ -116,7 +117,7 @@ async function main() {
     if (path === "/health") {
       return json({ ok: true, llmProvider: "openai", llmModel: "gpt-demo", publicPrAccessMode: "anonymous" });
     }
-    if (path === "/jobs") return json({ jobs: [{
+    const demoJob = {
       id: "job_demo_review",
       type: "PR_REVIEW",
       status: "succeeded",
@@ -128,7 +129,30 @@ async function main() {
       headSha: "abcdef1234567890abcdef1234567890abcdef12",
       createdAt: now,
       finishedAt: now,
-    }] });
+      report: {
+        jobId: "job_demo_review",
+        repositoryFullName: repo.displayName,
+        baseSha: "1234567890abcdef1234567890abcdef12345678",
+        headSha: "abcdef1234567890abcdef1234567890abcdef12",
+        summary: "Demo review succeeded with one medium finding",
+        score: 88,
+        riskLevel: "low",
+        agentRuns: [],
+        findings: [{
+            id: "finding_1",
+            severity: "medium",
+            confidence: "high",
+            title: "Prefer explicit error boundaries",
+            file: "apps/web/src/shell/AppShell.tsx",
+            evidence: "demo evidence",
+            agent: "demo",
+          }],
+        createdAt: now,
+      },
+    };
+    if (path === "/jobs") return json({ jobs: [demoJob] });
+    if (path === "/jobs/job_demo_review") return json({ job: demoJob });
+    if (path === "/jobs/job_demo_review/report") return json({ report: demoJob.report });
     if (path === "/reports/recent") return json({ reports: [] });
     if (path === "/stats") {
       return json({
@@ -222,7 +246,15 @@ async function main() {
             score: 88,
             riskLevel: "low",
             agentRuns: [],
-            findings: [],
+            findings: [{
+              id: "finding_1",
+              severity: "medium",
+              confidence: "high",
+              title: "Prefer explicit error boundaries",
+              file: "apps/web/src/shell/AppShell.tsx",
+              evidence: "demo evidence",
+              agent: "demo",
+            }],
             createdAt: now,
           },
         }],
@@ -243,7 +275,12 @@ async function main() {
     if (path.includes("/revisions/")) return json({ revision });
     if (path === "/workflow-runtime/runs") return json({ runs: [] });
     if (path === `/workflow-runtime/repositories/${repo.id}/bindings`) {
-      return json({ bindings: [] });
+      return json({ bindings: [{
+        definitionId: "verified-mini-review",
+        repositoryId: repo.id,
+        enabled: true,
+        triggerMode: "manual",
+      }] });
     }
     // Heartbeat / SSE endpoints — empty OK
     if (path.includes("heartbeat") || path.includes("pulse") || path.includes("events")) {
@@ -254,8 +291,8 @@ async function main() {
 
   const shots = [
     { hash: "#/inbox", file: "01-inbox.png", wait: ".review-workbench, .agent-shell" },
-    { hash: `#/repositories/${encodeURIComponent(repo.id)}/overview`, file: "02-repository-overview.png", wait: ".agent-shell, .repo-detail-page" },
-    { hash: "#/workflows", file: "03-workflow-studio.png", wait: ".runtime-studio, .workflows-page" },
+    { hash: `#/repositories/${encodeURIComponent(repo.id)}/changes`, file: "02-repository-overview.png", wait: ".agent-shell, .diff-viewer, .repo-detail-page" },
+    { hash: "#/runs/job_demo_review/overview", file: "03-workflow-studio.png", wait: ".agent-shell, .run-shell-chrome, .report-page, .review-overview-page" },
   ];
 
   for (const shot of shots) {
