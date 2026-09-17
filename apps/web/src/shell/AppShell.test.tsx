@@ -90,6 +90,17 @@ describe("Locked three-column AppShell", () => {
     expect(html).not.toContain("Chat");
   });
 
+  
+  it("keeps selection quiet: soft wash only, no composer strip classes", () => {
+    const html = renderShell("/inbox", { locale: "zh-CN", repositories: [demoRepo] });
+    expect(html).toContain("agent-shell__repo-row");
+    expect(html).not.toContain("review-workbench__composer");
+    expect(html).not.toContain("agent-shell__composer");
+    expect(html).not.toContain("描述审查目标");
+    expect(html).toContain("审查");
+    expect(html).not.toContain("审查工作台");
+  });
+
   it("lists connected repos with status and directory actions", () => {
     const html = renderShell("/inbox", {
       locale: "zh-CN",

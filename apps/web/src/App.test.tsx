@@ -52,29 +52,26 @@ describe("App", () => {
     expect(html).not.toContain("deepseek");
   });
 
-  it("renders the Chinese workbench labels when zh-CN is selected", () => {
+  it("renders the Chinese review shell labels when zh-CN is selected", () => {
     const html = renderApp("zh-CN");
 
     expect(html).toContain("自动化");
     expect(html).toContain("插件市场");
     expect(html).toContain("已连接仓库");
-    expect(html).toContain("审查工作台");
-    expect(html).toContain("中文");
+    expect(html).toContain("审查");
+    expect(html).toContain("证据审查");
+    expect(html).not.toContain("审查工作台");
   });
 
-  it("keeps the locale switch recognizable when the phone topbar trims labels", () => {
+  it("keeps the locale switch recognizable as a quiet icon control", () => {
     const html = renderApp();
 
-    expect(html).toContain("shell-locale-button");
     expect(html).toContain("lucide-languages");
     expect(html).toContain("shell-search-button");
-    expect(html).toContain(">English</span>");
     expect(html).toContain('aria-label="切换到中文"');
 
     const zhHtml = renderApp("zh-CN");
-    expect(zhHtml).toContain("shell-locale-button");
     expect(zhHtml).toContain("lucide-languages");
-    expect(zhHtml).toContain(">中文</span>");
     expect(zhHtml).toContain('aria-label="Switch to English"');
   });
 });

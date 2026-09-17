@@ -248,6 +248,7 @@ export const zh: Record<string, string> = {
   "Reviews": "审查",
   "Connect repository": "连接仓库",
   "Start Review": "开始审查",
+  "Start review": "开始审查",
   "Working tree changes": "工作区变更",
   "Pull request history unavailable": "拉取请求历史不可用",
   "Clean working tree": "工作区干净",

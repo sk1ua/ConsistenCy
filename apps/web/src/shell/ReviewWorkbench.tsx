@@ -42,7 +42,6 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
   const queryClient = useQueryClient();
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
-  const [goalDraft, setGoalDraft] = useState("");
 
   const repositoryId = repository?.id ?? "";
 
@@ -73,7 +72,6 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
     onSuccess: async result => {
       setIsReviewOpen(false);
       setReviewError(null);
-      setGoalDraft("");
       await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
       navigate(`/runs/${encodeURIComponent(result.jobId)}/overview`);
     },
@@ -107,8 +105,8 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           title={zh ? "连接仓库以开始审查" : "Connect a repository to start reviewing"}
           description={
             zh
-              ? "ConsistenCy 是证据审查工作台，不是聊天产品。从左侧连接本地或远程仓库。"
-              : "ConsistenCy is an evidence review workbench, not a chat product. Connect a repo from the left."
+              ? "从左侧连接本地或远程仓库，即可开始证据审查。"
+              : "Connect a local or remote repository on the left to start evidence review."
           }
         />
       </div>
@@ -193,7 +191,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
 
       <div className="review-workbench__grid">
         <section className="review-workbench__panel">
-          <h2>{zh ? "最近审查 / 发现" : "Recent reviews / findings"}</h2>
+          <h2>{zh ? "最近审查" : "Recent reviews"}</h2>
           {reviewsQuery.isLoading ? (
             <div className="review-workbench__loading">
               <Loader2 size={16} className="ds-spin" />
@@ -252,7 +250,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
         </section>
 
         <section className="review-workbench__panel">
-          <h2>{zh ? "变更 / 证据钩子" : "Diff / evidence hooks"}</h2>
+          <h2>{zh ? "变更" : "Changes"}</h2>
           {changedPreview.length === 0 && !latestReport ? (
             <EmptyState
               compact
@@ -303,40 +301,6 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           )}
         </section>
       </div>
-
-      <footer className="review-workbench__composer">
-        <label className="review-workbench__composer-label" htmlFor="review-goal">
-          {zh ? "描述审查目标（编排，非对话）" : "Describe review goal (orchestration, not chat)"}
-        </label>
-        <div className="review-workbench__composer-row">
-          <input
-            id="review-goal"
-            className="ds-input ds-input--sm"
-            value={goalDraft}
-            onChange={e => setGoalDraft(e.target.value)}
-            placeholder={
-              zh
-                ? "例如：审查 auth 相关变更的安全风险…"
-                : "e.g. Review security risk in auth-related changes…"
-            }
-            onKeyDown={e => {
-              if (e.key === "Enter" && !isReviewStartDisabled(prep)) {
-                e.preventDefault();
-                setIsReviewOpen(true);
-              }
-            }}
-          />
-          <Button
-            variant="primary"
-            size="sm"
-            icon={<PlayCircle size={14} />}
-            disabled={isReviewStartDisabled(prep)}
-            onClick={() => setIsReviewOpen(true)}
-          >
-            {zh ? "开始审查" : "Start review"}
-          </Button>
-        </div>
-      </footer>
 
       <ReviewComposerDialog
         isOpen={isReviewOpen}

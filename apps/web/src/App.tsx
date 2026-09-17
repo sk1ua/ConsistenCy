@@ -155,10 +155,10 @@ function openJob(job: ReviewJob) {
     refreshing={queries.isFetching}
     onRefresh={() => void queries.refresh()}
   >
-    <Suspense fallback={<RouteLoading label={zh ? "正在加载工作台" : "Loading workspace"} />}>
+    <Suspense fallback={<RouteLoading label={zh ? "正在加载" : "Loading"} />}>
       <Routes>
         <Route path="/" element={<Navigate replace to="/inbox" />} />
-        <Route path="/inbox" element={firstLoad ? <RouteLoading label={zh ? "正在加载审查工作区" : "Loading review workspace"} /> : <ReviewWorkbench
+        <Route path="/inbox" element={firstLoad ? <RouteLoading label={zh ? "正在加载审查" : "Loading review"} /> : <ReviewWorkbench
           locale={locale === "zh-CN" ? "zh-CN" : "en-US"}
           repository={repositories[0]}
           jobs={jobs}

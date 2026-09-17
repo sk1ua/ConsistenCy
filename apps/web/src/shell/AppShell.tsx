@@ -202,7 +202,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       return items;
     }
     if (path === "/inbox" || path === "/") {
-      items.push({ label: zh ? "审查工作台" : "Review workbench" });
+      items.push({ label: zh ? "审查" : "Review" });
       if (activeRepositoryName) items.push({ label: activeRepositoryName });
       return items;
     }
@@ -277,7 +277,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   };
 
   const commandItems = [
-    { label: zh ? "审查工作台" : "Review workbench", to: "/inbox" },
+    { label: zh ? "审查" : "Review", to: "/inbox" },
     { label: zh ? "自动化" : "Automation", to: "/automation" },
     { label: zh ? "插件市场" : "Plugin marketplace", to: "/plugins" },
     { label: zh ? "代码仓库" : "Repositories", to: "/repositories" },
@@ -358,7 +358,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                     icon={<Plus size={12} />}
                     onClick={() => setIsConnectOpen(true)}
                   >
-                    {zh ? "连接代码仓库…" : "Connect repo…"}
+                    {zh ? "连接仓库…" : "Connect repository…"}
                   </Button>
                 ) : (
                   filteredRepos.map(repo => {

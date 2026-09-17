@@ -383,15 +383,14 @@
 .ds-root.audit-shell .studio-rail-gate {
   border: 0;
   border-bottom: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--border-subtle);
-  border-radius: 0;
+  border-left: 0;
+  border-radius: var(--radius-md);
   background: transparent;
-  padding: 8px 6px 8px 8px;
+  padding: 8px 8px;
 }
 
 .ds-root.audit-shell .studio-rail-gate.gate-current {
   background: var(--agent-wash);
-  border-left-color: var(--muted-strong);
 }
 
 .ds-root.audit-shell .studio-rail-gate.gate-current > i {
@@ -413,7 +412,7 @@
 .ds-root.audit-shell .studio-library-item.is-active {
   background: var(--agent-wash);
   border-color: transparent;
-  box-shadow: inset 3px 0 0 var(--muted-strong);
+  box-shadow: none;
 }
 
 .ds-root.audit-shell .studio-library-item svg {
@@ -515,8 +514,8 @@
 }
 
 .ds-root.audit-shell .studio-node {
-  border-left-width: 2px;
-  border-left-color: var(--border-strong);
+  border-left-width: 1px;
+  border-left-color: var(--border);
   border-radius: var(--radius-md);
 }
 
@@ -741,7 +740,9 @@
 
 .agent-shell__repo-row.is-active {
   background: var(--agent-wash, var(--surface-subtle));
-  box-shadow: inset 2px 0 0 var(--muted-strong);
+  box-shadow: none;
+  border: 0;
+  outline: none;
 }
 
 .agent-shell__repo-row:hover {
@@ -928,12 +929,12 @@
 .related-cards-rail {
   border-left: 1px solid var(--border-subtle);
   background: transparent;
-  padding: 14px 14px 20px;
+  padding: 16px 14px 20px;
   overflow-y: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   font-family: var(--font-ui);
 }
 
@@ -947,26 +948,21 @@
 }
 
 .related-card {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 10px 2px 14px;
-  border-bottom: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--agent-paper, var(--surface));
+  padding: 12px 12px 12px;
   box-shadow: none;
 }
 
 .related-card:last-child {
-  border-bottom: 0;
+  margin-bottom: 0;
 }
 
 .related-card--focus {
-  border-color: transparent;
-  border-bottom-color: var(--border-strong);
+  border-color: var(--border);
   box-shadow: none;
   background: var(--agent-wash, var(--surface-subtle));
-  border-radius: 10px;
-  padding-left: 8px;
-  padding-right: 8px;
 }
 
 .related-card__head {
@@ -1070,12 +1066,12 @@
 
 /* Review workbench (center home) */
 .review-workbench {
-  padding: 24px 32px 32px;
+  padding: 28px 36px 36px;
   max-width: 1040px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   min-height: 100%;
   box-sizing: border-box;
   font-family: var(--font-ui);
@@ -1253,28 +1249,6 @@
   padding: 14px 0 !important;
 }
 
-.review-workbench__composer {
-  margin-top: auto;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.review-workbench__composer-label {
-  display: block;
-  font-size: 11px;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
-
-.review-workbench__composer-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.review-workbench__composer-row .ds-input {
-  flex: 1;
-}
 
 .repo-directory-list {
   list-style: none;

@@ -179,7 +179,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
 
     expect(html).toContain("ConsistenCy");
     expect(html).toContain("本地 Git");
-    expect(html).toContain("审查代码");
+    expect(html).toContain("开始审查");
   });
 
   it("AC-UX-REPO-3: Repository Overview renders sub-navigation tabs and changes view", () => {
@@ -700,7 +700,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
     expect(sourceComposer).toContain("if (pending) return;");
   });
 
-  it("AC-UX-REPO-21: header Start Review button reflects review preparation readiness", () => {
+  it("AC-UX-REPO-21: header Start review button reflects review preparation readiness", () => {
     // 1. Absent/Loading
     const htmlAbsent = renderWithProviders(
       <RepositoryDetailPage jobs={mockJobs} repositories={mockRepositories} pulse={null} />,
@@ -708,7 +708,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
       undefined,
       "en-US"
     );
-    expect(htmlAbsent).toMatch(/<button[^>]*disabled=""[^>]*>.*?Start Review<\/button>/);
+    expect(htmlAbsent).toMatch(/<button[^>]*disabled=""[^>]*>.*?Start review<\/button>/);
 
     // 2. Cannot start
     const htmlFalse = renderWithProviders(
@@ -717,7 +717,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
       (qc) => qc.setQueryData(["review-preparation", "repo_test_1"], preparation(false)),
       "en-US"
     );
-    expect(htmlFalse).toMatch(/<button[^>]*disabled=""[^>]*>.*?Start Review<\/button>/);
+    expect(htmlFalse).toMatch(/<button[^>]*disabled=""[^>]*>.*?Start review<\/button>/);
 
     // 3. Can start
     const htmlTrue = renderWithProviders(
@@ -726,7 +726,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
       (qc) => qc.setQueryData(["review-preparation", "repo_test_1"], preparation(true)),
       "en-US"
     );
-    expect(htmlTrue).not.toMatch(/<button[^>]*disabled=""[^>]*>.*?Start Review<\/button>/);
+    expect(htmlTrue).not.toMatch(/<button[^>]*disabled=""[^>]*>.*?Start review<\/button>/);
   });
 
   it("AC-UX-REPO-20: calculates dialog initialization edges purely", () => {

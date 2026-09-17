@@ -8,7 +8,6 @@ import type {
 } from "@consistency/schema";
 import {
   Activity,
-  FolderGit2,
   GitBranch,
   GitCommit,
   PlayCircle,
@@ -17,7 +16,6 @@ import {
 import { api } from "../api/client";
 import { workspaceQueryKeys } from "../query/client";
 import { Badge } from "../design-system/Badge";
-import { EmptyState } from "../design-system/EmptyState";
 
 export type RelatedCardsFocus = "status" | "review" | "workflow" | "evidence" | null;
 
@@ -101,12 +99,9 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
   if (!repository) {
     return (
       <aside className="related-cards-rail" aria-label={zh ? "相关信息" : "Related"}>
-        <EmptyState
-          compact
-          icon={<FolderGit2 size={20} />}
-          title={zh ? "未选择仓库" : "No repository selected"}
-          description={zh ? "从左侧连接或选择一个仓库。" : "Connect or select a repository on the left."}
-        />
+        <p className="related-card__muted" style={{ padding: "8px 4px" }}>
+          {zh ? "从左侧选择一个仓库。" : "Select a repository on the left."}
+        </p>
       </aside>
     );
   }
@@ -205,55 +200,36 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
         )}
       </Card>
 
-      <Card
-        title={zh ? "工作流绑定" : "Workflow binding"}
-        icon={<Workflow size={12} />}
-        highlighted={focus === "workflow"}
-      >
-        {bindingsQuery.isError ? (
-          <p className="related-card__muted">
-            {zh ? "绑定暂不可用" : "Bindings unavailable"}
-          </p>
-        ) : bindingsQuery.isLoading ? (
-          <p className="related-card__muted">{zh ? "加载中…" : "Loading…"}</p>
-        ) : enabledBindings.length === 0 ? (
-          <div>
+      {(enabledBindings.length > 0 || focus === "workflow") && (
+        <Card
+          title={zh ? "工作流" : "Workflow"}
+          icon={<Workflow size={12} />}
+          highlighted={focus === "workflow"}
+        >
+          {bindingsQuery.isError ? (
             <p className="related-card__muted">
-              {zh ? "尚未绑定工作流" : "No workflow bound"}
+              {zh ? "绑定暂不可用" : "Bindings unavailable"}
             </p>
-            <button
-              type="button"
-              className="related-card__text-btn"
-              onClick={() =>
-                navigate(`/repositories/${encodeURIComponent(repository.id)}/workflows`)
-              }
-            >
-              {zh ? "管理绑定" : "Manage bindings"}
-            </button>
-          </div>
-        ) : (
-          <ul className="related-card__list">
-            {enabledBindings.slice(0, 4).map(b => (
-              <li key={b.definitionId}>
-                <span className="related-dot" style={{ background: "var(--success)" }} />
-                <span className="mono">{b.definitionId}</span>
-                <span className="related-card__muted">{b.triggerMode}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+          ) : (
+            <ul className="related-card__list">
+              {enabledBindings.slice(0, 3).map(b => (
+                <li key={b.definitionId}>
+                  <span className="related-dot" style={{ background: "var(--success)" }} />
+                  <span className="mono">{b.definitionId}</span>
+                  <span className="related-card__muted">{b.triggerMode}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
 
-      <Card
-        title={zh ? "证据摘要" : "Evidence summary"}
-        icon={<Activity size={12} />}
-        highlighted={focus === "evidence"}
-      >
-        {!latestReport ? (
-          <p className="related-card__muted">
-            {zh ? "开始审查后显示证据摘要" : "Evidence appears after a review"}
-          </p>
-        ) : (
+      {latestReport && (
+        <Card
+          title={zh ? "证据" : "Evidence"}
+          icon={<Activity size={12} />}
+          highlighted={focus === "evidence"}
+        >
           <div className="related-card__meta">
             <div className="related-card__row">
               <span>{zh ? "风险" : "Risk"}</span>
@@ -281,8 +257,8 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
               {zh ? "查看证据" : "Open evidence"}
             </button>
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
     </aside>
   );
 };

@@ -247,7 +247,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
             onClick={() => setIsReviewDialogOpen(true)}
             disabled={isReviewStartDisabled(prep)}
           >
-            {zh ? "审查代码" : "Start Review"}
+            {zh ? "开始审查" : "Start review"}
           </Button>
         </div>
       </div>
@@ -322,7 +322,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                   compact
                   className="repo-overview-empty"
                   title={zh ? "暂无审查记录" : "No reviews yet"}
-                  description={zh ? "点击“审查代码”发起首次审查。" : "Start a review from the repository header."}
+                  description={zh ? "点击「开始审查」发起首次审查。" : "Use Start review in the header for the first run."}
                 />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column" }}>
