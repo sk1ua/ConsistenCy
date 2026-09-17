@@ -230,6 +230,96 @@ async function main() {
         remotes: [],
       });
     }
+    if (path === `/repositories/${repo.id}/git/tree`) {
+      const dir = url.searchParams.get("path") || "";
+      if (dir === "apps") {
+        return json({
+          repositoryId: repo.id,
+          available: true,
+          revision: "abcdef1234567890abcdef1234567890abcdef12",
+          path: "apps",
+          truncated: false,
+          entries: [
+            { path: "apps/web", name: "web", type: "tree", changeKind: "changed" },
+          ],
+        });
+      }
+      if (dir === "apps/web") {
+        return json({
+          repositoryId: repo.id,
+          available: true,
+          revision: "abcdef1234567890abcdef1234567890abcdef12",
+          path: "apps/web",
+          truncated: false,
+          entries: [
+            { path: "apps/web/src", name: "src", type: "tree", changeKind: "changed" },
+          ],
+        });
+      }
+      if (dir === "apps/web/src") {
+        return json({
+          repositoryId: repo.id,
+          available: true,
+          revision: "abcdef1234567890abcdef1234567890abcdef12",
+          path: "apps/web/src",
+          truncated: false,
+          entries: [
+            { path: "apps/web/src/shell", name: "shell", type: "tree", changeKind: "changed" },
+          ],
+        });
+      }
+      if (dir === "apps/web/src/shell") {
+        return json({
+          repositoryId: repo.id,
+          available: true,
+          revision: "abcdef1234567890abcdef1234567890abcdef12",
+          path: "apps/web/src/shell",
+          truncated: false,
+          entries: [
+            {
+              path: "apps/web/src/shell/AppShell.tsx",
+              name: "AppShell.tsx",
+              type: "blob",
+              sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              size: 2400,
+              changeKind: "changed",
+            },
+          ],
+        });
+      }
+      return json({
+        repositoryId: repo.id,
+        available: true,
+        revision: "abcdef1234567890abcdef1234567890abcdef12",
+        path: "",
+        truncated: false,
+        entries: [
+          { path: "apps", name: "apps", type: "tree", changeKind: "changed" },
+          {
+            path: "README.md",
+            name: "README.md",
+            type: "blob",
+            sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            size: 512,
+            changeKind: "changed",
+          },
+          {
+            path: "scratch.demo.tmp",
+            name: "scratch.demo.tmp",
+            type: "blob",
+            changeKind: "untracked",
+          },
+          {
+            path: "package.json",
+            name: "package.json",
+            type: "blob",
+            sha: "cccccccccccccccccccccccccccccccccccccccc",
+            size: 800,
+            changeKind: "unchanged",
+          },
+        ],
+      });
+    }
     if (path === `/repositories/${repo.id}/git/commits`) {
       return json({
         repositoryId: repo.id,
@@ -387,6 +477,31 @@ async function main() {
     await page.screenshot({ path: target, fullPage: false });
     console.log("wrote", target);
   }
+
+  // Directory tree dialog from inbox shell
+  await page.goto(`${baseURL.replace(/\/$/, "")}/#/inbox`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(800);
+  try {
+    await page.waitForSelector(".agent-shell, .review-workbench", { timeout: 10000 });
+    const treeBtn = page.getByRole("button", { name: /目录|Tree/ }).first();
+    await treeBtn.click({ timeout: 5000 });
+    await page.waitForSelector(".repo-directory-tree, .repo-directory-layout", { timeout: 8000 });
+    await page.waitForTimeout(500);
+    // Expand apps folder for a richer tree shot
+    try {
+      await page.locator(".repo-directory-tree__row", { hasText: "apps" }).first().click({ timeout: 3000 });
+      await page.waitForTimeout(400);
+    } catch {}
+    try {
+      await page.locator(".repo-directory-list__item", { hasText: "package.json" }).first().click({ timeout: 3000 });
+      await page.waitForTimeout(300);
+    } catch {}
+  } catch (err) {
+    console.warn("directory tree shot prep failed", err);
+  }
+  const treeShot = join(outDir, "06-directory-tree.png");
+  await page.screenshot({ path: treeShot, fullPage: false });
+  console.log("wrote", treeShot);
 
   writeFileSync(join(outDir, "README.txt"), `Captured ${new Date().toISOString()} against ${baseURL}\n`);
   await browser.close();

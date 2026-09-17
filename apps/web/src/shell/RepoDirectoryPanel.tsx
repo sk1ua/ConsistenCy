@@ -1,7 +1,16 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { FolderTree, FileCode2, Loader2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileCode2,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  Loader2
+} from "lucide-react";
+import type { RepositoryTreeEntry, RepositoryTreeResponse } from "@consistency/schema";
 import { api } from "../api/client";
 import { workspaceQueryKeys } from "../query/client";
 import { Dialog } from "../design-system/Dialog";
@@ -18,10 +27,23 @@ export interface RepoDirectoryPanelProps {
   onOpenFile?: (path: string) => void;
 }
 
+type CachedFolder = {
+  loading: boolean;
+  error?: string;
+  truncated: boolean;
+  entries: RepositoryTreeEntry[];
+};
+
+function changeLabel(kind: RepositoryTreeEntry["changeKind"], zh: boolean): string | null {
+  if (kind === "changed") return zh ? "变更" : "changed";
+  if (kind === "untracked") return zh ? "未跟踪" : "untracked";
+  return null;
+}
+
 /**
  * Directory panel for a repository.
- * Full VCS tree API is not exposed yet — present working-tree changed + untracked
- * paths in clear sections. Clicking a file opens the changes tab with highlightPath.
+ * Lazy-loads folder children via `/repositories/:id/git/tree` (HEAD + dirty/untracked overlay).
+ * Dirty files open Changes with highlightPath; clean files show a meta / preview stub.
  */
 export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
   isOpen,
@@ -33,6 +55,11 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
 }) => {
   const zh = locale === "zh-CN";
   const navigate = useNavigate();
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set([""]));
+  const [folderCache, setFolderCache] = useState<Record<string, CachedFolder>>({});
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedMeta, setSelectedMeta] = useState<RepositoryTreeEntry | null>(null);
+
   const gitStatusQuery = useQuery({
     queryKey: workspaceQueryKeys.repositoryGitStatus(repositoryId),
     queryFn: () => api.repositoryGitStatus(repositoryId),
@@ -40,12 +67,89 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
     refetchInterval: isOpen ? 10_000 : false
   });
 
-  const changed = gitStatusQuery.data?.changedFiles ?? [];
-  const untracked = gitStatusQuery.data?.untrackedFiles ?? [];
-  const available = gitStatusQuery.data?.available !== false;
-  const hasEntries = changed.length + untracked.length > 0;
+  const rootTreeQuery = useQuery({
+    queryKey: workspaceQueryKeys.repositoryTree(repositoryId, ""),
+    queryFn: () => api.repositoryTree(repositoryId, ""),
+    enabled: isOpen && Boolean(repositoryId)
+  });
 
-  const openFile = (path: string) => {
+  const dirtyPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const file of gitStatusQuery.data?.changedFiles ?? []) set.add(file.path);
+    for (const path of gitStatusQuery.data?.untrackedFiles ?? []) set.add(path);
+    return set;
+  }, [gitStatusQuery.data]);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setExpanded(new Set([""]));
+      setFolderCache({});
+      setSelectedPath(null);
+      setSelectedMeta(null);
+      return;
+    }
+    const data = rootTreeQuery.data;
+    if (!data) return;
+    if (!data.available) {
+      setFolderCache(prev => ({
+        ...prev,
+        "": { loading: false, error: data.reason, truncated: false, entries: [] }
+      }));
+      return;
+    }
+    setFolderCache(prev => ({
+      ...prev,
+      "": {
+        loading: false,
+        truncated: data.truncated,
+        entries: data.entries
+      }
+    }));
+  }, [isOpen, rootTreeQuery.data]);
+
+  const loadFolder = async (path: string) => {
+    setFolderCache(prev => ({
+      ...prev,
+      [path]: prev[path] ?? { loading: true, truncated: false, entries: [] }
+    }));
+    try {
+      const data: RepositoryTreeResponse = await api.repositoryTree(repositoryId, path);
+      if (!data.available) {
+        setFolderCache(prev => ({
+          ...prev,
+          [path]: { loading: false, error: data.reason, truncated: false, entries: [] }
+        }));
+        return;
+      }
+      setFolderCache(prev => ({
+        ...prev,
+        [path]: { loading: false, truncated: data.truncated, entries: data.entries }
+      }));
+    } catch (error) {
+      setFolderCache(prev => ({
+        ...prev,
+        [path]: {
+          loading: false,
+          error: error instanceof Error ? error.message : "failed",
+          truncated: false,
+          entries: []
+        }
+      }));
+    }
+  };
+
+  const toggleFolder = (path: string) => {
+    const willExpand = !expanded.has(path);
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+    if (willExpand && !folderCache[path]) void loadFolder(path);
+  };
+
+  const openDirtyFile = (path: string) => {
     if (onOpenFile) {
       onOpenFile(path);
       return;
@@ -56,65 +160,146 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
     });
   };
 
-  const renderSection = (
-    title: string,
-    emptyLabel: string,
-    items: Array<{ path: string; kind: "changed" | "untracked" }>
-  ) => (
-    <div className="repo-directory-section">
-      <div className="repo-directory-section__label">
-        <span>{title}</span>
-        <Badge variant="neutral" size="sm">{items.length}</Badge>
-      </div>
-      {items.length === 0 ? (
-        <p className="repo-directory-section__empty">{emptyLabel}</p>
-      ) : (
-        <ul className="repo-directory-list" aria-label={title}>
-          {items.map(entry => (
-            <li key={`${entry.kind}-${entry.path}`}>
+  const onFileClick = (entry: RepositoryTreeEntry) => {
+    setSelectedPath(entry.path);
+    setSelectedMeta(entry);
+    const dirty = entry.changeKind === "changed" || entry.changeKind === "untracked" || dirtyPaths.has(entry.path);
+    if (dirty) {
+      openDirtyFile(entry.path);
+    }
+  };
+
+  const renderEntries = (path: string, depth: number): React.ReactNode => {
+    const folder = folderCache[path];
+    if (!folder) {
+      if (path === "" && rootTreeQuery.isLoading) {
+        return (
+          <div className="repo-directory-tree__status">
+            <Loader2 size={14} className="ds-spin" />
+            {zh ? "加载目录…" : "Loading tree…"}
+          </div>
+        );
+      }
+      return null;
+    }
+    if (folder.loading) {
+      return (
+        <div className="repo-directory-tree__status" style={{ paddingLeft: 8 + depth * 14 }}>
+          <Loader2 size={14} className="ds-spin" />
+          {zh ? "加载中…" : "Loading…"}
+        </div>
+      );
+    }
+    if (folder.error) {
+      return (
+        <p className="repo-directory-section__empty" style={{ paddingLeft: 8 + depth * 14 }}>
+          {folder.error}
+        </p>
+      );
+    }
+    if (folder.entries.length === 0) {
+      return (
+        <p className="repo-directory-section__empty" style={{ paddingLeft: 8 + depth * 14 }}>
+          {zh ? "空目录" : "Empty folder"}
+        </p>
+      );
+    }
+    return (
+      <ul className="repo-directory-tree" aria-label={path || (zh ? "仓库根目录" : "Repository root")}>
+        {folder.entries.map(entry => {
+          if (entry.type === "tree") {
+            const isOpenFolder = expanded.has(entry.path);
+            return (
+              <li key={`dir-${entry.path}`}>
+                <button
+                  type="button"
+                  className={`repo-directory-tree__row${selectedPath === entry.path ? " is-selected" : ""}`}
+                  style={{ paddingLeft: 8 + depth * 14 }}
+                  onClick={() => {
+                    setSelectedPath(entry.path);
+                    setSelectedMeta(entry);
+                    toggleFolder(entry.path);
+                  }}
+                  aria-expanded={isOpenFolder}
+                >
+                  {isOpenFolder ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  {isOpenFolder ? <FolderOpen size={14} /> : <Folder size={14} />}
+                  <span className="mono">{entry.name}</span>
+                  {changeLabel(entry.changeKind, zh) && (
+                    <Badge variant="neutral" size="sm">{changeLabel(entry.changeKind, zh)}</Badge>
+                  )}
+                </button>
+                {isOpenFolder ? renderEntries(entry.path, depth + 1) : null}
+              </li>
+            );
+          }
+          const label = changeLabel(entry.changeKind, zh);
+          return (
+            <li key={`file-${entry.path}`}>
               <button
                 type="button"
-                className="repo-directory-list__item"
-                onClick={() => openFile(entry.path)}
-                title={zh ? "在变更视图中打开并高亮" : "Open and highlight in changes view"}
+                className={`repo-directory-tree__row repo-directory-list__item${selectedPath === entry.path ? " is-selected" : ""}`}
+                style={{ paddingLeft: 8 + depth * 14 + 16 }}
+                onClick={() => onFileClick(entry)}
+                title={
+                  label
+                    ? (zh ? "在变更视图中打开并高亮" : "Open and highlight in changes view")
+                    : (zh ? "查看文件信息" : "Show file metadata")
+                }
               >
                 <FileCode2 size={13} />
-                <span className="mono">{entry.path}</span>
-                <Badge variant="neutral" size="sm">
-                  {entry.kind === "untracked" ? (zh ? "未跟踪" : "untracked") : (zh ? "变更" : "changed")}
-                </Badge>
+                <span className="mono">{entry.name}</span>
+                {label && <Badge variant="neutral" size="sm">{label}</Badge>}
               </button>
             </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
+          );
+        })}
+        {folder.truncated && (
+          <li className="repo-directory-tree__truncated" style={{ paddingLeft: 8 + depth * 14 }}>
+            {zh ? "已截断：此目录条目过多" : "Truncated: too many entries in this folder"}
+          </li>
+        )}
+      </ul>
+    );
+  };
+
+  const root = folderCache[""];
+  const treeUnavailable = rootTreeQuery.data?.available === false;
+  const statusUnavailable = gitStatusQuery.data?.available === false;
+  const available = !treeUnavailable && (rootTreeQuery.data?.available !== false);
+
+  const selectedIsDirty = selectedMeta
+    ? selectedMeta.changeKind === "changed"
+      || selectedMeta.changeKind === "untracked"
+      || dirtyPaths.has(selectedMeta.path)
+    : false;
 
   return (
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
-      title={zh ? `工作区文件 · ${displayName}` : `Working tree · ${displayName}`}
+      title={zh ? `仓库目录 · ${displayName}` : `Repository tree · ${displayName}`}
       description={
         zh
-          ? "完整目录树尚未接入；当前按变更 / 未跟踪分区列出。点击文件可打开变更视图并高亮该行。"
-          : "Full tree API not available yet — listing changed and untracked files in sections. Click a file to open Changes with that row highlighted."
+          ? "按文件夹浏览 HEAD 树；变更 / 未跟踪会标出。点击脏文件跳转变更视图，干净文件显示元信息。"
+          : "Browse the HEAD tree by folder. Changed and untracked paths are marked. Dirty files open Changes; clean files show metadata."
       }
+      className="repo-directory-dialog"
     >
-      {gitStatusQuery.isLoading ? (
+      {rootTreeQuery.isLoading && !root ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)", fontSize: 12 }}>
           <Loader2 size={14} className="ds-spin" />
           {zh ? "加载中…" : "Loading…"}
         </div>
-      ) : !available ? (
+      ) : treeUnavailable || (!available && root?.error) ? (
         <EmptyState
           compact
           icon={<FolderTree size={20} />}
-          title={zh ? "无法读取工作区" : "Working tree unavailable"}
+          title={zh ? "无法读取目录树" : "Directory tree unavailable"}
           description={
-            gitStatusQuery.data?.reason
-            ?? (zh ? "仓库状态暂时不可用。" : "Repository status is temporarily unavailable.")
+            rootTreeQuery.data && !rootTreeQuery.data.available
+              ? rootTreeQuery.data.reason
+              : root?.error ?? (zh ? "仓库目录暂时不可用。" : "Repository tree is temporarily unavailable.")
           }
           action={
             <button
@@ -129,53 +314,94 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
             </button>
           }
         />
-      ) : !hasEntries ? (
-        <div className="repo-directory-sections">
-          {renderSection(
-            zh ? "已变更" : "Changed",
-            zh ? "暂无变更文件" : "No changed files",
-            []
-          )}
-          {renderSection(
-            zh ? "未跟踪" : "Untracked",
-            zh ? "暂无未跟踪文件" : "No untracked files",
-            []
-          )}
-          <EmptyState
-            compact
-            icon={<FolderTree size={20} />}
-            title={zh ? "工作区干净" : "Clean working tree"}
-            description={
-              zh
-                ? "暂无变更或未跟踪文件。完整目录树即将接入。"
-                : "No changed or untracked files. Full directory tree coming soon."
-            }
-            action={
-              <button
-                type="button"
-                className="related-card__text-btn"
-                onClick={() => {
-                  onClose();
-                  navigate(`/repositories/${encodeURIComponent(repositoryId)}/changes`);
-                }}
-              >
-                {zh ? "打开变更视图" : "Open changes view"}
-              </button>
-            }
-          />
-        </div>
       ) : (
-        <div className="repo-directory-sections">
-          {renderSection(
-            zh ? "已变更" : "Changed",
-            zh ? "暂无变更文件" : "No changed files",
-            changed.map(f => ({ path: f.path, kind: "changed" as const }))
-          )}
-          {renderSection(
-            zh ? "未跟踪" : "Untracked",
-            zh ? "暂无未跟踪文件" : "No untracked files",
-            untracked.map(path => ({ path, kind: "untracked" as const }))
-          )}
+        <div className="repo-directory-layout">
+          <div className="repo-directory-sections">
+            <div className="repo-directory-section">
+              <div className="repo-directory-section__label">
+                <span>{zh ? "目录树" : "Tree"}</span>
+                {rootTreeQuery.data?.available && rootTreeQuery.data.revision && (
+                  <Badge variant="neutral" size="sm">
+                    <span className="mono">{rootTreeQuery.data.revision.slice(0, 7)}</span>
+                  </Badge>
+                )}
+                {!statusUnavailable && gitStatusQuery.data && (
+                  <Badge variant="neutral" size="sm">
+                    {zh
+                      ? `${gitStatusQuery.data.dirtyFileCount + gitStatusQuery.data.untrackedFileCount} 脏`
+                      : `${gitStatusQuery.data.dirtyFileCount + gitStatusQuery.data.untrackedFileCount} dirty`}
+                  </Badge>
+                )}
+              </div>
+              {renderEntries("", 0)}
+            </div>
+          </div>
+
+          <div className="repo-directory-preview" data-testid="repo-directory-preview">
+            {selectedMeta && selectedMeta.type === "blob" ? (
+              <>
+                <div className="repo-directory-preview__title">
+                  <FileCode2 size={14} />
+                  <span className="mono">{selectedMeta.path}</span>
+                </div>
+                <dl className="repo-directory-preview__meta">
+                  <div>
+                    <dt>{zh ? "类型" : "Type"}</dt>
+                    <dd>{zh ? "文件" : "File"}</dd>
+                  </div>
+                  {selectedMeta.size !== undefined && (
+                    <div>
+                      <dt>{zh ? "大小" : "Size"}</dt>
+                      <dd>{selectedMeta.size} B</dd>
+                    </div>
+                  )}
+                  {selectedMeta.sha && (
+                    <div>
+                      <dt>SHA</dt>
+                      <dd className="mono">{selectedMeta.sha.slice(0, 12)}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>{zh ? "工作区" : "Worktree"}</dt>
+                    <dd>
+                      {selectedIsDirty
+                        ? (zh ? "有未提交变更" : "Has uncommitted changes")
+                        : (zh ? "干净" : "Clean")}
+                    </dd>
+                  </div>
+                </dl>
+                {selectedIsDirty ? (
+                  <button
+                    type="button"
+                    className="related-card__text-btn"
+                    onClick={() => openDirtyFile(selectedMeta.path)}
+                  >
+                    {zh ? "在变更视图中打开" : "Open in changes view"}
+                  </button>
+                ) : (
+                  <p className="repo-directory-preview__stub">
+                    {zh
+                      ? "文件预览即将接入。当前可查看元信息；有脏变更时会跳转变更视图。"
+                      : "File preview coming soon. Metadata is shown here; dirty files jump to Changes."}
+                  </p>
+                )}
+              </>
+            ) : selectedMeta && selectedMeta.type === "tree" ? (
+              <>
+                <div className="repo-directory-preview__title">
+                  <Folder size={14} />
+                  <span className="mono">{selectedMeta.path || "."}</span>
+                </div>
+                <p className="repo-directory-preview__stub">
+                  {zh ? "展开左侧文件夹以浏览子项。" : "Expand the folder on the left to browse children."}
+                </p>
+              </>
+            ) : (
+              <p className="repo-directory-preview__stub">
+                {zh ? "选择文件查看元信息，或点击脏文件打开变更。" : "Select a file for metadata, or click a dirty file to open Changes."}
+              </p>
+            )}
+          </div>
         </div>
       )}
     </Dialog>

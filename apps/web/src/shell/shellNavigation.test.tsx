@@ -97,6 +97,95 @@ beforeEach(() => {
     untrackedFiles: ["scratch.tmp"],
     remotes: []
   } as never);
+  vi.spyOn(api, "repositoryTree").mockImplementation(async (_id: string, path = "") => {
+    if (path === "apps") {
+      return {
+        repositoryId: demoRepo.id,
+        available: true,
+        revision: "abcdef1234567890abcdef1234567890abcdef12",
+        path: "apps",
+        truncated: false,
+        entries: [
+          { path: "apps/web", name: "web", type: "tree", changeKind: "changed" }
+        ]
+      } as never;
+    }
+    if (path === "apps/web") {
+      return {
+        repositoryId: demoRepo.id,
+        available: true,
+        revision: "abcdef1234567890abcdef1234567890abcdef12",
+        path: "apps/web",
+        truncated: false,
+        entries: [
+          { path: "apps/web/src", name: "src", type: "tree", changeKind: "changed" }
+        ]
+      } as never;
+    }
+    if (path === "apps/web/src") {
+      return {
+        repositoryId: demoRepo.id,
+        available: true,
+        revision: "abcdef1234567890abcdef1234567890abcdef12",
+        path: "apps/web/src",
+        truncated: false,
+        entries: [
+          { path: "apps/web/src/shell", name: "shell", type: "tree", changeKind: "changed" }
+        ]
+      } as never;
+    }
+    if (path === "apps/web/src/shell") {
+      return {
+        repositoryId: demoRepo.id,
+        available: true,
+        revision: "abcdef1234567890abcdef1234567890abcdef12",
+        path: "apps/web/src/shell",
+        truncated: false,
+        entries: [
+          {
+            path: "apps/web/src/shell/AppShell.tsx",
+            name: "AppShell.tsx",
+            type: "blob",
+            sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            size: 1200,
+            changeKind: "changed"
+          }
+        ]
+      } as never;
+    }
+    return {
+      repositoryId: demoRepo.id,
+      available: true,
+      revision: "abcdef1234567890abcdef1234567890abcdef12",
+      path: "",
+      truncated: false,
+      entries: [
+        { path: "apps", name: "apps", type: "tree", changeKind: "changed" },
+        {
+          path: "README.md",
+          name: "README.md",
+          type: "blob",
+          sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          size: 420,
+          changeKind: "changed"
+        },
+        {
+          path: "scratch.tmp",
+          name: "scratch.tmp",
+          type: "blob",
+          changeKind: "untracked"
+        },
+        {
+          path: "clean.ts",
+          name: "clean.ts",
+          type: "blob",
+          sha: "cccccccccccccccccccccccccccccccccccccccc",
+          size: 32,
+          changeKind: "unchanged"
+        }
+      ]
+    } as never;
+  });
   vi.spyOn(api, "repositoryReviews").mockResolvedValue([demoJob] as never);
   vi.spyOn(api, "workflowRuntimeBindings").mockResolvedValue([
     {
@@ -207,7 +296,7 @@ describe("shell navigation happy path", () => {
       />
     );
     let fileBtn: HTMLButtonElement | undefined;
-    for (let i = 0; i < 20 && !fileBtn; i++) {
+    for (let i = 0; i < 30 && !fileBtn; i++) {
       await act(async () => {
         await new Promise(r => setTimeout(r, 10));
       });
@@ -215,7 +304,8 @@ describe("shell navigation happy path", () => {
         b.textContent?.includes("README.md")
       );
     }
-    expect(host.textContent).toMatch(/已变更|未跟踪/);
+    expect(host.textContent).toMatch(/目录树|Tree/);
+    expect(host.textContent).toMatch(/README\.md|apps/);
     expect(fileBtn).toBeTruthy();
     await act(async () => {
       fileBtn!.click();
@@ -273,6 +363,35 @@ describe("shell navigation happy path", () => {
     });
     expect(pathOf(host)).toBe("/repositories/repo_1/changes");
     expect(lastState).toEqual({ highlightPath: "README.md" });
+  });
+
+  it("directory panel shows tree and clean-file preview stub", async () => {
+    const host = await mount(
+      <RepoDirectoryPanel
+        isOpen
+        onClose={() => undefined}
+        repositoryId={demoRepo.id}
+        displayName={demoRepo.displayName}
+        locale="zh-CN"
+      />
+    );
+    let cleanBtn: HTMLButtonElement | undefined;
+    for (let i = 0; i < 30 && !cleanBtn; i++) {
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 10));
+      });
+      cleanBtn = [...host.querySelectorAll<HTMLButtonElement>(".repo-directory-list__item")].find(b =>
+        b.textContent?.includes("clean.ts")
+      );
+    }
+    expect(cleanBtn).toBeTruthy();
+    await act(async () => {
+      cleanBtn!.click();
+    });
+    expect(pathOf(host)).toBe("/inbox");
+    const preview = host.querySelector("[data-testid=repo-directory-preview]");
+    expect(preview?.textContent).toMatch(/clean\.ts/);
+    expect(preview?.textContent).toMatch(/预览即将|元信息|干净/);
   });
 
   it("workbench surfaces and review rows navigate correctly", async () => {

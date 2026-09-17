@@ -232,3 +232,30 @@ export function assertSafeRef(ref: string): string {
   }
   return value;
 }
+
+/**
+ * Validates a repository-relative tree path before it is placed on an argv line
+ * (e.g. `git ls-tree HEAD -- <path>/`). Empty string means the repository root.
+ *
+ * Guards: absolute paths, parent traversal, NUL/control chars, and a leading `-`
+ * that git could misread as an option when passed after `--`.
+ */
+export function assertSafeTreePath(path: string): string {
+  const value = path.trim();
+  if (value.length === 0) return "";
+  if (value.length > 1024) throw new Error("Tree path is unreasonably long");
+  if (value.includes("\0")) throw new Error("Tree path must not contain NUL");
+  const slashed = value.replace(/\\/g, "/");
+  if (slashed.startsWith("/") || /^(?:[A-Za-z]:\/)/.test(slashed) || slashed.startsWith("//")) {
+    throw new Error(`Tree path must be relative: ${path}`);
+  }
+  const segments = slashed.split("/").filter((seg) => seg.length > 0 && seg !== ".");
+  for (const seg of segments) {
+    if (seg === "..") throw new Error(`Tree path must not traverse parent directories: ${path}`);
+    if (seg.startsWith("-")) throw new Error(`Tree path segment must not start with '-': ${path}`);
+    if (/[\x00-\x1f\x7f]/.test(seg)) {
+      throw new Error(`Tree path contains control characters: ${path}`);
+    }
+  }
+  return segments.join("/");
+}

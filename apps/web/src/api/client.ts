@@ -28,6 +28,7 @@ import {
   repositoryPulseSchema,
   repositorySchema,
   repositoryGitStatusResponseSchema,
+  repositoryTreeResponseSchema,
   repositoryCommitsResponseSchema,
   repositoryPullRequestsResponseSchema,
   repositoryReviewsResponseSchema,
@@ -46,6 +47,7 @@ import {
   type RunRuntimeSnapshot,
   type RuntimeRunsResponse,
   type RepositoryGitStatusResponse,
+  type RepositoryTreeResponse,
   type RepositoryCommitsResponse,
   type RepositoryPullRequestsResponse,
   llmCatalogResponseSchema,
@@ -380,6 +382,12 @@ export const api = {
   },
   async repositoryGitStatus(repositoryId: string, signal?: AbortSignal): Promise<RepositoryGitStatusResponse> {
     return repositoryGitStatusResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/git/status`, { signal }));
+  },
+  async repositoryTree(repositoryId: string, path = "", signal?: AbortSignal): Promise<RepositoryTreeResponse> {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    return repositoryTreeResponseSchema.parse(
+      await request(`/repositories/${encodeURIComponent(repositoryId)}/git/tree${query}`, { signal })
+    );
   },
   async repositoryCommits(repositoryId: string, depth?: number, signal?: AbortSignal): Promise<RepositoryCommitsResponse> {
     const query = depth ? `?depth=${depth}` : "";

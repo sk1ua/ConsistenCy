@@ -171,6 +171,38 @@ export const repositoryCommitsResponseSchema = z.discriminatedUnion("available",
   repositoryCommitsUnavailableResponseSchema
 ]);
 
+export const repositoryTreeEntrySchema = z.object({
+  path: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  type: z.enum(["blob", "tree"]),
+  sha: z.string().optional(),
+  size: z.number().int().nonnegative().optional(),
+  changeKind: z.enum(["unchanged", "changed", "untracked"]).optional()
+}).strict();
+
+const repositoryTreeAvailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(true),
+  revision: z.string().nullable(),
+  path: z.string(),
+  truncated: z.boolean(),
+  entries: z.array(repositoryTreeEntrySchema)
+}).strict();
+
+const repositoryTreeUnavailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(false),
+  reason: z.string().trim().min(1),
+  path: z.string(),
+  truncated: z.literal(false),
+  entries: z.array(repositoryTreeEntrySchema).length(0)
+}).strict();
+
+export const repositoryTreeResponseSchema = z.discriminatedUnion("available", [
+  repositoryTreeAvailableResponseSchema,
+  repositoryTreeUnavailableResponseSchema
+]);
+
 const providerTextSchema = (maxLength: number) => z.string()
   .min(1)
   .max(maxLength)
@@ -559,6 +591,8 @@ export const reviewPreparationResponseSchema = z.object({
 export type GitRemoteInfo = z.infer<typeof gitRemoteInfoSchema>;
 export type RepositoryGitStatusResponse = z.infer<typeof repositoryGitStatusResponseSchema>;
 export type RepositoryCommitsResponse = z.infer<typeof repositoryCommitsResponseSchema>;
+export type RepositoryTreeEntry = z.infer<typeof repositoryTreeEntrySchema>;
+export type RepositoryTreeResponse = z.infer<typeof repositoryTreeResponseSchema>;
 export type PullRequestSummary = z.infer<typeof pullRequestSummarySchema>;
 export type RepositoryPullRequestsUnavailableReasonCode = z.infer<typeof repositoryPullRequestsUnavailableReasonCodeSchema>;
 export type RepositoryPullRequestsResponse = z.infer<typeof repositoryPullRequestsResponseSchema>;

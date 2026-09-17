@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import {
   parseGitHubRepositoryFullName as parseSharedGitHubRepositoryFullName,
   vcsChangedFileSchema
 } from "@consistency/schema";
-import { GitCommandError, assertSafeRef, execGit } from "./git";
+import { GitCommandError, assertSafeRef, assertSafeTreePath, execGit } from "./git";
 import {
   LocalGitAdapter,
   parseGitHubRemote,
@@ -193,6 +193,33 @@ describe("LocalGitAdapter", { timeout: 30_000 }, () => {
     for (const entry of tree) {
       expect(entry.sha).toMatch(/^[0-9a-f]{40,64}$/);
     }
+  });
+
+  it("lists non-recursive tree children for root and nested directories", async () => {
+    mkdirSync(join(root, "pkg"), { recursive: true });
+    write(join("pkg", "mod.ts"), "export const mod = 1;\n");
+    await git(["add", "pkg/mod.ts"]);
+    await git(["commit", "-m", "add pkg"]);
+
+    const rootChildren = await adapter.listTreeChildren("HEAD");
+    const rootPaths = rootChildren.map((entry) => entry.path);
+    expect(rootPaths).toContain("a.txt");
+    expect(rootPaths).toContain("c.ts");
+    expect(rootPaths).toContain("pkg");
+    expect(rootChildren.find((entry) => entry.path === "pkg")?.type).toBe("tree");
+    expect(rootPaths).not.toContain("pkg/mod.ts");
+    expect(rootPaths).not.toContain("never-committed.txt");
+
+    const nested = await adapter.listTreeChildren("HEAD", "pkg");
+    expect(nested.map((entry) => entry.path)).toEqual(["pkg/mod.ts"]);
+    expect(nested[0]?.type).toBe("blob");
+  });
+
+  it("rejects unsafe tree directory paths", async () => {
+    expect(() => assertSafeTreePath("../etc")).toThrow(/parent/);
+    expect(() => assertSafeTreePath("/etc/passwd")).toThrow(/relative/);
+    expect(() => assertSafeTreePath("-rf")).toThrow(/'-'/);
+    await expect(adapter.listTreeChildren("HEAD", "../secret")).rejects.toThrow(/parent/);
   });
 
   it("refuses refs that could be read as options or ranges", async () => {
