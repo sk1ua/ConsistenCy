@@ -35,7 +35,7 @@
 .intro-copy h2 {
   max-width: 720px;
   margin: 13px 0 9px;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: clamp(28px, 3.3vw, 43px);
   line-height: 1.1;
   letter-spacing: -.01em;
@@ -66,7 +66,7 @@
 }
 .attention-signal strong {
   margin-top: 3px;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 32px;
   line-height: 1.15;
   color: var(--danger);
@@ -210,7 +210,7 @@
 }
 .panel-title h2 {
   margin: 3px 0 0;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 17px;
   letter-spacing: .01em;
   line-height: 1.15;

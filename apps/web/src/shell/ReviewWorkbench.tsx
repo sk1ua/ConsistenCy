@@ -12,9 +12,7 @@ import {
   GitBranch,
   GitCommit,
   Loader2,
-  PlayCircle,
-  FileDiff,
-  ShieldAlert
+  PlayCircle
 } from "lucide-react";
 import { api } from "../api/client";
 import { workspaceQueryKeys } from "../query/client";
@@ -105,7 +103,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
     return (
       <div className="ds-page review-workbench">
         <EmptyState
-          icon={<FolderGit2 size={28} />}
+          icon={null}
           title={zh ? "连接仓库以开始审查" : "Connect a repository to start reviewing"}
           description={
             zh
@@ -204,7 +202,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           ) : repoJobs.length === 0 ? (
             <EmptyState
               compact
-              icon={<ShieldAlert size={18} />}
+              icon={null}
               title={zh ? "暂无审查记录" : "No reviews yet"}
               description={zh ? "点击「开始审查」发起首次审查。" : "Use Start review for the first run."}
             />
@@ -258,7 +256,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           {changedPreview.length === 0 && !latestReport ? (
             <EmptyState
               compact
-              icon={<FileDiff size={18} />}
+              icon={null}
               title={zh ? "暂无变更摘要" : "No diff summary yet"}
               description={
                 zh

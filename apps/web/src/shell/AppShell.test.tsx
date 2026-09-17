@@ -111,17 +111,19 @@ describe("Locked three-column AppShell", () => {
     expect(enHtml).toContain("Pull Requests");
   });
 
-  it("exposes explicit system, light, and dark theme preferences", () => {
+  it("exposes a quiet single theme cycle control in the top bar", () => {
     const html = renderShell("/repositories", { themePreference: "system" });
-    expect(html).toContain('aria-label="System"');
-    expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain('aria-label="Light"');
-    expect(html).toContain('aria-label="Dark"');
+    expect(html).toContain('aria-label="Cycle theme"');
+    expect(html).toContain("lucide-monitor");
+
+    const light = renderShell("/repositories", { themePreference: "light" });
+    expect(light).toContain("lucide-sun");
+
+    const dark = renderShell("/repositories", { themePreference: "dark" });
+    expect(dark).toContain("lucide-moon");
 
     const zhHtml = renderShell("/repositories", { locale: "zh-CN", themePreference: "system" });
-    expect(zhHtml).toContain('aria-label="跟随系统"');
-    expect(zhHtml).toContain('aria-label="浅色"');
-    expect(zhHtml).toContain('aria-label="深色"');
+    expect(zhHtml).toContain('aria-label="切换主题"');
   });
 
   it("renders clear location breadcrumbs in the header", () => {
@@ -157,7 +159,7 @@ describe("Locked three-column AppShell", () => {
     expect(isCommandPaletteShortcut(event("p"))).toBe(false);
   });
 
-  it("displays real LLM provider status when configured and unconfigured link when absent without mock badge", () => {
+  it("shows LLM provenance in the top-bar chip (not a bottom status bar) without mock badge", () => {
     const htmlConfigured = renderShell("/runs", {
       locale: "zh-CN",
       health: {
@@ -179,6 +181,9 @@ describe("Locked three-column AppShell", () => {
     });
     expect(htmlConfigured).toContain("DeepSeek");
     expect(htmlConfigured).toContain("deepseek-chat");
+    expect(htmlConfigured).toContain("agent-shell__provenance");
+    expect(htmlConfigured).not.toContain("agent-shell__status");
+    expect(htmlConfigured).not.toContain("data-shell-status");
     expect(htmlConfigured).not.toContain("Mock 模型");
     expect(htmlConfigured).not.toContain("Demo mode");
 

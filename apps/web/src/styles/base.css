@@ -18,7 +18,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 :lang(zh-CN) {
-  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  /* Keep one UI sans (IBM Plex Sans + CJK fallbacks already in --font-ui) */
+  font-family: var(--font-ui);
 }
 :lang(zh-CN) code,
 :lang(zh-CN) pre,

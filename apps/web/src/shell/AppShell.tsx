@@ -2,10 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
-  Cpu,
   FolderGit2,
   FolderTree,
-  GitBranch,
   Languages,
   Monitor,
   Moon,
@@ -40,7 +38,7 @@ import { Breadcrumb, type BreadcrumbItem } from "../design-system/Breadcrumb";
 import { Dialog } from "../design-system/Dialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { closeSettingsDialog, openSettingsDialog, useSettingsDialogOpen } from "../settingsDialogStore";
-import { desktopBridge, type DesktopBuildInfo } from "../desktop";
+import { desktopBridge } from "../desktop";
 import { RelatedCards, type RelatedCardsFocus } from "./RelatedCards";
 import { RepoDirectoryPanel } from "./RepoDirectoryPanel";
 
@@ -121,7 +119,6 @@ export const AppShell: React.FC<AppShellProps> = ({
   locale = "en-US",
   setLocale = () => {},
   themePreference,
-  setThemePreference,
   cycleTheme,
   jobs = [],
   repositories = [],
@@ -142,7 +139,6 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [projectQuery, setProjectQuery] = useState("");
-  const [buildInfo, setBuildInfo] = useState<DesktopBuildInfo | null>(null);
   const [directoryRepoId, setDirectoryRepoId] = useState<string | null>(null);
   const [relatedFocus, setRelatedFocus] = useState<RelatedCardsFocus>(null);
   const statusCardRef = useRef<HTMLElement | null>(null);
@@ -156,13 +152,6 @@ export const AppShell: React.FC<AppShellProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  useEffect(() => {
-    const bridge = desktopBridge();
-    if (bridge?.buildInfo) {
-      void bridge.buildInfo().then(info => setBuildInfo(info), () => undefined);
-    }
   }, []);
 
   useEffect(() => {
@@ -269,7 +258,6 @@ export const AppShell: React.FC<AppShellProps> = ({
     return items;
   }, [activeRepositoryName, activeRepositoryId, path, params.runId, jobs, zh]);
 
-  const activeBranch = pulse?.repository.branch || "—";
   const activeModel = health?.llmModel || "";
   const modelProvider = health?.llmProvider || "none";
   const apiConnected = health?.ok === true && !healthUnavailable;
@@ -437,7 +425,29 @@ export const AppShell: React.FC<AppShellProps> = ({
           <div className="agent-shell__center">
             <header className="shell-topbar agent-shell__topbar">
               <Breadcrumb items={breadcrumbs} />
-              <div className="shell-topbar-actions" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <div className="shell-topbar-actions">
+                <button
+                  type="button"
+                  className="agent-shell__provenance"
+                  onClick={openSettingsDialog}
+                  title={zh ? "打开设置查看 LLM / API" : "Open Settings for LLM / API"}
+                  aria-label={zh ? "LLM 与 API 状态" : "LLM and API status"}
+                >
+                  <span
+                    className={`agent-shell__provenance-dot${apiConnected ? " is-ok" : " is-warn"}`}
+                    aria-hidden="true"
+                  />
+                  <span className="agent-shell__provenance-label">
+                    {modelProvider === "none" || health?.llmConfigured === false
+                      ? (zh ? "LLM 未配置" : "LLM unconfigured")
+                      : `${modelProvider}${activeModel ? ` · ${activeModel}` : ""}`}
+                  </span>
+                  <span className="agent-shell__provenance-sep" aria-hidden="true">·</span>
+                  <span className="agent-shell__provenance-api">
+                    {apiConnected ? (zh ? "API 已连接" : "API connected") : (zh ? "API 未知" : "API unavailable")}
+                  </span>
+                </button>
+
                 <Button
                   className="shell-search-button"
                   variant="outline"
@@ -450,41 +460,23 @@ export const AppShell: React.FC<AppShellProps> = ({
                   <span className="agent-shell__kbd">Ctrl+K</span>
                 </Button>
 
-                <Button
-                  className="shell-locale-button"
-                  variant="ghost"
+                <IconButton
+                  icon={<Languages size={14} />}
+                  label={locale === "zh-CN" ? "Switch to English" : "切换到中文"}
                   size="sm"
-                  icon={<Languages size={12} aria-hidden="true" />}
-                  aria-label={locale === "zh-CN" ? "Switch to English" : "切换到中文"}
                   onClick={() => setLocale(locale === "zh-CN" ? "en-US" : "zh-CN")}
-                  style={{ fontSize: "11px", padding: "0 6px" }}
-                >
-                  <span>{locale === "zh-CN" ? "中文" : "English"}</span>
-                </Button>
+                />
 
-                <div role="group" aria-label={zh ? "主题设置" : "Theme settings"} style={{ display: "flex", alignItems: "center", gap: "2px" }}>
-                  <IconButton
-                    icon={<Monitor size={14} />}
-                    label={zh ? "跟随系统" : "System"}
-                    size="sm"
-                    active={themePreference === "system"}
-                    onClick={() => setThemePreference ? setThemePreference("system") : cycleTheme()}
-                  />
-                  <IconButton
-                    icon={<Sun size={14} />}
-                    label={zh ? "浅色" : "Light"}
-                    size="sm"
-                    active={themePreference === "light"}
-                    onClick={() => setThemePreference ? setThemePreference("light") : cycleTheme()}
-                  />
-                  <IconButton
-                    icon={<Moon size={14} />}
-                    label={zh ? "深色" : "Dark"}
-                    size="sm"
-                    active={themePreference === "dark"}
-                    onClick={() => setThemePreference ? setThemePreference("dark") : cycleTheme()}
-                  />
-                </div>
+                <IconButton
+                  icon={
+                    themePreference === "dark" ? <Moon size={14} /> :
+                    themePreference === "light" ? <Sun size={14} /> :
+                    <Monitor size={14} />
+                  }
+                  label={zh ? "切换主题" : "Cycle theme"}
+                  size="sm"
+                  onClick={cycleTheme}
+                />
 
                 {onRefresh && (
                   <IconButton
@@ -525,26 +517,6 @@ export const AppShell: React.FC<AppShellProps> = ({
           )}
         </div>
 
-        <footer className="agent-shell__status" data-shell-status>
-          <div className="agent-shell__status-left">
-            <span><GitBranch size={11} /> <code className="shell-status-mono">{activeBranch}</code></span>
-            <span>
-              <Cpu size={11} />
-              {modelProvider === "none" || health?.llmConfigured === false
-                ? (zh ? "LLM 未配置" : "LLM unconfigured")
-                : `LLM: ${modelProvider}${activeModel ? ` · ${activeModel}` : ""}`}
-            </span>
-          </div>
-          <div className="agent-shell__status-right">
-            <span>
-              <Activity size={11} color={apiConnected ? "var(--success)" : "var(--warning)"} />
-              {apiConnected ? (zh ? "API 已连接" : "API connected") : (zh ? "API 状态未知" : "API unavailable")}
-            </span>
-            {buildInfo?.commitSha && (
-              <span className="shell-status-mono">Build {buildInfo.commitSha.substring(0, 7)}</span>
-            )}
-          </div>
-        </footer>
       </div>
 
       {/* Selection inspector overlay (secondary; not primary chat) */}

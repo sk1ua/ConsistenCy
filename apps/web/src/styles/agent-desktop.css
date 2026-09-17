@@ -5,7 +5,6 @@
 .ds-root.audit-shell {
   --ds-sidebar-width: 230px;
   --ds-topbar-height: 42px;
-  --ds-statusbar-height: 26px;
   --ds-radius-sm: 5px;
   --ds-radius-md: 6px;
   /* Warm content canvas: soft surface, not editor-gutter gray */
@@ -87,36 +86,34 @@
   color: var(--muted-strong) !important;
 }
 
-/* ---------- Topbar / status: warmer type, less technical chrome ---------- */
+/* ---------- Topbar: quiet chrome, unified UI sans ---------- */
 .shell-topbar {
   font-size: 13px;
+  font-family: var(--font-ui);
   background: var(--surface) !important;
   border-bottom-color: var(--border-subtle) !important;
 }
 
 .ds-root.audit-shell .ds-breadcrumb,
 .ds-root.audit-shell .location-breadcrumbs {
-  font-family: var(--font-ui), var(--ds-font-sans), system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 13px;
   letter-spacing: 0;
   text-transform: none;
 }
 
+/* Bottom status bar removed — do not resurrect a full-width footer */
 .shell-statusbar,
 .audit-shell [data-shell-status],
-.ds-root.audit-shell > div > div > footer,
-.audit-status-bar,
-.ds-root.audit-shell footer {
-  font-size: 11px;
-  font-family: var(--font-ui), system-ui, sans-serif;
-  color: var(--muted);
-  border-top-color: var(--border-subtle) !important;
-  background: var(--surface) !important;
-}
-
-.ds-root.audit-shell footer code,
-.ds-root.audit-shell footer .shell-status-mono {
-  font-family: var(--font-mono), var(--ds-font-mono), monospace;
+.agent-shell__status,
+.audit-status-bar {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
 }
 
 /* Quieter theme/locale active chips in the topbar (not loud blue pills) */
@@ -434,7 +431,7 @@
 }
 
 .ds-root.audit-shell .studio-canvas-toolbar strong {
-  font-family: var(--font-ui), system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   font-weight: 600;
 }
@@ -539,19 +536,37 @@
 
 /* ========== Locked three-column agent shell (ZCode / Claude Desktop) ========== */
 .ds-root.agent-shell {
-  --agent-chrome-bg: #f4f2ee;
+  --agent-chrome-bg: #f3f1ec;
   --agent-paper: #fffdf9;
-  --agent-radius: 16px;
-  --agent-left-width: 248px;
-  --agent-right-width: 268px;
+  --agent-radius: 18px;
+  --agent-left-width: 252px;
+  --agent-right-width: 272px;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--agent-chrome-bg) !important;
-  padding: 10px;
+  padding: 12px;
   box-sizing: border-box;
+  font-family: var(--font-ui);
+  color: var(--foreground);
+}
+
+.ds-root.agent-shell,
+.ds-root.agent-shell button,
+.ds-root.agent-shell input,
+.ds-root.agent-shell select,
+.ds-root.agent-shell textarea {
+  font-family: var(--font-ui);
+}
+
+.ds-root.agent-shell code,
+.ds-root.agent-shell pre,
+.ds-root.agent-shell kbd,
+.ds-root.agent-shell .mono,
+.ds-root.agent-shell .shell-status-mono {
+  font-family: var(--font-mono);
 }
 
 :root[data-theme="dark"] .ds-root.agent-shell {
@@ -568,7 +583,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--agent-radius);
   overflow: hidden;
-  box-shadow: 0 1px 0 rgba(28, 25, 23, 0.04);
+  box-shadow: none;
 }
 
 .agent-shell__columns {
@@ -616,6 +631,7 @@
 }
 
 .agent-shell__brand-text strong {
+  font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 650;
   letter-spacing: -0.2px;
@@ -665,6 +681,7 @@
   color: var(--muted-strong);
   padding: 8px 10px;
   border-radius: 10px;
+  font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -695,12 +712,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-family: var(--font-ui);
   font-size: 10px;
   font-weight: 650;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
-  padding: 4px 4px 8px;
+  padding: 6px 4px 10px;
 }
 
 .agent-shell__repo-list {
@@ -709,34 +727,41 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+  padding: 2px 0;
 }
 
 .agent-shell__repo-row {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: var(--surface);
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
   overflow: hidden;
+  padding: 2px 0 4px;
 }
 
 .agent-shell__repo-row.is-active {
-  border-color: var(--border-strong);
-  box-shadow: inset 3px 0 0 var(--muted-strong);
+  background: var(--agent-wash, var(--surface-subtle));
+  box-shadow: inset 2px 0 0 var(--muted-strong);
+}
+
+.agent-shell__repo-row:hover {
+  background: var(--agent-wash, var(--surface-subtle));
 }
 
 .agent-shell__repo-main {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   width: 100%;
   border: 0;
   background: transparent;
-  padding: 8px 10px 4px;
+  padding: 8px 10px 2px;
   cursor: pointer;
   text-align: left;
   color: var(--foreground);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 550;
 }
 
 .agent-shell__repo-main span {
@@ -746,23 +771,24 @@
 }
 
 .agent-shell__repo-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 0 6px 6px;
+  display: flex;
+  gap: 2px;
+  padding: 0 8px 6px 30px;
 }
 
 .agent-shell__repo-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  border: 1px solid var(--border-subtle);
-  background: var(--surface-subtle);
-  color: var(--muted-strong);
-  border-radius: 8px;
-  padding: 4px 6px;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-family: var(--font-ui);
   font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -797,7 +823,7 @@
 }
 
 .agent-shell__topbar {
-  height: 44px;
+  height: 46px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: transparent !important;
@@ -805,6 +831,8 @@
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+  gap: 12px;
+  font-family: var(--font-ui);
 }
 
 .agent-shell__kbd {
@@ -836,43 +864,77 @@
   overflow-y: auto;
 }
 
-.agent-shell__status {
-  height: 28px;
-  padding: 0 14px;
-  border-top: 1px solid var(--border-subtle);
+/* Provenance chip in top bar (not a footer strip) */
+.shell-topbar-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--muted);
-  background: transparent;
-  flex-shrink: 0;
-  user-select: none;
-}
-
-.agent-shell__status-left,
-.agent-shell__status-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.agent-shell__status span {
-  display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.agent-shell__provenance {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  margin-right: 4px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.agent-shell__provenance:hover {
+  color: var(--foreground);
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.agent-shell__provenance-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--warning);
+}
+
+.agent-shell__provenance-dot.is-ok {
+  background: var(--success);
+}
+
+.agent-shell__provenance-dot.is-warn {
+  background: var(--warning);
+}
+
+.agent-shell__provenance-label,
+.agent-shell__provenance-api {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-shell__provenance-sep {
+  color: var(--border-strong);
+  flex-shrink: 0;
 }
 
 /* Related cards (right rail) */
 .related-cards-rail {
   border-left: 1px solid var(--border-subtle);
   background: transparent;
-  padding: 12px 12px 16px;
+  padding: 14px 14px 20px;
   overflow-y: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  font-family: var(--font-ui);
 }
 
 .related-cards-rail__title {
@@ -885,15 +947,26 @@
 }
 
 .related-card {
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: var(--surface);
-  padding: 10px 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 2px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  box-shadow: none;
+}
+
+.related-card:last-child {
+  border-bottom: 0;
 }
 
 .related-card--focus {
-  border-color: var(--border-strong);
-  box-shadow: 0 0 0 2px var(--primary-wash);
+  border-color: transparent;
+  border-bottom-color: var(--border-strong);
+  box-shadow: none;
+  background: var(--agent-wash, var(--surface-subtle));
+  border-radius: 10px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .related-card__head {
@@ -950,10 +1023,14 @@
 }
 
 .related-card__text-btn {
-  color: var(--primary-strong);
+  color: var(--muted-strong);
   margin-top: 6px;
   font-size: 11.5px;
   font-weight: 600;
+}
+
+.related-card__text-btn:hover {
+  color: var(--foreground);
 }
 
 .related-card__list {
@@ -986,20 +1063,22 @@
 }
 
 .mono {
-  font-family: var(--font-mono), var(--ds-font-mono), monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
+  font-weight: 500;
 }
 
 /* Review workbench (center home) */
 .review-workbench {
-  padding: 20px 28px 24px;
-  max-width: 1080px;
+  padding: 24px 32px 32px;
+  max-width: 1040px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   min-height: 100%;
   box-sizing: border-box;
+  font-family: var(--font-ui);
 }
 
 .review-workbench__header {
@@ -1033,9 +1112,10 @@
 
 .review-workbench__title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
+  font-family: var(--font-ui);
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.35px;
 }
 
 .review-workbench__sub {
@@ -1140,12 +1220,37 @@
 .review-workbench__text-btn {
   border: 0;
   background: transparent;
-  color: var(--primary-strong);
+  color: var(--muted-strong);
+  font-family: var(--font-ui);
   font-size: 11.5px;
   font-weight: 600;
   padding: 10px 0 0;
   cursor: pointer;
   text-align: left;
+}
+
+.review-workbench__text-btn:hover {
+  color: var(--foreground);
+}
+
+.review-workbench .ds-empty-state {
+  font-family: var(--font-ui);
+}
+
+.review-workbench .ds-empty-state-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+.review-workbench .ds-empty-state-description {
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 28em;
+}
+
+.review-workbench .ds-empty-state--compact {
+  padding: 14px 0 !important;
 }
 
 .review-workbench__composer {

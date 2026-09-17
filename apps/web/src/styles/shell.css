@@ -38,7 +38,7 @@
   display: block;
 }
 .brand strong {
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 21px;
   letter-spacing: .01em;
 }
@@ -178,7 +178,7 @@
 }
 .header-title h1 {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 22px;
   line-height: 1.15;
   letter-spacing: .01em;

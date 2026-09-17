@@ -248,7 +248,7 @@
 
 .ops-command-summary h2 {
   margin: 3px 0 0;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 18px;
   line-height: 1.05;
   letter-spacing: -.01em;
@@ -481,7 +481,7 @@
 
 .ops-panel-heading h2 {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 13px;
   line-height: 1.1;
 }
