@@ -21,3 +21,19 @@ python evaluation/scripts/run_ablation.py --manifest evaluation/sampled_prs.json
 `generic_baseline` 只有在使用真正 generic baseline 重新生成报告时才是严格对照；现有报告可用于信号移除消融，因为信号分数已保存在报告中。
 
 评估结果描述的是排序重合度。公开 Review 位置是弱标签，任何缺陷检测或安全有效性结论都需要额外的人工标注与审查。
+
+
+## 离线冒烟（无需 HuggingFace / LLM）
+
+仓库内置 `evaluation/fixtures/`，可在无网络环境下验证 metrics 脚本：
+
+```bash
+python evaluation/scripts/run_metrics.py \
+  --manifest evaluation/fixtures/sampled_prs.json \
+  --output evaluation/results/metrics_summary.json \
+  --markdown-output evaluation/results/metrics_summary.md
+```
+
+这是弱标签上的排序对齐冒烟检查，不代表缺陷检测或安全有效性结论。`evaluation/results/` 下的生成文件仍被 gitignore。
+
+对应测试：`tests/test_evaluation_fixture_smoke.py`。

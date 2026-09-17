@@ -1,0 +1,60 @@
+[
+  {
+    "repo": "demo/auth-service",
+    "pr_number": 1,
+    "model_report_path": "evaluation/fixtures/reports/report_demo_pr_1.json",
+    "reviewer_touched_files": [
+      "src/auth.py",
+      "src/db.py"
+    ],
+    "annotations": [
+      {
+        "annotator": "fixture",
+        "overall_risk": "high",
+        "top_risky_files": [
+          "src/auth.py",
+          "src/db.py"
+        ],
+        "severity_per_file": {
+          "src/auth.py": "high",
+          "src/db.py": "medium"
+        },
+        "reason_per_file": {
+          "src/auth.py": [
+            "security"
+          ],
+          "src/db.py": [
+            "structural"
+          ]
+        },
+        "notes": "offline fixture for smoke evaluation"
+      }
+    ]
+  },
+  {
+    "repo": "demo/web-ui",
+    "pr_number": 2,
+    "model_report_path": "evaluation/fixtures/reports/report_demo_pr_2.json",
+    "reviewer_touched_files": [
+      "lib/parser.ts"
+    ],
+    "annotations": [
+      {
+        "annotator": "fixture",
+        "overall_risk": "medium",
+        "top_risky_files": [
+          "lib/parser.ts"
+        ],
+        "severity_per_file": {
+          "lib/parser.ts": "medium"
+        },
+        "reason_per_file": {
+          "lib/parser.ts": [
+            "semantic"
+          ]
+        },
+        "notes": "offline fixture for smoke evaluation"
+      }
+    ]
+  }
+]
