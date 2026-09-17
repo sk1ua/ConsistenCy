@@ -167,9 +167,29 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const pulseRepositoryName = pulse?.repository.root?.split(/[\\/]/).filter(Boolean).at(-1);
 
+  const routeRunId = useMemo(() => {
+    const match = path.match(/^\/runs\/([^/]+)/);
+    return safeDecodeURIComponent(match?.[1]);
+  }, [path]);
+
+  const runJob = useMemo(
+    () => (routeRunId ? jobs.find(j => j.id === routeRunId) : undefined),
+    [jobs, routeRunId]
+  );
+
   const activeRepo = useMemo(() => {
     if (routeRepositoryId) return repositories.find(r => r.id === routeRepositoryId);
     if (path.startsWith("/repositories/")) return undefined;
+    if (runJob) {
+      const byId = runJob.repositoryId
+        ? repositories.find(r => r.id === runJob.repositoryId)
+        : undefined;
+      if (byId) return byId;
+      const byRemote = repositories.find(
+        r => r.remoteFullName === runJob.repositoryFullName || r.id === runJob.repositoryFullName
+      );
+      if (byRemote) return byRemote;
+    }
     try {
       const stored = sessionStorage.getItem("consistency.selectedRepo.v1");
       if (stored) {
@@ -180,7 +200,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       // ignore
     }
     return repositories[0];
-  }, [repositories, routeRepositoryId, path]);
+  }, [repositories, routeRepositoryId, path, runJob]);
 
   const activeRepositoryName = activeRepo?.displayName ?? (
     !routeRepositoryId && pulseRepositoryName ? pulseRepositoryName : undefined
@@ -312,7 +332,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     return item.label.toLowerCase().includes(q);
   });
 
-  const showRelatedRail = Boolean(activeRepo) || path.startsWith("/repositories/") || path === "/inbox" || path === "/";
+  const showRelatedRail = Boolean(activeRepo) || path.startsWith("/repositories/") || path.startsWith("/runs/") || path === "/inbox" || path === "/";
 
   return (
     <div className="ds-root audit-shell agent-shell">
@@ -532,7 +552,8 @@ export const AppShell: React.FC<AppShellProps> = ({
               locale={locale === "zh-CN" ? "zh-CN" : "en-US"}
               repository={activeRepo}
               jobs={jobs}
-              focus={relatedFocus}
+              focus={routeRunId ? (relatedFocus ?? "review") : relatedFocus}
+              focusJobId={routeRunId}
               statusCardRef={statusCardRef}
             />
           )}

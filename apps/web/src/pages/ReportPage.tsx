@@ -32,7 +32,8 @@ export function ReportPage({
   job,
   report,
   llmProvider,
-  llmModel
+  llmModel,
+  onBack: _onBack
 }: {
   job?: ReviewJob;
   report?: ReviewReport;
@@ -41,6 +42,7 @@ export function ReportPage({
   llmModel?: string;
   onBack?: () => void;
 }) {
+  void _onBack;
   const { locale, t } = useI18n();
   const zh = locale === "zh-CN";
   const [groupBy, setGroupBy] = useState<"severity" | "agent">("severity");

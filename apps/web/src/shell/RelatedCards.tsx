@@ -24,6 +24,8 @@ export interface RelatedCardsProps {
   repository?: Repository;
   jobs: ReviewJob[];
   focus?: RelatedCardsFocus;
+  /** When viewing a run, highlight that job in the recent-review card. */
+  focusJobId?: string;
   statusCardRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -72,6 +74,7 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
   repository,
   jobs,
   focus = null,
+  focusJobId,
   statusCardRef
 }) => {
   const zh = locale === "zh-CN";
@@ -106,7 +109,8 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
   const repoJobs = jobs
     .filter(j => j.repositoryId === repositoryId || j.repositoryFullName === repository?.displayName || j.repositoryFullName === repository?.remoteFullName)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const latestJob = repoJobs[0];
+  const focusJob = focusJobId ? jobs.find(j => j.id === focusJobId) : undefined;
+  const latestJob = focusJob ?? repoJobs[0];
   const latestReport = latestJob?.report;
 
   const repoBase = repositoryId
@@ -188,36 +192,45 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
             {zh ? "尚无审查" : "No reviews yet"}
           </p>
         ) : (
-          <button
-            type="button"
-            className="related-card__link"
-            onClick={() => navigate(`/runs/${encodeURIComponent(latestJob.id)}/overview`)}
-          >
-            <Badge
-              variant={
-                latestJob.status === "succeeded"
-                  ? "success"
-                  : latestJob.status === "running"
-                    ? "warning"
-                    : latestJob.status === "failed"
-                      ? "danger"
-                      : "neutral"
-              }
-              size="sm"
+          <div className="related-card__stack">
+            <button
+              type="button"
+              className="related-card__link"
+              onClick={() => navigate(`/runs/${encodeURIComponent(latestJob.id)}/overview`)}
             >
-              {latestJob.status.toUpperCase()}
-            </Badge>
-            <span>
-              {latestJob.pullRequestNumber
-                ? `PR #${latestJob.pullRequestNumber}`
-                : (zh ? "工作区审查" : "Working tree")}
-            </span>
-            {latestReport?.score !== undefined && (
-              <span className="related-card__score">
-                {zh ? `${latestReport.score} 分` : `${latestReport.score}`}
+              <Badge
+                variant={
+                  latestJob.status === "succeeded"
+                    ? "success"
+                    : latestJob.status === "running"
+                      ? "warning"
+                      : latestJob.status === "failed"
+                        ? "danger"
+                        : "neutral"
+                }
+                size="sm"
+              >
+                {latestJob.status.toUpperCase()}
+              </Badge>
+              <span>
+                {focusJobId && focusJobId === latestJob.id
+                  ? (zh ? "当前运行" : "This run")
+                  : latestJob.pullRequestNumber
+                    ? `PR #${latestJob.pullRequestNumber}`
+                    : (zh ? "工作区审查" : "Working tree")}
               </span>
+              {latestReport?.score !== undefined && (
+                <span className="related-card__score">
+                  {zh ? `${latestReport.score} 分` : `${latestReport.score}`}
+                </span>
+              )}
+            </button>
+            {latestReport?.findings?.[0] && (
+              <p className="related-card__snippet" title={latestReport.findings[0].title}>
+                {zh ? "发现" : "Finding"}: {latestReport.findings[0].title}
+              </p>
             )}
-          </button>
+          </div>
         )}
       </Card>
 
@@ -237,21 +250,28 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
             {zh ? "暂无启用绑定" : "No enabled bindings"}
           </p>
         ) : (
-          <ul className="related-card__list">
-            {enabledBindings.slice(0, 3).map(b => (
-              <li key={b.definitionId}>
-                <button
-                  type="button"
-                  className="related-card__link"
-                  onClick={() => navigate(`${repoBase}/workflows`)}
-                >
-                  <span className="related-dot" style={{ background: "var(--success)" }} />
-                  <span className="mono">{b.definitionId}</span>
-                  <span className="related-card__muted">{b.triggerMode}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className="related-card__stack">
+            <p className="related-card__muted" style={{ margin: 0 }}>
+              {zh
+                ? `${enabledBindings.length} 个启用绑定`
+                : `${enabledBindings.length} enabled binding${enabledBindings.length === 1 ? "" : "s"}`}
+            </p>
+            <ul className="related-card__list">
+              {enabledBindings.slice(0, 3).map(b => (
+                <li key={b.definitionId}>
+                  <button
+                    type="button"
+                    className="related-card__link"
+                    onClick={() => navigate(`${repoBase}/workflows`)}
+                  >
+                    <span className="related-dot" style={{ background: "var(--success)" }} />
+                    <span className="mono">{b.definitionId}</span>
+                    <span className="related-card__muted">{b.triggerMode}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </Card>
 
