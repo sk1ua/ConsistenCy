@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, KeyboardEvent } from "react";
+import { useState, useMemo, useEffect, useRef, KeyboardEvent } from "react";
 import type { RepositoryGitStatusResponse, VcsChangedFile } from "@consistency/schema";
 import { useI18n } from "../i18n";
 import { FileCode2, GitMerge, FileQuestion } from "lucide-react";
@@ -7,6 +7,8 @@ export interface RepositoryChangesViewProps {
   loading?: boolean;
   error?: Error;
   data?: RepositoryGitStatusResponse;
+  /** When navigating from directory / workbench, select and scroll this path. */
+  highlightPath?: string | null;
 }
 
 export type ListEntry =
@@ -73,18 +75,45 @@ const LOCALES = {
   }
 };
 
-export function RepositoryChangesView({ loading, error, data }: RepositoryChangesViewProps) {
+export function resolveHighlightKey(entries: ListEntry[], highlightPath?: string | null): string | null {
+  if (!highlightPath) return null;
+  const tracked = entries.find(e => e.type === "tracked" && e.file.path === highlightPath);
+  if (tracked) return tracked.key;
+  const untracked = entries.find(e => e.type === "untracked" && e.path === highlightPath);
+  return untracked?.key ?? null;
+}
+
+export function RepositoryChangesView({ loading, error, data, highlightPath }: RepositoryChangesViewProps) {
   const { locale } = useI18n();
   const strings = LOCALES[locale === "zh-CN" ? "zh-CN" : "en-US"];
 
   const entries = useMemo(() => buildEntries(data), [data]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const appliedHighlight = useRef<string | null>(null);
 
   useEffect(() => {
+    const fromHighlight = resolveHighlightKey(entries, highlightPath);
+    if (fromHighlight && appliedHighlight.current !== `${highlightPath}:${fromHighlight}`) {
+      appliedHighlight.current = `${highlightPath}:${fromHighlight}`;
+      setSelectedKey(fromHighlight);
+      setFlashKey(fromHighlight);
+      requestAnimationFrame(() => {
+        rowRefs.current.get(fromHighlight)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+      return;
+    }
     if (entries.length > 0 && (!selectedKey || !entries.find(e => e.key === selectedKey))) {
       setSelectedKey(entries[0]!.key);
     }
-  }, [entries, selectedKey]);
+  }, [entries, selectedKey, highlightPath]);
+
+  useEffect(() => {
+    if (!flashKey) return;
+    const t = window.setTimeout(() => setFlashKey(null), 2200);
+    return () => window.clearTimeout(t);
+  }, [flashKey]);
 
   if (loading || error) {
     return <div className="changes-view-loading">{strings.loading}</div>;
@@ -150,7 +179,11 @@ export function RepositoryChangesView({ loading, error, data }: RepositoryChange
                   <li key={entry.key}>
                     <button
                       type="button"
-                      className={`diff-tree-file${active ? " active" : ""}`}
+                      ref={el => {
+                        if (el) rowRefs.current.set(entry.key, el);
+                        else rowRefs.current.delete(entry.key);
+                      }}
+                      className={`diff-tree-file${active ? " active" : ""}${flashKey === entry.key ? " is-highlight" : ""}`}
                       aria-selected={active}
                       role="option"
                       onClick={() => setSelectedKey(entry.key)}
@@ -169,7 +202,11 @@ export function RepositoryChangesView({ loading, error, data }: RepositoryChange
                   <li key={entry.key}>
                     <button
                       type="button"
-                      className={`diff-tree-file${active ? " active" : ""}`}
+                      ref={el => {
+                        if (el) rowRefs.current.set(entry.key, el);
+                        else rowRefs.current.delete(entry.key);
+                      }}
+                      className={`diff-tree-file${active ? " active" : ""}${flashKey === entry.key ? " is-highlight" : ""}`}
                       aria-selected={active}
                       role="option"
                       onClick={() => setSelectedKey(entry.key)}

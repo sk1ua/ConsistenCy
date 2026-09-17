@@ -24,6 +24,8 @@ import { Badge } from "../design-system/Badge";
 import { Tabs } from "../design-system/Tabs";
 import { SectionHeader } from "../design-system/SectionHeader";
 import { EmptyState } from "../design-system/EmptyState";
+import { isReviewStartDisabled, formatReviewMutationError } from "./reviewStart";
+export { isReviewStartDisabled, formatReviewMutationError };
 import { useI18n } from "../i18n";
 import { ReviewComposerDialog } from "./ReviewComposerDialog";
 import { RepositoryChangesView } from "./RepositoryChangesView";
@@ -45,13 +47,7 @@ export interface RepositoryDetailPageProps {
   health?: HealthResponse;
 }
 
-export function isReviewStartDisabled(preparation?: ReviewPreparationResponse): boolean {
-  return preparation?.canStartReview !== true;
-}
 
-export function formatReviewMutationError(zh: boolean, _error: unknown): string {
-  return zh ? "请求失败，请稍后重试。" : "Request failed. Please try again later.";
-}
 
 export function createRepositoryPullRequestsQueryOptions(
   repositoryId: string,
@@ -95,6 +91,11 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
   const handleTabChange = (tabId: string) => {
     navigate(`/repositories/${encodeURIComponent(repositoryId)}/${tabId}`);
   };
+
+  const highlightPath = useMemo(() => {
+    const state = location.state as { highlightPath?: string } | null;
+    return typeof state?.highlightPath === "string" ? state.highlightPath : null;
+  }, [location.state]);
 
   // Queries for repository git status, commits, PRs, review preparation
   const gitStatusKey = ["repository-git-status", repositoryId] as const;
@@ -200,38 +201,17 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
   const commits = commitsData?.commits ?? [];
 
   return (
-    <div style={{ padding: "16px 24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <div className="repo-detail-page">
       {/* 1. REPOSITORY HEADER (Compact Desktop Strip) */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingBottom: "14px",
-          borderBottom: "1px solid var(--border)",
-          marginBottom: "14px"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div
-            style={{
-              width: "32px",
-              height: "32px",
-              borderRadius: "var(--ds-radius-md)",
-              background: "var(--primary-soft)",
-              color: "var(--primary-strong)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center"
-            }}
-          >
+      <div className="repo-detail-header">
+        <div className="review-workbench__identity">
+          <div className="repo-detail-icon">
             {sourceKind === "github" ? <Github size={18} /> : <FolderGit2 size={18} />}
           </div>
-
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <h1 style={{ margin: 0, fontSize: "16px", fontWeight: 700 }}>{displayName}</h1>
-              <Badge variant="neutral" size="sm" mono>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <h1 className="repo-detail-title">{displayName}</h1>
+              <Badge variant="neutral" size="sm">
                 {sourceKind === "local_git" ? (zh ? "本地 Git" : "Local Git") : sourceKind === "github" ? "GitHub" : sourceKind ?? (zh ? "来源未知" : "Source unknown")}
               </Badge>
               {trust && (
@@ -240,112 +220,83 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                 </Badge>
               )}
             </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", fontSize: "11px", color: "var(--muted)", marginTop: "1px" }}>
-              <span style={{ display: "flex", alignItems: "center", gap: "3px" }}>
-                <GitBranch size={11} />
-                 <span>{gitStatus?.branch || (zh ? "分支未知" : "Branch unknown")}</span>
+            <div className="repo-detail-sub">
+              <span>
+                <GitBranch size={11} /> {gitStatus?.branch || (zh ? "分支未知" : "Branch unknown")}
               </span>
               {gitStatus?.headSha && (
-                <span style={{ display: "flex", alignItems: "center", gap: "3px", fontFamily: "var(--ds-font-mono)" }}>
-                  <GitCommit size={11} />
-                  <span>{gitStatus.headSha.substring(0, 7)}</span>
+                <span className="mono">
+                  <GitCommit size={11} /> {gitStatus.headSha.substring(0, 7)}
                 </span>
               )}
               {gitStatus?.dirtyFileCount !== undefined && (
                 <span>
-                   {gitStatus.dirtyFileCount === 0
-                     ? (zh ? "工作区干净" : "Clean working tree")
-                     : (zh ? `${gitStatus.dirtyFileCount} 个未提交变更` : `${gitStatus.dirtyFileCount} uncommitted changes`)}
+                  {gitStatus.dirtyFileCount === 0
+                    ? (zh ? "工作区干净" : "Clean working tree")
+                    : (zh ? `${gitStatus.dirtyFileCount} 个未提交变更` : `${gitStatus.dirtyFileCount} uncommitted changes`)}
                 </span>
               )}
             </div>
           </div>
         </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Button
-            variant="primary"
-            size="sm"
-            icon={<PlayCircle size={14} />}
-            onClick={() => setIsReviewDialogOpen(true)}
-            disabled={isReviewStartDisabled(prep)}
-          >
-            {zh ? "审查代码" : "Start Review"}
-          </Button>
-        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<PlayCircle size={14} />}
+          onClick={() => setIsReviewDialogOpen(true)}
+          disabled={isReviewStartDisabled(prep)}
+          title={
+            isReviewStartDisabled(prep)
+              ? (prep?.blockingReasons[0] ?? (zh ? "审查尚未就绪" : "Review is not ready"))
+              : (zh ? "开始审查" : "Start Review")
+          }
+        >
+          {zh ? "开始审查" : "Start Review"}
+        </Button>
       </div>
 
-      {/* 2. LOCAL REPOSITORY NAVIGATION */}
-      <div style={{ marginBottom: "16px" }}>
+      <div className="repo-detail-tabs">
         <Tabs tabs={tabs} activeId={activeTab} onChange={handleTabChange} />
       </div>
 
       {/* 3. OVERVIEW VIEW (ONLY BUSINESS PAGE IMPLEMENTED IN THIS PROTOTYPE) */}
       {activeTab === "overview" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Review Readiness Status Bar */}
-          <div
-            style={{
-              padding: "10px 14px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--ds-radius-md)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              fontSize: "12px"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div className="repo-overview-readiness">
+            <div className="review-workbench__readiness" style={{ paddingBottom: 0, border: 0 }}>
               <span
-                style={{
-                  width: "7px",
-                  height: "7px",
-                  borderRadius: "50%",
-                  background: prep?.canStartReview ? "var(--success)" : "var(--warning)"
-                }}
+                className="related-dot"
+                style={{ background: prep?.canStartReview ? "var(--success)" : "var(--warning)" }}
               />
-               <span style={{ fontWeight: 600 }}>
-                 {prep?.canStartReview
-                    ? (zh ? "可以开始审查" : "Ready to review")
-                   : (zh ? "审查待就绪" : "Review pending")}
-               </span>
-               <span style={{ color: "var(--muted)" }}>—</span>
-                <span style={{ color: "var(--muted-strong)" }}>
-                 {prep
-                   ? prep.sources.workingTree.available
-                     ? (zh ? `${prep.sources.workingTree.changedFileCount} 个工作区变更` : `${prep.sources.workingTree.changedFileCount} working-tree changes`)
-                     : prep.sources.branch.available
-                       ? `${prep.sources.branch.head} → ${prep.sources.branch.base}`
-                       : (zh ? "当前没有可审查的工作区变更" : "No reviewable working-tree changes")
-                   : (zh ? "正在读取审查准备状态" : "Loading review preparation")}
-               </span>
-               {prep?.canStartReview && prep.model.default.provider !== "none" && (
-                 <span style={{ color: "var(--muted-strong)" }}>· {prep.model.default.provider === "deepseek" ? "DeepSeek" : prep.model.default.provider === "openai" ? "OpenAI" : "Anthropic"} · {prep.model.default.model}</span>
-               )}
-               {prep && !prep.canStartReview && prep.blockingReasons[0] && (
-                 <span style={{ color: "var(--warning-strong)" }}>· {prep.blockingReasons[0]}</span>
-               )}
-             </div>
-             {prep && prep.model.default.provider === "none" && (
-               <Button variant="outline" size="sm" onClick={openSettingsDialog}>{zh ? "配置模型" : "Configure model"}</Button>
-             )}
+              <strong>
+                {prep?.canStartReview
+                  ? (zh ? "可以开始审查" : "Ready to review")
+                  : (zh ? "审查待就绪" : "Review pending")}
+              </strong>
+              <span className="review-workbench__muted">
+                {prep
+                  ? prep.sources.workingTree.available
+                    ? (zh ? `${prep.sources.workingTree.changedFileCount} 个工作区变更` : `${prep.sources.workingTree.changedFileCount} working-tree changes`)
+                    : prep.sources.branch.available
+                      ? `${prep.sources.branch.head} → ${prep.sources.branch.base}`
+                      : (zh ? "当前没有可审查的变更" : "No reviewable changes")
+                  : (zh ? "正在读取准备状态…" : "Loading preparation…")}
+              </span>
+              {prep && !prep.canStartReview && prep.blockingReasons[0] && (
+                <span className="review-workbench__warn">· {prep.blockingReasons[0]}</span>
+              )}
+            </div>
+            {prep && prep.model.default.provider === "none" && (
+              <Button variant="outline" size="sm" onClick={openSettingsDialog}>{zh ? "配置模型" : "Configure model"}</Button>
+            )}
           </div>
 
           {/* DENSE CONTENT SECTIONS (NO CARD SOUP) */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+          <div className="repo-overview-grid">
             {/* Left: Recent Reviews (Dense List) */}
-            <section
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--ds-radius-md)",
-                overflow: "hidden"
-              }}
-            >
-              <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", background: "var(--surface-subtle)" }}>
-                <span style={{ fontWeight: 600, fontSize: "13px" }}>
+            <section className="repo-overview-panel">
+              <div className="repo-overview-panel-head">
+                <span>
                  {zh ? "最近审查" : "Recent Reviews"}
                 </span>
               </div>
@@ -364,7 +315,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                   compact
                   className="repo-overview-empty"
                   title={zh ? "暂无审查记录" : "No reviews yet"}
-                  description={zh ? "点击“审查代码”发起首次审查。" : "Start a review from the repository header."}
+                  description={zh ? "用「开始审查」发起首次运行。" : "Start review to create the first run."}
                 />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column" }}>
@@ -372,7 +323,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                     <div
                       key={job.id}
                       onClick={() => navigate(`/runs/${encodeURIComponent(job.id)}/overview`)}
-                      className="ds-list-row ds-list-row--static"
+                      className="review-workbench__row"
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
                         <Badge
@@ -411,16 +362,9 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
             </section>
 
             {/* Right: Recent Commits (Dense List) */}
-            <section
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--ds-radius-md)",
-                overflow: "hidden"
-              }}
-            >
-              <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", background: "var(--surface-subtle)" }}>
-                <span style={{ fontWeight: 600, fontSize: "13px" }}>
+            <section className="repo-overview-panel">
+              <div className="repo-overview-panel-head">
+                <span>
                    {zh ? "最近提交" : "Recent Commits"}
                 </span>
               </div>
@@ -434,14 +378,14 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                 <EmptyState
                   compact
                   title={zh ? "暂无提交历史" : "No commits yet"}
-                  description={zh ? "本地 Git 仓库历史为空。" : "Git history is empty."}
+                  description={zh ? "提交历史为空。" : "Git history is empty."}
                 />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column" }}>
                   {commits.slice(0, 5).map(c => (
                     <div
                       key={c.sha}
-                      className="ds-list-row ds-list-row--static"
+                      className="review-workbench__row review-workbench__row--static"
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
                         <Badge variant="neutral" size="sm" mono>
@@ -471,6 +415,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
           <RepositoryChangesView
             loading={gitStatusLoading}
             data={gitStatusData}
+            highlightPath={highlightPath}
           />
         </div>
       ) : activeTab === "history" ? (

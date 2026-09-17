@@ -144,6 +144,11 @@
   background: var(--surface-subtle);
 }
 
+.diff-tree-file.is-highlight {
+  outline: 1px solid var(--primary-line);
+  background: var(--primary-soft);
+}
+
 .diff-tree-file.active {
   border-color: var(--primary);
   background: var(--primary-soft);

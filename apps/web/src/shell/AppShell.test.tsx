@@ -1,103 +1,119 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { AppShell, isCommandPaletteShortcut } from "./AppShell";
 
 function renderShell(path = "/runs", overrides = {}): string {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } }
+  });
   return renderToString(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/runs/:runId/*" element={
-          <AppShell
-            path={path}
-            routeHref={path}
-            meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
-            locale="en-US"
-            setLocale={() => undefined}
-            themePreference="dark"
-            themeLabel="Dark"
-            setThemePreference={() => undefined}
-            cycleTheme={() => undefined}
-            jobs={[]}
-            repositories={[]}
-            pulse={null}
-            healthUnavailable={false}
-            notices={[]}
-            refreshing={false}
-            onRefresh={() => undefined}
-            {...overrides}
-          >
-            <p>Route content</p>
-          </AppShell>
-        } />
-        <Route path="*" element={
-          <AppShell
-            path={path}
-            routeHref={path}
-            meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
-            locale="en-US"
-            setLocale={() => undefined}
-            themePreference="dark"
-            themeLabel="Dark"
-            setThemePreference={() => undefined}
-            cycleTheme={() => undefined}
-            jobs={[]}
-            repositories={[]}
-            pulse={null}
-            healthUnavailable={false}
-            notices={[]}
-            refreshing={false}
-            onRefresh={() => undefined}
-            {...overrides}
-          >
-            <p>Route content</p>
-          </AppShell>
-        } />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/runs/:runId/*" element={
+            <AppShell
+              path={path}
+              routeHref={path}
+              meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
+              locale="en-US"
+              setLocale={() => undefined}
+              themePreference="dark"
+              themeLabel="Dark"
+              setThemePreference={() => undefined}
+              cycleTheme={() => undefined}
+              jobs={[]}
+              repositories={[]}
+              pulse={null}
+              healthUnavailable={false}
+              notices={[]}
+              refreshing={false}
+              onRefresh={() => undefined}
+              {...overrides}
+            >
+              <p>Route content</p>
+            </AppShell>
+          } />
+          <Route path="*" element={
+            <AppShell
+              path={path}
+              routeHref={path}
+              meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
+              locale="en-US"
+              setLocale={() => undefined}
+              themePreference="dark"
+              themeLabel="Dark"
+              setThemePreference={() => undefined}
+              cycleTheme={() => undefined}
+              jobs={[]}
+              repositories={[]}
+              pulse={null}
+              healthUnavailable={false}
+              notices={[]}
+              refreshing={false}
+              onRefresh={() => undefined}
+              {...overrides}
+            >
+              <p>Route content</p>
+            </AppShell>
+          } />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
-describe("Repository-Centric AppShell", () => {
-  it("renders a single repository-first left sidebar without duplicate activity rail", () => {
-    const html = renderShell("/repositories", {
-      repositories: [
-        {
-          id: "repo_1",
-          displayName: "ConsistenCy",
-          source: "local_git",
-          defaultBranch: "v3",
-          trustLevel: "trusted_local",
-          monitoringEnabled: true,
-          createdAt: "2026-08-18T00:00:00.000Z",
-          updatedAt: "2026-08-18T00:00:00.000Z"
-        }
-      ]
-    });
+const demoRepo = {
+  id: "repo_1",
+  displayName: "ConsistenCy",
+  source: "local_git" as const,
+  defaultBranch: "v3",
+  trustLevel: "trusted_local" as const,
+  monitoringEnabled: true,
+  createdAt: "2026-08-18T00:00:00.000Z",
+  updatedAt: "2026-08-18T00:00:00.000Z"
+};
 
-    // Contains the single repository-first sidebar
+describe("Locked three-column AppShell", () => {
+  it("renders three-column agent shell without VS Code activity rail or chat tabs", () => {
+    const html = renderShell("/inbox", { repositories: [demoRepo] });
+
+    expect(html).toContain("agent-shell");
     expect(html).toContain("repo-first-sidebar");
+    expect(html).toContain("related-cards-rail");
     expect(html).toContain("ConsistenCy");
-
-    // Does NOT contain obsolete chrome
     expect(html).not.toContain("activity-rail");
     expect(html).not.toContain("workbench-tabs");
     expect(html).not.toContain("run-ledger-toggle");
+    expect(html).not.toContain("对话");
+    expect(html).not.toContain("Chat");
+  });
+
+  
+  it("keeps selection quiet: soft wash only, no composer strip classes", () => {
+    const html = renderShell("/inbox", { locale: "zh-CN", repositories: [demoRepo] });
+    expect(html).toContain("agent-shell__repo-row");
+    expect(html).not.toContain("review-workbench__composer");
+    expect(html).not.toContain("agent-shell__composer");
+    expect(html).not.toContain("描述审查目标");
+    expect(html).toContain("审查");
+    expect(html).not.toContain("审查工作台");
+  });
+
+  it("lists connected repos with status and directory actions", () => {
+    const html = renderShell("/inbox", {
+      locale: "zh-CN",
+      repositories: [demoRepo]
+    });
+    expect(html).toContain("仓库情况");
+    expect(html).toContain("仓库目录");
+    expect(html).toContain("自动化");
+    expect(html).toContain("插件市场");
   });
 
   it("localizes the pull-requests breadcrumb per locale", () => {
-    const repositories = [
-      {
-        id: "repo_1",
-        displayName: "ConsistenCy",
-        source: "local_git",
-        defaultBranch: "v3",
-        trustLevel: "trusted_local",
-        monitoringEnabled: true,
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z"
-      }
-    ];
+    const repositories = [demoRepo];
     const zhHtml = renderShell("/repositories/repo_1/pull-requests", { locale: "zh-CN", repositories });
     expect(zhHtml).toContain("拉取请求");
     expect(zhHtml).not.toContain("Pull Requests");
@@ -106,31 +122,31 @@ describe("Repository-Centric AppShell", () => {
     expect(enHtml).toContain("Pull Requests");
   });
 
-  it("exposes explicit system, light, and dark theme preferences", () => {    const html = renderShell("/repositories", { themePreference: "system" });
-    expect(html).toContain('aria-label="System"');
-    expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain('aria-label="Light"');
-    expect(html).toContain('aria-label="Dark"');
+  it("exposes a quiet single theme cycle control in the top bar", () => {
+    const html = renderShell("/repositories", { themePreference: "system" });
+    expect(html).toContain('aria-label="Cycle theme"');
+    expect(html).toContain("lucide-monitor");
+
+    const light = renderShell("/repositories", { themePreference: "light" });
+    expect(light).toContain("lucide-sun");
+
+    const dark = renderShell("/repositories", { themePreference: "dark" });
+    expect(dark).toContain("lucide-moon");
 
     const zhHtml = renderShell("/repositories", { locale: "zh-CN", themePreference: "system" });
-    expect(zhHtml).toContain('aria-label="跟随系统"');
-    expect(zhHtml).toContain('aria-label="浅色"');
-    expect(zhHtml).toContain('aria-label="深色"');
+    expect(zhHtml).toContain('aria-label="切换主题"');
   });
 
   it("renders clear location breadcrumbs in the header", () => {
     const html = renderShell("/repositories/repo_1/history", {
       repositories: [
         {
-          id: "repo_1",
-          displayName: "ConsistenCy",
+          ...demoRepo,
           source: "github",
           remoteFullName: "sk1ua/ConsistenCy",
           defaultBranch: "main",
           trustLevel: "untrusted_readonly",
-          monitoringEnabled: false,
-          createdAt: "2026-08-18T00:00:00.000Z",
-          updatedAt: "2026-08-18T00:00:00.000Z"
+          monitoringEnabled: false
         }
       ]
     });
@@ -154,8 +170,7 @@ describe("Repository-Centric AppShell", () => {
     expect(isCommandPaletteShortcut(event("p"))).toBe(false);
   });
 
-  it("displays real LLM provider status when configured and unconfigured link when absent without mock badge", () => {
-    // Configured real provider
+  it("shows LLM provenance in the top-bar chip (not a bottom status bar) without mock badge", () => {
     const htmlConfigured = renderShell("/runs", {
       locale: "zh-CN",
       health: {
@@ -175,12 +190,13 @@ describe("Repository-Centric AppShell", () => {
         }
       }
     });
-    expect(htmlConfigured).toContain("DeepSeek");
     expect(htmlConfigured).toContain("deepseek-chat");
+    expect(htmlConfigured).toContain("agent-shell__provenance");
+    expect(htmlConfigured).not.toContain("agent-shell__status");
+    expect(htmlConfigured).not.toContain("data-shell-status");
     expect(htmlConfigured).not.toContain("Mock 模型");
     expect(htmlConfigured).not.toContain("Demo mode");
 
-    // Unconfigured LLM
     const htmlUnconfigured = renderShell("/runs", {
       locale: "zh-CN",
       health: {
@@ -207,15 +223,12 @@ describe("Repository-Centric AppShell", () => {
   it("strictly matches repository ID and does not resolve aliases for navigation", () => {
     const repos = [
       {
-        id: "repo_1",
-        displayName: "ConsistenCy",
+        ...demoRepo,
         source: "github" as const,
         remoteFullName: "sk1ua/ConsistenCy",
         defaultBranch: "main",
         trustLevel: "untrusted_readonly" as const,
-        monitoringEnabled: false,
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z"
+        monitoringEnabled: false
       }
     ];
 
@@ -228,6 +241,61 @@ describe("Repository-Centric AppShell", () => {
     const htmlId = renderShell("/repositories/repo_1/history", { repositories: repos });
     expect(htmlId).toContain("ConsistenCy");
     expect(htmlId).toContain("location-breadcrumbs");
+  });
+
+  it("keeps quiet repo action chips and no accent selection rail", () => {
+    const html = renderShell("/inbox", { locale: "zh-CN", repositories: [demoRepo] });
+    expect(html).toContain("agent-shell__repo-action");
+    expect(html).toContain("情况");
+    expect(html).toContain("目录");
+    expect(html).not.toContain("activity-rail");
+    expect(html).not.toContain("agent-shell__composer");
+    // provenance stays in top bar, quieter API label
+    expect(html).toContain("agent-shell__provenance");
+    expect(html).toContain("API");
+  });
+
+  it("related cards expose jump actions to overview, reviews, and workflows", () => {
+    const html = renderShell("/inbox", { locale: "zh-CN", repositories: [demoRepo] });
+    expect(html).toContain("打开概览");
+    expect(html).toContain("打开审查列表");
+    expect(html).toContain("打开工作流绑定");
+  });
+
+
+  it("keeps related rail on run detail routes", () => {
+    const job = {
+      id: "job_abc123",
+      type: "PR_REVIEW" as const,
+      repositoryId: demoRepo.id,
+      repositoryFullName: demoRepo.displayName,
+      status: "succeeded" as const,
+      accessMode: "local_git" as const,
+      publicationPolicy: "disabled" as const,
+      createdAt: "2026-08-18T01:00:00.000Z",
+      headSha: "abcdef1234567890abcdef1234567890abcdef12",
+      baseSha: "1234567890abcdef1234567890abcdef12345678",
+      report: {
+        jobId: "job_abc123",
+        repositoryFullName: demoRepo.displayName,
+        baseSha: "1234567890abcdef1234567890abcdef12345678",
+        headSha: "abcdef1234567890abcdef1234567890abcdef12",
+        score: 88,
+        riskLevel: "low" as const,
+        findings: [],
+        agentRuns: [],
+        summary: "ok",
+        createdAt: "2026-08-18T01:05:00.000Z"
+      }
+    };
+    const html = renderShell("/runs/job_abc123/overview", {
+      locale: "zh-CN",
+      repositories: [demoRepo],
+      jobs: [job as never]
+    });
+    expect(html).toContain("related-cards-rail");
+    expect(html).toContain("agent-shell");
+    expect(html).toContain("当前运行");
   });
 
   it("safely handles malformed percent-encoded path segments without throwing", () => {

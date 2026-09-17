@@ -875,9 +875,9 @@
 }
 
 .workflow-tab.active {
-  color: var(--primary);
-  background: var(--primary-soft);
-  border-color: var(--primary-wash);
+  color: var(--foreground);
+  background: var(--surface-subtle);
+  border-color: var(--border-subtle);
 }
 
 .source-option-card.selected {

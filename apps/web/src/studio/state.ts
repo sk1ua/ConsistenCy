@@ -4,6 +4,7 @@ import type {
   WorkflowRuntimeNode,
   WorkflowRuntimeNodeType,
 } from "@consistency/schema";
+import dagre from "dagre";
 
 export type StudioAction =
   | { type: "add-node"; nodeType: WorkflowRuntimeNodeType; id?: string }
@@ -77,14 +78,30 @@ export function layoutStudioGraph(definition: WorkflowRuntimeDefinition): Studio
     const items = sorted.map((node, index) => ({ node, x: 24 + index * (nodeWidth + gapX), y: 24 }));
     return { items, width: Math.max(320, 48 + items.length * (nodeWidth + gapX)), height: 24 + nodeHeight + 24, hasCycle: true };
   }
-  const columns = new Map<number, StudioLayoutItem[]>();
-  for (const node of sorted) {
-    const layer = rank.get(node.id) ?? 0;
-    const peers = columns.get(layer) ?? [];
-    peers.push({ node, x: 24 + peers.length * (nodeWidth + gapX), y: 24 + layer * (nodeHeight + gapY) });
-    columns.set(layer, peers);
+  if (sorted.length === 0) {
+    return { items: [], width: 320, height: 180, hasCycle: false };
   }
-  const items = [...columns.values()].flat();
+  // Readable agent-desktop graph: dagre left-to-right with stable node order.
+  const graph = new dagre.graphlib.Graph();
+  graph.setGraph({ rankdir: "LR", nodesep: gapY, ranksep: gapX, marginx: 24, marginy: 24 });
+  graph.setDefaultEdgeLabel(() => ({}));
+  for (const node of sorted) {
+    graph.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+  }
+  for (const edge of definition.edges) {
+    if (ids.has(edge.from) && ids.has(edge.to) && edge.from !== edge.to) {
+      graph.setEdge(edge.from, edge.to);
+    }
+  }
+  dagre.layout(graph);
+  const items: StudioLayoutItem[] = sorted.map(node => {
+    const laid = graph.node(node.id) as { x: number; y: number };
+    return {
+      node,
+      x: Math.round(laid.x - nodeWidth / 2),
+      y: Math.round(laid.y - nodeHeight / 2),
+    };
+  });
   const maxX = Math.max(0, ...items.map(item => item.x + nodeWidth));
   const maxY = Math.max(0, ...items.map(item => item.y + nodeHeight));
   return { items, width: Math.max(320, maxX + 24), height: Math.max(180, maxY + 24), hasCycle: false };

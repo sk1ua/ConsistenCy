@@ -101,6 +101,10 @@
   --shadow-card: rgba(23, 32, 42, 0.06);
   --scrim: rgba(255, 255, 255, 0.9);
 
+  /* Agent shell chrome (warm paper frame) */
+  --agent-chrome-bg: #f3f1ec;
+  --agent-paper: #fffdf9;
+
   color: #17202a;
   background: #f6f8f5;
   font-synthesis: none;
@@ -159,6 +163,9 @@
   --shadow-soft: rgba(0, 0, 0, 0.35);
   --shadow-card: rgba(0, 0, 0, 0.4);
   --scrim: rgba(11, 13, 16, 0.92);
+
+  --agent-chrome-bg: #161412;
+  --agent-paper: #1c1a18;
 
   color: #e7eaee;
   background: #0b0d10;

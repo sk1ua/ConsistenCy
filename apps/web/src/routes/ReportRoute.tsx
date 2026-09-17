@@ -77,6 +77,10 @@ function EvidenceMode({ report, zh }: { report?: ReviewReport; zh: boolean }) {
 
 export function matchJobRepositoryId(job: ReviewJob | undefined, repositories: Repository[]): string | undefined {
   if (!job) return undefined;
+  if (job.repositoryId) {
+    const byRepoId = repositories.find(r => r.id === job.repositoryId);
+    if (byRepoId) return byRepoId.id;
+  }
   const match = repositories.find(r =>
     r.id === job.repositoryFullName ||
     r.remoteFullName === job.repositoryFullName
@@ -138,8 +142,30 @@ export function ReportRoute({ jobs, reports, repositories = [], health, jobsUnav
   const notebookId = mode === "notebook" ? searchParams.get("notebook") ?? notebookQuery.data ?? undefined : undefined;
   const verifiedReport = (listReport ?? reportQuery.data)?.jobId === job?.id ? (listReport ?? reportQuery.data) : undefined;
 
+  const workbenchHref = (() => {
+    const matchedId = matchJobRepositoryId(job, repositories);
+    if (matchedId) return `/repositories/${encodeURIComponent(matchedId)}/overview`;
+    return "/inbox";
+  })();
+
   return <>
     {errors.length > 0 && <div className="route-query-notice" role="status"><strong>{zh ? "部分审查数据暂不可用" : "Some review data is unavailable"}</strong><span>{[...new Set(errors)].join(" · ")}</span></div>}
+    {selectedRunId && (
+      <div className="run-shell-chrome">
+        <button
+          type="button"
+          className="run-shell-chrome__back"
+          onClick={() => navigate(workbenchHref)}
+        >
+          ← {zh ? "返回工作台" : "Back to workbench"}
+        </button>
+        <span className="run-shell-chrome__meta">
+          {job?.repositoryFullName
+            ? `${job.repositoryFullName} · ${selectedRunId.substring(0, 8)}`
+            : selectedRunId.substring(0, 8)}
+        </span>
+      </div>
+    )}
     {selectedRunId && <RunModeTabs runId={selectedRunId} mode={mode} notebookId={notebookId} zh={zh} scope={tabScope} notebookAvailable={health?.notebook !== false} />}
     <div id={`${tabScope}-run-panel`} role="tabpanel" aria-labelledby={`${tabScope}-run-tab-${mode}`} tabIndex={0}>
       {mode === "overview" ? <ReportPage
@@ -148,10 +174,7 @@ export function ReportRoute({ jobs, reports, repositories = [], health, jobsUnav
         notebookId={notebookId}
         llmProvider={health?.llmProvider}
         llmModel={health?.llmModel}
-        onBack={() => {
-          const matchedId = matchJobRepositoryId(job, repositories);
-          navigate(matchedId ? `/repositories/${encodeURIComponent(matchedId)}` : "/runs");
-        }}
+        onBack={() => navigate(workbenchHref)}
       /> : <div className="run-mode-route">
         {mode === "diff" ? <DiffMode job={job} report={verifiedReport} zh={zh} />
           : mode === "evidence" ? <EvidenceMode report={verifiedReport} zh={zh} />

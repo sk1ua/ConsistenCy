@@ -52,7 +52,7 @@
 }
 .settings-group-title h3 {
   margin: 6px 0 6px;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 18px;
 }
 .settings-group-title p {

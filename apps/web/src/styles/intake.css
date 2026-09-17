@@ -20,7 +20,7 @@
 }
 .public-pr-copy h2 {
   margin: 5px 0 5px;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 18px;
   line-height: 1.15;
 }

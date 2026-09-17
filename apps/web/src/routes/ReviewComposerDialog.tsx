@@ -217,7 +217,7 @@ export function ReviewComposerDialog({
       isOpen={isOpen}
       onClose={handleClose}
       dismissible={!pending}
-      title={zh ? "审查代码" : "Start Review"}
+      title={zh ? "开始审查" : "Start Review"}
       description={zh ? `为 ${displayName} 发起一次代码质量与安全性审查` : `Start a code quality and security review for ${displayName}`}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "16px", fontSize: "12px" }}>
@@ -342,7 +342,7 @@ export function ReviewComposerDialog({
               loading={pending}
               onClick={handleSubmit}
             >
-              {zh ? "审查代码" : "Start Review"}
+              {zh ? "开始审查" : "Start Review"}
             </Button>
           )}
         </div>

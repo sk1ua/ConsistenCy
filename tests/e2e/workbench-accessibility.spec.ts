@@ -22,7 +22,8 @@ test.describe("audit workbench accessibility", () => {
     await page.setViewportSize({ width: 1100, height: 820 });
     await expect(page.getByRole("main")).toBeVisible();
     const workbench = page.getByRole("main");
-    await expect(workbench.getByRole("heading", { name: /Inbox|收件箱/ })).toBeVisible();
+    await expect(page.locator(".agent-shell")).toBeVisible();
+    await expect(page.locator(".review-workbench")).toBeVisible();
     expect((await workbench.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(640);
     await expectNoAxeViolations(page);
   });

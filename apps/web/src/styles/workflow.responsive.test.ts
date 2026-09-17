@@ -93,7 +93,8 @@ describe("Runtime Studio responsive CSS contract", () => {
     expect(workflowCss).not.toContain(".studio-gate-heading");
     expect(workflowCss).not.toContain(".studio-run-reason {");
     expect(workflowCss).not.toContain(".validation-rail");
-    expect(workflowCss).not.toContain(".studio-library");
+    expect(workflowCss).toContain(".studio-library-list");
+    expect(workflowCss).toContain(".studio-node-icon");
     expect(workflowCss).not.toContain(".execution-rail");
     expect(workflowCss).not.toContain(".studio-graph-section");
     expect(workflowCss).not.toMatch(/\.studio-[a-z-]+[^{\n]*\{[^}]*var\(--warning-soft\)/);

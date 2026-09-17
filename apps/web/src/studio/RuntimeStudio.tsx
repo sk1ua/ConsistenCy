@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, GitBranch, LoaderCircle, Play, Plus, Save, ShieldCheck, Trash2, RotateCcw } from "lucide-react";
+import { CheckCircle2, GitBranch, LoaderCircle, Play, Plus, Save, ShieldCheck, Trash2, RotateCcw, Library, Sparkles, SearchCode, Shield, Boxes, Workflow } from "lucide-react";
 import type { Repository, WorkflowRuntimeDefinition, WorkflowRuntimeDefinitionRevision, WorkflowRuntimeDefinitionSummary, WorkflowRuntimeNodeType, WorkflowRuntimeDryLoadResult, WorkflowRuntimeCopilotPatchOperation } from "@consistency/schema";
 import { api } from "../api/client";
 import { useI18n } from "../i18n";
@@ -8,7 +8,7 @@ import { createStudioState, layoutStudioGraph, rectangleEdgeAnchors, STUDIO_NODE
 import { CopilotPanel } from "./CopilotPanel";
 
 export const RUNTIME_STUDIO_I18N_KEYS = [
-  "Runtime Studio", "Loading Runtime Studio", "Gate evidence rail", "Definition", "New definition", "No revision", "Fork", "Draft", "Builtin", "User", "Purpose", "Validate", "Dry-load", "Save revision", "Run", "Persist", "Server validation passed", "Server validation failed", "Revision saved", "saved revision, local changes remain", "saved; library refresh failed", "Builtin seeds are fork-only and never overwritten.", "Dry-load feasible", "Dry-load not feasible", "Run started", "Run failed", "No nodes in draft", "Select a node to inspect", "Definition summary", "Nodes", "Edges", "Shape", "linear", "fan-out ×{degree}", "fan-in ×{degree}", "fan-out / fan-in", "Remove node", "Local repository", "Select a local repository", "No repository selected", "Server canonical", "Next action", "gates", "Draft changes", "Persisted revision", "Feasible dry-load", "Blocked", "Passed", "Current", "Pending", "Advanced graph editing", "Selected node", "Execution graph", "Node palette", "Connect nodes", "From node", "To node", "Connect", "Retry", "Studio unavailable", "Could not open definition", "Could not open definition; retry", "Save failed", "Validation failed", "Dry-load failed", "Graph has cycle or invalid edges", "Run blocked", "Reset", "Remove", "Add item", "(legacy)", "{nodes} nodes · {edges} edges · acyclic", "Draft changed; validate again", "Save to pin a revision", "Fork before saving a builtin seed", "Needs validation", "Dry-load the saved revision", "Needs a saved revision", "Ready to run the pinned revision"
+  "Runtime Studio", "Loading Runtime Studio", "Gate evidence rail", "Definition", "New definition", "No revision", "Fork", "Draft", "Builtin", "User", "Purpose", "Validate", "Dry-load", "Save revision", "Run", "Persist", "Server validation passed", "Server validation failed", "Revision saved", "saved revision, local changes remain", "saved; library refresh failed", "Builtin seeds are fork-only and never overwritten.", "Dry-load feasible", "Dry-load not feasible", "Run started", "Run failed", "No nodes in draft", "Select a node to inspect", "Definition summary", "Nodes", "Edges", "Shape", "linear", "fan-out ×{degree}", "fan-in ×{degree}", "fan-out / fan-in", "Remove node", "Local repository", "Select a local repository", "No repository selected", "Server canonical", "Next action", "gates", "Draft changes", "Persisted revision", "Feasible dry-load", "Blocked", "Passed", "Current", "Pending", "Advanced graph editing", "Selected node", "Execution graph", "Node palette", "Connect nodes", "From node", "To node", "Connect", "Retry", "Studio unavailable", "Could not open definition", "Could not open definition; retry", "Save failed", "Validation failed", "Dry-load failed", "Graph has cycle or invalid edges", "Run blocked", "Reset", "Remove", "Add item", "(legacy)", "{nodes} nodes · {edges} edges · acyclic", "Draft changed; validate again", "Save to pin a revision", "Fork before saving a builtin seed", "Needs validation", "Dry-load the saved revision", "Needs a saved revision", "Ready to run the pinned revision", "Library", "Canvas", "Copilot", "Definitions"
 ] as const;
 
 type OpenTarget = WorkflowRuntimeDefinitionSummary;
@@ -19,6 +19,14 @@ const GATE_ORDER: GateKey[] = ["draft", "validate", "persist", "dry", "run"];
 const GATE_LABEL_KEYS: Record<GateKey, string> = { draft: "Draft", validate: "Validate", persist: "Persist", dry: "Dry-load", run: "Run" };
 const GATE_STATUS_KEYS: Record<GateStatus, string> = { passed: "Passed", current: "Current", pending: "Pending", blocked: "Blocked" };
 const GATE_GLYPHS: Record<GateStatus, string> = { passed: "✓", current: "●", pending: "○", blocked: "!" };
+
+function studioNodeIcon(type: string, serviceRef: string) {
+  const key = `${type} ${serviceRef}`.toLowerCase();
+  if (key.includes("verify") || key.includes("shield") || key.includes("gate")) return Shield;
+  if (key.includes("search") || key.includes("analyz") || key.includes("evidence")) return SearchCode;
+  if (key.includes("box") || key.includes("pack")) return Boxes;
+  return Workflow;
+}
 
 function useDesktopStudioPresentation(): boolean {
   // JS and CSS share one desktop branch for Studio presentation at 1280px;
@@ -434,9 +442,9 @@ export function RuntimeStudio() {
   const gateActionTitle = (key: GateKey) => gateEvidence[key];
   return <section className="runtime-studio" aria-label={t("Runtime Studio")}>
     <div className="studio-grid">
-      <aside className="studio-rail" aria-label={t("Gate evidence rail")}>
+      <aside className="studio-library studio-rail" aria-label={t("Library")}>
         <div className="studio-rail-head">
-          <span className="panel-kicker studio-rail-title"><GitBranch size={14} /> {t("Runtime Studio")}</span>
+          <span className="panel-kicker studio-rail-title"><Library size={14} /> {t("Library")}</span>
           <label className="studio-defselect">
             <span>{t("Definition")}</span>
             <SelectMenu
@@ -457,6 +465,24 @@ export function RuntimeStudio() {
             {selectedSummary?.origin === "builtin" && <button type="button" className="secondary-button btn-small studio-header-fork" onClick={fork}>{t("Fork")}</button>}
             <button type="button" className="icon-button" aria-label={t("New definition")} onClick={newDefinition}><Plus size={14} /></button>
           </div>
+        </div>
+        <div className="studio-library-list" role="list" aria-label={t("Definitions")}>
+          {displayedDefinitions.map(summary => (
+            <button
+              key={summary.definitionId}
+              type="button"
+              role="listitem"
+              className={`studio-library-item${selectedSummary?.definitionId === summary.definitionId ? " is-active" : ""}`}
+              onClick={() => void open(summary)}
+            >
+              <Workflow size={13} />
+              <span className="studio-library-item-text">
+                <strong>{summary.definitionId}</strong>
+                <small>{summary.origin === "builtin" ? t("Builtin") : t("User")}{summary.latestRevision !== null ? ` · r${summary.latestRevision}` : ""}</small>
+              </span>
+            </button>
+          ))}
+          {displayedDefinitions.length === 0 && <div className="studio-library-empty">{t("No nodes in draft")}</div>}
         </div>
         <ol className="studio-rail-gates">
           {GATE_ORDER.map(key => {
@@ -494,15 +520,15 @@ export function RuntimeStudio() {
           <small className={`studio-repo-state ${repositoryId ? "ok" : "unset"}`}>{repositoryId ? repositories.find(repo => repo.id === repositoryId)?.displayName ?? repositoryId : t("No repository selected")}</small>
         </label>
       </aside>
-      <section className="studio-canvas" aria-label={t("Execution graph")}>
+      <section className="studio-canvas" aria-label={t("Canvas")}>
         <div className="studio-canvas-toolbar" role="toolbar" aria-label={t("Execution graph")}><strong>{activeState.draft.id}</strong><input aria-label={t("Purpose")} placeholder={t("Purpose")} value={activeState.draft.metadata?.purpose ?? ""} onChange={event => mutate(studioReducer(activeState, { type: "purpose", purpose: event.target.value }, nodeTypes))} /></div>
         {activeState.draft.nodes.length === 0 && <div className="studio-empty">{t("No nodes in draft")}</div>}
         {layout.hasCycle && <div className="studio-issue" role="alert">{t("Graph has cycle or invalid edges")}</div>}
-        <div className={`studio-graph-frame${graphScroll.overflow ? " has-overflow" : ""}${graphScroll.left ? " cue-left" : ""}${graphScroll.right ? " cue-right" : ""}`}><div className="studio-graph-viewport" ref={graphViewportRef} role="group" aria-label={t("Execution graph")} tabIndex={0} onScroll={updateGraphScroll}><div className="studio-graph" style={{ width: layout.width, minWidth: layout.width, height: layout.height, minHeight: layout.height }}><svg className="studio-graph-svg" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden="true"><defs><marker id="studio-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" /></marker></defs>{(copilotPreview ? copilotPreview.definition.edges : activeState.draft.edges).map(edge => { const a = layout.items.find(item => item.node.id === edge.from); const b = layout.items.find(item => item.node.id === edge.to); return a && b && edge.from !== edge.to ? (() => { const anchors = rectangleEdgeAnchors({ x: a.x + STUDIO_NODE_WIDTH / 2, y: a.y + STUDIO_NODE_HEIGHT / 2 }, { x: b.x + STUDIO_NODE_WIDTH / 2, y: b.y + STUDIO_NODE_HEIGHT / 2 }); return <line key={`${edge.from}-${edge.to}`} className={copilotPreview?.proposedEdgeKeys.has(`${edge.from}-${edge.to}`) ? "is-proposed" : undefined} x1={anchors.source.x} y1={anchors.source.y} x2={anchors.target.x} y2={anchors.target.y} markerEnd="url(#studio-arrow)" />; })() : null; })}</svg>{layout.items.map(({ node, x, y }) => <button key={node.id} type="button" className={`studio-node${copilotPreview?.proposedNodeIds.has(node.id) ? " is-proposed" : ""}${selected?.id === node.id ? " selected" : ""}`} aria-pressed={selected?.id === node.id} disabled={copilotPreview?.proposedNodeIds.has(node.id) || undefined} aria-label={`${node.id}: ${node.type}; ${node.serviceRef}`} title={`${node.id}: ${node.type}; ${node.serviceRef}`} style={{ left: x, top: y, width: STUDIO_NODE_WIDTH, height: STUDIO_NODE_HEIGHT }} onClick={() => setStudioState({ ...activeState, selectedNodeId: node.id })} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") setStudioState({ ...activeState, selectedNodeId: node.id }); }}><strong>{node.id}</strong><span>{node.type}</span><small>{node.serviceRef}</small></button>)}</div></div><span className="studio-graph-cue studio-graph-cue-left" aria-hidden="true" /><span className="studio-graph-cue studio-graph-cue-right" aria-hidden="true" /></div>
+        <div className={`studio-graph-frame${graphScroll.overflow ? " has-overflow" : ""}${graphScroll.left ? " cue-left" : ""}${graphScroll.right ? " cue-right" : ""}`}><div className="studio-graph-viewport" ref={graphViewportRef} role="group" aria-label={t("Execution graph")} tabIndex={0} onScroll={updateGraphScroll}><div className="studio-graph" style={{ width: layout.width, minWidth: layout.width, height: layout.height, minHeight: layout.height }}><svg className="studio-graph-svg" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden="true"><defs><marker id="studio-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" /></marker></defs>{(copilotPreview ? copilotPreview.definition.edges : activeState.draft.edges).map(edge => { const a = layout.items.find(item => item.node.id === edge.from); const b = layout.items.find(item => item.node.id === edge.to); return a && b && edge.from !== edge.to ? (() => { const anchors = rectangleEdgeAnchors({ x: a.x + STUDIO_NODE_WIDTH / 2, y: a.y + STUDIO_NODE_HEIGHT / 2 }, { x: b.x + STUDIO_NODE_WIDTH / 2, y: b.y + STUDIO_NODE_HEIGHT / 2 }); return <line key={`${edge.from}-${edge.to}`} className={copilotPreview?.proposedEdgeKeys.has(`${edge.from}-${edge.to}`) ? "is-proposed" : undefined} x1={anchors.source.x} y1={anchors.source.y} x2={anchors.target.x} y2={anchors.target.y} markerEnd="url(#studio-arrow)" />; })() : null; })}</svg>{layout.items.map(({ node, x, y }) => { const NodeIcon = studioNodeIcon(node.type, node.serviceRef); return <button key={node.id} type="button" className={`studio-node${copilotPreview?.proposedNodeIds.has(node.id) ? " is-proposed" : ""}${selected?.id === node.id ? " selected" : ""}`} aria-pressed={selected?.id === node.id} disabled={copilotPreview?.proposedNodeIds.has(node.id) || undefined} aria-label={`${node.id}: ${node.type}; ${node.serviceRef}`} title={`${node.id}: ${node.type}; ${node.serviceRef}`} style={{ left: x, top: y, width: STUDIO_NODE_WIDTH, height: STUDIO_NODE_HEIGHT }} onClick={() => setStudioState({ ...activeState, selectedNodeId: node.id })} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") setStudioState({ ...activeState, selectedNodeId: node.id }); }}><span className="studio-node-icon" aria-hidden="true"><NodeIcon size={14} /></span><strong>{node.id}</strong><span>{node.type}</span><small>{node.serviceRef}</small></button>; })}</div></div><span className="studio-graph-cue studio-graph-cue-left" aria-hidden="true" /><span className="studio-graph-cue studio-graph-cue-right" aria-hidden="true" /></div>
         <details id="studio-advanced-controls" className="studio-advanced" open={desktopPresentation || paletteOpen} onToggle={event => setPaletteOpen(event.currentTarget.open)}><summary>{t("Advanced graph editing")}</summary><div className="studio-palette" role="group" aria-label={t("Node palette")}>{nodeTypes.map(nodeType => <button key={nodeType.type} className="secondary-button btn-small" onClick={() => mutate(studioReducer(activeState, { type: "add-node", nodeType }, nodeTypes))}><Plus size={13} />{nodeType.type}</button>)}</div></details>
         <details className="studio-advanced studio-advanced-connect" open={desktopPresentation || connectOpen} onToggle={event => setConnectOpen(event.currentTarget.open)}><summary>{t("Connect nodes")}</summary><div className="studio-connect" role="group" aria-label={t("Connect nodes")}><SelectMenu ariaLabel={t("From node")} value={connectFrom} options={[{ value: "", label: t("From node") }, ...activeState.draft.nodes.map(node => ({ value: node.id, label: node.id }))]} onChange={setConnectFrom} /><span aria-hidden="true">→</span><SelectMenu ariaLabel={t("To node")} value={connectTo} options={[{ value: "", label: t("To node") }, ...activeState.draft.nodes.map(node => ({ value: node.id, label: node.id }))]} onChange={setConnectTo} /><button className="secondary-button btn-small" disabled={!connectFrom || !connectTo} onClick={() => { mutate(studioReducer(activeState, { type: "connect", from: connectFrom, to: connectTo }, nodeTypes)); setConnectFrom(""); setConnectTo(""); }}>{t("Connect")}</button></div><div className="studio-edges">{activeState.draft.edges.map(edge => <button key={`${edge.from}-${edge.to}`} onClick={() => mutate(studioReducer(activeState, { type: "disconnect", from: edge.from, to: edge.to }, nodeTypes))}>{edge.from} → {edge.to} <Trash2 size={12} /></button>)}</div></details>
       </section>
-      <div className="studio-right">
+      <div className="studio-right studio-copilot-column" aria-label={t("Copilot")}>
       <details id="studio-node-inspector" className="studio-inspector" open={desktopPresentation || inspectorOpen} onToggle={event => setInspectorOpen(event.currentTarget.open)}>
         <summary>{t("Selected node")}<span>{selected?.id ?? t("Definition summary")}</span></summary>
         {!selected || !selectedType ? <div className="studio-definition-summary">

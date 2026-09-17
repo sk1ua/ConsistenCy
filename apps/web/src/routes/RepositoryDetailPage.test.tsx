@@ -179,7 +179,7 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
 
     expect(html).toContain("ConsistenCy");
     expect(html).toContain("本地 Git");
-    expect(html).toContain("审查代码");
+    expect(html).toContain("开始审查");
   });
 
   it("AC-UX-REPO-3: Repository Overview renders sub-navigation tabs and changes view", () => {

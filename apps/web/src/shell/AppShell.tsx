@@ -1,29 +1,22 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  FolderGit2,
-  PlayCircle,
-  ShieldAlert,
-  GitFork,
-  Settings,
-  Plus,
-  RefreshCw,
-  Monitor,
-  Sun,
-  Moon,
-  Search,
   Activity,
-  GitBranch,
-  Cpu,
-  Languages,
-  Layers,
-  ChevronDown,
-  CheckCircle2,
   AlertCircle,
-  X,
-  PanelLeftClose,
-  PanelLeftOpen
+  FolderGit2,
+  FolderTree,
+  Languages,
+  Monitor,
+  Moon,
+  Plus,
+  Puzzle,
+  RefreshCw,
+  Search,
+  Settings,
+  Sun,
+  User,
+  Zap
 } from "lucide-react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import type {
   AgentRuntimeSnapshot,
   HeartbeatPulse,
@@ -39,15 +32,15 @@ import type { RouteMeta } from "../routes/meta";
 import type { ThemePreference } from "../theme";
 import { Button } from "../design-system/Button";
 import { IconButton } from "../design-system/IconButton";
-import { SidebarRow } from "../design-system/SidebarRow";
 import { Badge } from "../design-system/Badge";
 import type { BadgeVariant } from "../design-system/Badge";
 import { Breadcrumb, type BreadcrumbItem } from "../design-system/Breadcrumb";
 import { Dialog } from "../design-system/Dialog";
 import { SettingsDialog } from "../components/SettingsDialog";
 import { closeSettingsDialog, openSettingsDialog, useSettingsDialogOpen } from "../settingsDialogStore";
-import { desktopBridge, type DesktopBuildInfo } from "../desktop";
-import { useSidebarLayout, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH_BOUNDS } from "./useSidebarLayout";
+import { desktopBridge } from "../desktop";
+import { RelatedCards, type RelatedCardsFocus } from "./RelatedCards";
+import { RepoDirectoryPanel } from "./RepoDirectoryPanel";
 
 export type DataNotice = {
   id: string;
@@ -115,7 +108,7 @@ export function safeDecodeURIComponent(value: string | undefined): string | unde
   if (!value) return undefined;
   try {
     return decodeURIComponent(value);
-  } catch (error) {
+  } catch {
     return undefined;
   }
 }
@@ -126,7 +119,6 @@ export const AppShell: React.FC<AppShellProps> = ({
   locale = "en-US",
   setLocale = () => {},
   themePreference,
-  setThemePreference,
   cycleTheme,
   jobs = [],
   repositories = [],
@@ -139,7 +131,6 @@ export const AppShell: React.FC<AppShellProps> = ({
   onRefresh
 }) => {
   const navigate = useNavigate();
-  const location = useLocation();
   const params = useParams();
   const zh = locale === "zh-CN";
 
@@ -147,54 +138,11 @@ export const AppShell: React.FC<AppShellProps> = ({
   const isSettingsOpen = useSettingsDialogOpen();
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [buildInfo, setBuildInfo] = useState<DesktopBuildInfo | null>(null);
+  const [projectQuery, setProjectQuery] = useState("");
+  const [directoryRepoId, setDirectoryRepoId] = useState<string | null>(null);
+  const [relatedFocus, setRelatedFocus] = useState<RelatedCardsFocus>(null);
+  const statusCardRef = useRef<HTMLElement | null>(null);
 
-  // Collapsible + resizable left navigation rail (>= 980px only; below that
-  // the pre-existing responsive behavior is untouched). The collapsed and
-  // expanded widths are persisted under the v3-prefixed localStorage key.
-  const sidebar = useSidebarLayout();
-  const sidebarCollapsed = sidebar.isWideViewport && sidebar.collapsed;
-  const sidebarDrag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
-
-  const handleSidebarResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || sidebarCollapsed || !sidebar.isWideViewport) return;
-    event.preventDefault();
-    sidebarDrag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebar.width };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    document.body.classList.add("shell-sidebar-resizing");
-  };
-
-  const handleSidebarResizeMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = sidebarDrag.current;
-    if (!drag) return;
-    sidebar.setWidth(drag.startWidth + (event.clientX - drag.startX));
-  };
-
-  const handleSidebarResizeEnd = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!sidebarDrag.current) return;
-    sidebarDrag.current = null;
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // The pointer capture may already be gone; the drag still ends.
-    }
-    document.body.classList.remove("shell-sidebar-resizing");
-  };
-
-  const handleSidebarResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (sidebarCollapsed || !sidebar.isWideViewport) return;
-    const step = event.shiftKey ? 48 : 16;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      sidebar.setWidth(sidebar.width - step);
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      sidebar.setWidth(sidebar.width + step);
-    }
-  };
-
-  // Keyboard shortcut listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isCommandPaletteShortcut(e)) {
@@ -206,65 +154,99 @@ export const AppShell: React.FC<AppShellProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Fetch Desktop build info
   useEffect(() => {
-    const bridge = desktopBridge();
-    if (bridge?.buildInfo) {
-      void bridge.buildInfo().then(info => setBuildInfo(info), () => undefined);
+    if (relatedFocus === "status" && statusCardRef.current) {
+      statusCardRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, []);
-
-  // Selection-driven Inspector visibility
-  useEffect(() => {
-    if (inspectorContext && (inspectorContext.finding || inspectorContext.agent || inspectorContext.commit || inspectorContext.customContent)) {
-      setInspectorOpen(true);
-    } else {
-      setInspectorOpen(false);
-    }
-  }, [inspectorContext]);
+  }, [relatedFocus, path]);
 
   const routeRepositoryId = useMemo(() => {
     const match = path.match(/^\/repositories\/([^/]+)/);
     return safeDecodeURIComponent(match?.[1]);
   }, [path]);
+
   const pulseRepositoryName = pulse?.repository.root?.split(/[\\/]/).filter(Boolean).at(-1);
+
+  const routeRunId = useMemo(() => {
+    const match = path.match(/^\/runs\/([^/]+)/);
+    return safeDecodeURIComponent(match?.[1]);
+  }, [path]);
+
+  const runJob = useMemo(
+    () => (routeRunId ? jobs.find(j => j.id === routeRunId) : undefined),
+    [jobs, routeRunId]
+  );
+
   const activeRepo = useMemo(() => {
     if (routeRepositoryId) return repositories.find(r => r.id === routeRepositoryId);
-    if (path.startsWith("/repositories/")) return undefined; // never fall back if inside repository route
+    if (path.startsWith("/repositories/")) return undefined;
+    if (runJob) {
+      const byId = runJob.repositoryId
+        ? repositories.find(r => r.id === runJob.repositoryId)
+        : undefined;
+      if (byId) return byId;
+      const byRemote = repositories.find(
+        r => r.remoteFullName === runJob.repositoryFullName || r.id === runJob.repositoryFullName
+      );
+      if (byRemote) return byRemote;
+    }
+    try {
+      const stored = sessionStorage.getItem("consistency.selectedRepo.v1");
+      if (stored) {
+        const found = repositories.find(r => r.id === stored);
+        if (found) return found;
+      }
+    } catch {
+      // ignore
+    }
     return repositories[0];
-  }, [repositories, routeRepositoryId, path]);
+  }, [repositories, routeRepositoryId, path, runJob]);
 
   const activeRepositoryName = activeRepo?.displayName ?? (
-    !routeRepositoryId && pulseRepositoryName
-      ? pulseRepositoryName
-      : undefined
+    !routeRepositoryId && pulseRepositoryName ? pulseRepositoryName : undefined
   );
   const activeRepositoryId = routeRepositoryId ?? activeRepo?.id;
 
-  // Location breadcrumbs
+  const filteredRepos = useMemo(() => {
+    const q = projectQuery.trim().toLowerCase();
+    if (!q) return repositories;
+    return repositories.filter(r =>
+      r.displayName.toLowerCase().includes(q) ||
+      r.id.toLowerCase().includes(q) ||
+      (r.remoteFullName?.toLowerCase().includes(q) ?? false)
+    );
+  }, [projectQuery, repositories]);
+
   const breadcrumbs = useMemo<BreadcrumbItem[]>(() => {
     const items: BreadcrumbItem[] = [
-      { label: "ConsistenCy", to: "/repositories", icon: <Layers size={13} /> }
+      { label: "ConsistenCy", to: "/inbox" }
     ];
+
+    if (path.startsWith("/automation")) {
+      items.push({ label: zh ? "自动化" : "Automation" });
+      return items;
+    }
+    if (path.startsWith("/plugins")) {
+      items.push({ label: zh ? "插件市场" : "Plugin marketplace" });
+      return items;
+    }
+    if (path === "/inbox" || path === "/") {
+      items.push({ label: zh ? "审查" : "Review" });
+      if (activeRepositoryName) items.push({ label: activeRepositoryName });
+      return items;
+    }
 
     if (path.startsWith("/repositories/") && activeRepositoryName) {
       items.push({
         label: activeRepositoryName,
         to: `/repositories/${encodeURIComponent(activeRepositoryId ?? activeRepositoryName)}/overview`
       });
-      if (path.includes("/changes")) {
-        items.push({ label: zh ? "变更" : "Changes" });
-      } else if (path.includes("/history")) {
-        items.push({ label: zh ? "Git 提交历史" : "Git History" });
-      } else if (path.includes("/pull-requests")) {
-        items.push({ label: zh ? "拉取请求" : "Pull Requests" });
-      } else if (path.includes("/reviews")) {
-        items.push({ label: zh ? "审查" : "Reviews" });
-      } else if (path.includes("/workflows")) {
-        items.push({ label: zh ? "工作流" : "Workflows" });
-      } else {
-        items.push({ label: zh ? "概览" : "Overview" });
-      }
+      if (path.includes("/changes")) items.push({ label: zh ? "变更" : "Changes" });
+      else if (path.includes("/history")) items.push({ label: zh ? "Git 提交历史" : "Git History" });
+      else if (path.includes("/pull-requests")) items.push({ label: zh ? "拉取请求" : "Pull Requests" });
+      else if (path.includes("/reviews")) items.push({ label: zh ? "审查" : "Reviews" });
+      else if (path.includes("/workflows")) items.push({ label: zh ? "工作流" : "Workflows" });
+      else items.push({ label: zh ? "概览" : "Overview" });
     } else if (path.startsWith("/runs/") && params.runId) {
       const runId = safeDecodeURIComponent(params.runId);
       const currentJob = runId ? jobs.find(j => j.id === runId) : undefined;
@@ -284,24 +266,14 @@ export const AppShell: React.FC<AppShellProps> = ({
       else items.push({ label: zh ? "概览" : "Overview" });
     } else if (path.startsWith("/repositories/")) {
       const repositoryId = safeDecodeURIComponent(path.split("/")[2]);
-      if (repositoryId) {
-        items.push({ label: repositoryId || (zh ? "代码仓库" : "Repositories") });
-      } else {
-        items.push({ label: zh ? "无效的仓库 ID" : "Invalid repository ID" });
-      }
-      if (path.includes("/changes")) {
-        items.push({ label: zh ? "变更" : "Changes" });
-      } else if (path.includes("/history")) {
-        items.push({ label: zh ? "Git 提交历史" : "Git History" });
-      } else if (path.includes("/pull-requests")) {
-        items.push({ label: zh ? "拉取请求" : "Pull Requests" });
-      } else if (path.includes("/reviews")) {
-        items.push({ label: zh ? "审查" : "Reviews" });
-      } else if (path.includes("/workflows")) {
-        items.push({ label: zh ? "工作流" : "Workflows" });
-      } else {
-        items.push({ label: zh ? "概览" : "Overview" });
-      }
+      if (repositoryId) items.push({ label: repositoryId || (zh ? "代码仓库" : "Repositories") });
+      else items.push({ label: zh ? "无效的仓库 ID" : "Invalid repository ID" });
+      if (path.includes("/changes")) items.push({ label: zh ? "变更" : "Changes" });
+      else if (path.includes("/history")) items.push({ label: zh ? "Git 提交历史" : "Git History" });
+      else if (path.includes("/pull-requests")) items.push({ label: zh ? "拉取请求" : "Pull Requests" });
+      else if (path.includes("/reviews")) items.push({ label: zh ? "审查" : "Reviews" });
+      else if (path.includes("/workflows")) items.push({ label: zh ? "工作流" : "Workflows" });
+      else items.push({ label: zh ? "概览" : "Overview" });
     } else if (path.startsWith("/repositories")) {
       items.push({ label: zh ? "代码仓库" : "Repositories" });
     } else if (path.startsWith("/runs")) {
@@ -310,484 +282,322 @@ export const AppShell: React.FC<AppShellProps> = ({
       items.push({ label: zh ? "审查发现" : "Findings" });
     } else if (path.startsWith("/workflows")) {
       items.push({ label: zh ? "工作流" : "Workflows" });
-    } else if (path.startsWith("/inbox")) {
-      items.push({ label: zh ? "收件箱" : "Inbox" });
     }
 
     return items;
-  }, [activeRepositoryName, path, routeRepositoryId, params.runId, jobs, zh]);
+  }, [activeRepositoryName, activeRepositoryId, path, params.runId, jobs, zh]);
 
-  // Primary navigation links
-  const navItems = [
-    { to: "/inbox", label: zh ? "收件箱" : "Inbox", icon: <Layers size={15} /> },
-    { to: "/repositories", label: zh ? "代码仓库" : "Repositories", icon: <FolderGit2 size={15} /> },
-    {
-      to: "/runs",
-      label: zh ? "审查运行" : "Runs",
-      icon: <PlayCircle size={15} />,
-      badge: jobs.filter(j => j.status === "running").length ? (
-        <Badge variant="warning" size="sm" dot>
-          {jobs.filter(j => j.status === "running").length}
-        </Badge>
-      ) : undefined
-    },
-    { to: "/findings", label: zh ? "审查发现" : "Findings", icon: <ShieldAlert size={15} /> },
-    { to: "/workflows", label: zh ? "工作流" : "Workflows", icon: <GitFork size={15} /> }
-  ];
-
-  const activeBranch = pulse?.repository.branch || "—";
   const activeModel = health?.llmModel || "";
   const modelProvider = health?.llmProvider || "none";
-  const isPulseActive = pulse?.state === "idle" || pulse?.state === "scanning" || pulse?.state === "indexing";
   const apiConnected = health?.ok === true && !healthUnavailable;
+  const directoryRepo = repositories.find(r => r.id === directoryRepoId);
+
+  const rememberRepo = (repo: Repository) => {
+    try {
+      sessionStorage.setItem("consistency.selectedRepo.v1", repo.id);
+    } catch {
+      // ignore quota / private mode
+    }
+  };
+
+  const openRepoStatus = (repo: Repository) => {
+    rememberRepo(repo);
+    setRelatedFocus("status");
+    navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`);
+  };
+
+  const openRepoDirectory = (repo: Repository) => {
+    rememberRepo(repo);
+    setDirectoryRepoId(repo.id);
+  };
+
+  const selectRepo = (repo: Repository) => {
+    rememberRepo(repo);
+    setRelatedFocus(null);
+    navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`);
+  };
+
+  const commandItems = [
+    { label: zh ? "审查" : "Review", to: "/inbox" },
+    { label: zh ? "自动化" : "Automation", to: "/automation" },
+    { label: zh ? "插件市场" : "Plugin marketplace", to: "/plugins" },
+    { label: zh ? "代码仓库" : "Repositories", to: "/repositories" },
+    { label: zh ? "工作流 Studio" : "Workflow Studio", to: "/workflows" },
+    { label: zh ? "审查运行" : "Runs", to: "/runs" },
+    { label: zh ? "审查发现" : "Findings", to: "/findings" },
+    { label: zh ? "系统设置" : "Settings", action: () => openSettingsDialog() }
+  ].filter(item => {
+    const q = commandQuery.trim().toLowerCase();
+    if (!q) return true;
+    return item.label.toLowerCase().includes(q);
+  });
+
+  const showRelatedRail = Boolean(activeRepo) || path.startsWith("/repositories/") || path.startsWith("/runs/") || path === "/inbox" || path === "/";
 
   return (
-    <div
-      className="ds-root audit-shell"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        width: "100vw",
-        overflow: "hidden"
-      }}
-    >
-      {/* Main Layout (Sidebar + Center Workspace) */}
-      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {/* SINGLE PERSISTENT SIDEBAR */}
-        <nav
-          aria-label="Application Navigation"
-          className={`repo-first-sidebar${sidebarCollapsed ? " shell-sidebar-collapsed" : ""}`}
-          style={{
-            width: sidebar.isWideViewport
-              ? (sidebarCollapsed ? `${SIDEBAR_COLLAPSED_WIDTH}px` : `${sidebar.width}px`)
-              : "var(--ds-sidebar-width)",
-            position: "relative",
-            background: "var(--surface)",
-            borderRight: "1px solid var(--border)",
-            display: "flex",
-            flexDirection: "column",
-            flexShrink: 0,
-            userSelect: "none"
-          }}
-        >
-          {/* Brand Header */}
-          <div
-            style={{
-              height: "var(--ds-topbar-height)",
-              padding: "0 12px",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "6px"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-              <div
-                style={{
-                  width: "20px",
-                  height: "20px",
-                  borderRadius: "var(--ds-radius-sm)",
-                  background: "var(--primary)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#ffffff",
-                  fontWeight: 700,
-                  fontSize: "12px",
-                  flexShrink: 0
-                }}
-              >
-                C
+    <div className="ds-root audit-shell agent-shell">
+      <div className="agent-shell__frame">
+        <div className="agent-shell__columns">
+          {/* LEFT — project rail */}
+          <nav className="agent-shell__left repo-first-sidebar" aria-label={zh ? "项目导航" : "Project navigation"}>
+            <div className="agent-shell__brand">
+              <div className="shell-brand-mark">C</div>
+              <div className="agent-shell__brand-text">
+                <strong>ConsistenCy</strong>
+                <span>{zh ? "证据审查" : "Evidence review"}</span>
               </div>
-              <span style={{ fontWeight: 600, fontSize: "13px", letterSpacing: "-0.2px" }}>
-                ConsistenCy
-              </span>
-              <Badge variant="neutral" size="sm" mono>
-                v3
-              </Badge>
+              <Badge variant="neutral" size="sm" mono>v3</Badge>
             </div>
-            {sidebar.isWideViewport && (
-              <IconButton
-                className="shell-sidebar-collapse-button"
-                icon={sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
-                label={sidebarCollapsed ? (zh ? "展开侧栏" : "Expand sidebar") : (zh ? "折叠侧栏" : "Collapse sidebar")}
-                size="sm"
-                variant="ghost"
-                onClick={() => sidebar.setCollapsed(!sidebarCollapsed)}
-              />
-            )}
-          </div>
 
-          {/* Active Repository Card */}
-          <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-subtle)" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "4px"
-              }}
-            >
-              <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--muted)", textTransform: "uppercase" }}>
-                 {zh ? "当前仓库" : "Repository"}
-              </span>
-              <IconButton
-                icon={<Plus size={12} />}
-                label={zh ? "连接仓库" : "Connect Repository"}
-                size="sm"
-                onClick={() => setIsConnectOpen(true)}
+            <div className="agent-shell__search">
+              <Search size={13} aria-hidden="true" />
+              <input
+                type="search"
+                value={projectQuery}
+                onChange={e => setProjectQuery(e.target.value)}
+                placeholder={zh ? "搜索项目 / 仓库…" : "Search projects / repos…"}
+                aria-label={zh ? "项目搜索" : "Project search"}
               />
             </div>
 
-            {activeRepositoryName ? (
-              <div
-                onClick={() => activeRepositoryId && navigate(`/repositories/${encodeURIComponent(activeRepositoryId)}/overview`)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "5px 8px",
-                  borderRadius: "var(--ds-radius-sm)",
-                  background: "var(--surface-subtle)",
-                  cursor: "pointer",
-                  border: "1px solid var(--border)"
-                }}
+            <div className="agent-shell__entries">
+              <button
+                type="button"
+                className={`agent-shell__entry${path.startsWith("/automation") ? " is-active" : ""}`}
+                onClick={() => navigate("/automation")}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
-                  <FolderGit2 size={13} style={{ color: "var(--primary)", flexShrink: 0 }} />
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      fontWeight: 600,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap"
-                    }}
+                <Zap size={14} />
+                <span>{zh ? "自动化" : "Automation"}</span>
+              </button>
+              <button
+                type="button"
+                className={`agent-shell__entry${path.startsWith("/plugins") ? " is-active" : ""}`}
+                onClick={() => navigate("/plugins")}
+              >
+                <Puzzle size={14} />
+                <span>{zh ? "插件市场" : "Plugin marketplace"}</span>
+              </button>
+            </div>
+
+            <div className="agent-shell__repo-section">
+              <div className="agent-shell__section-label">
+                <span>{zh ? "已连接仓库" : "Connected repositories"}</span>
+                <IconButton
+                  icon={<Plus size={12} />}
+                  label={zh ? "连接仓库" : "Connect repository"}
+                  size="sm"
+                  onClick={() => setIsConnectOpen(true)}
+                />
+              </div>
+
+              <div className="agent-shell__repo-list">
+                {filteredRepos.length === 0 ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    fullWidth
+                    icon={<Plus size={12} />}
+                    onClick={() => setIsConnectOpen(true)}
                   >
-                    {activeRepositoryName}
-                  </span>
-                </div>
-                <ChevronDown size={12} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                    {zh ? "连接仓库…" : "Connect repository…"}
+                  </Button>
+                ) : (
+                  filteredRepos.map(repo => {
+                    const active = repo.id === activeRepositoryId;
+                    return (
+                      <div
+                        key={repo.id}
+                        className={`agent-shell__repo-row${active ? " is-active" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="agent-shell__repo-main"
+                          onClick={() => selectRepo(repo)}
+                          title={repo.displayName}
+                        >
+                          <FolderGit2 size={13} />
+                          <span>{repo.displayName}</span>
+                        </button>
+                        <div className="agent-shell__repo-actions">
+                          <button
+                            type="button"
+                            className="agent-shell__repo-action"
+                            title={zh ? "仓库情况" : "Repo status"}
+                            aria-label={zh ? "仓库情况" : "Repo status"}
+                            onClick={() => openRepoStatus(repo)}
+                          >
+                            <Activity size={12} />
+                            <span>{zh ? "情况" : "Status"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="agent-shell__repo-action"
+                            title={zh ? "仓库目录" : "Repo directory"}
+                            aria-label={zh ? "仓库目录" : "Repo directory"}
+                            onClick={() => openRepoDirectory(repo)}
+                          >
+                            <FolderTree size={12} />
+                            <span>{zh ? "目录" : "Tree"}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                fullWidth
-                icon={<Plus size={12} />}
-                onClick={() => setIsConnectOpen(true)}
-              >
-                {zh ? "连接代码仓库..." : "Connect repo..."}
-              </Button>
-            )}
-          </div>
-
-          {/* Primary Navigation Rows */}
-          <div style={{ flex: 1, padding: "6px 8px", display: "flex", flexDirection: "column", gap: "2px", overflowY: "auto" }}>
-            {navItems.map(item => (
-              <SidebarRow
-                key={item.to}
-                to={item.to}
-                label={item.label}
-                icon={item.icon}
-                badge={item.badge}
-              />
-            ))}
-          </div>
-
-          {/* Sidebar Footer: Settings gear + Heartbeat daemon indicator */}
-          <div
-            style={{
-              padding: "8px 10px",
-              borderTop: "1px solid var(--border)",
-              background: "var(--surface-subtle)",
-              fontSize: "11px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between"
-            }}
-          >
-            <IconButton
-              icon={<Settings size={14} />}
-              label={zh ? "设置" : "Settings"}
-              size="sm"
-              variant="ghost"
-              onClick={openSettingsDialog}
-            />
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span
-                style={{
-                  width: "6px",
-                  height: "6px",
-                  borderRadius: "50%",
-                  background: isPulseActive ? "var(--success)" : "var(--muted)"
-                }}
-              />
-              <span style={{ color: "var(--muted-strong)" }}>
-                {isPulseActive ? (zh ? "守护进程运行中" : "Daemon active") : (zh ? "守护进程待机" : "Daemon idle")}
-              </span>
             </div>
-            {pulse?.dirtyFileCount !== undefined && pulse.dirtyFileCount > 0 && (
-              <Badge variant="neutral" size="sm" mono>
-                 <span title={zh ? "已变更与未跟踪文件数量" : "Changed and untracked files"}>
-                   {zh ? `${pulse.dirtyFileCount} 个变更与未跟踪文件` : `${pulse.dirtyFileCount} changed/untracked`}
-                 </span>
-              </Badge>
-            )}
-          </div>
 
-          {/* Sidebar resize handle: pointer drag or Left/Right arrow keys.
-              Hidden while collapsed — expansion restores the ability. */}
-          {sidebar.isWideViewport && !sidebarCollapsed && (
-            <div
-              role="separator"
-              className="shell-sidebar-resize-handle"
-              aria-orientation="vertical"
-              aria-label={zh ? "调整侧栏宽度" : "Adjust sidebar width"}
-              aria-valuemin={SIDEBAR_WIDTH_BOUNDS.min}
-              aria-valuemax={SIDEBAR_WIDTH_BOUNDS.max}
-              aria-valuenow={sidebar.width}
-              aria-valuetext={`${sidebar.width}px`}
-              tabIndex={0}
-              onPointerDown={handleSidebarResizeStart}
-              onPointerMove={handleSidebarResizeMove}
-              onPointerUp={handleSidebarResizeEnd}
-              onPointerCancel={handleSidebarResizeEnd}
-              onKeyDown={handleSidebarResizeKeyDown}
-            />
-          )}
-        </nav>
-
-        {/* Workspace Body Area */}
-        <div style={{ display: "flex", flex: 1, minWidth: 0, flexDirection: "column" }}>
-          {/* TOP LOCATION BAR */}
-          <header
-            className="shell-topbar"
-            style={{
-              height: "var(--ds-topbar-height)",
-              padding: "0 14px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--surface)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexShrink: 0
-            }}
-          >
-            {/* Location Breadcrumb */}
-            <Breadcrumb items={breadcrumbs} />
-
-            {/* Global Actions */}
-            <div className="shell-topbar-actions" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <Button
-                className="shell-search-button"
-                variant="outline"
+            <div className="agent-shell__left-footer">
+              <IconButton
+                icon={<Settings size={14} />}
+                label={zh ? "设置" : "Settings"}
                 size="sm"
-                icon={<Search size={12} />}
-                aria-label={zh ? "搜索" : "Search"}
-                onClick={() => setIsCommandOpen(true)}
-              >
-                <span>{zh ? "搜索" : "Search"}</span>
-                <span
-                  style={{
-                    fontSize: "10px",
-                    color: "var(--muted)",
-                    background: "var(--surface-subtle)",
-                    padding: "0 3px",
-                    borderRadius: "2px",
-                    marginLeft: "2px"
-                  }}
-                >
-                  Ctrl+K
-                </span>
-              </Button>
-
-              <Button
-                className="shell-locale-button"
                 variant="ghost"
-                size="sm"
-                icon={<Languages size={12} aria-hidden="true" />}
-                aria-label={locale === "zh-CN" ? "Switch to English" : "切换到中文"}
-                onClick={() => setLocale(locale === "zh-CN" ? "en-US" : "zh-CN")}
-                style={{ fontSize: "11px", padding: "0 6px" }}
-              >
-                <span>{locale === "zh-CN" ? "中文" : "English"}</span>
-              </Button>
-
-              <div role="group" aria-label={zh ? "主题设置" : "Theme settings"} style={{ display: "flex", alignItems: "center", gap: "2px" }}>
-                <IconButton
-                  icon={<Monitor size={14} />}
-                  label={zh ? "跟随系统" : "System"}
-                  size="sm"
-                  active={themePreference === "system"}
-                  onClick={() => setThemePreference ? setThemePreference("system") : cycleTheme()}
-                />
-                <IconButton
-                  icon={<Sun size={14} />}
-                  label={zh ? "浅色" : "Light"}
-                  size="sm"
-                  active={themePreference === "light"}
-                  onClick={() => setThemePreference ? setThemePreference("light") : cycleTheme()}
-                />
-                <IconButton
-                  icon={<Moon size={14} />}
-                  label={zh ? "深色" : "Dark"}
-                  size="sm"
-                  active={themePreference === "dark"}
-                  onClick={() => setThemePreference ? setThemePreference("dark") : cycleTheme()}
-                />
+                onClick={openSettingsDialog}
+              />
+              <div className="agent-shell__user" title={zh ? "用户" : "User"}>
+                <User size={13} />
+                <span>{zh ? "本地用户" : "Local user"}</span>
               </div>
+            </div>
+          </nav>
 
-              {onRefresh && (
-                <IconButton
-                  icon={<RefreshCw size={13} className={refreshing ? "ds-spin" : ""} />}
-                  label={zh ? "刷新" : "Refresh"}
+          {/* CENTER — workbench / routes */}
+          <div className="agent-shell__center">
+            <header className="shell-topbar agent-shell__topbar">
+              <Breadcrumb items={breadcrumbs} />
+              <div className="shell-topbar-actions">
+                <button
+                  type="button"
+                  className="agent-shell__provenance"
+                  onClick={openSettingsDialog}
+                  title={zh ? "打开设置查看 LLM / API" : "Open Settings for LLM / API"}
+                  aria-label={zh ? "LLM 与 API 状态" : "LLM and API status"}
+                >
+                  <span
+                    className={`agent-shell__provenance-dot${apiConnected ? " is-ok" : " is-warn"}`}
+                    aria-hidden="true"
+                  />
+                  <span className="agent-shell__provenance-label">
+                    {modelProvider === "none" || health?.llmConfigured === false
+                      ? (zh ? "LLM 未配置" : "LLM unconfigured")
+                      : (activeModel || modelProvider)}
+                  </span>
+                  <span className="agent-shell__provenance-sep" aria-hidden="true">·</span>
+                  <span className="agent-shell__provenance-api">
+                    {apiConnected ? "API" : (zh ? "API 未知" : "API off")}
+                  </span>
+                </button>
+
+                <Button
+                  className="shell-search-button"
+                  variant="outline"
                   size="sm"
-                  onClick={onRefresh}
+                  icon={<Search size={12} />}
+                  aria-label={zh ? "搜索" : "Search"}
+                  onClick={() => setIsCommandOpen(true)}
+                >
+                  <span>{zh ? "搜索" : "Search"}</span>
+                  <span className="agent-shell__kbd">Ctrl+K</span>
+                </Button>
+
+                <IconButton
+                  icon={<Languages size={14} />}
+                  label={locale === "zh-CN" ? "Switch to English" : "切换到中文"}
+                  size="sm"
+                  onClick={() => setLocale(locale === "zh-CN" ? "en-US" : "zh-CN")}
                 />
-              )}
-            </div>
-          </header>
 
-          {/* Notices banner if errors exist */}
-          {notices.length > 0 && (
-            <div style={{ background: "var(--warning-soft)", borderBottom: "1px solid var(--warning-faint)", padding: "4px 14px" }}>
-              {notices.map(n => (
-                <div key={n.id} style={{ fontSize: "11px", color: "var(--warning-strong)", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <AlertCircle size={12} />
-                  <span><strong>{n.label}:</strong> {n.message}</span>
-                </div>
-              ))}
-            </div>
-          )}
+                <IconButton
+                  icon={
+                    themePreference === "dark" ? <Moon size={14} /> :
+                    themePreference === "light" ? <Sun size={14} /> :
+                    <Monitor size={14} />
+                  }
+                  label={zh ? "切换主题" : "Cycle theme"}
+                  size="sm"
+                  onClick={cycleTheme}
+                />
 
-          {/* Main Content Area */}
-          <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
-            <main
-              style={{
-                flex: 1,
-                minWidth: 0,
-                overflowY: "auto",
-                background: "var(--background)"
-              }}
-            >
+                {onRefresh && (
+                  <IconButton
+                    icon={<RefreshCw size={13} className={refreshing ? "ds-spin" : ""} />}
+                    label={zh ? "刷新" : "Refresh"}
+                    size="sm"
+                    onClick={onRefresh}
+                  />
+                )}
+              </div>
+            </header>
+
+            {notices.length > 0 && (
+              <div className="agent-shell__notices">
+                {notices.map(n => (
+                  <div key={n.id}>
+                    <AlertCircle size={12} />
+                    <span><strong>{n.label}:</strong> {n.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <main className="shell-main-canvas agent-shell__main">
               {children}
             </main>
-
-            {/* Selection-Driven Contextual Inspector */}
-            <aside
-              aria-hidden={!inspectorOpen}
-              style={{
-                width: inspectorOpen ? "380px" : "0px",
-                borderLeft: inspectorOpen ? "1px solid var(--border)" : "none",
-                background: "var(--surface)",
-                display: inspectorOpen ? "flex" : "none",
-                flexDirection: "column",
-                overflow: "hidden",
-                flexShrink: 0
-              }}
-            >
-              {inspectorOpen && (
-                <>
-                  <div
-                    style={{
-                      height: "var(--ds-topbar-height)",
-                      padding: "0 12px",
-                      borderBottom: "1px solid var(--border)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      background: "var(--surface-subtle)"
-                    }}
-                  >
-                    <span style={{ fontWeight: 600, fontSize: "13px" }}>
-                      {inspectorContext?.customTitle ||
-                        (inspectorContext?.finding ? `审查发现: ${inspectorContext.finding.title}` :
-                         inspectorContext?.agent ? `智能体: ${inspectorContext.agent.label}` :
-                         inspectorContext?.commit ? `提交: ${inspectorContext.commit.sha?.substring(0, 7)}` :
-                         "详情")}
-                    </span>
-                    <IconButton icon={<X size={14} />} label="Close" size="sm" onClick={() => setInspectorOpen(false)} />
-                  </div>
-                  <div style={{ padding: "14px", overflowY: "auto", flex: 1 }}>
-                    {inspectorContext?.customContent ||
-                     (inspectorContext?.finding && (
-                       <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12px" }}>
-                         <div style={{ display: "flex", gap: "6px" }}>
-                           <Badge variant={findingSeverityVariants[inspectorContext.finding.severity]}>{inspectorContext.finding.severity.toUpperCase()}</Badge>
-                           <Badge variant="neutral">{inspectorContext.finding.confidence}</Badge>
-                         </div>
-                         <div>
-                           <div style={{ color: "var(--muted)" }}>位置:</div>
-                           <code style={{ fontFamily: "var(--ds-font-mono)" }}>{inspectorContext.finding.file}</code>
-                         </div>
-                         <div>
-                           <div style={{ color: "var(--muted)" }}>证据:</div>
-                           <pre style={{ background: "var(--surface-subtle)", padding: "8px", borderRadius: "var(--ds-radius-sm)", fontSize: "11px", margin: "4px 0 0 0", whiteSpace: "pre-wrap" }}>{inspectorContext.finding.evidence}</pre>
-                         </div>
-                         <div>
-                           <div style={{ color: "var(--muted)" }}>建议:</div>
-                           <p style={{ margin: "4px 0 0 0" }}>{inspectorContext.finding.recommendation}</p>
-                         </div>
-                       </div>
-                     ))}
-                  </div>
-                </>
-              )}
-            </aside>
-          </div>
-        </div>
-      </div>
-
-      {/* COMPACT BOTTOM STATUS BAR */}
-      <footer
-        style={{
-          height: "var(--ds-statusbar-height)",
-          padding: "0 10px",
-          borderTop: "1px solid var(--border)",
-          background: "var(--surface)",
-          fontSize: "11px",
-          color: "var(--muted-strong)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexShrink: 0,
-          userSelect: "none"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <GitBranch size={11} />
-            <span style={{ fontFamily: "var(--ds-font-mono)" }}>{activeBranch}</span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <Cpu size={11} />
-            <span>
-              {modelProvider === "none" || health?.llmConfigured === false
-                ? (zh ? "LLM 未配置" : "LLM unconfigured")
-                : `LLM: ${modelProvider}${activeModel ? ` · ${activeModel}` : ""}`}
-            </span>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <Activity size={11} color={apiConnected ? "var(--success)" : "var(--warning)"} />
-            <span>{apiConnected ? (zh ? "API 已连接" : "API connected") : (zh ? "API 状态未知" : "API unavailable")}</span>
-          </div>
-
-          {buildInfo?.commitSha && (
-            <span style={{ fontFamily: "var(--ds-font-mono)", opacity: 0.8 }}>
-              Build {buildInfo.commitSha.substring(0, 7)}
-            </span>
+          {/* RIGHT — related cards */}
+          {showRelatedRail && (
+            <RelatedCards
+              locale={locale === "zh-CN" ? "zh-CN" : "en-US"}
+              repository={activeRepo}
+              jobs={jobs}
+              focus={routeRunId ? (relatedFocus ?? "review") : relatedFocus}
+              focusJobId={routeRunId}
+              statusCardRef={statusCardRef}
+            />
           )}
         </div>
-      </footer>
 
-      {/* Quick Connect Dialog */}
+      </div>
+
+      {/* Selection inspector overlay (secondary; not primary chat) */}
+      {inspectorContext && (inspectorContext.finding || inspectorContext.customContent) && (
+        <aside className="agent-shell__inspector" aria-label={zh ? "详情" : "Details"}>
+          <header>
+            <span>
+              {inspectorContext.customTitle ||
+                (inspectorContext.finding
+                  ? `${zh ? "审查发现" : "Finding"}: ${inspectorContext.finding.title}`
+                  : (zh ? "详情" : "Details"))}
+            </span>
+          </header>
+          <div>
+            {inspectorContext.customContent ||
+              (inspectorContext.finding && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12px" }}>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <Badge variant={findingSeverityVariants[inspectorContext.finding.severity]}>
+                      {inspectorContext.finding.severity.toUpperCase()}
+                    </Badge>
+                    <Badge variant="neutral">{inspectorContext.finding.confidence}</Badge>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--muted)" }}>{zh ? "位置" : "Location"}:</div>
+                    <code style={{ fontFamily: "var(--ds-font-mono)" }}>{inspectorContext.finding.file}</code>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--muted)" }}>{zh ? "证据" : "Evidence"}:</div>
+                    <pre style={{ background: "var(--surface-subtle)", padding: "8px", borderRadius: "8px", fontSize: "11px", margin: "4px 0 0 0", whiteSpace: "pre-wrap" }}>
+                      {inspectorContext.finding.evidence}
+                    </pre>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </aside>
+      )}
+
       <Dialog
         isOpen={isConnectOpen}
         onClose={() => setIsConnectOpen(false)}
@@ -816,6 +626,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                     setIsConnectOpen(false);
                     navigate(`/repositories/${encodeURIComponent(res.repository.id)}/overview`);
                   }
+                } else {
+                  setIsConnectOpen(false);
+                  navigate("/repositories");
                 }
               }}
             >
@@ -825,20 +638,14 @@ export const AppShell: React.FC<AppShellProps> = ({
         </div>
       </Dialog>
 
-      {/* Settings Dialog */}
       {isSettingsOpen && (
-        <SettingsDialog
-          isOpen
-          onClose={closeSettingsDialog}
-          health={health}
-        />
+        <SettingsDialog isOpen onClose={closeSettingsDialog} health={health} />
       )}
 
-      {/* Command Palette Dialog */}
       <Dialog
         isOpen={isCommandOpen}
         onClose={() => setIsCommandOpen(false)}
-        title={zh ? "快捷命令 (Command Palette)" : "Command Palette"}
+        title={zh ? "快捷命令" : "Command Palette"}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           <input
@@ -846,46 +653,39 @@ export const AppShell: React.FC<AppShellProps> = ({
             autoFocus
             value={commandQuery}
             onChange={e => setCommandQuery(e.target.value)}
-            placeholder={zh ? "输入命令或页面名称..." : "Type a command..."}
+            placeholder={zh ? "输入命令或页面名称…" : "Type a command…"}
             className="ds-input ds-input--sm"
           />
           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <Button
-              variant="ghost"
-              size="sm"
-              style={{ justifyContent: "flex-start" }}
-              onClick={() => {
-                navigate("/repositories");
-                setIsCommandOpen(false);
-              }}
-            >
-              跳转到代码仓库 (Repositories)
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              style={{ justifyContent: "flex-start" }}
-              onClick={() => {
-                navigate("/runs");
-                setIsCommandOpen(false);
-              }}
-            >
-              跳转到审查运行记录 (Runs)
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              style={{ justifyContent: "flex-start" }}
-              onClick={() => {
-                openSettingsDialog();
-                setIsCommandOpen(false);
-              }}
-            >
-              跳转到系统设置 (Settings)
-            </Button>
+            {commandItems.map(item => (
+              <Button
+                key={item.label}
+                variant="ghost"
+                size="sm"
+                style={{ justifyContent: "flex-start" }}
+                onClick={() => {
+                  if ("action" in item && item.action) item.action();
+                  else if ("to" in item && item.to) navigate(item.to);
+                  setIsCommandOpen(false);
+                  setCommandQuery("");
+                }}
+              >
+                {item.label}
+              </Button>
+            ))}
           </div>
         </div>
       </Dialog>
+
+      {directoryRepo && (
+        <RepoDirectoryPanel
+          isOpen={Boolean(directoryRepoId)}
+          onClose={() => setDirectoryRepoId(null)}
+          repositoryId={directoryRepo.id}
+          displayName={directoryRepo.displayName}
+          locale={locale === "zh-CN" ? "zh-CN" : "en-US"}
+        />
+      )}
     </div>
   );
 };

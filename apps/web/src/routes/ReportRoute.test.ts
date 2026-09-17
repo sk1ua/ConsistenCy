@@ -59,6 +59,11 @@ describe("matchJobRepositoryId", () => {
     expect(matchJobRepositoryId(jobWithIdMatch, [repo1])).toBe("repo-123");
   });
 
+  it("matches job.repositoryId preferentially", () => {
+    const jobWithRepoId = { ...baseJob, repositoryId: "repo-123", repositoryFullName: "owner/other" };
+    expect(matchJobRepositoryId(jobWithRepoId, [repo1])).toBe("repo-123");
+  });
+
   it("never matches using displayName fallback", () => {
     const jobWithDisplay = { ...baseJob, repositoryFullName: "my-display" };
     expect(matchJobRepositoryId(jobWithDisplay, [repo1])).toBeUndefined();

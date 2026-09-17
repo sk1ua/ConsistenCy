@@ -26,16 +26,16 @@ describe("App", () => {
     expect(App).toBeTypeOf("function");
   });
 
-  it("renders the review workbench shell and its preserved destinations", () => {
+  it("renders the locked three-column review shell", () => {
     const html = renderApp();
 
     expect(html).toContain("ConsistenCy");
-    expect(html).toContain("Inbox");
-    expect(html).toContain("Repositories");
-    expect(html).toContain("Runs");
-    expect(html).toContain("Findings");
-    expect(html).toContain("Workflows");
+    expect(html).toContain("agent-shell");
+    expect(html).toContain("Automation");
+    expect(html).toContain("Plugin marketplace");
+    expect(html).toContain("Connected repositories");
     expect(html).toContain("Settings");
+    expect(html).toContain("Evidence review");
   });
 
   it("renders dashboard, jobs, and report detail views", () => {
@@ -52,28 +52,26 @@ describe("App", () => {
     expect(html).not.toContain("deepseek");
   });
 
-  it("renders the Chinese workbench labels when zh-CN is selected", () => {
+  it("renders the Chinese review shell labels when zh-CN is selected", () => {
     const html = renderApp("zh-CN");
 
-    expect(html).toContain("收件箱");
-    expect(html).toContain("仓库");
-    expect(html).toContain("工作流");
-    expect(html).toContain("中文");
+    expect(html).toContain("自动化");
+    expect(html).toContain("插件市场");
+    expect(html).toContain("已连接仓库");
+    expect(html).toContain("审查");
+    expect(html).toContain("证据审查");
+    expect(html).not.toContain("审查工作台");
   });
 
-  it("keeps the locale switch recognizable when the phone topbar trims labels", () => {
+  it("keeps the locale switch recognizable as a quiet icon control", () => {
     const html = renderApp();
 
-    expect(html).toContain("shell-locale-button");
     expect(html).toContain("lucide-languages");
     expect(html).toContain("shell-search-button");
-    expect(html).toContain(">English</span>");
     expect(html).toContain('aria-label="切换到中文"');
 
     const zhHtml = renderApp("zh-CN");
-    expect(zhHtml).toContain("shell-locale-button");
     expect(zhHtml).toContain("lucide-languages");
-    expect(zhHtml).toContain(">中文</span>");
     expect(zhHtml).toContain('aria-label="Switch to English"');
   });
 });

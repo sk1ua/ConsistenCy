@@ -150,6 +150,7 @@ function ReviewRow({ job, zh }: { job: ReviewJob; zh: boolean }) {
     <Link
       to={`/runs/${encodeURIComponent(job.id)}/overview`}
       role="listitem"
+      className="review-history-row"
       style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", padding: "10px 12px", border: "1px solid var(--border)", borderRadius: "var(--ds-radius-sm)", background: "var(--surface)", textDecoration: "none", color: "inherit" }}
     >
       <span style={{ display: "flex", gap: "10px", alignItems: "center", minWidth: 0 }}>
@@ -168,8 +169,9 @@ function ReviewRow({ job, zh }: { job: ReviewJob; zh: boolean }) {
       </span>
       <span style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
         {report ? (
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>
-            {zh ? "静态风险" : "static risk"}: {report.riskLevel} · {zh ? "发现风险" : "finding risk"}: {report.riskBand ?? riskBandForFindings(report.findings)} · {zh ? "分" : "score"}: {report.score}
+          <span style={{ fontSize: 12, color: "var(--muted)", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={report.findings[0]?.title}>
+            {zh ? "静态风险" : "static risk"}: {report.riskLevel} · {zh ? "分" : "score"}: {report.score}
+            {report.findings[0] ? ` · ${report.findings[0].title}` : ""}
           </span>
         ) : (
           <span style={{ fontSize: 12, color: "var(--muted)" }}>{zh ? "报告：—" : "report: —"}</span>

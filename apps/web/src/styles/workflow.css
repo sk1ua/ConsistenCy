@@ -183,7 +183,7 @@
 .studio-repo-state.ok { color:var(--success); }
 .studio-repo-state.unset { color:var(--muted); }
 .studio-canvas-toolbar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-.studio-canvas-toolbar strong { min-width:0; overflow-wrap:anywhere; font:14px var(--font-mono); }
+.studio-canvas-toolbar strong { min-width:0; overflow-wrap:anywhere; font:600 14px var(--font-ui); }
 .studio-canvas-toolbar input { flex:1; min-width:120px; }
 /* The frame is the non-scrolling clipping context that owns the edge cues;
    the viewport inside it is the only horizontal scroller and stays keyboard
@@ -272,7 +272,7 @@
    unconditional base presentation; only the 1280px media query changes layout.
    The right column wraps the inspector + copilot panel so desktop keeps a
    single third grid column (no new top-level navigation, no chat surface). */
-.studio-right { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.studio-right, .studio-copilot-column { display:flex; flex-direction:column; gap:10px; min-width:0; }
 .studio-copilot { display:flex; flex-direction:column; gap:8px; padding:12px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface); color:var(--foreground); }
 .studio-copilot-title { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:var(--foreground); }
 .studio-copilot textarea { width:100%; min-height:88px; resize:vertical; }
@@ -338,4 +338,25 @@
   .studio-graph-viewport::-webkit-scrollbar { display:initial; }
   .studio-node-list button { min-height:36px; }
   .studio-inspector > summary { display:none; }
+}
+
+
+/* Agent-desktop Studio: Library | Canvas | Copilot */
+.studio-library-list { display:flex; flex-direction:column; gap:4px; max-height:180px; overflow:auto; padding:2px; }
+.studio-library-item { display:flex; align-items:flex-start; gap:8px; width:100%; text-align:left; padding:6px 8px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-subtle); color:var(--foreground); cursor:pointer; min-height:36px; }
+.studio-library-item:hover { background:var(--surface-muted); border-color:transparent; }
+.studio-library-item.is-active { background:var(--surface-subtle); border-color:transparent; box-shadow:inset 3px 0 0 var(--muted-strong); }
+.studio-library-item svg { flex:0 0 auto; margin-top:2px; color:var(--muted-strong); }
+.studio-library-item-text { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.studio-library-item-text strong { font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.studio-library-item-text small { color:var(--muted); font:10px var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.studio-library-empty { color:var(--muted); font-size:11px; padding:6px 4px; }
+.studio-node { display:grid; grid-template-columns:auto minmax(0,1fr); grid-template-rows:auto auto auto; column-gap:8px; row-gap:2px; align-items:center; }
+.studio-node-icon { grid-row:1 / span 3; display:grid; place-items:center; width:22px; height:22px; border-radius:var(--radius-sm); background:var(--surface-subtle); color:var(--muted-strong); }
+.studio-node strong { grid-column:2; }
+.studio-node span { grid-column:2; color:var(--muted-strong); font-size:11px; }
+.studio-node small { grid-column:2; color:var(--muted); font:10px var(--font-mono); }
+@media (min-width: 1280px) {
+  .studio-grid { grid-template-columns:minmax(220px, 248px) minmax(0, 1fr) minmax(300px, 360px); }
+  .studio-library-list { max-height:220px; }
 }
