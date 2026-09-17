@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { resolve as pathResolve, sep as pathSep } from "node:path";
 import { z, ZodError } from "zod";
 import {
   auditCapabilitiesSchema,
@@ -31,6 +33,7 @@ import {
   publicPrRequestSchema,
   REPOSITORY_REVIEWS_MAX_LIMIT,
   repositoryPullRequestsResponseSchema,
+  REPOSITORY_FILE_PREVIEW_MAX_BYTES,
   repositoryReviewsResponseSchema,
   reviewPreparationResponseSchema,
   riskScoreSchema,
@@ -55,6 +58,69 @@ function resolveLocalPathForRepository(repositoryId: string, options: CreateApiS
   if (repository?.source !== "local_git") return undefined;
   return options.auditStore?.getLocalRepositoryPath?.(repository.id);
 }
+
+/**
+ * Resolve a repository-relative path to an absolute file under a registered
+ * local_git root. Rejects absolute paths, parent traversal (via assertSafeTreePath),
+ * and any resolved location outside the repo sandbox (symlink escape).
+ */
+function resolveSandboxedRepoFile(repoRoot: string, relativePath: string): { absolutePath: string; safeRel: string } {
+  const safeRel = assertSafeTreePath(relativePath);
+  if (safeRel.length === 0) {
+    throw new ApiError("Query parameter path must identify a file", "INVALID_FILE_PATH", 400);
+  }
+  let rootReal: string;
+  try {
+    rootReal = realpathSync(repoRoot);
+  } catch {
+    throw new ApiError("Local repository path unavailable", "REPOSITORY_PATH_UNAVAILABLE", 404);
+  }
+  const candidate = pathResolve(rootReal, ...safeRel.split("/"));
+  const rootPrefix = rootReal.endsWith(pathSep) ? rootReal : rootReal + pathSep;
+  if (candidate !== rootReal && !candidate.startsWith(rootPrefix)) {
+    throw new ApiError("Path escapes repository sandbox", "INVALID_FILE_PATH", 400);
+  }
+  if (!existsSync(candidate)) {
+    return { absolutePath: candidate, safeRel };
+  }
+  let fileReal: string;
+  try {
+    fileReal = realpathSync(candidate);
+  } catch {
+    throw new ApiError("Unable to resolve file path", "INVALID_FILE_PATH", 400);
+  }
+  if (fileReal !== rootReal && !fileReal.startsWith(rootPrefix)) {
+    throw new ApiError("Path escapes repository sandbox", "INVALID_FILE_PATH", 400);
+  }
+  return { absolutePath: fileReal, safeRel };
+}
+
+function looksLikeBinary(buffer: Buffer): boolean {
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8_192));
+  if (sample.includes(0)) return true;
+  let suspicious = 0;
+  for (const byte of sample) {
+    if (byte === 9 || byte === 10 || byte === 13) continue;
+    if (byte < 32 || byte === 127) suspicious += 1;
+  }
+  return sample.length > 0 && suspicious / sample.length > 0.3;
+}
+
+function decodeUtf8WithFallback(buffer: Buffer): { text: string; encoding: "utf-8" | "utf-8-lossy" } {
+  const strict = buffer.toString("utf8");
+  if (!strict.includes("\uFFFD") && Buffer.from(strict, "utf8").equals(buffer)) {
+    return { text: strict, encoding: "utf-8" };
+  }
+  // Lossy: replace invalid sequences via TextDecoder when available, else Buffer utf8 (already uses U+FFFD).
+  try {
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    return { text: decoder.decode(buffer), encoding: "utf-8-lossy" };
+  } catch {
+    return { text: strict, encoding: "utf-8-lossy" };
+  }
+}
+
+
 
 function toRendererGitRemote(remote: {
   readonly name: string;
@@ -1758,6 +1824,121 @@ const routes: Route[] = [
           entries: []
         }, allowedOrigins);
       }
+    }
+  },
+
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/file$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const rawPath = url.searchParams.get("path") ?? "";
+      let safeRel = "";
+      try {
+        safeRel = assertSafeTreePath(rawPath);
+      } catch {
+        throw new ApiError("Query parameter path must be a relative repository path", "INVALID_FILE_PATH", 400);
+      }
+      if (safeRel.length === 0) {
+        throw new ApiError("Query parameter path must identify a file", "INVALID_FILE_PATH", 400);
+      }
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "local repository path unavailable"
+        }, allowedOrigins);
+        return;
+      }
+      let absolutePath: string;
+      try {
+        ({ absolutePath, safeRel } = resolveSandboxedRepoFile(localPath, rawPath));
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError("Query parameter path must be a relative repository path", "INVALID_FILE_PATH", 400);
+      }
+      if (!existsSync(absolutePath)) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "file not found in working tree"
+        }, allowedOrigins);
+        return;
+      }
+      let stats;
+      try {
+        stats = statSync(absolutePath);
+      } catch {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "unable to read file metadata"
+        }, allowedOrigins);
+        return;
+      }
+      if (!stats.isFile()) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "path is not a regular file"
+        }, allowedOrigins);
+        return;
+      }
+      const size = stats.size;
+      const maxBytes = REPOSITORY_FILE_PREVIEW_MAX_BYTES;
+      let buffer: Buffer;
+      try {
+        // Read only up to cap + 1 to detect truncation without loading huge files fully when possible.
+        // Node readFileSync always loads whole file; for oversized files refuse with clear reason.
+        if (size > maxBytes * 4) {
+          sendJson(request, response, 200, {
+            repositoryId,
+            path: safeRel,
+            available: false,
+            reason: `file too large to preview (>${maxBytes} bytes cap)`
+          }, allowedOrigins);
+          return;
+        }
+        buffer = readFileSync(absolutePath);
+      } catch {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "failed to read file"
+        }, allowedOrigins);
+        return;
+      }
+      if (looksLikeBinary(buffer)) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: true,
+          binary: true,
+          size,
+          reason: "binary file — preview not shown"
+        }, allowedOrigins);
+        return;
+      }
+      const truncated = buffer.length > maxBytes;
+      const slice = truncated ? buffer.subarray(0, maxBytes) : buffer;
+      const { text: content, encoding } = decodeUtf8WithFallback(slice);
+      sendJson(request, response, 200, {
+        repositoryId,
+        path: safeRel,
+        available: true,
+        encoding,
+        truncated,
+        size,
+        content,
+        binary: false
+      }, allowedOrigins);
     }
   },
   {

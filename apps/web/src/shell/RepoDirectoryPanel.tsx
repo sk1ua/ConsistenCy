@@ -10,7 +10,7 @@ import {
   FolderTree,
   Loader2
 } from "lucide-react";
-import type { RepositoryTreeEntry, RepositoryTreeResponse } from "@consistency/schema";
+import type { RepositoryFileContentResponse, RepositoryTreeEntry, RepositoryTreeResponse } from "@consistency/schema";
 import { api } from "../api/client";
 import { workspaceQueryKeys } from "../query/client";
 import { Dialog } from "../design-system/Dialog";
@@ -45,6 +45,68 @@ function changeLabel(kind: RepositoryTreeEntry["changeKind"], zh: boolean): stri
  * Lazy-loads folder children via `/repositories/:id/git/tree` (HEAD + dirty/untracked overlay).
  * Dirty files open Changes with highlightPath; clean files show a meta / preview stub.
  */
+
+function FilePreviewBody({
+  zh,
+  loading,
+  error,
+  data
+}: {
+  zh: boolean;
+  loading: boolean;
+  error?: string;
+  data?: RepositoryFileContentResponse;
+}) {
+  if (loading) {
+    return (
+      <div className="repo-directory-preview__status">
+        <Loader2 size={14} className="ds-spin" />
+        {zh ? "加载预览…" : "Loading preview…"}
+      </div>
+    );
+  }
+  if (error) {
+    return <p className="repo-directory-preview__stub">{error}</p>;
+  }
+  if (!data) {
+    return (
+      <p className="repo-directory-preview__stub">
+        {zh ? "选择文件以预览内容。" : "Select a file to preview its contents."}
+      </p>
+    );
+  }
+  if (!data.available) {
+    return <p className="repo-directory-preview__stub">{data.reason}</p>;
+  }
+  if ("binary" in data && data.binary) {
+    return (
+      <p className="repo-directory-preview__stub" data-testid="repo-directory-preview-binary">
+        {zh ? `二进制文件，无法预览（${data.size} B）。${data.reason}` : `Binary file — preview not shown (${data.size} B). ${data.reason}`}
+      </p>
+    );
+  }
+  if (!("content" in data)) {
+    return <p className="repo-directory-preview__stub">{zh ? "无预览内容" : "No preview content"}</p>;
+  }
+  return (
+    <div className="repo-directory-preview__content-wrap">
+      <div className="repo-directory-preview__content-meta">
+        <Badge variant="neutral" size="sm">{data.encoding}</Badge>
+        {data.truncated ? (
+          <Badge variant="neutral" size="sm">{zh ? "已截断" : "truncated"}</Badge>
+        ) : null}
+        <span className="repo-directory-preview__bytes">{data.size} B</span>
+      </div>
+      {data.encoding === "utf-8-lossy" ? (
+        <p className="repo-directory-preview__encoding-note">
+          {zh ? "非严格 UTF-8：已用替换字符显示。" : "Not strict UTF-8 — shown with replacement characters."}
+        </p>
+      ) : null}
+      <pre className="repo-directory-preview__code" data-testid="repo-directory-preview-code">{data.content}</pre>
+    </div>
+  );
+}
+
 export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
   isOpen,
   onClose,
@@ -71,6 +133,13 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
     queryKey: workspaceQueryKeys.repositoryTree(repositoryId, ""),
     queryFn: () => api.repositoryTree(repositoryId, ""),
     enabled: isOpen && Boolean(repositoryId)
+  });
+
+  const selectedBlobPath = selectedMeta?.type === "blob" ? selectedMeta.path : null;
+  const filePreviewQuery = useQuery({
+    queryKey: workspaceQueryKeys.repositoryFileContent(repositoryId, selectedBlobPath ?? ""),
+    queryFn: () => api.repositoryFileContent(repositoryId, selectedBlobPath!),
+    enabled: isOpen && Boolean(repositoryId) && Boolean(selectedBlobPath)
   });
 
   const dirtyPaths = useMemo(() => {
@@ -165,6 +234,7 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
     setSelectedMeta(entry);
     const dirty = entry.changeKind === "changed" || entry.changeKind === "untracked" || dirtyPaths.has(entry.path);
     if (dirty) {
+      // Dirty → Changes (existing UX). Clean files stay for content preview.
       openDirtyFile(entry.path);
     }
   };
@@ -243,8 +313,8 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
                 onClick={() => onFileClick(entry)}
                 title={
                   label
-                    ? (zh ? "在变更视图中打开并高亮" : "Open and highlight in changes view")
-                    : (zh ? "查看文件信息" : "Show file metadata")
+                    ? (zh ? "预览文件；可在右侧打开变更视图" : "Preview file; open Changes from the right pane")
+                    : (zh ? "预览文件内容" : "Preview file contents")
                 }
               >
                 <FileCode2 size={13} />
@@ -281,8 +351,8 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
       title={zh ? `仓库目录 · ${displayName}` : `Repository tree · ${displayName}`}
       description={
         zh
-          ? "按文件夹浏览 HEAD 树；变更 / 未跟踪会标出。点击脏文件跳转变更视图，干净文件显示元信息。"
-          : "Browse the HEAD tree by folder. Changed and untracked paths are marked. Dirty files open Changes; clean files show metadata."
+          ? "按文件夹浏览 HEAD 树；变更 / 未跟踪会标出。点击脏文件跳转变更视图；干净文件在右侧预览内容。"
+          : "Browse the HEAD tree by folder. Changed and untracked paths are marked. Dirty files open Changes; clean files preview on the right."
       }
       className="repo-directory-dialog"
     >
@@ -378,13 +448,13 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
                   >
                     {zh ? "在变更视图中打开" : "Open in changes view"}
                   </button>
-                ) : (
-                  <p className="repo-directory-preview__stub">
-                    {zh
-                      ? "文件预览即将接入。当前可查看元信息；有脏变更时会跳转变更视图。"
-                      : "File preview coming soon. Metadata is shown here; dirty files jump to Changes."}
-                  </p>
-                )}
+                ) : null}
+                <FilePreviewBody
+                  zh={zh}
+                  loading={filePreviewQuery.isLoading}
+                  error={filePreviewQuery.isError ? (filePreviewQuery.error instanceof Error ? filePreviewQuery.error.message : "error") : undefined}
+                  data={filePreviewQuery.data}
+                />
               </>
             ) : selectedMeta && selectedMeta.type === "tree" ? (
               <>
@@ -398,7 +468,7 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
               </>
             ) : (
               <p className="repo-directory-preview__stub">
-                {zh ? "选择文件查看元信息，或点击脏文件打开变更。" : "Select a file for metadata, or click a dirty file to open Changes."}
+                {zh ? "选择文件预览内容，或点击脏文件打开变更。" : "Select a file to preview, or click a dirty file to open Changes."}
               </p>
             )}
           </div>

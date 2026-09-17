@@ -230,6 +230,45 @@ async function main() {
         remotes: [],
       });
     }
+    if (path === `/repositories/${repo.id}/git/file`) {
+      const filePath = url.searchParams.get("path") || "";
+      if (filePath === "package.json") {
+        return json({
+          repositoryId: repo.id,
+          path: "package.json",
+          available: true,
+          encoding: "utf-8",
+          truncated: false,
+          size: 120,
+          content: '{\n  "name": "demo-repo",\n  "private": true\n}\n',
+          binary: false
+        });
+      }
+      return json({
+        repositoryId: repo.id,
+        path: filePath,
+        available: true,
+        encoding: "utf-8",
+        truncated: false,
+        size: 40,
+        content: "// demo preview\n",
+        binary: false
+      });
+    }
+    if (path === "/policy-revisions") return json({ policyRevisions: [] });
+    if (path === "/workflow-revisions") return json({ workflowRevisions: [] });
+    if (path === "/catalog/engine-allowlist") {
+      return json({
+        catalog: {
+          analyzers: ["engine.style", "engine.security", "tool.eslint"],
+          verifiers: ["verify.syntax", "verify.unit_tests"],
+          synthesizerKinds: ["synthesize.review_report"],
+          builtinWorkflows: [],
+          engineLegacyBuiltins: [],
+          runtimeVerifiedBuiltins: []
+        }
+      });
+    }
     if (path === `/repositories/${repo.id}/git/tree`) {
       const dir = url.searchParams.get("path") || "";
       if (dir === "apps") {
@@ -465,10 +504,12 @@ async function main() {
     console.log("wrote", target);
   }
 
-  // Extra maturity shots (not part of 01-03 contract, but useful for review)
+  // Maturity surfaces
   for (const extra of [
-    { hash: "#/automation", file: "04-automation-stub.png", wait: ".coming-soon-page--product, .coming-soon-hero" },
-    { hash: "#/plugins", file: "05-plugins-stub.png", wait: ".coming-soon-page--product, .coming-soon-hero" },
+    { hash: "#/automation", file: "04-automation-stub.png", wait: "[data-testid=automation-page], .automation-page" },
+    { hash: "#/plugins", file: "05-plugins-stub.png", wait: "[data-testid=plugins-page], .plugins-page" },
+    { hash: "#/automation", file: "08-automation.png", wait: "[data-testid=automation-page], .automation-live" },
+    { hash: "#/plugins", file: "09-plugins.png", wait: "[data-testid=plugins-page], .plugins-registry" },
   ]) {
     await page.goto(`${baseURL.replace(/\/$/, "")}/${extra.hash}`, { waitUntil: "networkidle" });
     await page.waitForTimeout(800);
@@ -502,6 +543,18 @@ async function main() {
   const treeShot = join(outDir, "06-directory-tree.png");
   await page.screenshot({ path: treeShot, fullPage: false });
   console.log("wrote", treeShot);
+
+  // 07 — file content preview (clean package.json)
+  try {
+    await page.locator(".repo-directory-list__item", { hasText: "package.json" }).first().click({ timeout: 5000 });
+    await page.waitForSelector("[data-testid=repo-directory-preview-code], .repo-directory-preview__code", { timeout: 8000 });
+    await page.waitForTimeout(400);
+  } catch (err) {
+    console.warn("file preview shot prep failed", err);
+  }
+  const previewShot = join(outDir, "07-file-preview.png");
+  await page.screenshot({ path: previewShot, fullPage: false });
+  console.log("wrote", previewShot);
 
   writeFileSync(join(outDir, "README.txt"), `Captured ${new Date().toISOString()} against ${baseURL}\n`);
   await browser.close();

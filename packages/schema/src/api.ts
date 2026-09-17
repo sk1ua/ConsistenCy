@@ -203,6 +203,43 @@ export const repositoryTreeResponseSchema = z.discriminatedUnion("available", [
   repositoryTreeUnavailableResponseSchema
 ]);
 
+/** Max bytes returned by GET /repositories/:id/git/file (worktree preview). */
+export const REPOSITORY_FILE_PREVIEW_MAX_BYTES = 256 * 1024;
+
+const repositoryFileContentAvailableSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  path: z.string().trim().min(1),
+  available: z.literal(true),
+  encoding: z.enum(["utf-8", "utf-8-lossy"]),
+  truncated: z.boolean(),
+  size: z.number().int().nonnegative(),
+  content: z.string(),
+  binary: z.literal(false).optional()
+}).strict();
+
+const repositoryFileContentBinarySchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  path: z.string().trim().min(1),
+  available: z.literal(true),
+  binary: z.literal(true),
+  size: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1)
+}).strict();
+
+const repositoryFileContentUnavailableSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  path: z.string(),
+  available: z.literal(false),
+  reason: z.string().trim().min(1)
+}).strict();
+
+export const repositoryFileContentResponseSchema = z.union([
+  repositoryFileContentAvailableSchema,
+  repositoryFileContentBinarySchema,
+  repositoryFileContentUnavailableSchema
+]);
+
+
 const providerTextSchema = (maxLength: number) => z.string()
   .min(1)
   .max(maxLength)
@@ -593,6 +630,7 @@ export type RepositoryGitStatusResponse = z.infer<typeof repositoryGitStatusResp
 export type RepositoryCommitsResponse = z.infer<typeof repositoryCommitsResponseSchema>;
 export type RepositoryTreeEntry = z.infer<typeof repositoryTreeEntrySchema>;
 export type RepositoryTreeResponse = z.infer<typeof repositoryTreeResponseSchema>;
+export type RepositoryFileContentResponse = z.infer<typeof repositoryFileContentResponseSchema>;
 export type PullRequestSummary = z.infer<typeof pullRequestSummarySchema>;
 export type RepositoryPullRequestsUnavailableReasonCode = z.infer<typeof repositoryPullRequestsUnavailableReasonCodeSchema>;
 export type RepositoryPullRequestsResponse = z.infer<typeof repositoryPullRequestsResponseSchema>;

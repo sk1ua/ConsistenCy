@@ -16,6 +16,9 @@ import {
   auditIssueSchema,
   auditRunSchema,
   automationSchema,
+  createAutomationRequestSchema,
+  policyRevisionSchema,
+  workflowRevisionSchema,
   evolutionSnapshotSchema,
   githubConnectionTestResponseSchema,
   githubOauthDevicePollResponseSchema,
@@ -29,6 +32,7 @@ import {
   repositorySchema,
   repositoryGitStatusResponseSchema,
   repositoryTreeResponseSchema,
+  repositoryFileContentResponseSchema,
   repositoryCommitsResponseSchema,
   repositoryPullRequestsResponseSchema,
   repositoryReviewsResponseSchema,
@@ -48,6 +52,7 @@ import {
   type RuntimeRunsResponse,
   type RepositoryGitStatusResponse,
   type RepositoryTreeResponse,
+  type RepositoryFileContentResponse,
   type RepositoryCommitsResponse,
   type RepositoryPullRequestsResponse,
   llmCatalogResponseSchema,
@@ -86,6 +91,9 @@ import {
   type JobDiffResponse,
   type AuditCapabilities,
   type Automation,
+  type CreateAutomationRequest,
+  type PolicyRevision,
+  type WorkflowRevision,
   type Repository,
   type AuditIssue,
   type AuditRun,
@@ -389,6 +397,12 @@ export const api = {
       await request(`/repositories/${encodeURIComponent(repositoryId)}/git/tree${query}`, { signal })
     );
   },
+  async repositoryFileContent(repositoryId: string, path: string, signal?: AbortSignal): Promise<RepositoryFileContentResponse> {
+    const query = `?path=${encodeURIComponent(path)}`;
+    return repositoryFileContentResponseSchema.parse(
+      await request(`/repositories/${encodeURIComponent(repositoryId)}/git/file${query}`, { signal })
+    );
+  },
   async repositoryCommits(repositoryId: string, depth?: number, signal?: AbortSignal): Promise<RepositoryCommitsResponse> {
     const query = depth ? `?depth=${depth}` : "";
     return repositoryCommitsResponseSchema.parse(await request(`/repositories/${encodeURIComponent(repositoryId)}/git/commits${query}`, { signal }));
@@ -413,6 +427,22 @@ export const api = {
       body: "{}"
     }) as { automation?: unknown };
     return automationSchema.parse(payload.automation);
+  },
+  async createAutomation(input: CreateAutomationRequest): Promise<Automation> {
+    const body = createAutomationRequestSchema.parse(input);
+    const payload = await request("/automations", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }) as { automation?: unknown };
+    return automationSchema.parse(payload.automation);
+  },
+  async policyRevisions(signal?: AbortSignal): Promise<PolicyRevision[]> {
+    const payload = await request("/policy-revisions", { signal }) as { policyRevisions?: unknown };
+    return policyRevisionSchema.array().parse(payload.policyRevisions ?? []);
+  },
+  async workflowRevisions(signal?: AbortSignal): Promise<WorkflowRevision[]> {
+    const payload = await request("/workflow-revisions", { signal }) as { workflowRevisions?: unknown };
+    return workflowRevisionSchema.array().parse(payload.workflowRevisions ?? []);
   },
   async heartbeat(): Promise<HeartbeatPulse | null> {
     const payload = await request("/heartbeat") as { pulse?: HeartbeatPulse | null };

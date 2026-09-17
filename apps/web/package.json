@@ -26,7 +26,8 @@
     "remark-gfm": "^4.0.1",
     "@consistency/ui": "0.1.0",
     "@consistency/web-host": "0.1.0",
-    "cordis": "4.0.0-rc.8"
+    "cordis": "4.0.0-rc.8",
+    "@consistency/plugins-builtin": "0.1.0"
   },
   "devDependencies": {
     "@types/dagre": "^0.7.54",
