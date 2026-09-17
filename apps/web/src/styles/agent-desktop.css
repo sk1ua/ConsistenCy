@@ -1,0 +1,62 @@
+/* Dense agent-desktop language (web-reengineering-design.md) */
+.ds-root.audit-shell {
+  --ds-sidebar-width: 230px;
+  --ds-topbar-height: 40px;
+  --ds-statusbar-height: 28px;
+  --ds-radius-sm: 5px;
+}
+
+.repo-first-sidebar .ds-sidebar-row,
+.repo-first-sidebar a.ds-sidebar-row {
+  min-height: 30px;
+  font-size: 13px;
+}
+
+.shell-topbar {
+  font-size: 13px;
+}
+
+.shell-statusbar,
+.audit-shell [data-shell-status],
+.ds-root.audit-shell > div > div > footer,
+.audit-status-bar {
+  font-size: 11px;
+  font-family: var(--font-mono), var(--ds-font-mono), monospace;
+}
+
+/* Flatter page heroes: less card-in-card */
+.ds-page .ds-hero {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  gap: 10px;
+}
+
+.ds-page .ds-hero-title {
+  font-size: 17px;
+  letter-spacing: -0.2px;
+}
+
+.ds-page .ds-section {
+  gap: 8px;
+}
+
+.ds-page .ds-section-title {
+  font-size: 14px;
+}
+
+.inbox-item-row {
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* Repository overview densification */
+.repo-overview-header,
+.repository-header {
+  gap: 8px;
+}
+
+.pw-page .ds-chip {
+  font-size: 11px;
+  min-height: 22px;
+}

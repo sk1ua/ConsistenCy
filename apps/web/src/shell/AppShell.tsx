@@ -16,6 +16,8 @@ import {
   Cpu,
   Languages,
   Layers,
+  Inbox,
+  Workflow,
   ChevronDown,
   CheckCircle2,
   AlertCircle,
@@ -319,7 +321,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   // Primary navigation links
   const navItems = [
-    { to: "/inbox", label: zh ? "收件箱" : "Inbox", icon: <Layers size={15} /> },
+    { to: "/inbox", label: zh ? "收件箱" : "Inbox", icon: <Inbox size={15} /> },
     { to: "/repositories", label: zh ? "代码仓库" : "Repositories", icon: <FolderGit2 size={15} /> },
     {
       to: "/runs",
@@ -332,7 +334,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       ) : undefined
     },
     { to: "/findings", label: zh ? "审查发现" : "Findings", icon: <ShieldAlert size={15} /> },
-    { to: "/workflows", label: zh ? "工作流" : "Workflows", icon: <GitFork size={15} /> }
+    { to: "/workflows", label: zh ? "工作流" : "Workflows", icon: <Workflow size={15} /> }
   ];
 
   const activeBranch = pulse?.repository.branch || "—";

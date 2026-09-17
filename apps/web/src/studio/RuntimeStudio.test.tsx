@@ -56,7 +56,8 @@ describe("RuntimeStudio executable component contract", () => {
     expect(host.querySelector(".studio-actions")).toBeNull();
     expect(host.querySelector(".studio-gate-spine")).toBeNull();
     expect(host.querySelector(".studio-run-reason")).toBeNull();
-    expect(host.querySelector(".studio-library")).toBeNull();
+    expect(host.querySelector(".studio-grid .studio-library")).toBeTruthy();
+    expect(host.querySelector(".studio-grid .studio-copilot-column")).toBeTruthy();
     const summaryPanel = host.querySelector(".studio-definition-summary")!;
     expect(summaryPanel.textContent).toContain("Definition summary");
     expect(summaryPanel.textContent).toContain("Nodes");

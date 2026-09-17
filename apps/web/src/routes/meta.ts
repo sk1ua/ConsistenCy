@@ -14,7 +14,7 @@ const en = {
   reports: { title: "Run workbench", shortTitle: "Run", description: "Inspect findings, evidence, and agent decisions", section: "Reviews" },
   findings: { title: "Findings", shortTitle: "Findings", description: "Triage report findings without treating risk as ground truth", section: "Reviews" },
   automations: { title: "Automations", shortTitle: "Automations", description: "Schedule repository checks when the automation service is available", section: "Harness" },
-  workflows: { title: "Workflow builder", shortTitle: "Workflows", description: "Visualize and edit deterministic analysis workflows", section: "Harness" },
+  workflows: { title: "Workflows", shortTitle: "Workflows", description: "Visualize and edit deterministic analysis workflows", section: "Harness" },
   settings: { title: "System status", shortTitle: "Settings", description: "Runtime readiness without exposing secret values", section: "System" }
 } satisfies Record<string, RouteMeta>;
 
@@ -25,7 +25,7 @@ const zh: typeof en = {
   reports: { title: "运行工作台", shortTitle: "运行", description: "检查发现、证据与智能体结论", section: "审查" },
   findings: { title: "发现", shortTitle: "发现", description: "分流报告发现，不把风险信号当作事实", section: "审查" },
   automations: { title: "自动化", shortTitle: "自动化", description: "自动化服务可用后，在这里安排仓库检查", section: "Harness" },
-  workflows: { title: "工作流构建器", shortTitle: "工作流", description: "查看和编辑确定性分析工作流", section: "Harness" },
+  workflows: { title: "工作流", shortTitle: "工作流", description: "查看和编辑确定性分析工作流", section: "Harness" },
   settings: { title: "系统状态", shortTitle: "设置", description: "在不暴露秘密值的前提下检查运行状态", section: "系统" }
 };
 
