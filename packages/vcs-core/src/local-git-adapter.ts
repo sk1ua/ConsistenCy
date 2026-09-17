@@ -11,7 +11,7 @@ import {
   type WorkingDirDirtyEvent
 } from "@consistency/schema";
 import { parseUnifiedDiff, splitNulRecords } from "./diff";
-import { GitCommandError, assertSafeRef, execGit, type GitExec } from "./git";
+import { GitCommandError, assertSafeRef, assertSafeTreePath, execGit, type GitExec } from "./git";
 
 const UNIT = "\x1f";
 const RECORD = "\x1e";
@@ -245,6 +245,34 @@ export class LocalGitAdapter implements IVCSService {
   async getUntrackedFiles(): Promise<string[]> {
     const stdout = await this.run(["ls-files", "--others", "--exclude-standard", "-z"]);
     return splitNulRecords(stdout);
+  }
+
+
+  /**
+   * Non-recursive children of a directory at a revision. Pass an empty
+   * `directoryPath` for the repository root. Paths are repository-relative;
+   * submodule `commit` entries are omitted (same rule as getFileTreeAtCommit).
+   */
+  async listTreeChildren(revision: string, directoryPath = ""): Promise<VcsFileTreeEntry[]> {
+    const rev = assertSafeRef(revision);
+    const dir = assertSafeTreePath(directoryPath);
+    const args = ["ls-tree", "--long", "-z", rev];
+    if (dir.length > 0) {
+      args.push("--", `${dir}/`);
+    }
+    const stdout = await this.run(args);
+
+    const entries: VcsFileTreeEntry[] = [];
+    for (const record of splitNulRecords(stdout)) {
+      const match = LS_TREE_ENTRY.exec(record);
+      if (match === null) continue;
+      const [, , type, objectSha = "", size = "-", path = ""] = match;
+      if (type !== "blob" && type !== "tree") continue;
+      const entry: VcsFileTreeEntry = { path, type, sha: objectSha };
+      if (size !== "-") entry.size = Number(size);
+      entries.push(entry);
+    }
+    return entries;
   }
 
   /**

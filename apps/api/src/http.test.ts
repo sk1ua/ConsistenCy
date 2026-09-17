@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, reviewPreparationResponseSchema, workflowRuntimeCopilotChatResponseSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeDefinitionsResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
+import { repositoryCommitsResponseSchema, repositoryGitStatusResponseSchema, repositoryPullRequestsResponseSchema, repositoryTreeResponseSchema, reviewPreparationResponseSchema, workflowRuntimeCopilotChatResponseSchema, workflowRuntimeCopilotProposalResponseSchema, workflowRuntimeDefinitionsResponseSchema, type GitHubConnectionTestRequest, type GitHubConnectionTestResponse, type Repository } from "@consistency/schema";
 import { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import { createApiServer, ApiError } from "./http";
@@ -639,6 +639,69 @@ describe("createApiServer", () => {
       authorization: "Bearer api-secret"
     });
     expect(authorized.status).toBe(200);
+  });
+
+  it("lists lazy repository tree children with dirty overlays and rejects unsafe paths", async () => {
+    const repositoryPath = mkdtempSync(join(tmpdir(), "consistency-http-tree-"));
+    tempDirectories.push(repositoryPath);
+    execFileSync("git", ["init", "--quiet"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "audit@example.com"], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Auditor"], { cwd: repositoryPath, stdio: "ignore" });
+    mkdirSync(join(repositoryPath, "src"), { recursive: true });
+    writeFileSync(join(repositoryPath, "README.md"), "local repository\n", "utf8");
+    writeFileSync(join(repositoryPath, "src", "index.ts"), "export const ok = true;\n", "utf8");
+    execFileSync("git", ["add", "."], { cwd: repositoryPath, stdio: "ignore" });
+    execFileSync("git", ["commit", "--quiet", "-m", "Initial repository"], { cwd: repositoryPath, stdio: "ignore" });
+    writeFileSync(join(repositoryPath, "README.md"), "local repository dirty\n", "utf8");
+    writeFileSync(join(repositoryPath, "scratch.tmp"), "tmp\n", "utf8");
+
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Tree checkout", repositoryPath);
+    const server = createApiServer({ auditStore });
+    servers.push(server);
+    const port = await listen(server);
+
+    const rootRes = await getJson(port, `/repositories/${repository.id}/git/tree`);
+    expect(rootRes.status).toBe(200);
+    const rootTree = repositoryTreeResponseSchema.parse(rootRes.body);
+    expect(rootTree).toMatchObject({
+      repositoryId: repository.id,
+      available: true,
+      path: "",
+      truncated: false
+    });
+    if (!rootTree.available) throw new Error("expected available tree");
+    expect(rootTree.entries.map(entry => entry.path)).toEqual(expect.arrayContaining(["README.md", "src", "scratch.tmp"]));
+    expect(rootTree.entries.find(entry => entry.path === "README.md")).toMatchObject({
+      type: "blob",
+      changeKind: "changed"
+    });
+    expect(rootTree.entries.find(entry => entry.path === "scratch.tmp")).toMatchObject({
+      type: "blob",
+      changeKind: "untracked"
+    });
+    expect(rootTree.entries.find(entry => entry.path === "src")).toMatchObject({ type: "tree" });
+    expect(JSON.stringify(rootTree)).not.toContain(repositoryPath);
+
+    const nestedRes = await getJson(port, `/repositories/${repository.id}/git/tree?path=src`);
+    const nestedTree = repositoryTreeResponseSchema.parse(nestedRes.body);
+    expect(nestedTree.available).toBe(true);
+    if (!nestedTree.available) throw new Error("expected nested tree");
+    expect(nestedTree.path).toBe("src");
+    expect(nestedTree.entries).toEqual([
+      expect.objectContaining({ path: "src/index.ts", name: "index.ts", type: "blob" })
+    ]);
+
+    const badPath = await getJson(port, `/repositories/${repository.id}/git/tree?path=../secret`);
+    expect(badPath.status).toBe(400);
+
+    const missing = await getJson(port, "/repositories/unknown-tree-repo/git/tree");
+    expect(missing.status).toBe(200);
+    expect(repositoryTreeResponseSchema.parse(missing.body)).toMatchObject({
+      available: false,
+      reason: "local repository path unavailable",
+      entries: []
+    });
   });
 
   it("reports available: false for unresolvable repository git status without fabricating clean state", async () => {

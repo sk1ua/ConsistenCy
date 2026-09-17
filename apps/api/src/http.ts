@@ -43,7 +43,7 @@ import {
   type ReviewModelOverride
 } from "@consistency/schema";
 import type { HeartbeatPulse, HeartbeatStreamEvent, Repository, VcsChangedFile } from "@consistency/schema";
-import { LocalGitAdapter } from "@consistency/vcs-core";
+import { LocalGitAdapter, assertSafeTreePath } from "@consistency/vcs-core";
 import { RepositoryPullRequestService, type RepositoryPullRequestRequest } from "./github/pullRequestReader";
 import type { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
 import type { GitHubDesktopOAuthBroker } from "./github/oauthBroker";
@@ -64,6 +64,35 @@ function toRendererGitRemote(remote: {
     name: remote.name,
     ...(remote.githubFullName === undefined ? {} : { githubFullName: remote.githubFullName })
   };
+}
+
+
+const REPOSITORY_TREE_MAX_ENTRIES = 500;
+
+type TreeChangeKind = "unchanged" | "changed" | "untracked";
+
+function classifyTreeChangeKind(
+  entryPath: string,
+  entryType: "blob" | "tree",
+  changedPaths: ReadonlySet<string>,
+  untrackedPaths: readonly string[]
+): TreeChangeKind {
+  if (entryType === "blob") {
+    if (untrackedPaths.includes(entryPath)) return "untracked";
+    if (changedPaths.has(entryPath)) return "changed";
+    return "unchanged";
+  }
+  const prefix = `${entryPath}/`;
+  if (untrackedPaths.some((path) => path === entryPath || path.startsWith(prefix))) return "untracked";
+  for (const path of changedPaths) {
+    if (path === entryPath || path.startsWith(prefix)) return "changed";
+  }
+  return "unchanged";
+}
+
+function entryName(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? path : path.slice(idx + 1);
 }
 
 function fulfilledValue<T>(result: PromiseSettledResult<T>): T | undefined {
@@ -1597,6 +1626,136 @@ const routes: Route[] = [
           available: false,
           reason: "unable to read commit history",
           commits: []
+        }, allowedOrigins);
+      }
+    }
+  },
+
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/tree$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const rawPath = url.searchParams.get("path") ?? "";
+      let directoryPath = "";
+      try {
+        directoryPath = assertSafeTreePath(rawPath);
+      } catch {
+        throw new ApiError("Query parameter path must be a relative repository path", "INVALID_TREE_PATH", 400);
+      }
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "local repository path unavailable",
+          path: directoryPath,
+          truncated: false,
+          entries: []
+        }, allowedOrigins);
+        return;
+      }
+      try {
+        const vcs = new LocalGitAdapter({ root: localPath });
+        const headSha = await vcs.getHeadSha();
+        if (!headSha) {
+          sendJson(request, response, 200, {
+            repositoryId,
+            available: false,
+            reason: "repository has no commits yet",
+            path: directoryPath,
+            truncated: false,
+            entries: []
+          }, allowedOrigins);
+          return;
+        }
+        const [children, changedFiles, untrackedFiles] = await Promise.all([
+          vcs.listTreeChildren(headSha, directoryPath),
+          vcs.getWorkingDiff().catch(() => [] as Awaited<ReturnType<LocalGitAdapter["getWorkingDiff"]>>),
+          vcs.getUntrackedFiles().catch(() => [] as string[])
+        ]);
+        const changedPaths = new Set(changedFiles.map((file) => file.path));
+        const prefix = directoryPath.length === 0 ? "" : `${directoryPath}/`;
+        const byPath = new Map<string, {
+          path: string;
+          name: string;
+          type: "blob" | "tree";
+          sha?: string;
+          size?: number;
+          changeKind: TreeChangeKind;
+        }>();
+
+        for (const entry of children) {
+          byPath.set(entry.path, {
+            path: entry.path,
+            name: entryName(entry.path),
+            type: entry.type,
+            sha: entry.sha,
+            ...(entry.size === undefined ? {} : { size: entry.size }),
+            changeKind: classifyTreeChangeKind(entry.path, entry.type, changedPaths, untrackedFiles)
+          });
+        }
+
+        // Surface untracked files that live directly in this directory (not in HEAD).
+        for (const untracked of untrackedFiles) {
+          if (prefix.length > 0 && !untracked.startsWith(prefix)) continue;
+          const remainder = prefix.length === 0 ? untracked : untracked.slice(prefix.length);
+          if (!remainder || remainder.includes("/")) continue;
+          const path = untracked;
+          if (byPath.has(path)) continue;
+          byPath.set(path, {
+            path,
+            name: remainder,
+            type: "blob",
+            changeKind: "untracked"
+          });
+        }
+
+        // Surface untracked nested folders as expandable tree nodes.
+        for (const untracked of untrackedFiles) {
+          if (prefix.length > 0 && !untracked.startsWith(prefix)) continue;
+          const remainder = prefix.length === 0 ? untracked : untracked.slice(prefix.length);
+          const slash = remainder.indexOf("/");
+          if (slash <= 0) continue;
+          const folderName = remainder.slice(0, slash);
+          const path = prefix.length === 0 ? folderName : `${directoryPath}/${folderName}`;
+          const existing = byPath.get(path);
+          if (existing) {
+            if (existing.changeKind === "unchanged") existing.changeKind = "untracked";
+            continue;
+          }
+          byPath.set(path, {
+            path,
+            name: folderName,
+            type: "tree",
+            changeKind: "untracked"
+          });
+        }
+
+        const sorted = [...byPath.values()].sort((a, b) => {
+          if (a.type !== b.type) return a.type === "tree" ? -1 : 1;
+          return a.path.localeCompare(b.path);
+        });
+        const truncated = sorted.length > REPOSITORY_TREE_MAX_ENTRIES;
+        const entries = truncated ? sorted.slice(0, REPOSITORY_TREE_MAX_ENTRIES) : sorted;
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: true,
+          revision: headSha,
+          path: directoryPath,
+          truncated,
+          entries
+        }, allowedOrigins);
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "failed to read repository tree",
+          path: directoryPath,
+          truncated: false,
+          entries: []
         }, allowedOrigins);
       }
     }
