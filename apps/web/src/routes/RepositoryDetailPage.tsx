@@ -24,6 +24,8 @@ import { Badge } from "../design-system/Badge";
 import { Tabs } from "../design-system/Tabs";
 import { SectionHeader } from "../design-system/SectionHeader";
 import { EmptyState } from "../design-system/EmptyState";
+import { isReviewStartDisabled, formatReviewMutationError } from "./reviewStart";
+export { isReviewStartDisabled, formatReviewMutationError };
 import { useI18n } from "../i18n";
 import { ReviewComposerDialog } from "./ReviewComposerDialog";
 import { RepositoryChangesView } from "./RepositoryChangesView";
@@ -45,13 +47,7 @@ export interface RepositoryDetailPageProps {
   health?: HealthResponse;
 }
 
-export function isReviewStartDisabled(preparation?: ReviewPreparationResponse): boolean {
-  return preparation?.canStartReview !== true;
-}
 
-export function formatReviewMutationError(zh: boolean, _error: unknown): string {
-  return zh ? "请求失败，请稍后重试。" : "Request failed. Please try again later.";
-}
 
 export function createRepositoryPullRequestsQueryOptions(
   repositoryId: string,

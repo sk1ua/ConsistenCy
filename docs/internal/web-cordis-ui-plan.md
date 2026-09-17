@@ -49,3 +49,7 @@ The React tree mounts `<App />` inside `WebHostProvider` + existing Theme/I18n/Q
 - Full extraction of AppShell into a Cordis-owned shell plugin with Slot-rendered chrome
 - Moving all page routes into `ui.routes` contributions
 - Dark/light screenshot matrix for every repository sub-route
+
+## Locked Shell IA (follow-on)
+
+See `docs/internal/web-shell-ia.md`. The AppShell was rewritten to the confirmed three-column review workbench (not chat tabs). Automation / plugin market are honest stubs; Studio remains secondary via Cmd+K / automation.

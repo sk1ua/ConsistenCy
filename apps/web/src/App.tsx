@@ -1,6 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { AgentRuntimeSnapshot, ReviewJob, StatsResponse } from "@consistency/schema";
+import type { AgentRuntimeSnapshot, ReviewJob } from "@consistency/schema";
 import { RefreshCw } from "lucide-react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api } from "./api/client";
@@ -12,25 +12,16 @@ import { safeRequestError } from "./query/safeRequestError";
 import { useWorkspaceQueries } from "./query/useWorkspaceQueries";
 import { routeMeta } from "./routes/meta";
 import { AppShell, safeDecodeURIComponent, type DataNotice } from "./shell/AppShell";
+import { ReviewWorkbench } from "./shell/ReviewWorkbench";
+import { ComingSoonPage } from "./routes/ComingSoonPage";
 import { useTheme } from "./theme";
 
-const DashboardPage = lazy(() => import("./pages/DashboardPage").then(module => ({ default: module.DashboardPage })));
 const JobsPage = lazy(() => import("./pages/JobsPage").then(module => ({ default: module.JobsPage })));
 const WorkflowPage = lazy(() => import("./pages/WorkflowPage").then(module => ({ default: module.WorkflowPage })));
 const RepositoriesPage = lazy(() => import("./routes/RepositoriesPage").then(module => ({ default: module.RepositoriesPage })));
 const ReportRoute = lazy(() => import("./routes/ReportRoute").then(module => ({ default: module.ReportRoute })));
 const FindingsPage = lazy(() => import("./routes/FindingsPage").then(module => ({ default: module.FindingsPage })));
 const RepositoryDetailPage = lazy(() => import("./routes/RepositoryDetailPage").then(module => ({ default: module.RepositoryDetailPage })));
-
-const EMPTY_STATS: StatsResponse = {
-  totalJobs: 0,
-  runningJobs: 0,
-  succeededJobs: 0,
-  failedJobs: 0,
-  averageDuration: 0,
-  riskDistribution: { low: 0, medium: 0, high: 0, critical: 0 },
-  topRepositories: []
-};
 
 function RouteLoading({ label }: { label: string }) {
   return <div className="loading-state"><RefreshCw className="spinning" size={20} /><span>{label}</span></div>;
@@ -56,11 +47,10 @@ export function App() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const queries = useWorkspaceQueries();
-  const { pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable } = useHeartbeat();
+  const { pulse: heartbeatPulse, unavailable: heartbeatUnavailable } = useHeartbeat();
 
   const jobs = queries.jobs.data ?? [];
   const reports = queries.reports.data ?? [];
-  const stats = queries.stats.data ?? EMPTY_STATS;
   const health = queries.health.data;
   const repositories = queries.repositories.data ?? [];
   const automations = queries.automations.data ?? [];
@@ -82,17 +72,7 @@ export function App() {
     return selectedAgent ? { agent: selectedAgent } : undefined;
   }, [jobs, location.pathname, reports, selectedAgent]);
 
-  const analyzePublicPr = useMutation({
-    mutationFn: (url: string) => api.analyzePublicPr(url),
-    onSuccess: result => {
-      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
-      // Always land on the report overview: it renders from the job report
-      // alone, while the Notebook sub-path needs CONSISTENCY_NOTEBOOK_ENABLED
-      // and would otherwise dead-end on NOTEBOOK_DISABLED/404 pages.
-      navigate(`/runs/${encodeURIComponent(result.jobId)}/overview`);
-    }
-  });
-  const connectPublicRepository = useMutation({
+const connectPublicRepository = useMutation({
     mutationFn: (input: string) => api.connectPublicRepository(input),
     onSuccess: async repository => {
       await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.repositories });
@@ -126,15 +106,7 @@ export function App() {
     }
   });
 
-  async function submitPublicPr(url: string): Promise<void> {
-    try {
-      await analyzePublicPr.mutateAsync(url);
-    } catch {
-      // The mutation owns the route-local error state shown by DashboardPage.
-    }
-  }
-
-  function openJob(job: ReviewJob) {
+function openJob(job: ReviewJob) {
     navigate(`/runs/${encodeURIComponent(job.id)}/overview`);
   }
 
@@ -186,18 +158,14 @@ export function App() {
     <Suspense fallback={<RouteLoading label={zh ? "正在加载工作台" : "Loading workspace"} />}>
       <Routes>
         <Route path="/" element={<Navigate replace to="/inbox" />} />
-        <Route path="/inbox" element={firstLoad ? <RouteLoading label={zh ? "正在加载审查工作区" : "Loading review workspace"} /> : <DashboardPage
-          stats={stats}
+        <Route path="/inbox" element={firstLoad ? <RouteLoading label={zh ? "正在加载审查工作区" : "Loading review workspace"} /> : <ReviewWorkbench
+          locale={locale === "zh-CN" ? "zh-CN" : "en-US"}
+          repository={repositories[0]}
           jobs={jobs}
           reports={reports}
-          onOpenJob={openJob}
-          onOpenJobs={() => navigate("/runs")}
-          onAnalyzePublicPr={submitPublicPr}
-          publicPrAnalyzing={analyzePublicPr.isPending}
-          publicPrError={analyzePublicPr.error ? safeRequestError(analyzePublicPr.error, zh ? "无法分析公开 PR" : "Could not analyze public PR") : undefined}
-          publicPrAccessMode={health?.publicPrAccessMode}
-          heartbeat={{ pulse: heartbeatPulse, history: heartbeatHistory, unavailable: heartbeatUnavailable }}
         />} />
+        <Route path="/automation" element={<ComingSoonPage kind="automation" />} />
+        <Route path="/plugins" element={<ComingSoonPage kind="plugins" />} />
         <Route path="/repositories" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository sources"} /> : <RepositoriesPage
           jobs={jobs}
           pulse={heartbeatPulse}

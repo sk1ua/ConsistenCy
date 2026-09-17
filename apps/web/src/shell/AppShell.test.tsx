@@ -1,103 +1,108 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { AppShell, isCommandPaletteShortcut } from "./AppShell";
 
 function renderShell(path = "/runs", overrides = {}): string {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } }
+  });
   return renderToString(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/runs/:runId/*" element={
-          <AppShell
-            path={path}
-            routeHref={path}
-            meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
-            locale="en-US"
-            setLocale={() => undefined}
-            themePreference="dark"
-            themeLabel="Dark"
-            setThemePreference={() => undefined}
-            cycleTheme={() => undefined}
-            jobs={[]}
-            repositories={[]}
-            pulse={null}
-            healthUnavailable={false}
-            notices={[]}
-            refreshing={false}
-            onRefresh={() => undefined}
-            {...overrides}
-          >
-            <p>Route content</p>
-          </AppShell>
-        } />
-        <Route path="*" element={
-          <AppShell
-            path={path}
-            routeHref={path}
-            meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
-            locale="en-US"
-            setLocale={() => undefined}
-            themePreference="dark"
-            themeLabel="Dark"
-            setThemePreference={() => undefined}
-            cycleTheme={() => undefined}
-            jobs={[]}
-            repositories={[]}
-            pulse={null}
-            healthUnavailable={false}
-            notices={[]}
-            refreshing={false}
-            onRefresh={() => undefined}
-            {...overrides}
-          >
-            <p>Route content</p>
-          </AppShell>
-        } />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/runs/:runId/*" element={
+            <AppShell
+              path={path}
+              routeHref={path}
+              meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
+              locale="en-US"
+              setLocale={() => undefined}
+              themePreference="dark"
+              themeLabel="Dark"
+              setThemePreference={() => undefined}
+              cycleTheme={() => undefined}
+              jobs={[]}
+              repositories={[]}
+              pulse={null}
+              healthUnavailable={false}
+              notices={[]}
+              refreshing={false}
+              onRefresh={() => undefined}
+              {...overrides}
+            >
+              <p>Route content</p>
+            </AppShell>
+          } />
+          <Route path="*" element={
+            <AppShell
+              path={path}
+              routeHref={path}
+              meta={{ title: "Audit runs", shortTitle: "Runs", description: "Review runs", section: "Reviews" }}
+              locale="en-US"
+              setLocale={() => undefined}
+              themePreference="dark"
+              themeLabel="Dark"
+              setThemePreference={() => undefined}
+              cycleTheme={() => undefined}
+              jobs={[]}
+              repositories={[]}
+              pulse={null}
+              healthUnavailable={false}
+              notices={[]}
+              refreshing={false}
+              onRefresh={() => undefined}
+              {...overrides}
+            >
+              <p>Route content</p>
+            </AppShell>
+          } />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
-describe("Repository-Centric AppShell", () => {
-  it("renders a single repository-first left sidebar without duplicate activity rail", () => {
-    const html = renderShell("/repositories", {
-      repositories: [
-        {
-          id: "repo_1",
-          displayName: "ConsistenCy",
-          source: "local_git",
-          defaultBranch: "v3",
-          trustLevel: "trusted_local",
-          monitoringEnabled: true,
-          createdAt: "2026-08-18T00:00:00.000Z",
-          updatedAt: "2026-08-18T00:00:00.000Z"
-        }
-      ]
-    });
+const demoRepo = {
+  id: "repo_1",
+  displayName: "ConsistenCy",
+  source: "local_git" as const,
+  defaultBranch: "v3",
+  trustLevel: "trusted_local" as const,
+  monitoringEnabled: true,
+  createdAt: "2026-08-18T00:00:00.000Z",
+  updatedAt: "2026-08-18T00:00:00.000Z"
+};
 
-    // Contains the single repository-first sidebar
+describe("Locked three-column AppShell", () => {
+  it("renders three-column agent shell without VS Code activity rail or chat tabs", () => {
+    const html = renderShell("/inbox", { repositories: [demoRepo] });
+
+    expect(html).toContain("agent-shell");
     expect(html).toContain("repo-first-sidebar");
+    expect(html).toContain("related-cards-rail");
     expect(html).toContain("ConsistenCy");
-
-    // Does NOT contain obsolete chrome
     expect(html).not.toContain("activity-rail");
     expect(html).not.toContain("workbench-tabs");
     expect(html).not.toContain("run-ledger-toggle");
+    expect(html).not.toContain("对话");
+    expect(html).not.toContain("Chat");
+  });
+
+  it("lists connected repos with status and directory actions", () => {
+    const html = renderShell("/inbox", {
+      locale: "zh-CN",
+      repositories: [demoRepo]
+    });
+    expect(html).toContain("仓库情况");
+    expect(html).toContain("仓库目录");
+    expect(html).toContain("自动化");
+    expect(html).toContain("插件市场");
   });
 
   it("localizes the pull-requests breadcrumb per locale", () => {
-    const repositories = [
-      {
-        id: "repo_1",
-        displayName: "ConsistenCy",
-        source: "local_git",
-        defaultBranch: "v3",
-        trustLevel: "trusted_local",
-        monitoringEnabled: true,
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z"
-      }
-    ];
+    const repositories = [demoRepo];
     const zhHtml = renderShell("/repositories/repo_1/pull-requests", { locale: "zh-CN", repositories });
     expect(zhHtml).toContain("拉取请求");
     expect(zhHtml).not.toContain("Pull Requests");
@@ -106,7 +111,8 @@ describe("Repository-Centric AppShell", () => {
     expect(enHtml).toContain("Pull Requests");
   });
 
-  it("exposes explicit system, light, and dark theme preferences", () => {    const html = renderShell("/repositories", { themePreference: "system" });
+  it("exposes explicit system, light, and dark theme preferences", () => {
+    const html = renderShell("/repositories", { themePreference: "system" });
     expect(html).toContain('aria-label="System"');
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('aria-label="Light"');
@@ -122,15 +128,12 @@ describe("Repository-Centric AppShell", () => {
     const html = renderShell("/repositories/repo_1/history", {
       repositories: [
         {
-          id: "repo_1",
-          displayName: "ConsistenCy",
+          ...demoRepo,
           source: "github",
           remoteFullName: "sk1ua/ConsistenCy",
           defaultBranch: "main",
           trustLevel: "untrusted_readonly",
-          monitoringEnabled: false,
-          createdAt: "2026-08-18T00:00:00.000Z",
-          updatedAt: "2026-08-18T00:00:00.000Z"
+          monitoringEnabled: false
         }
       ]
     });
@@ -155,7 +158,6 @@ describe("Repository-Centric AppShell", () => {
   });
 
   it("displays real LLM provider status when configured and unconfigured link when absent without mock badge", () => {
-    // Configured real provider
     const htmlConfigured = renderShell("/runs", {
       locale: "zh-CN",
       health: {
@@ -180,7 +182,6 @@ describe("Repository-Centric AppShell", () => {
     expect(htmlConfigured).not.toContain("Mock 模型");
     expect(htmlConfigured).not.toContain("Demo mode");
 
-    // Unconfigured LLM
     const htmlUnconfigured = renderShell("/runs", {
       locale: "zh-CN",
       health: {
@@ -207,15 +208,12 @@ describe("Repository-Centric AppShell", () => {
   it("strictly matches repository ID and does not resolve aliases for navigation", () => {
     const repos = [
       {
-        id: "repo_1",
-        displayName: "ConsistenCy",
+        ...demoRepo,
         source: "github" as const,
         remoteFullName: "sk1ua/ConsistenCy",
         defaultBranch: "main",
         trustLevel: "untrusted_readonly" as const,
-        monitoringEnabled: false,
-        createdAt: "2026-08-18T00:00:00.000Z",
-        updatedAt: "2026-08-18T00:00:00.000Z"
+        monitoringEnabled: false
       }
     ];
 

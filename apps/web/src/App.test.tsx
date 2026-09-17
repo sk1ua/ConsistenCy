@@ -26,16 +26,16 @@ describe("App", () => {
     expect(App).toBeTypeOf("function");
   });
 
-  it("renders the review workbench shell and its preserved destinations", () => {
+  it("renders the locked three-column review shell", () => {
     const html = renderApp();
 
     expect(html).toContain("ConsistenCy");
-    expect(html).toContain("Inbox");
-    expect(html).toContain("Repositories");
-    expect(html).toContain("Runs");
-    expect(html).toContain("Findings");
-    expect(html).toContain("Workflows");
+    expect(html).toContain("agent-shell");
+    expect(html).toContain("Automation");
+    expect(html).toContain("Plugin marketplace");
+    expect(html).toContain("Connected repositories");
     expect(html).toContain("Settings");
+    expect(html).toContain("Evidence review");
   });
 
   it("renders dashboard, jobs, and report detail views", () => {
@@ -55,9 +55,10 @@ describe("App", () => {
   it("renders the Chinese workbench labels when zh-CN is selected", () => {
     const html = renderApp("zh-CN");
 
-    expect(html).toContain("收件箱");
-    expect(html).toContain("仓库");
-    expect(html).toContain("工作流");
+    expect(html).toContain("自动化");
+    expect(html).toContain("插件市场");
+    expect(html).toContain("已连接仓库");
+    expect(html).toContain("审查工作台");
     expect(html).toContain("中文");
   });
 

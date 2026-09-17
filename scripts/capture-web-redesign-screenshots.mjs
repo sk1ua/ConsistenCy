@@ -104,7 +104,7 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.addInitScript(() => {
     localStorage.setItem("consistency.theme.v1", "light");
-    localStorage.setItem("consistency.locale.v1", "en-US");
+    localStorage.setItem("consistency.locale.v1", "zh-CN");
   });
 
   await page.route("**/api/**", async route => {
@@ -200,6 +200,9 @@ async function main() {
     }
     if (path.includes("/revisions/")) return json({ revision });
     if (path === "/workflow-runtime/runs") return json({ runs: [] });
+    if (path === `/workflow-runtime/repositories/${repo.id}/bindings`) {
+      return json({ bindings: [] });
+    }
     // Heartbeat / SSE endpoints — empty OK
     if (path.includes("heartbeat") || path.includes("pulse") || path.includes("events")) {
       return json({ ok: true });
@@ -208,8 +211,8 @@ async function main() {
   });
 
   const shots = [
-    { hash: "#/inbox", file: "01-inbox.png", wait: ".ds-page" },
-    { hash: `#/repositories/${encodeURIComponent(repo.id)}/overview`, file: "02-repository-overview.png", wait: ".audit-shell" },
+    { hash: "#/inbox", file: "01-inbox.png", wait: ".review-workbench, .agent-shell" },
+    { hash: `#/repositories/${encodeURIComponent(repo.id)}/overview`, file: "02-repository-overview.png", wait: ".agent-shell, .repo-detail-page" },
     { hash: "#/workflows", file: "03-workflow-studio.png", wait: ".runtime-studio, .workflows-page" },
   ];
 
