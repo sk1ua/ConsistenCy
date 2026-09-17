@@ -1349,11 +1349,77 @@
 
 .repo-directory-list li {
   display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.repo-directory-list__item {
+  display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   font-size: 12px;
   padding: 6px 4px;
-  border-bottom: 1px solid var(--border-subtle);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.repo-directory-list__item:hover {
+  background: var(--surface-subtle);
+}
+
+.repo-directory-list__item .mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-workbench__surfaces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.review-workbench__surface {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface);
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.review-workbench__surface:hover {
+  color: var(--foreground);
+  border-color: var(--border);
+  background: var(--surface-subtle);
+}
+
+.related-card__jump {
+  margin: 0 10px 10px;
+  width: calc(100% - 20px);
+}
+
+.coming-soon-page__back {
+  margin-bottom: 8px;
+}
+
+.coming-soon-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
 }
 
 .coming-soon-page {

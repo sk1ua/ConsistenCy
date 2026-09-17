@@ -135,6 +135,20 @@ function openJob(job: ReviewJob) {
 
   const firstLoad = queries.jobs.isPending || queries.reports.isPending || queries.stats.isPending;
 
+  const workbenchRepository = useMemo(() => {
+    if (repositories.length === 0) return undefined;
+    try {
+      const stored = sessionStorage.getItem("consistency.selectedRepo.v1");
+      if (stored) {
+        const found = repositories.find(r => r.id === stored);
+        if (found) return found;
+      }
+    } catch {
+      // ignore
+    }
+    return repositories[0];
+  }, [repositories]);
+
   return <AppShell
     path={location.pathname}
     routeHref={`${location.pathname}${location.search}`}
@@ -160,7 +174,7 @@ function openJob(job: ReviewJob) {
         <Route path="/" element={<Navigate replace to="/inbox" />} />
         <Route path="/inbox" element={firstLoad ? <RouteLoading label={zh ? "正在加载审查" : "Loading review"} /> : <ReviewWorkbench
           locale={locale === "zh-CN" ? "zh-CN" : "en-US"}
-          repository={repositories[0]}
+          repository={workbenchRepository}
           jobs={jobs}
           reports={reports}
         />} />

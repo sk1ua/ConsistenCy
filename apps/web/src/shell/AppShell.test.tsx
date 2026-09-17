@@ -255,6 +255,13 @@ describe("Locked three-column AppShell", () => {
     expect(html).toContain("API");
   });
 
+  it("related cards expose jump actions to overview, reviews, and workflows", () => {
+    const html = renderShell("/inbox", { locale: "zh-CN", repositories: [demoRepo] });
+    expect(html).toContain("打开概览");
+    expect(html).toContain("打开审查列表");
+    expect(html).toContain("打开工作流绑定");
+  });
+
     it("safely handles malformed percent-encoded path segments without throwing", () => {
     const htmlMalformedRepo = renderShell("/repositories/%A/history", { repositories: [] });
     expect(htmlMalformedRepo).toContain("Invalid repository ID");

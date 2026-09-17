@@ -31,6 +31,15 @@ export interface ReviewWorkbenchProps {
   onStartReviewIntent?: (goal: string) => void;
 }
 
+const REPO_SURFACES = [
+  { id: "overview", zh: "概览", en: "Overview" },
+  { id: "changes", zh: "变更", en: "Changes" },
+  { id: "history", zh: "历史", en: "History" },
+  { id: "pull-requests", zh: "PR", en: "PRs" },
+  { id: "reviews", zh: "审查", en: "Reviews" },
+  { id: "workflows", zh: "工作流", en: "Workflows" }
+] as const;
+
 export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
   locale,
   repository,
@@ -118,6 +127,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
     ...(gitStatus?.changedFiles ?? []).slice(0, 6).map(f => ({ path: f.path, kind: "changed" as const })),
     ...(gitStatus?.untrackedFiles ?? []).slice(0, 4).map(path => ({ path, kind: "untracked" as const }))
   ];
+  const repoBase = `/repositories/${encodeURIComponent(repository.id)}`;
 
   return (
     <div className="ds-page review-workbench">
@@ -155,6 +165,19 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           {zh ? "开始审查" : "Start review"}
         </Button>
       </header>
+
+      <nav className="review-workbench__surfaces" aria-label={zh ? "仓库视图" : "Repository surfaces"}>
+        {REPO_SURFACES.map(surface => (
+          <button
+            key={surface.id}
+            type="button"
+            className="review-workbench__surface"
+            onClick={() => navigate(`${repoBase}/${surface.id}`)}
+          >
+            {zh ? surface.zh : surface.en}
+          </button>
+        ))}
+      </nav>
 
       <div className="review-workbench__readiness">
         <span
@@ -265,12 +288,19 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           ) : (
             <div className="review-workbench__list">
               {changedPreview.map(item => (
-                <div key={`${item.kind}-${item.path}`} className="review-workbench__row review-workbench__row--static">
+                <button
+                  key={`${item.kind}-${item.path}`}
+                  type="button"
+                  className="review-workbench__row"
+                  onClick={() =>
+                    navigate(`${repoBase}/changes`, { state: { highlightPath: item.path } })
+                  }
+                >
                   <Badge variant="neutral" size="sm">
                     {item.kind === "untracked" ? (zh ? "未跟踪" : "untracked") : (zh ? "变更" : "changed")}
                   </Badge>
                   <span className="mono review-workbench__row-title">{item.path}</span>
-                </div>
+                </button>
               ))}
               {latestReport && (
                 <button
@@ -291,9 +321,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
               <button
                 type="button"
                 className="review-workbench__text-btn"
-                onClick={() =>
-                  navigate(`/repositories/${encodeURIComponent(repository.id)}/changes`)
-                }
+                onClick={() => navigate(`${repoBase}/changes`)}
               >
                 {zh ? "打开变更视图" : "Open changes view"}
               </button>

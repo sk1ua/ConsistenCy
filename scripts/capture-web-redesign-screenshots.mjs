@@ -116,7 +116,19 @@ async function main() {
     if (path === "/health") {
       return json({ ok: true, llmProvider: "openai", llmModel: "gpt-demo", publicPrAccessMode: "anonymous" });
     }
-    if (path === "/jobs") return json({ jobs: [] });
+    if (path === "/jobs") return json({ jobs: [{
+      id: "job_demo_review",
+      type: "PR_REVIEW",
+      status: "succeeded",
+      repositoryFullName: repo.displayName,
+      repositoryId: repo.id,
+      accessMode: "local_git",
+      publicationPolicy: "disabled",
+      baseSha: "1234567890abcdef1234567890abcdef12345678",
+      headSha: "abcdef1234567890abcdef1234567890abcdef12",
+      createdAt: now,
+      finishedAt: now,
+    }] });
     if (path === "/reports/recent") return json({ reports: [] });
     if (path === "/stats") {
       return json({
@@ -140,10 +152,13 @@ async function main() {
         available: true,
         branch: "main",
         headSha: "abcdef1234567890",
-        dirtyFileCount: 0,
-        untrackedFileCount: 0,
-        changedFiles: [],
-        untrackedFiles: [],
+        dirtyFileCount: 2,
+        untrackedFileCount: 1,
+        changedFiles: [
+          { path: "apps/web/src/shell/AppShell.tsx", status: "modified", additions: 12, deletions: 3, hunks: [] },
+          { path: "README.md", status: "modified", additions: 4, deletions: 1, hunks: [] },
+        ],
+        untrackedFiles: ["scratch.demo.tmp"],
         remotes: [],
       });
     }
@@ -171,7 +186,7 @@ async function main() {
           trust: "trusted_local",
         },
         sources: {
-          workingTree: { available: true, changedFileCount: 0 },
+          workingTree: { available: true, changedFileCount: 3 },
           branch: { available: true, base: "main", head: "abcdef1234567890abcdef1234567890abcdef12" },
         },
         model: {
@@ -184,7 +199,34 @@ async function main() {
       });
     }
     if (path === `/repositories/${repo.id}/reviews`) {
-      return json({ repositoryId: repo.id, reviews: [] });
+      return json({
+        repositoryId: repo.id,
+        reviews: [{
+          id: "job_demo_review",
+          type: "PR_REVIEW",
+          status: "succeeded",
+          repositoryFullName: repo.displayName,
+          repositoryId: repo.id,
+          accessMode: "local_git",
+          publicationPolicy: "disabled",
+          baseSha: "1234567890abcdef1234567890abcdef12345678",
+          headSha: "abcdef1234567890abcdef1234567890abcdef12",
+          createdAt: now,
+          finishedAt: now,
+          report: {
+            jobId: "job_demo_review",
+            repositoryFullName: repo.displayName,
+            baseSha: "1234567890abcdef1234567890abcdef12345678",
+            headSha: "abcdef1234567890abcdef1234567890abcdef12",
+            summary: "Demo review succeeded",
+            score: 88,
+            riskLevel: "low",
+            agentRuns: [],
+            findings: [],
+            createdAt: now,
+          },
+        }],
+      });
     }
     if (path === "/workflow-runtime/overview") return json({ definition, nodeTypes });
     if (path === "/workflow-runtime/definitions") return json({ definitions: [summary] });

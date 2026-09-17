@@ -1,5 +1,5 @@
 import React from "react";
-import { Puzzle, Zap } from "lucide-react";
+import { ArrowLeft, Puzzle, Zap } from "lucide-react";
 import { EmptyState } from "../design-system/EmptyState";
 import { ButtonLink } from "../design-system/Button";
 import { useI18n } from "../i18n";
@@ -13,6 +13,11 @@ export function ComingSoonPage({ kind }: { kind: ComingSoonKind }) {
 
   return (
     <div className="ds-page coming-soon-page">
+      <div className="coming-soon-page__back">
+        <ButtonLink to="/inbox" variant="ghost" size="sm" icon={<ArrowLeft size={13} />}>
+          {zh ? "返回审查工作台" : "Back to review workbench"}
+        </ButtonLink>
+      </div>
       <EmptyState
         icon={isAutomation ? <Zap size={20} /> : <Puzzle size={20} />}
         title={
@@ -30,11 +35,16 @@ export function ComingSoonPage({ kind }: { kind: ComingSoonKind }) {
               : "Extension points reserved — no fake marketplace listings.")
         }
         action={
-          isAutomation ? (
-            <ButtonLink to="/workflows" variant="outline" size="sm">
-              {zh ? "打开工作流 Studio" : "Open Workflow Studio"}
+          <div className="coming-soon-page__actions">
+            {isAutomation ? (
+              <ButtonLink to="/workflows" variant="outline" size="sm">
+                {zh ? "打开工作流 Studio" : "Open Workflow Studio"}
+              </ButtonLink>
+            ) : null}
+            <ButtonLink to="/inbox" variant="outline" size="sm">
+              {zh ? "返回工作台" : "Return to workbench"}
             </ButtonLink>
-          ) : undefined
+          </div>
         }
       />
     </div>

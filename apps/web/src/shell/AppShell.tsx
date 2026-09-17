@@ -170,6 +170,15 @@ export const AppShell: React.FC<AppShellProps> = ({
   const activeRepo = useMemo(() => {
     if (routeRepositoryId) return repositories.find(r => r.id === routeRepositoryId);
     if (path.startsWith("/repositories/")) return undefined;
+    try {
+      const stored = sessionStorage.getItem("consistency.selectedRepo.v1");
+      if (stored) {
+        const found = repositories.find(r => r.id === stored);
+        if (found) return found;
+      }
+    } catch {
+      // ignore
+    }
     return repositories[0];
   }, [repositories, routeRepositoryId, path]);
 
@@ -263,16 +272,28 @@ export const AppShell: React.FC<AppShellProps> = ({
   const apiConnected = health?.ok === true && !healthUnavailable;
   const directoryRepo = repositories.find(r => r.id === directoryRepoId);
 
+  const rememberRepo = (repo: Repository) => {
+    try {
+      sessionStorage.setItem("consistency.selectedRepo.v1", repo.id);
+    } catch {
+      // ignore quota / private mode
+    }
+  };
+
   const openRepoStatus = (repo: Repository) => {
+    rememberRepo(repo);
     setRelatedFocus("status");
     navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`);
   };
 
   const openRepoDirectory = (repo: Repository) => {
+    rememberRepo(repo);
     setDirectoryRepoId(repo.id);
   };
 
   const selectRepo = (repo: Repository) => {
+    rememberRepo(repo);
+    setRelatedFocus(null);
     navigate(`/repositories/${encodeURIComponent(repo.id)}/overview`);
   };
 

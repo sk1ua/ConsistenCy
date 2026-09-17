@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { FolderTree, FileCode2, Loader2 } from "lucide-react";
 import { api } from "../api/client";
@@ -13,20 +14,25 @@ export interface RepoDirectoryPanelProps {
   repositoryId: string;
   displayName: string;
   locale: "zh-CN" | "en-US";
+  /** Optional override; default navigates to the repo changes tab. */
+  onOpenFile?: (path: string) => void;
 }
 
 /**
- * Minimal directory/tree panel. Full VCS tree API is not exposed yet;
- * surface working-tree changed + untracked paths as an honest stub tree.
+ * Directory panel for a repository.
+ * Full VCS tree API is not exposed yet — present working-tree changed + untracked
+ * paths clearly as "变更文件" / changed files. Clicking a file opens the changes tab.
  */
 export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
   isOpen,
   onClose,
   repositoryId,
   displayName,
-  locale
+  locale,
+  onOpenFile
 }) => {
   const zh = locale === "zh-CN";
+  const navigate = useNavigate();
   const gitStatusQuery = useQuery({
     queryKey: workspaceQueryKeys.repositoryGitStatus(repositoryId),
     queryFn: () => api.repositoryGitStatus(repositoryId),
@@ -41,15 +47,26 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
     ...untracked.map(path => ({ path, kind: "untracked" as const }))
   ];
 
+  const openFile = (path: string) => {
+    if (onOpenFile) {
+      onOpenFile(path);
+      return;
+    }
+    onClose();
+    navigate(`/repositories/${encodeURIComponent(repositoryId)}/changes`, {
+      state: { highlightPath: path }
+    });
+  };
+
   return (
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
-      title={zh ? `仓库目录 · ${displayName}` : `Repo directory · ${displayName}`}
+      title={zh ? `变更文件 · ${displayName}` : `Changed files · ${displayName}`}
       description={
         zh
-          ? "完整目录树即将接入；当前展示工作区变更与未跟踪文件。"
-          : "Full tree API coming soon; showing working-tree changes and untracked files."
+          ? "完整目录树尚未接入；当前列出工作区变更与未跟踪文件。点击文件可打开变更视图。"
+          : "Full tree API not available yet — listing working-tree changes and untracked files. Click a file to open the changes view."
       }
     >
       {gitStatusQuery.isLoading ? (
@@ -62,17 +79,40 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
           compact
           icon={<FolderTree size={20} />}
           title={zh ? "工作区干净" : "Clean working tree"}
-          description={zh ? "暂无变更文件可列。完整目录树即将接入。" : "No changed files. Full directory tree coming soon."}
+          description={
+            zh
+              ? "暂无变更文件。完整目录树即将接入；可前往变更标签确认。"
+              : "No changed files. Full directory tree coming soon — open the Changes tab to confirm."
+          }
+          action={
+            <button
+              type="button"
+              className="related-card__text-btn"
+              onClick={() => {
+                onClose();
+                navigate(`/repositories/${encodeURIComponent(repositoryId)}/changes`);
+              }}
+            >
+              {zh ? "打开变更视图" : "Open changes view"}
+            </button>
+          }
         />
       ) : (
-        <ul className="repo-directory-list">
+        <ul className="repo-directory-list" aria-label={zh ? "变更文件" : "Changed files"}>
           {entries.map(entry => (
             <li key={`${entry.kind}-${entry.path}`}>
-              <FileCode2 size={13} />
-              <span className="mono">{entry.path}</span>
-              <Badge variant="neutral" size="sm">
-                {entry.kind === "untracked" ? (zh ? "未跟踪" : "untracked") : (zh ? "变更" : "changed")}
-              </Badge>
+              <button
+                type="button"
+                className="repo-directory-list__item"
+                onClick={() => openFile(entry.path)}
+                title={zh ? "在变更视图中打开" : "Open in changes view"}
+              >
+                <FileCode2 size={13} />
+                <span className="mono">{entry.path}</span>
+                <Badge variant="neutral" size="sm">
+                  {entry.kind === "untracked" ? (zh ? "未跟踪" : "untracked") : (zh ? "变更" : "changed")}
+                </Badge>
+              </button>
             </li>
           ))}
         </ul>

@@ -32,24 +32,37 @@ function Card({
   children,
   highlighted,
   cardRef,
-  icon
+  icon,
+  onActivate,
+  activateLabel
 }: {
   title: string;
   children: React.ReactNode;
   highlighted?: boolean;
   cardRef?: React.RefObject<HTMLElement | null>;
   icon?: React.ReactNode;
+  onActivate?: () => void;
+  activateLabel?: string;
 }) {
   return (
     <section
       ref={cardRef as React.RefObject<HTMLElement | null>}
-      className={`related-card${highlighted ? " related-card--focus" : ""}`}
+      className={`related-card${highlighted ? " related-card--focus" : ""}${onActivate ? " related-card--nav" : ""}`}
     >
       <header className="related-card__head">
         {icon}
         <span>{title}</span>
       </header>
       <div className="related-card__body">{children}</div>
+      {onActivate && (
+        <button
+          type="button"
+          className="related-card__text-btn related-card__jump"
+          onClick={onActivate}
+        >
+          {activateLabel}
+        </button>
+      )}
     </section>
   );
 }
@@ -96,7 +109,11 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
   const latestJob = repoJobs[0];
   const latestReport = latestJob?.report;
 
-  if (!repository) {
+  const repoBase = repositoryId
+    ? `/repositories/${encodeURIComponent(repositoryId)}`
+    : null;
+
+  if (!repository || !repoBase) {
     return (
       <aside className="related-cards-rail" aria-label={zh ? "相关信息" : "Related"}>
         <p className="related-card__muted" style={{ padding: "8px 4px", margin: 0 }}>
@@ -117,6 +134,8 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
         icon={<Activity size={12} />}
         highlighted={focus === "status"}
         cardRef={statusCardRef}
+        onActivate={() => navigate(`${repoBase}/overview`)}
+        activateLabel={zh ? "打开概览" : "Open overview"}
       >
         <div className="related-card__meta">
           <span className="related-card__name">{repository.displayName}</span>
@@ -157,80 +176,92 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
         </div>
       </Card>
 
-      {(latestJob || focus === "review") && (
-        <Card
-          title={zh ? "最近审查" : "Recent review"}
-          icon={<PlayCircle size={12} />}
-          highlighted={focus === "review"}
-        >
-          {!latestJob ? (
-            <p className="related-card__muted">
-              {zh ? "尚无审查" : "No reviews yet"}
-            </p>
-          ) : (
-            <button
-              type="button"
-              className="related-card__link"
-              onClick={() => navigate(`/runs/${encodeURIComponent(latestJob.id)}/overview`)}
+      <Card
+        title={zh ? "最近审查" : "Recent review"}
+        icon={<PlayCircle size={12} />}
+        highlighted={focus === "review"}
+        onActivate={() => navigate(`${repoBase}/reviews`)}
+        activateLabel={zh ? "打开审查列表" : "Open reviews"}
+      >
+        {!latestJob ? (
+          <p className="related-card__muted">
+            {zh ? "尚无审查" : "No reviews yet"}
+          </p>
+        ) : (
+          <button
+            type="button"
+            className="related-card__link"
+            onClick={() => navigate(`/runs/${encodeURIComponent(latestJob.id)}/overview`)}
+          >
+            <Badge
+              variant={
+                latestJob.status === "succeeded"
+                  ? "success"
+                  : latestJob.status === "running"
+                    ? "warning"
+                    : latestJob.status === "failed"
+                      ? "danger"
+                      : "neutral"
+              }
+              size="sm"
             >
-              <Badge
-                variant={
-                  latestJob.status === "succeeded"
-                    ? "success"
-                    : latestJob.status === "running"
-                      ? "warning"
-                      : latestJob.status === "failed"
-                        ? "danger"
-                        : "neutral"
-                }
-                size="sm"
-              >
-                {latestJob.status.toUpperCase()}
-              </Badge>
-              <span>
-                {latestJob.pullRequestNumber
-                  ? `PR #${latestJob.pullRequestNumber}`
-                  : (zh ? "工作区审查" : "Working tree")}
+              {latestJob.status.toUpperCase()}
+            </Badge>
+            <span>
+              {latestJob.pullRequestNumber
+                ? `PR #${latestJob.pullRequestNumber}`
+                : (zh ? "工作区审查" : "Working tree")}
+            </span>
+            {latestReport?.score !== undefined && (
+              <span className="related-card__score">
+                {zh ? `${latestReport.score} 分` : `${latestReport.score}`}
               </span>
-              {latestReport?.score !== undefined && (
-                <span className="related-card__score">
-                  {zh ? `${latestReport.score} 分` : `${latestReport.score}`}
-                </span>
-              )}
-            </button>
-          )}
-        </Card>
-      )}
+            )}
+          </button>
+        )}
+      </Card>
 
-      {(enabledBindings.length > 0 || focus === "workflow") && (
-        <Card
-          title={zh ? "工作流" : "Workflow"}
-          icon={<Workflow size={12} />}
-          highlighted={focus === "workflow"}
-        >
-          {bindingsQuery.isError ? (
-            <p className="related-card__muted">
-              {zh ? "绑定暂不可用" : "Bindings unavailable"}
-            </p>
-          ) : (
-            <ul className="related-card__list">
-              {enabledBindings.slice(0, 3).map(b => (
-                <li key={b.definitionId}>
+      <Card
+        title={zh ? "工作流" : "Workflow"}
+        icon={<Workflow size={12} />}
+        highlighted={focus === "workflow"}
+        onActivate={() => navigate(`${repoBase}/workflows`)}
+        activateLabel={zh ? "打开工作流绑定" : "Open workflows"}
+      >
+        {bindingsQuery.isError ? (
+          <p className="related-card__muted">
+            {zh ? "绑定暂不可用" : "Bindings unavailable"}
+          </p>
+        ) : enabledBindings.length === 0 ? (
+          <p className="related-card__muted">
+            {zh ? "暂无启用绑定" : "No enabled bindings"}
+          </p>
+        ) : (
+          <ul className="related-card__list">
+            {enabledBindings.slice(0, 3).map(b => (
+              <li key={b.definitionId}>
+                <button
+                  type="button"
+                  className="related-card__link"
+                  onClick={() => navigate(`${repoBase}/workflows`)}
+                >
                   <span className="related-dot" style={{ background: "var(--success)" }} />
                   <span className="mono">{b.definitionId}</span>
                   <span className="related-card__muted">{b.triggerMode}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
-      {latestReport && (
+      {latestReport && latestJob && (
         <Card
           title={zh ? "证据" : "Evidence"}
           icon={<Activity size={12} />}
           highlighted={focus === "evidence"}
+          onActivate={() => navigate(`/runs/${encodeURIComponent(latestJob.id)}/evidence`)}
+          activateLabel={zh ? "查看证据" : "Open evidence"}
         >
           <div className="related-card__meta">
             <div className="related-card__row">
@@ -249,15 +280,6 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
                 <strong>{latestReport.findings.length}</strong>
               </div>
             )}
-            <button
-              type="button"
-              className="related-card__text-btn"
-              onClick={() =>
-                navigate(`/runs/${encodeURIComponent(latestJob!.id)}/evidence`)
-              }
-            >
-              {zh ? "查看证据" : "Open evidence"}
-            </button>
           </div>
         </Card>
       )}
