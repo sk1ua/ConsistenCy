@@ -53,4 +53,18 @@ describe("resolveReviewModel", () => {
     expect(resolveReviewModel({ config: configWith({ LLM_PROVIDER: "  DeepSeek  " }) }))
       .toEqual({ provider: "deepseek", model: "deepseek-v4-flash" });
   });
+
+  it("prefers canonical model over legacy name when both are set", () => {
+    expect(resolveReviewModel({
+      config: baseConfig,
+      override: { provider: "deepseek", name: "legacy-name", model: "canonical-model" }
+    })).toEqual({ provider: "deepseek", model: "canonical-model" });
+  });
+
+  it("still accepts legacy name when model is omitted", () => {
+    expect(resolveReviewModel({
+      config: baseConfig,
+      override: { provider: "deepseek", name: "legacy-name" }
+    })).toEqual({ provider: "deepseek", model: "legacy-name" });
+  });
 });

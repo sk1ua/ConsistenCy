@@ -30,7 +30,9 @@ export function resolveReviewModel(options: {
     );
   }
 
-  const pinnedModel = options.override?.name ?? options.override?.model
+  // Canonical field is `model`. Legacy `name` remains accepted for older
+  // clients; when both are present, `model` wins.
+  const pinnedModel = options.override?.model ?? options.override?.name
     ?? providerModelPin(options.config, provider)
     ?? "";
   return { provider, model: pinnedModel.trim() };

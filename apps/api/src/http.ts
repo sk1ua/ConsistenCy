@@ -1564,7 +1564,14 @@ const routes: Route[] = [
     auth: true,
     handler: async ({ request, response, allowedOrigins, options, match, url }) => {
       const repositoryId = decodeURIComponent(match?.[1] ?? "");
-      const depth = Math.min(50, Math.max(1, Number(url.searchParams.get("depth") || 30)));
+      const depthRaw = url.searchParams.get("depth");
+      let depth = 30;
+      if (depthRaw !== null) {
+        if (!/^[1-9]\d*$/.test(depthRaw)) {
+          throw new ApiError("Query parameter depth must be a positive integer", "INVALID_DEPTH", 400);
+        }
+        depth = Math.min(50, Number(depthRaw));
+      }
       const localPath = resolveLocalPathForRepository(repositoryId, options);
       if (!localPath) {
         sendJson(request, response, 200, {
