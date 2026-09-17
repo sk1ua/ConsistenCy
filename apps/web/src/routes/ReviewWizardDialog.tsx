@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, GitBranch, LoaderCircle, PlayCircle, X } from "lucide-react";
 import type { Repository, WorkflowRuntimeDefinitionSummary, WorkflowRuntimeRunV2 } from "@consistency/schema";
 import { ApiRequestError, api } from "../api/client";
+import { workspaceQueryKeys } from "../query/client";
 import { Button } from "../design-system/Button";
 import { useI18n } from "../i18n";
 
@@ -69,7 +70,7 @@ export function ReviewWizardDialog({
    * (mount → cleanup → mount) cannot leave it permanently disabled.
    */
   const pollActiveRef = useRef(true);
-  const definitionsCacheKey = ["workflow-runtime-definitions"];
+  const definitionsCacheKey = workspaceQueryKeys.workflowRuntimeDefinitions;
 
   // Reuse the SAME query key the RepositoryWorkflowsView caches under.
   const cachedDefinitions = queryClient.getQueryData<WorkflowRuntimeDefinitionSummary[]>(definitionsCacheKey);
@@ -102,8 +103,8 @@ export function ReviewWizardDialog({
   }, []);
 
   async function invalidateBindingSurfaces() {
-    await queryClient.invalidateQueries({ queryKey: ["workflow-runtime-bindings", repositoryId] });
-    await queryClient.invalidateQueries({ queryKey: ["workflow-runtime-repo-runs", repositoryId] });
+    await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.workflowRuntimeBindings(repositoryId) });
+    await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.workflowRuntimeRunsForRepository(repositoryId) });
   }
 
   const bindAndPrepareRun = useMutation({

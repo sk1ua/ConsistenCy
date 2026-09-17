@@ -25,7 +25,12 @@ export const workspaceQueryKeys = {
   catalogKernelSyscalls: ["workspace", "catalog-kernel-syscalls"] as const,
   catalogEngineAllowlist: ["workspace", "catalog-engine-allowlist"] as const,
   workflowRuntimeRuns: ["workspace", "workflow-runtime-runs"] as const,
-  workflowRuntimeRun: (runId: string) => ["workspace", "workflow-runtime-run", runId] as const
+  workflowRuntimeRun: (runId: string) => ["workspace", "workflow-runtime-run", runId] as const,
+  workflowRuntimeDefinitions: ["workspace", "workflow-runtime-definitions"] as const,
+  workflowRuntimeBindings: (repositoryId: string) =>
+    ["workspace", "workflow-runtime-bindings", repositoryId] as const,
+  workflowRuntimeRunsForRepository: (repositoryId: string) =>
+    ["workspace", "workflow-runtime-repo-runs", repositoryId] as const
 };
 
 export function createWorkspaceQueryClient(): QueryClient {
