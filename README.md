@@ -119,6 +119,8 @@ Packaged desktop builds store persistent SQLite databases and configuration unde
 
 ConsistenCy v3 is a **real-LLM-only runtime** (no demo/mock runtime modes). Review execution and Notebook reasoning require configuring a supported model provider:
 
+> CI and unit tests may still use an internal mock LLM double; that is not a user-facing runtime mode.
+
 - **DeepSeek**: Set `DEEPSEEK_API_KEY` (and optional `DEEPSEEK_MODEL`, default: `deepseek-v4-flash`).
 - **OpenAI**: Set `OPENAI_API_KEY` (and optional `OPENAI_MODEL`, default: `gpt-4.1-mini`).
 - **Anthropic**: Set `ANTHROPIC_API_KEY` (and optional `ANTHROPIC_MODEL`, default: `claude-sonnet-4-5`).

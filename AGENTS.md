@@ -5,7 +5,8 @@
 - Treat ConsistenCy as a repository-native Agent Harness for evidence-grounded review: Kernel capability security, Cordis reactive harness, and deterministic Evidence Engine.
 - Keep the TypeScript API responsible for HTTP, persistence, and workload runtime. Keep the Python engine deterministic and JSON-over-stdio compatible.
 - Treat risk scores as triage signals grounded in file paths, findings, signal breakdowns, and confidence.
-- ConsistenCy v3 is real-data and real-LLM only (DeepSeek or OpenAI); there is no user-facing demo or mock runtime mode.
+- ConsistenCy v3 product runtimes are real-data and real-LLM only (DeepSeek, OpenAI, or Anthropic via the bundled Pi runtime); there is no user-facing demo or mock runtime mode.
+- CI and isolated unit tests may use an internal `LLM_PROVIDER=mock` / `MockLLMProvider` double for deterministic orchestration checks. That double is never exposed as a product runtime setting.
 
 ## Runtime and setup
 
