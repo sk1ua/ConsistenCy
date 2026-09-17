@@ -102,11 +102,11 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
       <div className="ds-page review-workbench">
         <EmptyState
           icon={null}
-          title={zh ? "连接仓库以开始审查" : "Connect a repository to start reviewing"}
+          title={zh ? "连接仓库后开始审查" : "Connect a repository"}
           description={
             zh
-              ? "从左侧连接本地或远程仓库，即可开始证据审查。"
-              : "Connect a local or remote repository on the left to start evidence review."
+              ? "从左侧连接仓库，即可发起证据审查。"
+              : "Connect a repository on the left to start evidence review."
           }
         />
       </div>
@@ -201,8 +201,8 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
             <EmptyState
               compact
               icon={null}
-              title={zh ? "暂无审查记录" : "No reviews yet"}
-              description={zh ? "点击「开始审查」发起首次审查。" : "Use Start review for the first run."}
+              title={zh ? "暂无审查" : "No reviews yet"}
+              description={zh ? "用「开始审查」发起首次运行。" : "Start review to create the first run."}
             />
           ) : (
             <div className="review-workbench__list">
@@ -255,11 +255,11 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
             <EmptyState
               compact
               icon={null}
-              title={zh ? "暂无变更摘要" : "No diff summary yet"}
+              title={zh ? "暂无变更" : "No changes"}
               description={
                 zh
-                  ? "工作区变更与最近审查证据会显示在这里。"
-                  : "Working-tree changes and latest evidence hooks land here."
+                  ? "工作区变更与证据摘要会出现在这里。"
+                  : "Working-tree changes and evidence appear here."
               }
             />
           ) : (

@@ -190,7 +190,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   const breadcrumbs = useMemo<BreadcrumbItem[]>(() => {
     const items: BreadcrumbItem[] = [
-      { label: "ConsistenCy", to: "/inbox", icon: <FolderGit2 size={13} /> }
+      { label: "ConsistenCy", to: "/inbox" }
     ];
 
     if (path.startsWith("/automation")) {
@@ -440,11 +440,11 @@ export const AppShell: React.FC<AppShellProps> = ({
                   <span className="agent-shell__provenance-label">
                     {modelProvider === "none" || health?.llmConfigured === false
                       ? (zh ? "LLM 未配置" : "LLM unconfigured")
-                      : `${modelProvider}${activeModel ? ` · ${activeModel}` : ""}`}
+                      : (activeModel || modelProvider)}
                   </span>
                   <span className="agent-shell__provenance-sep" aria-hidden="true">·</span>
                   <span className="agent-shell__provenance-api">
-                    {apiConnected ? (zh ? "API 已连接" : "API connected") : (zh ? "API 未知" : "API unavailable")}
+                    {apiConnected ? "API" : (zh ? "API 未知" : "API off")}
                   </span>
                 </button>
 

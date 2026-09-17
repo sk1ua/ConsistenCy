@@ -190,7 +190,6 @@ describe("Locked three-column AppShell", () => {
         }
       }
     });
-    expect(htmlConfigured).toContain("DeepSeek");
     expect(htmlConfigured).toContain("deepseek-chat");
     expect(htmlConfigured).toContain("agent-shell__provenance");
     expect(htmlConfigured).not.toContain("agent-shell__status");
@@ -244,7 +243,19 @@ describe("Locked three-column AppShell", () => {
     expect(htmlId).toContain("location-breadcrumbs");
   });
 
-  it("safely handles malformed percent-encoded path segments without throwing", () => {
+  it("keeps quiet repo action chips and no accent selection rail", () => {
+    const html = renderShell("/inbox", { locale: "zh-CN", repositories: [demoRepo] });
+    expect(html).toContain("agent-shell__repo-action");
+    expect(html).toContain("情况");
+    expect(html).toContain("目录");
+    expect(html).not.toContain("activity-rail");
+    expect(html).not.toContain("agent-shell__composer");
+    // provenance stays in top bar, quieter API label
+    expect(html).toContain("agent-shell__provenance");
+    expect(html).toContain("API");
+  });
+
+    it("safely handles malformed percent-encoded path segments without throwing", () => {
     const htmlMalformedRepo = renderShell("/repositories/%A/history", { repositories: [] });
     expect(htmlMalformedRepo).toContain("Invalid repository ID");
     expect(htmlMalformedRepo).toContain("location-breadcrumbs");

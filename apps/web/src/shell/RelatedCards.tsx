@@ -99,8 +99,8 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
   if (!repository) {
     return (
       <aside className="related-cards-rail" aria-label={zh ? "相关信息" : "Related"}>
-        <p className="related-card__muted" style={{ padding: "8px 4px" }}>
-          {zh ? "从左侧选择一个仓库。" : "Select a repository on the left."}
+        <p className="related-card__muted" style={{ padding: "8px 4px", margin: 0 }}>
+          {zh ? "选择左侧仓库。" : "Select a repository."}
         </p>
       </aside>
     );
@@ -157,48 +157,50 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
         </div>
       </Card>
 
-      <Card
-        title={zh ? "最近审查" : "Recent review"}
-        icon={<PlayCircle size={12} />}
-        highlighted={focus === "review"}
-      >
-        {!latestJob ? (
-          <p className="related-card__muted">
-            {zh ? "尚无审查记录" : "No reviews yet"}
-          </p>
-        ) : (
-          <button
-            type="button"
-            className="related-card__link"
-            onClick={() => navigate(`/runs/${encodeURIComponent(latestJob.id)}/overview`)}
-          >
-            <Badge
-              variant={
-                latestJob.status === "succeeded"
-                  ? "success"
-                  : latestJob.status === "running"
-                    ? "warning"
-                    : latestJob.status === "failed"
-                      ? "danger"
-                      : "neutral"
-              }
-              size="sm"
+      {(latestJob || focus === "review") && (
+        <Card
+          title={zh ? "最近审查" : "Recent review"}
+          icon={<PlayCircle size={12} />}
+          highlighted={focus === "review"}
+        >
+          {!latestJob ? (
+            <p className="related-card__muted">
+              {zh ? "尚无审查" : "No reviews yet"}
+            </p>
+          ) : (
+            <button
+              type="button"
+              className="related-card__link"
+              onClick={() => navigate(`/runs/${encodeURIComponent(latestJob.id)}/overview`)}
             >
-              {latestJob.status.toUpperCase()}
-            </Badge>
-            <span>
-              {latestJob.pullRequestNumber
-                ? `PR #${latestJob.pullRequestNumber}`
-                : (zh ? "工作区审查" : "Working tree")}
-            </span>
-            {latestReport?.score !== undefined && (
-              <span className="related-card__score">
-                {zh ? `${latestReport.score} 分` : `${latestReport.score}`}
+              <Badge
+                variant={
+                  latestJob.status === "succeeded"
+                    ? "success"
+                    : latestJob.status === "running"
+                      ? "warning"
+                      : latestJob.status === "failed"
+                        ? "danger"
+                        : "neutral"
+                }
+                size="sm"
+              >
+                {latestJob.status.toUpperCase()}
+              </Badge>
+              <span>
+                {latestJob.pullRequestNumber
+                  ? `PR #${latestJob.pullRequestNumber}`
+                  : (zh ? "工作区审查" : "Working tree")}
               </span>
-            )}
-          </button>
-        )}
-      </Card>
+              {latestReport?.score !== undefined && (
+                <span className="related-card__score">
+                  {zh ? `${latestReport.score} 分` : `${latestReport.score}`}
+                </span>
+              )}
+            </button>
+          )}
+        </Card>
+      )}
 
       {(enabledBindings.length > 0 || focus === "workflow") && (
         <Card

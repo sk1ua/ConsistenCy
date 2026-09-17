@@ -246,9 +246,14 @@
 
 /* ---------- Repository overview: flat panels ---------- */
 .repo-detail-page {
-  padding: 20px 28px 32px;
-  max-width: 1080px;
+  padding: 24px 32px 32px;
+  max-width: 1040px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: var(--font-ui);
+  box-sizing: border-box;
 }
 
 .repo-detail-header {
@@ -257,14 +262,14 @@
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 16px;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .repo-detail-icon {
   width: 34px;
   height: 34px;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   background: var(--surface-subtle);
   color: var(--muted-strong);
   border: 1px solid var(--border-subtle);
@@ -274,22 +279,67 @@
   flex-shrink: 0;
 }
 
-.repo-overview-readiness {
-  padding: 10px 0 14px;
+.repo-detail-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.35px;
+  font-family: var(--font-ui);
+}
+
+.repo-detail-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.repo-detail-tabs {
+  margin: 0;
+  padding: 0;
+}
+
+.repo-detail-page .ds-tabs-nav {
+  gap: 0;
   border-bottom: 1px solid var(--border-subtle);
+  margin: 0;
+}
+
+.repo-detail-page .ds-tab-button {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 0;
+  background: transparent;
+}
+
+.repo-detail-page .ds-tab-button--active {
+  border-bottom-color: var(--foreground);
+  color: var(--foreground);
+  font-weight: 600;
+  background: transparent;
+}
+
+.repo-overview-readiness {
+  padding: 0;
+  border-bottom: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
   background: transparent;
+  color: var(--muted-strong);
 }
 
 .repo-overview-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0 28px;
-  margin-top: 4px;
+  gap: 0 24px;
+  margin-top: 0;
 }
 
 .repo-overview-panel {
@@ -297,21 +347,23 @@
   border: 0;
   border-radius: 0;
   overflow: hidden;
-  padding-top: 14px;
+  padding-top: 0;
+  min-height: 160px;
 }
 
 .repo-overview-panel + .repo-overview-panel {
   border-left: 1px solid var(--border-subtle);
-  padding-left: 28px;
+  padding-left: 24px;
 }
 
 .repo-overview-panel-head {
-  padding: 0 0 10px;
+  padding: 0 0 8px;
   border-bottom: 1px solid var(--border-subtle);
   background: transparent;
-  font-weight: 600;
+  font-weight: 650;
   font-size: 13px;
   color: var(--foreground);
+  margin-bottom: 8px;
 }
 
 .repo-overview-empty {
@@ -606,7 +658,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 14px 10px;
+  padding: 16px 16px 8px;
 }
 
 .agent-shell__brand .shell-brand-mark {
@@ -642,12 +694,12 @@
 }
 
 .agent-shell__search {
-  margin: 0 12px 10px;
+  margin: 0 16px 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border-radius: 10px;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
   border: 1px solid var(--border-subtle);
   background: var(--surface);
   color: var(--muted);
@@ -666,8 +718,8 @@
 .agent-shell__entries {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 0 10px 8px;
+  gap: 0;
+  padding: 0 8px 8px;
 }
 
 .agent-shell__entry {
@@ -678,8 +730,8 @@
   border: 0;
   background: transparent;
   color: var(--muted-strong);
-  padding: 8px 10px;
-  border-radius: 10px;
+  padding: 8px;
+  border-radius: 8px;
   font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 500;
@@ -703,7 +755,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 4px 10px 8px;
+  padding: 0 8px 8px;
   overflow: hidden;
 }
 
@@ -717,7 +769,7 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
-  padding: 6px 4px 10px;
+  padding: 8px 8px 8px;
 }
 
 .agent-shell__repo-list {
@@ -732,10 +784,15 @@
 
 .agent-shell__repo-row {
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   overflow: hidden;
-  padding: 2px 0 4px;
+  padding: 0;
+  transition: background var(--duration-fast, 120ms) ease;
+}
+
+.agent-shell__repo-row:hover {
+  background: color-mix(in srgb, var(--agent-wash, var(--surface-subtle)) 70%, transparent);
 }
 
 .agent-shell__repo-row.is-active {
@@ -745,8 +802,9 @@
   outline: none;
 }
 
-.agent-shell__repo-row:hover {
-  background: var(--agent-wash, var(--surface-subtle));
+.agent-shell__repo-row.is-active .agent-shell__repo-main {
+  font-weight: 650;
+  color: var(--foreground);
 }
 
 .agent-shell__repo-main {
@@ -756,13 +814,13 @@
   width: 100%;
   border: 0;
   background: transparent;
-  padding: 8px 10px 2px;
+  padding: 8px 8px 4px;
   cursor: pointer;
   text-align: left;
-  color: var(--foreground);
+  color: var(--muted-strong);
   font-family: var(--font-ui);
   font-size: 13px;
-  font-weight: 550;
+  font-weight: 500;
 }
 
 .agent-shell__repo-main span {
@@ -773,28 +831,37 @@
 
 .agent-shell__repo-actions {
   display: flex;
-  gap: 2px;
-  padding: 0 8px 6px 30px;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 8px 28px;
 }
 
 .agent-shell__repo-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  border: 0;
+  gap: 4px;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
-  border-radius: 6px;
-  padding: 3px 6px;
+  border-radius: 999px;
+  padding: 2px 8px;
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
+  line-height: 1.3;
+}
+
+.agent-shell__repo-row:hover .agent-shell__repo-action,
+.agent-shell__repo-row.is-active .agent-shell__repo-action {
+  border-color: var(--border-subtle);
+  background: var(--surface);
 }
 
 .agent-shell__repo-action:hover {
   color: var(--foreground);
+  border-color: var(--border);
   background: var(--surface);
 }
 
@@ -803,7 +870,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -824,7 +891,7 @@
 }
 
 .agent-shell__topbar {
-  height: 46px;
+  height: 40px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: transparent !important;
@@ -832,7 +899,7 @@
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
-  gap: 12px;
+  gap: 8px;
   font-family: var(--font-ui);
 }
 
@@ -869,19 +936,19 @@
 .shell-topbar-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .agent-shell__provenance {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 280px;
-  margin-right: 4px;
-  padding: 3px 9px 3px 7px;
-  border: 1px solid var(--border-subtle);
+  max-width: 220px;
+  margin-right: 2px;
+  padding: 2px 8px 2px 6px;
+  border: 0;
   border-radius: 999px;
-  background: var(--surface-subtle);
+  background: transparent;
   color: var(--muted);
   font-family: var(--font-ui);
   font-size: 11px;
@@ -893,9 +960,8 @@
 }
 
 .agent-shell__provenance:hover {
-  color: var(--foreground);
-  border-color: var(--border);
-  background: var(--surface);
+  color: var(--muted-strong);
+  background: var(--surface-subtle);
 }
 
 .agent-shell__provenance-dot {
@@ -929,12 +995,12 @@
 .related-cards-rail {
   border-left: 1px solid var(--border-subtle);
   background: transparent;
-  padding: 16px 14px 20px;
+  padding: 16px 12px 24px;
   overflow-y: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   font-family: var(--font-ui);
 }
 
@@ -949,9 +1015,9 @@
 
 .related-card {
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--agent-paper, var(--surface));
-  padding: 12px 12px 12px;
+  padding: 12px;
   box-shadow: none;
 }
 
@@ -1066,12 +1132,12 @@
 
 /* Review workbench (center home) */
 .review-workbench {
-  padding: 28px 36px 36px;
+  padding: 24px 32px 32px;
   max-width: 1040px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   min-height: 100%;
   box-sizing: border-box;
   font-family: var(--font-ui);
@@ -1082,7 +1148,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding-bottom: 14px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -1135,7 +1201,13 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  padding-bottom: 4px;
+  padding: 0;
+  color: var(--muted-strong);
+}
+
+.review-workbench__readiness strong {
+  font-weight: 600;
+  color: var(--foreground);
 }
 
 .review-workbench__muted {
@@ -1149,12 +1221,19 @@
 .review-workbench__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0 28px;
+  gap: 0 24px;
   flex: 1;
+  min-height: 0;
+}
+
+.review-workbench__panel {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
 }
 
 .review-workbench__panel h2 {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 13px;
   font-weight: 650;
   padding-bottom: 8px;
@@ -1163,7 +1242,14 @@
 
 .review-workbench__panel + .review-workbench__panel {
   border-left: 1px solid var(--border-subtle);
-  padding-left: 28px;
+  padding-left: 24px;
+}
+
+.review-workbench__panel .ds-empty-state--compact {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .review-workbench__list {
@@ -1271,9 +1357,62 @@
 }
 
 .coming-soon-page {
-  padding: 48px 28px;
-  max-width: 640px;
+  padding: 48px 32px;
+  max-width: 520px;
   margin: 0 auto;
+  font-family: var(--font-ui);
+}
+
+.coming-soon-page .ds-empty-state {
+  border: 0;
+  background: transparent;
+  padding: 24px 8px !important;
+}
+
+.coming-soon-page .ds-empty-state-icon {
+  color: var(--muted-strong);
+  opacity: 0.85;
+}
+
+.coming-soon-page .ds-empty-state-title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+
+.coming-soon-page .ds-empty-state-description {
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 36em;
+  line-height: 1.5;
+}
+
+
+/* Quiet breadcrumb under agent shell */
+.ds-root.agent-shell .ds-breadcrumb,
+.ds-root.agent-shell .location-breadcrumbs {
+  gap: 2px;
+  font-size: 12.5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ds-root.agent-shell .ds-breadcrumb a:hover {
+  color: var(--foreground);
+}
+
+.ds-root.agent-shell .shell-search-button {
+  padding-inline: 8px;
+}
+
+.ds-root.agent-shell .shell-search-button .agent-shell__kbd {
+  display: none;
+}
+
+@media (min-width: 1200px) {
+  .ds-root.agent-shell .shell-search-button .agent-shell__kbd {
+    display: inline;
+  }
 }
 
 /* Hide right rail on narrow viewports */

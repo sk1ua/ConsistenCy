@@ -14,20 +14,20 @@ export function ComingSoonPage({ kind }: { kind: ComingSoonKind }) {
   return (
     <div className="ds-page coming-soon-page">
       <EmptyState
-        icon={isAutomation ? <Zap size={28} /> : <Puzzle size={28} />}
+        icon={isAutomation ? <Zap size={20} /> : <Puzzle size={20} />}
         title={
           isAutomation
-            ? (zh ? "自动化 · 即将接入" : "Automation · Coming soon")
-            : (zh ? "插件市场 · 即将接入" : "Plugin marketplace · Coming soon")
+            ? (zh ? "自动化即将接入" : "Automation coming soon")
+            : (zh ? "插件市场即将接入" : "Plugins coming soon")
         }
         description={
           isAutomation
             ? (zh
-              ? "自动化编排入口已预留。当前可通过工作流 Studio（Cmd+K → Workflows）管理绑定与触发。"
-              : "Automation entry is reserved. Use Workflow Studio (Cmd+K → Workflows) for bindings and triggers today.")
+              ? "入口已预留。当前可用工作流 Studio 管理绑定与触发。"
+              : "Entry reserved. Use Workflow Studio for bindings and triggers today.")
             : (zh
-              ? "插件市场尚未上线。Cordis 扩展点已预留，不会展示虚假插件数据。"
-              : "Plugin marketplace is not live yet. Cordis extension points are reserved; no fake listings.")
+              ? "扩展点已预留，暂无虚假插件列表。"
+              : "Extension points reserved — no fake marketplace listings.")
         }
         action={
           isAutomation ? (
