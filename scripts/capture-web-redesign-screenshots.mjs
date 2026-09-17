@@ -171,7 +171,18 @@ async function main() {
       });
     }
     if (path === "/repositories") return json({ repositories: [repo] });
-    if (path === "/automations") return json({ automations: [] });
+    if (path === "/automations") return json({ automations: [{
+      id: "automation-demo",
+      repositoryId: repo.id,
+      name: "PR safety gate",
+      trigger: { type: "repository_event", eventTypes: ["pull_request"], debounceMs: 5000 },
+      workflowRevisionId: revision.revisionId,
+      policyRevisionId: "policy-revision-demo",
+      executionProfile: "static_readonly",
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    }] });
     if (path === "/audit/capabilities") {
       return json({ notebook: false, workflowRuntime: true, publicPr: true });
     }
@@ -341,15 +352,38 @@ async function main() {
     } catch {
       // still capture
     }
+    // Prefer changes + highlight for 02: select README.md row so hunks/highlight show.
+    if (shot.file === "02-repository-overview.png") {
+      try {
+        const row = page.locator(".diff-tree-file", { hasText: "README.md" }).first();
+        await row.click({ timeout: 5000 });
+        await page.waitForTimeout(500);
+      } catch {
+        // keep default selection
+      }
+    }
     if (shot.file.includes("workflow")) {
       try {
-        await page.waitForSelector(".studio-library, .studio-graph, .runtime-studio", { timeout: 8000 });
+        await page.waitForSelector(".studio-library, .studio-graph, .runtime-studio, .run-shell-chrome, .report-page", { timeout: 8000 });
         await page.waitForTimeout(600);
       } catch {
         // capture whatever rendered
       }
     }
     const target = join(outDir, shot.file);
+    await page.screenshot({ path: target, fullPage: false });
+    console.log("wrote", target);
+  }
+
+  // Extra maturity shots (not part of 01-03 contract, but useful for review)
+  for (const extra of [
+    { hash: "#/automation", file: "04-automation-stub.png", wait: ".coming-soon-page--product, .coming-soon-hero" },
+    { hash: "#/plugins", file: "05-plugins-stub.png", wait: ".coming-soon-page--product, .coming-soon-hero" },
+  ]) {
+    await page.goto(`${baseURL.replace(/\/$/, "")}/${extra.hash}`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(800);
+    try { await page.waitForSelector(extra.wait, { timeout: 8000 }); } catch {}
+    const target = join(outDir, extra.file);
     await page.screenshot({ path: target, fullPage: false });
     console.log("wrote", target);
   }

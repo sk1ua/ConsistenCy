@@ -53,6 +53,7 @@ const LOCALES = {
     changedFiles: "Changed files",
     untrackedFile: "Untracked file",
     binaryFile: "Binary file not shown.",
+    noDiffContent: "No diff content yet",
     noTextChanges: "No text changes.",
     diffAria: "Code diff",
     noChangesToShow: "No changes to show.",
@@ -66,6 +67,7 @@ const LOCALES = {
     changedFiles: "变更文件",
     untrackedFile: "未跟踪文件",
     binaryFile: "二进制文件不显示。",
+    noDiffContent: "暂无 diff 内容",
     noTextChanges: "没有文本变更。",
     diffAria: "代码差异",
     noChangesToShow: "没有可显示的变更。",
@@ -88,10 +90,20 @@ export function RepositoryChangesView({ loading, error, data, highlightPath }: R
   const strings = LOCALES[locale === "zh-CN" ? "zh-CN" : "en-US"];
 
   const entries = useMemo(() => buildEntries(data), [data]);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [flashKey, setFlashKey] = useState<string | null>(null);
+  // Seed from highlightPath so SSR / first paint select the right file (and show its hunks).
+  const [selectedKey, setSelectedKey] = useState<string | null>(() =>
+    resolveHighlightKey(buildEntries(data), highlightPath)
+  );
+  const [flashKey, setFlashKey] = useState<string | null>(() =>
+    resolveHighlightKey(buildEntries(data), highlightPath)
+  );
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const appliedHighlight = useRef<string | null>(null);
+  const appliedHighlight = useRef<string | null>(
+    (() => {
+      const key = resolveHighlightKey(buildEntries(data), highlightPath);
+      return key && highlightPath ? `${highlightPath}:${key}` : null;
+    })()
+  );
 
   useEffect(() => {
     const fromHighlight = resolveHighlightKey(entries, highlightPath);
@@ -251,7 +263,11 @@ export function RepositoryChangesView({ loading, error, data, highlightPath }: R
             {selectedEntry.file.binary ? (
               <div className="metadata-only">{strings.binaryFile}</div>
             ) : selectedEntry.file.hunks.length === 0 ? (
-              <div className="empty-inline">{strings.noTextChanges}</div>
+              <div className="diff-empty-pane" role="status">
+                <FileCode2 size={20} />
+                <p>{strings.noDiffContent}</p>
+                <small>{strings.noTextChanges}</small>
+              </div>
             ) : (
               <div className="diff-grid" tabIndex={0} role="region" aria-label={strings.diffAria}>
                 {selectedEntry.file.hunks.map((hunk, i) => {

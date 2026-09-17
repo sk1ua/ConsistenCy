@@ -178,7 +178,7 @@ function openJob(job: ReviewJob) {
           jobs={jobs}
           reports={reports}
         />} />
-        <Route path="/automation" element={<ComingSoonPage kind="automation" />} />
+        <Route path="/automation" element={<ComingSoonPage kind="automation" automations={automations} />} />
         <Route path="/plugins" element={<ComingSoonPage kind="plugins" />} />
         <Route path="/repositories" element={queries.jobs.isPending && queries.repositories.isPending ? <RouteLoading label={zh ? "正在加载仓库来源" : "Loading repository sources"} /> : <RepositoriesPage
           jobs={jobs}

@@ -20,7 +20,7 @@ import { Button } from "../design-system/Button";
 import { Badge } from "../design-system/Badge";
 import { EmptyState } from "../design-system/EmptyState";
 import { ReviewComposerDialog } from "../routes/ReviewComposerDialog";
-import { isReviewStartDisabled, formatReviewMutationError } from "../routes/reviewStart";
+import { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError } from "../routes/reviewStart";
 import { openSettingsDialog } from "../settingsDialogStore";
 
 export interface ReviewWorkbenchProps {
@@ -162,7 +162,7 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           disabled={isReviewStartDisabled(prep)}
           title={
             isReviewStartDisabled(prep)
-              ? (prep?.blockingReasons[0] ?? (zh ? "审查尚未就绪" : "Review is not ready"))
+              ? reviewStartDisabledReason(prep, zh)
               : (zh ? "开始审查" : "Start Review")
           }
           onClick={() => setIsReviewOpen(true)}
@@ -207,8 +207,8 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
                 : (zh ? "当前没有可审查的变更" : "No reviewable changes")
             : (zh ? "正在读取准备状态…" : "Loading preparation…")}
         </span>
-        {prep && !prep.canStartReview && prep.blockingReasons[0] && (
-          <span className="review-workbench__warn">· {prep.blockingReasons[0]}</span>
+        {isReviewStartDisabled(prep) && (
+          <span className="review-workbench__warn">· {reviewStartDisabledReason(prep, zh)}</span>
         )}
         {prep && prep.model.default.provider === "none" && (
           <Button variant="outline" size="sm" onClick={openSettingsDialog}>
