@@ -200,31 +200,11 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
   const commits = commitsData?.commits ?? [];
 
   return (
-    <div style={{ padding: "16px 24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <div className="repo-detail-page">
       {/* 1. REPOSITORY HEADER (Compact Desktop Strip) */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingBottom: "14px",
-          borderBottom: "1px solid var(--border)",
-          marginBottom: "14px"
-        }}
-      >
+      <div className="repo-detail-header">
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div
-            style={{
-              width: "32px",
-              height: "32px",
-              borderRadius: "var(--ds-radius-md)",
-              background: "var(--primary-soft)",
-              color: "var(--primary-strong)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center"
-            }}
-          >
+          <div className="repo-detail-icon">
             {sourceKind === "github" ? <Github size={18} /> : <FolderGit2 size={18} />}
           </div>
 
@@ -285,18 +265,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
       {activeTab === "overview" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {/* Review Readiness Status Bar */}
-          <div
-            style={{
-              padding: "10px 14px",
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--ds-radius-md)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              fontSize: "12px"
-            }}
-          >
+          <div className="repo-overview-readiness">
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span
                 style={{
@@ -334,18 +303,11 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
           </div>
 
           {/* DENSE CONTENT SECTIONS (NO CARD SOUP) */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+          <div className="repo-overview-grid">
             {/* Left: Recent Reviews (Dense List) */}
-            <section
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--ds-radius-md)",
-                overflow: "hidden"
-              }}
-            >
-              <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", background: "var(--surface-subtle)" }}>
-                <span style={{ fontWeight: 600, fontSize: "13px" }}>
+            <section className="repo-overview-panel">
+              <div className="repo-overview-panel-head">
+                <span>
                  {zh ? "最近审查" : "Recent Reviews"}
                 </span>
               </div>
@@ -411,16 +373,9 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
             </section>
 
             {/* Right: Recent Commits (Dense List) */}
-            <section
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--ds-radius-md)",
-                overflow: "hidden"
-              }}
-            >
-              <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", background: "var(--surface-subtle)" }}>
-                <span style={{ fontWeight: 600, fontSize: "13px" }}>
+            <section className="repo-overview-panel">
+              <div className="repo-overview-panel-head">
+                <span>
                    {zh ? "最近提交" : "Recent Commits"}
                 </span>
               </div>

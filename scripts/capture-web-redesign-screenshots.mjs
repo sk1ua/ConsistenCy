@@ -102,6 +102,10 @@ async function main() {
   await waitForServer(baseURL);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.addInitScript(() => {
+    localStorage.setItem("consistency.theme.v1", "light");
+    localStorage.setItem("consistency.locale.v1", "en-US");
+  });
 
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url());

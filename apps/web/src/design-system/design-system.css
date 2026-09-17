@@ -268,7 +268,7 @@
 .ds-sidebar-row.active,
 .ds-sidebar-row--active {
   background: var(--surface-subtle);
-  color: var(--primary-strong);
+  color: var(--foreground);
   font-weight: 600;
 }
 
@@ -390,8 +390,8 @@
 }
 
 .ds-tab-button--active {
-  color: var(--primary-strong);
-  border-bottom-color: var(--primary-strong);
+  color: var(--foreground);
+  border-bottom-color: var(--foreground);
   font-weight: 600;
 }
 

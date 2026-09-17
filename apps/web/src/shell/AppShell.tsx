@@ -387,15 +387,16 @@ export const AppShell: React.FC<AppShellProps> = ({
           >
             <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
               <div
+                className="shell-brand-mark"
                 style={{
                   width: "20px",
                   height: "20px",
                   borderRadius: "var(--ds-radius-sm)",
-                  background: "var(--primary)",
+                  background: "var(--foreground)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: "#ffffff",
+                  color: "var(--surface)",
                   fontWeight: 700,
                   fontSize: "12px",
                   flexShrink: 0
@@ -445,6 +446,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
             {activeRepositoryName ? (
               <div
+                className="shell-repo-chip"
                 onClick={() => activeRepositoryId && navigate(`/repositories/${encodeURIComponent(activeRepositoryId)}/overview`)}
                 style={{
                   display: "flex",
@@ -452,13 +454,13 @@ export const AppShell: React.FC<AppShellProps> = ({
                   justifyContent: "space-between",
                   padding: "5px 8px",
                   borderRadius: "var(--ds-radius-sm)",
-                  background: "var(--surface-subtle)",
+                  background: "transparent",
                   cursor: "pointer",
-                  border: "1px solid var(--border)"
+                  border: "1px solid var(--border-subtle)"
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
-                  <FolderGit2 size={13} style={{ color: "var(--primary)", flexShrink: 0 }} />
+                  <FolderGit2 size={13} style={{ color: "var(--muted-strong)", flexShrink: 0 }} />
                   <span
                     style={{
                       fontSize: "12px",
@@ -501,10 +503,11 @@ export const AppShell: React.FC<AppShellProps> = ({
 
           {/* Sidebar Footer: Settings gear + Heartbeat daemon indicator */}
           <div
+            className="shell-sidebar-footer"
             style={{
               padding: "8px 10px",
-              borderTop: "1px solid var(--border)",
-              background: "var(--surface-subtle)",
+              borderTop: "1px solid var(--border-subtle)",
+              background: "transparent",
               fontSize: "11px",
               display: "flex",
               alignItems: "center",
@@ -668,11 +671,12 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Main Content Area */}
           <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
             <main
+              className="shell-main-canvas"
               style={{
                 flex: 1,
                 minWidth: 0,
                 overflowY: "auto",
-                background: "var(--background)"
+                background: "var(--surface)"
               }}
             >
               {children}

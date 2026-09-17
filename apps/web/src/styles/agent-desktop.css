@@ -1,62 +1,538 @@
-/* Dense agent-desktop language (web-reengineering-design.md) */
+/* Calm agent-desktop language — ZCode × Claude Desktop (not VS Code IDE chrome).
+ * Primary visual target: docs/frontend-style-guide.md + docs/internal/web-reference-audit.md
+ * Layered on Cordis shell; keep HashRouter / DS package structure intact. */
+
 .ds-root.audit-shell {
   --ds-sidebar-width: 230px;
-  --ds-topbar-height: 40px;
-  --ds-statusbar-height: 28px;
+  --ds-topbar-height: 42px;
+  --ds-statusbar-height: 26px;
   --ds-radius-sm: 5px;
+  --ds-radius-md: 6px;
+  /* Warm content canvas: soft surface, not editor-gutter gray */
+  --agent-canvas: var(--surface);
+  --agent-rail: var(--surface);
+  --agent-wash: var(--surface-subtle);
+}
+
+/* ---------- Sidebar: quieter selection, softer brand, less IDE rail ---------- */
+.repo-first-sidebar {
+  background: var(--agent-rail) !important;
+  border-right-color: var(--border-subtle) !important;
 }
 
 .repo-first-sidebar .ds-sidebar-row,
 .repo-first-sidebar a.ds-sidebar-row {
-  min-height: 30px;
+  position: relative;
+  min-height: 32px;
+  height: auto;
+  padding: 6px 10px 6px 12px;
   font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-strong);
+  border-radius: var(--radius-md);
 }
 
+.repo-first-sidebar .ds-sidebar-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  transform: translateY(-50%);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.repo-first-sidebar .ds-sidebar-row:hover {
+  background: var(--agent-wash);
+  color: var(--foreground);
+}
+
+.repo-first-sidebar .ds-sidebar-row.active,
+.repo-first-sidebar .ds-sidebar-row--active {
+  background: var(--agent-wash);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.repo-first-sidebar .ds-sidebar-row.active::before,
+.repo-first-sidebar .ds-sidebar-row--active::before {
+  background: var(--muted-strong);
+}
+
+.repo-first-sidebar .ds-sidebar-row.active svg,
+.repo-first-sidebar .ds-sidebar-row--active svg {
+  color: var(--foreground);
+}
+
+.shell-brand-mark {
+  background: var(--foreground) !important;
+  color: var(--surface) !important;
+  opacity: 0.88;
+}
+
+.repo-first-sidebar .shell-sidebar-footer {
+  background: transparent !important;
+  border-top-color: var(--border-subtle) !important;
+}
+
+.repo-first-sidebar .shell-repo-chip {
+  background: transparent !important;
+  border-color: var(--border-subtle) !important;
+}
+
+.repo-first-sidebar .shell-repo-chip svg {
+  color: var(--muted-strong) !important;
+}
+
+/* ---------- Topbar / status: warmer type, less technical chrome ---------- */
 .shell-topbar {
   font-size: 13px;
+  background: var(--surface) !important;
+  border-bottom-color: var(--border-subtle) !important;
+}
+
+.ds-root.audit-shell .ds-breadcrumb,
+.ds-root.audit-shell .location-breadcrumbs {
+  font-family: var(--font-ui), var(--ds-font-sans), system-ui, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .shell-statusbar,
 .audit-shell [data-shell-status],
 .ds-root.audit-shell > div > div > footer,
-.audit-status-bar {
+.audit-status-bar,
+.ds-root.audit-shell footer {
   font-size: 11px;
+  font-family: var(--font-ui), system-ui, sans-serif;
+  color: var(--muted);
+  border-top-color: var(--border-subtle) !important;
+  background: var(--surface) !important;
+}
+
+.ds-root.audit-shell footer code,
+.ds-root.audit-shell footer .shell-status-mono {
   font-family: var(--font-mono), var(--ds-font-mono), monospace;
 }
 
-/* Flatter page heroes: less card-in-card */
-.ds-page .ds-hero {
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
+/* Quieter theme/locale active chips in the topbar (not loud blue pills) */
+.shell-topbar .ds-icon-button--active,
+.shell-topbar .ds-button--active {
+  background: var(--surface-subtle);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+/* ---------- Main canvas: flat surface, breathing room ---------- */
+.shell-main-canvas {
+  background: var(--agent-canvas) !important;
+}
+
+.ds-page.pw-page,
+.pw-page.page-stack {
+  padding: 20px 28px 32px;
+  gap: 22px;
+  max-width: 1080px;
+}
+
+/* Flatter page heroes: no boxed marketing card */
+.ds-root.audit-shell .ds-page .ds-hero {
+  padding: 4px 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  gap: 12px;
+  align-items: center;
+}
+
+.ds-root.audit-shell .ds-page .ds-hero-icon {
+  width: 32px;
+  height: 32px;
+  border-color: var(--border-subtle);
+  background: var(--surface-subtle);
+  color: var(--muted-strong);
+}
+
+.ds-root.audit-shell .ds-page .ds-hero-title {
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.25px;
+  color: var(--foreground);
+}
+
+.ds-root.audit-shell .ds-page .ds-hero-description {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Flat sections with hairline dividers — not nested card stacks */
+.ds-root.audit-shell .ds-page .ds-section {
   gap: 10px;
+  padding: 16px 0 18px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.ds-page .ds-hero-title {
-  font-size: 17px;
-  letter-spacing: -0.2px;
+.ds-root.audit-shell .ds-page .ds-section:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
-.ds-page .ds-section {
-  gap: 8px;
-}
-
-.ds-page .ds-section-title {
+.ds-root.audit-shell .ds-page .ds-section-title {
   font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+
+.ds-root.audit-shell .ds-page .ds-section-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.ds-root.audit-shell .ds-page .ds-empty,
+.ds-root.audit-shell .ds-page .ds-empty--slim {
+  padding: 28px 12px;
+  border: 0;
+  background: transparent;
+}
+
+.ds-root.audit-shell .ds-page .ds-empty-icon--ok {
+  color: var(--success);
+  opacity: 0.85;
 }
 
 .inbox-item-row {
-  min-height: 40px;
-  padding: 8px 10px;
+  min-height: 42px;
+  padding: 10px 8px;
   border-radius: var(--radius-sm);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-/* Repository overview densification */
-.repo-overview-header,
-.repository-header {
-  gap: 8px;
+.inbox-item-row:hover {
+  background: var(--agent-wash);
 }
 
-.pw-page .ds-chip {
-  font-size: 11px;
-  min-height: 22px;
+/* Soft chips — muted wash, not loud pills */
+.ds-root.audit-shell .ds-chip {
+  border-color: var(--border-subtle);
+  background: var(--surface-subtle);
+}
+
+/* ---------- Tabs: calm underline, not VS Code blue ---------- */
+.ds-root.audit-shell .ds-tab-button {
+  color: var(--muted);
+  border-bottom-width: 1.5px;
+  font-weight: 500;
+}
+
+.ds-root.audit-shell .ds-tab-button:hover {
+  color: var(--foreground);
+}
+
+.ds-root.audit-shell .ds-tab-button--active {
+  color: var(--foreground);
+  border-bottom-color: var(--foreground);
+  font-weight: 600;
+}
+
+/* ---------- Repository overview: flat panels ---------- */
+.repo-detail-page {
+  padding: 20px 28px 32px;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.repo-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.repo-detail-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  color: var(--muted-strong);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.repo-overview-readiness {
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  background: transparent;
+}
+
+.repo-overview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 28px;
+  margin-top: 4px;
+}
+
+.repo-overview-panel {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  padding-top: 14px;
+}
+
+.repo-overview-panel + .repo-overview-panel {
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 28px;
+}
+
+.repo-overview-panel-head {
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--foreground);
+}
+
+.repo-overview-empty {
+  padding: 20px 0 !important;
+}
+
+@media (max-width: 860px) {
+  .repo-overview-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .repo-overview-panel + .repo-overview-panel {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
+/* ---------- Studio: calm Library | Canvas | Copilot tool ---------- */
+.ds-root.audit-shell .runtime-studio {
+  gap: 0;
+  padding: 12px 16px 16px;
+  min-height: 100%;
+  background: var(--agent-canvas);
+}
+
+.ds-root.audit-shell .studio-grid {
+  gap: 0;
+  min-height: calc(100vh - 120px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.ds-root.audit-shell .studio-rail,
+.ds-root.audit-shell .studio-canvas,
+.ds-root.audit-shell .studio-inspector,
+.ds-root.audit-shell .studio-copilot {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--surface);
+}
+
+.ds-root.audit-shell .studio-rail {
+  border-right: 1px solid var(--border-subtle);
+  padding: 14px 12px;
+  background: var(--surface);
+}
+
+.ds-root.audit-shell .studio-canvas {
+  padding: 14px 16px;
+  background: var(--surface);
+}
+
+.ds-root.audit-shell .studio-right,
+.ds-root.audit-shell .studio-copilot-column {
+  border-left: 1px solid var(--border-subtle);
+  background: var(--surface);
+  padding: 0;
+}
+
+.ds-root.audit-shell .studio-inspector,
+.ds-root.audit-shell .studio-copilot {
+  padding: 14px 14px;
+}
+
+.ds-root.audit-shell .studio-rail-gate {
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 6px 8px 8px;
+}
+
+.ds-root.audit-shell .studio-rail-gate.gate-current {
+  background: var(--agent-wash);
+  border-left-color: var(--muted-strong);
+}
+
+.ds-root.audit-shell .studio-rail-gate.gate-current > i {
+  color: var(--foreground);
+}
+
+.ds-root.audit-shell .studio-library-item {
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 8px 10px;
+}
+
+.ds-root.audit-shell .studio-library-item:hover {
+  background: var(--agent-wash);
+  border-color: transparent;
+}
+
+.ds-root.audit-shell .studio-library-item.is-active {
+  background: var(--agent-wash);
+  border-color: transparent;
+  box-shadow: inset 3px 0 0 var(--muted-strong);
+}
+
+.ds-root.audit-shell .studio-library-item svg {
+  color: var(--muted-strong);
+}
+
+.ds-root.audit-shell .studio-library-item.is-active svg {
+  color: var(--foreground);
+}
+
+.ds-root.audit-shell .studio-graph-viewport,
+.ds-root.audit-shell .studio-graph {
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+}
+
+.ds-root.audit-shell .studio-canvas-toolbar strong {
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ds-root.audit-shell .studio-node {
+  border-color: var(--border);
+  border-left-color: var(--border-strong);
+  box-shadow: 0 1px 2px var(--shadow-soft);
+}
+
+.ds-root.audit-shell .studio-node-icon {
+  background: var(--surface-subtle);
+  color: var(--muted-strong);
+}
+
+.ds-root.audit-shell .studio-node.selected {
+  outline-color: var(--border-strong);
+}
+
+.ds-root.audit-shell .studio-graph-svg line,
+.ds-root.audit-shell .studio-graph-svg marker path {
+  stroke: var(--muted-strong);
+  fill: var(--muted-strong);
+}
+
+/* Workflow page mode tabs: soft wash, not blue pill */
+.ds-root.audit-shell .workspace-mode-tabs button.active,
+.ds-root.audit-shell .workflows-page .ds-chip.is-active,
+.ds-root.audit-shell [role="tab"][aria-selected="true"].is-pill {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+  color: var(--foreground);
+}
+
+@media (min-width: 1280px) {
+  .ds-root.audit-shell .studio-grid {
+    grid-template-columns: minmax(220px, 240px) minmax(0, 1fr) minmax(300px, 340px);
+  }
+}
+
+/* Extra Studio calm: unify rails, quiet gates, softer graph chrome */
+.ds-root.audit-shell .workflows-page {
+  padding: 10px 14px 14px;
+  gap: 10px;
+  background: var(--agent-canvas);
+}
+
+.ds-root.audit-shell .workflows-page .workflow-tabs {
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+  padding-bottom: 2px;
+}
+
+.ds-root.audit-shell .studio-rail-gates {
+  gap: 0;
+}
+
+.ds-root.audit-shell .studio-rail-gate.gate-passed,
+.ds-root.audit-shell .studio-rail-gate.gate-blocked,
+.ds-root.audit-shell .studio-rail-gate.gate-current {
+  background: transparent;
+}
+
+.ds-root.audit-shell .studio-rail-gate.gate-current {
+  background: var(--agent-wash);
+}
+
+.ds-root.audit-shell .studio-advanced {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+  margin-top: 12px;
+}
+
+.ds-root.audit-shell .studio-palette button,
+.ds-root.audit-shell .studio-connect {
+  border-radius: var(--radius-md);
+}
+
+.ds-root.audit-shell .studio-copilot {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ds-root.audit-shell .studio-node {
+  border-left-width: 2px;
+  border-left-color: var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.ds-root.audit-shell .studio-graph-svg line {
+  stroke-width: 1.5;
+}
+
+/* Soften hero chip-row on inbox */
+.ds-root.audit-shell .ds-hero .ds-chip-row {
+  margin-left: auto;
+}
+
+.ds-root.audit-shell .ds-chip strong {
+  font-weight: 650;
+  color: var(--foreground);
 }
