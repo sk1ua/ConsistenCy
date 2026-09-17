@@ -883,6 +883,20 @@ describe("createApiServer", () => {
     expect(unavailable.reason).not.toContain(unbornRepository);
   });
 
+  it("rejects a non-numeric git commits depth with 400", async () => {
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Depth validation repository", process.cwd());
+    const server = createApiServer({ auditStore });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, `/repositories/${repository.id}/git/commits?depth=abc`);
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      error: { code: "INVALID_DEPTH" }
+    });
+  });
+
   it("returns 404 for an unregistered opaque repository ID", async () => {
     let pullRequestServiceCalled = false;
     const server = createApiServer({

@@ -47,7 +47,9 @@ export const errorResponseSchema = z.object({
 export const reviewModelOverrideSchema = z.object({
   /** Any provider id from the bundled Pi catalog; validated at runtime. */
   provider: z.string().trim().min(1).max(64).optional(),
+  /** @deprecated Legacy alias for `model`; prefer `model`. */
   name: z.string().trim().min(1).max(100).optional(),
+  /** Canonical model id. Wins over legacy `name` when both are set. */
   model: z.string().trim().min(1).max(100).optional()
 }).strict();
 
@@ -55,7 +57,9 @@ export type ReviewModelOverride = z.infer<typeof reviewModelOverrideSchema>;
 
 export const publicPrRequestSchema = z.object({
   url: z.string().trim().min(1).max(2_048),
+  /** Canonical per-request model override. Wins over legacy `llm`. */
   model: reviewModelOverrideSchema.optional(),
+  /** @deprecated Legacy alias for `model`; prefer `model`. */
   llm: reviewModelOverrideSchema.optional()
 }).strict();
 
@@ -63,7 +67,9 @@ export const localReviewRequestSchema = z.object({
   repositoryId: z.string().trim().min(1).max(255),
   baseRef: z.string().trim().min(1).max(255).optional(),
   headRef: z.string().trim().min(1).max(255).optional(),
+  /** Canonical per-request model override. Wins over legacy `llm`. */
   model: reviewModelOverrideSchema.optional(),
+  /** @deprecated Legacy alias for `model`; prefer `model`. */
   llm: reviewModelOverrideSchema.optional()
 }).strict();
 
