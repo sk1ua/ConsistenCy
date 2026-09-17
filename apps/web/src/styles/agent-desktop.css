@@ -587,8 +587,6 @@
 
 /* ========== Locked three-column agent shell (ZCode / Claude Desktop) ========== */
 .ds-root.agent-shell {
-  --agent-chrome-bg: #f3f1ec;
-  --agent-paper: #fffdf9;
   --agent-radius: 18px;
   --agent-left-width: 252px;
   --agent-right-width: 272px;
@@ -618,11 +616,6 @@
 .ds-root.agent-shell .mono,
 .ds-root.agent-shell .shell-status-mono {
   font-family: var(--font-mono);
-}
-
-:root[data-theme="dark"] .ds-root.agent-shell {
-  --agent-chrome-bg: #161412;
-  --agent-paper: #1c1a18;
 }
 
 .agent-shell__frame {
@@ -1336,6 +1329,26 @@
 }
 
 
+.repo-directory-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.repo-directory-section__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
 .repo-directory-list {
   list-style: none;
   margin: 0;
@@ -1343,8 +1356,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 360px;
-  overflow: auto;
 }
 
 .repo-directory-list li {
@@ -1514,4 +1525,64 @@
     border-top: 1px solid var(--border-subtle);
     padding-top: 14px;
   }
+}
+
+
+.related-card__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.related-card__snippet {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-shell-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 0 2px;
+}
+
+.run-shell-chrome__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.run-shell-chrome__back:hover {
+  color: var(--foreground);
+  background: var(--surface-subtle);
+}
+
+.run-shell-chrome__meta {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+.review-history-row:hover {
+  background: var(--surface-subtle) !important;
+  border-color: var(--border-strong) !important;
 }
