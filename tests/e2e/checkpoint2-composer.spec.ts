@@ -144,6 +144,10 @@ async function installMatrix(page: Page, matrix: Matrix): Promise<void> {
       await route.fulfill({ json: { repositoryId, reviews: [] } });
       return;
     }
+    if (path === `/api/workflow-runtime/repositories/${repositoryId}/bindings` && request.method() === "GET") {
+      await route.fulfill({ json: { bindings: [] } });
+      return;
+    }
     if (path === "/api/jobs" && request.method() === "GET") {
       await route.fulfill({ json: { jobs: [] } });
       return;

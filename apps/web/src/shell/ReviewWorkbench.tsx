@@ -163,11 +163,11 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
           title={
             isReviewStartDisabled(prep)
               ? (prep?.blockingReasons[0] ?? (zh ? "审查尚未就绪" : "Review is not ready"))
-              : (zh ? "开始审查" : "Start review")
+              : (zh ? "开始审查" : "Start Review")
           }
           onClick={() => setIsReviewOpen(true)}
         >
-          {zh ? "开始审查" : "Start review"}
+          {zh ? "开始审查" : "Start Review"}
         </Button>
       </header>
 

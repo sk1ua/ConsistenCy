@@ -36,10 +36,9 @@ test.describe("Module 5 feature suite", () => {
 
   test("Inbox renders the summary and recent items in development", async ({ page }) => {
     await page.goto("/#/inbox");
-    // The Inbox header moved onto the shared ds-hero pattern (hero title plus
-    // the compact summary chip line) during the style unification rework.
-    await expect(page.locator(".ds-hero")).toBeVisible();
-    await expect(page.locator(".ds-hero-title")).toHaveText(/Inbox|收件箱/);
-    await expect(page.locator(".ds-hero .ds-chip-row")).toBeVisible();
+    // Locked shell IA: /inbox is the evidence-review workbench (not chat/inbox hero).
+    await expect(page.locator(".agent-shell")).toBeVisible();
+    await expect(page.locator(".review-workbench, .ds-page")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Start Review|开始审查|Connect/i }).first()).toBeVisible();
   });
 });

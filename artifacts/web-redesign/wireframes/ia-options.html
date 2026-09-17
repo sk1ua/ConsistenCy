@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>ConsistenCy IA Wireframes A/B/C</title>
+<style>
+  :root {
+    --bg: #f4f2ee;
+    --paper: #fffdf9;
+    --ink: #1c1917;
+    --muted: #78716c;
+    --line: #e7e5e4;
+    --accent: #c4a484;
+    --accent-strong: #b45309;
+    --soft: #f5f5f4;
+    --ok: #15803d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 13px/1.45 "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    padding: 28px 32px 40px;
+  }
+  h1 { font-size: 20px; font-weight: 650; margin: 0 0 6px; }
+  .lede { color: var(--muted); margin: 0 0 22px; max-width: 920px; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .option {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 18px 16px;
+    box-shadow: 0 1px 0 rgba(28,25,23,.03);
+  }
+  .option-head {
+    display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;
+  }
+  .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    padding: 3px 8px; border-radius: 999px; background: var(--soft); color: var(--muted);
+  }
+  .tag.rec { background: #ffedd5; color: var(--accent-strong); }
+  .option h2 { margin: 0; font-size: 16px; }
+  .blurb { color: var(--muted); margin: 0 0 14px; font-size: 12.5px; }
+  .wire {
+    display: grid;
+    grid-template-columns: 148px 1fr 150px;
+    grid-template-rows: 34px 1fr 22px;
+    height: 320px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .wire.no-right { grid-template-columns: 148px 1fr; }
+  .wire.session { grid-template-columns: 200px 1fr 0fr; }
+  .wire.session .right { display: none; }
+  .top {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 12px; background: #fffcf8;
+    font-size: 12px; color: var(--muted);
+  }
+  .crumb strong { color: var(--ink); font-weight: 600; }
+  .pill {
+    margin-left: auto; font-size: 11px; padding: 3px 8px;
+    border-radius: 6px; border: 1px solid var(--line); color: var(--muted);
+  }
+  .cta {
+    margin-left: 8px; font-size: 11px; padding: 4px 10px; border-radius: 7px;
+    background: var(--accent-strong); color: #fff; border: 0; font-weight: 600;
+  }
+  .left {
+    border-right: 1px solid var(--line);
+    padding: 10px 8px; background: #fafaf9;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .brand { font-size: 11px; font-weight: 700; padding: 2px 6px 8px; color: var(--ink); }
+  .repo {
+    font-size: 11px; padding: 6px 8px; border-radius: 8px;
+    background: #fff; border: 1px solid var(--line); margin-bottom: 8px;
+  }
+  .nav {
+    font-size: 12px; padding: 6px 8px; border-radius: 7px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .nav.active {
+    background: #f5f5f4; color: var(--ink); font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  .nav.dim { opacity: .45; font-size: 11px; }
+  .sec-label {
+    font-size: 10px; letter-spacing: .06em; color: var(--muted);
+    padding: 8px 8px 4px; text-transform: uppercase;
+  }
+  .main { padding: 12px 14px; overflow: hidden; }
+  .main h3 { margin: 0 0 4px; font-size: 15px; }
+  .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 10px; }
+  .tabs { display: flex; gap: 12px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+  .tabs span { padding-bottom: 6px; color: var(--muted); font-size: 12px; }
+  .tabs .on { color: var(--ink); font-weight: 600; border-bottom: 2px solid var(--ink); }
+  .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .mono { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+  .split {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;
+  }
+  .panel {
+    border: 1px dashed var(--line); border-radius: 8px; padding: 8px;
+    min-height: 88px;
+  }
+  .panel .k { font-size: 10px; color: var(--muted); letter-spacing: .05em; margin-bottom: 6px; }
+  .right {
+    border-left: 1px solid var(--line); padding: 10px; background: #fffcf8;
+    font-size: 11.5px; color: var(--muted);
+  }
+  .right .k { color: var(--ink); font-weight: 600; margin-bottom: 6px; font-size: 12px; }
+  .bottom {
+    grid-column: 1 / -1; border-top: 1px solid var(--line);
+    display: flex; align-items: center; padding: 0 12px;
+    font-size: 11px; color: var(--muted); background: #fafaf9;
+  }
+  .flow {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;
+  }
+  .chip {
+    font-size: 11px; padding: 4px 8px; border-radius: 999px;
+    background: var(--soft); color: var(--muted);
+  }
+  .chip.primary { background: #ffedd5; color: var(--accent-strong); font-weight: 600; }
+  .note {
+    margin-top: 12px; font-size: 12px; color: var(--muted);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px;
+  }
+  .note b { color: var(--ink); font-weight: 600; }
+  .path {
+    margin-top: 10px; font-size: 12px; padding: 8px 10px;
+    background: #fafaf9; border-radius: 8px; border: 1px solid var(--line);
+  }
+  .path span { color: var(--accent-strong); font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>ConsistenCy 交互线框对比</h1>
+  <p class="lede">三套都保留「仓库 + 证据审查 + Cordis 工作流」，差别在于：打开后先落在哪、哪些入口是一级、工作流/Studio 怎么进。灰色虚线框表示次级内容，琥珀色只标主路径。</p>
+
+  <div class="grid">
+    <!-- A -->
+    <section class="option" id="a">
+      <div class="option-head">
+        <span class="tag">A</span>
+        <h2>会话优先 · Claude Desktop 感</h2>
+      </div>
+      <p class="blurb">心智：当前仓库下的「审查会话列表」是主界面。点进一次 run 才展开工作区。工作流 = 开新会话时选模板。</p>
+      <div class="wire session">
+        <div class="top">
+          <span class="crumb"><strong>demo-repo</strong> · 审查会话</span>
+          <span class="pill">Ctrl+K</span>
+          <button class="cta">新审查</button>
+        </div>
+        <div class="left">
+          <div class="brand">ConsistenCy</div>
+          <div class="repo">demo-repo ▾</div>
+          <div class="sec-label">Sessions</div>
+          <div class="nav active">● run_084 · 进行中</div>
+          <div class="nav">○ run_071 · 已完成</div>
+          <div class="nav">○ run_066 · 需处理</div>
+          <div class="sec-label">次级</div>
+          <div class="nav dim">变更 / 历史</div>
+          <div class="nav dim">工作流模板…</div>
+        </div>
+        <div class="main">
+          <h3>run_084 · PR 安全审查</h3>
+          <div class="sub">会话工作区 · 不是全局 Runs 页</div>
+          <div class="tabs">
+            <span class="on">概览</span><span>Diff</span><span>Evidence</span><span>Runtime</span>
+          </div>
+          <div class="row"><span class="dot"></span> 高风险文件 src/auth.py <span class="mono">finding</span></div>
+          <div class="row"><span class="dot"></span> 等待你确认是否发布评论</div>
+          <div class="flow">
+            <span class="chip primary">主路径：会话列表 → 打开 run</span>
+            <span class="chip">Studio 在「模板」里</span>
+          </div>
+        </div>
+        <div class="bottom">LLM · API · 仅当前仓库上下文</div>
+      </div>
+      <div class="path">日常：<span>打开 app → 看见会话 → 点进去干活</span>。跨仓 Inbox / Findings 不再占侧栏。</div>
+      <div class="note">
+        <div><b>适合</b>：习惯「对话/任务流」的人</div>
+        <div><b>风险</b>：证据/仓库浏览感变弱，需防做成聊天产品</div>
+      </div>
+    </section>
+
+    <!-- B -->
+    <section class="option" id="b">
+      <div class="option-head">
+        <span class="tag rec">B · 推荐</span>
+        <h2>仓库工作台优先 · ZCode 项目页感</h2>
+      </div>
+      <p class="blurb">心智：App = 当前仓库的一页工作台。主路径只有「看变更 → 开始审查 → 看结果」。Studio 从本仓工作流钻入，不是顶栏平级大模块。</p>
+      <div class="wire">
+        <div class="top">
+          <span class="crumb">ConsistenCy / <strong>demo-repo</strong> / 工作台</span>
+          <span class="pill">Ctrl+K</span>
+          <button class="cta">开始审查</button>
+        </div>
+        <div class="left">
+          <div class="brand">ConsistenCy</div>
+          <div class="repo">demo-repo ▾</div>
+          <div class="nav active">工作台</div>
+          <div class="nav">最近结果</div>
+          <div class="sec-label">本仓</div>
+          <div class="nav">变更</div>
+          <div class="nav">历史</div>
+          <div class="nav">PR</div>
+          <div class="nav">工作流</div>
+          <div class="sec-label">高级 · Cmd+K</div>
+          <div class="nav dim">Studio 编辑器</div>
+          <div class="nav dim">跨仓 Findings</div>
+        </div>
+        <div class="main">
+          <h3>demo-repo</h3>
+          <div class="sub">main · abcdef1 · 工作区干净 · Ready</div>
+          <div class="tabs">
+            <span class="on">概览</span><span>变更</span><span>审查结果</span><span>工作流</span>
+          </div>
+          <div class="split">
+            <div class="panel"><div class="k">最近审查</div><div class="row">尚无 · 点右上角开始</div></div>
+            <div class="panel"><div class="k">最近提交</div><div class="row"><span class="mono">abcdef1</span> Seed demo</div></div>
+          </div>
+          <div class="flow">
+            <span class="chip primary">主路径：工作台 → 开始审查</span>
+            <span class="chip">工作流=绑定/触发</span>
+          </div>
+        </div>
+        <div class="right">
+          <div class="k">Inspector</div>
+          未选中时关闭<br/><br/>选中 finding / commit 才打开
+        </div>
+        <div class="bottom">本仓上下文 · LLM · API</div>
+      </div>
+      <div class="path">日常：<span>打开就在当前仓 → 一个主按钮干活</span>。Inbox/Runs/Findings/Studio 不再平级抢注意力。</div>
+      <div class="note">
+        <div><b>适合</b>：证据审查 + 仓库真相（与产品定位一致）</div>
+        <div><b>风险</b>：跨仓巡检要多点一步（可接受）</div>
+      </div>
+    </section>
+
+    <!-- C -->
+    <section class="option" id="c">
+      <div class="option-head">
+        <span class="tag">C</span>
+        <h2>双轨收束 · 少改结构</h2>
+      </div>
+      <p class="blurb">心智：仍是现在的模块，但首页收成「当前仓 + 开始审查」；Runs / Findings / Studio 降为二级或只靠命令面板。</p>
+      <div class="wire no-right">
+        <div class="top">
+          <span class="crumb">首页 · <strong>当前仓库</strong></span>
+          <span class="pill">Ctrl+K 打开其余</span>
+          <button class="cta">开始审查</button>
+        </div>
+        <div class="left">
+          <div class="brand">ConsistenCy</div>
+          <div class="repo">demo-repo ▾</div>
+          <div class="nav active">首页</div>
+          <div class="nav">仓库</div>
+          <div class="sec-label">折叠到「更多」</div>
+          <div class="nav dim">Runs</div>
+          <div class="nav dim">Findings</div>
+          <div class="nav dim">Studio</div>
+          <div class="nav dim">Inbox</div>
+        </div>
+        <div class="main">
+          <h3>继续上次的事</h3>
+          <div class="sub">同一套页面还在，只是入口变少</div>
+          <div class="panel" style="margin-top:8px">
+            <div class="k">主卡片</div>
+            <div class="row">demo-repo · Ready · <span class="chip primary">开始审查</span></div>
+            <div class="row">最近 run_084 · 查看结果</div>
+          </div>
+          <div class="flow">
+            <span class="chip primary">主路径被钉死</span>
+            <span class="chip">旧路由大多保留</span>
+          </div>
+        </div>
+        <div class="bottom">兼容现有路由 · 改动最小</div>
+      </div>
+      <div class="path">日常：<span>首页只推一件事</span>；老用户仍能从「更多 / Cmd+K」摸到旧面。</div>
+      <div class="note">
+        <div><b>适合</b>：想快点改善、少推翻</div>
+        <div><b>风险</b>：根上的「模块平级」感可能还在</div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>
