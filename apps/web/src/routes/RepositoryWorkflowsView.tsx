@@ -16,6 +16,7 @@ import type {
   WorkflowRuntimeRunV2
 } from "@consistency/schema";
 import { api } from "../api/client";
+import { workspaceQueryKeys } from "../query/client";
 import { Button } from "../design-system/Button";
 import { SectionHeader } from "../design-system/SectionHeader";
 import { EmptyState } from "../design-system/EmptyState";
@@ -37,24 +38,24 @@ export function RepositoryWorkflowsView({
   const [activeRun, setActiveRun] = useState<WorkflowRuntimeRunV2 | null>(null);
 
   const bindingsQuery = useQuery({
-    queryKey: ["workflow-runtime-bindings", repositoryId],
+    queryKey: workspaceQueryKeys.workflowRuntimeBindings(repositoryId),
     queryFn: () => api.workflowRuntimeBindings(repositoryId),
     retry: false
   });
   const definitionsQuery = useQuery({
-    queryKey: ["workflow-runtime-definitions"],
+    queryKey: workspaceQueryKeys.workflowRuntimeDefinitions,
     queryFn: () => api.workflowRuntimeDefinitions(),
     retry: false
   });
   const runsQuery = useQuery({
-    queryKey: ["workflow-runtime-repo-runs", repositoryId],
+    queryKey: workspaceQueryKeys.workflowRuntimeRunsForRepository(repositoryId),
     queryFn: () => api.workflowRuntimeRunsForRepository(repositoryId, 20),
     retry: false
   });
 
   const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ["workflow-runtime-bindings", repositoryId] });
-    await queryClient.invalidateQueries({ queryKey: ["workflow-runtime-repo-runs", repositoryId] });
+    await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.workflowRuntimeBindings(repositoryId) });
+    await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.workflowRuntimeRunsForRepository(repositoryId) });
   };
 
   const toggleBinding = useMutation({

@@ -109,6 +109,15 @@ export function RepositoryReviewsView({
               ? "该仓库还没有关联的审查任务（空 ≠ 不可用）。可从仓库概览发起审查。"
               : "No canonically associated review jobs yet (empty, not unavailable). Start one from the repository overview."
           }
+          action={
+            <Link
+              to={`/repositories/${encodeURIComponent(repositoryId)}/overview`}
+              className="secondary-button btn-small"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", textDecoration: "none" }}
+            >
+              {zh ? "回到概览发起审查" : "Back to overview to start a review"}
+            </Link>
+          }
         />
       ) : (
         <>
