@@ -23,7 +23,10 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.2",
     "remark-breaks": "^4.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "@consistency/ui": "0.1.0",
+    "@consistency/web-host": "0.1.0",
+    "cordis": "4.0.0-rc.8"
   },
   "devDependencies": {
     "@types/dagre": "^0.7.54",
