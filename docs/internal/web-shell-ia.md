@@ -44,8 +44,8 @@ Product purpose stays **evidence-grounded review harness**. Chat-thread-as-prima
 
 ## Stubs (honest)
 
-- `/automation` and `/plugins` → EmptyState “即将接入” (no fake marketplace data)
-- Repo **目录** → working-tree changed/untracked sections until a full tree API exists
+- `/automation` and `/plugins` → product-style “即将接入” entry pages (intent + workflow/review relation + back to workbench; automation may list real saved trigger definitions read-only — no fake marketplace)
+- Repo **目录** → working-tree **Changed / Untracked** sections (always shown, clear empties) until a full tree API exists; file click → Changes + `highlightPath` (select/scroll/flash + hunks or “暂无 diff 内容”)
 - Repo **情况** → focuses the right-rail status card and opens repo overview
 
 ## Cordis / boot

@@ -42,6 +42,7 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
 
   const changed = gitStatusQuery.data?.changedFiles ?? [];
   const untracked = gitStatusQuery.data?.untrackedFiles ?? [];
+  const available = gitStatusQuery.data?.available !== false;
   const hasEntries = changed.length + untracked.length > 0;
 
   const openFile = (path: string) => {
@@ -57,15 +58,17 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
 
   const renderSection = (
     title: string,
+    emptyLabel: string,
     items: Array<{ path: string; kind: "changed" | "untracked" }>
-  ) => {
-    if (items.length === 0) return null;
-    return (
-      <div className="repo-directory-section">
-        <div className="repo-directory-section__label">
-          <span>{title}</span>
-          <Badge variant="neutral" size="sm">{items.length}</Badge>
-        </div>
+  ) => (
+    <div className="repo-directory-section">
+      <div className="repo-directory-section__label">
+        <span>{title}</span>
+        <Badge variant="neutral" size="sm">{items.length}</Badge>
+      </div>
+      {items.length === 0 ? (
+        <p className="repo-directory-section__empty">{emptyLabel}</p>
+      ) : (
         <ul className="repo-directory-list" aria-label={title}>
           {items.map(entry => (
             <li key={`${entry.kind}-${entry.path}`}>
@@ -84,9 +87,9 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
             </li>
           ))}
         </ul>
-      </div>
-    );
-  };
+      )}
+    </div>
+  );
 
   return (
     <Dialog
@@ -104,15 +107,14 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
           <Loader2 size={14} className="ds-spin" />
           {zh ? "加载中…" : "Loading…"}
         </div>
-      ) : !hasEntries ? (
+      ) : !available ? (
         <EmptyState
           compact
           icon={<FolderTree size={20} />}
-          title={zh ? "工作区干净" : "Clean working tree"}
+          title={zh ? "无法读取工作区" : "Working tree unavailable"}
           description={
-            zh
-              ? "暂无变更或未跟踪文件。完整目录树即将接入。"
-              : "No changed or untracked files. Full directory tree coming soon."
+            gitStatusQuery.data?.reason
+            ?? (zh ? "仓库状态暂时不可用。" : "Repository status is temporarily unavailable.")
           }
           action={
             <button
@@ -127,14 +129,51 @@ export const RepoDirectoryPanel: React.FC<RepoDirectoryPanelProps> = ({
             </button>
           }
         />
+      ) : !hasEntries ? (
+        <div className="repo-directory-sections">
+          {renderSection(
+            zh ? "已变更" : "Changed",
+            zh ? "暂无变更文件" : "No changed files",
+            []
+          )}
+          {renderSection(
+            zh ? "未跟踪" : "Untracked",
+            zh ? "暂无未跟踪文件" : "No untracked files",
+            []
+          )}
+          <EmptyState
+            compact
+            icon={<FolderTree size={20} />}
+            title={zh ? "工作区干净" : "Clean working tree"}
+            description={
+              zh
+                ? "暂无变更或未跟踪文件。完整目录树即将接入。"
+                : "No changed or untracked files. Full directory tree coming soon."
+            }
+            action={
+              <button
+                type="button"
+                className="related-card__text-btn"
+                onClick={() => {
+                  onClose();
+                  navigate(`/repositories/${encodeURIComponent(repositoryId)}/changes`);
+                }}
+              >
+                {zh ? "打开变更视图" : "Open changes view"}
+              </button>
+            }
+          />
+        </div>
       ) : (
         <div className="repo-directory-sections">
           {renderSection(
             zh ? "已变更" : "Changed",
+            zh ? "暂无变更文件" : "No changed files",
             changed.map(f => ({ path: f.path, kind: "changed" as const }))
           )}
           {renderSection(
             zh ? "未跟踪" : "Untracked",
+            zh ? "暂无未跟踪文件" : "No untracked files",
             untracked.map(path => ({ path, kind: "untracked" as const }))
           )}
         </div>

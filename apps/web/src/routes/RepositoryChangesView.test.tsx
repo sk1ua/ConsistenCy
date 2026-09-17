@@ -197,4 +197,47 @@ describe("RepositoryChangesView component", () => {
     expect(htmlZh).toContain("未跟踪文件");
     expect(htmlZh).toContain("new-file.txt");
   });
+
+  it("highlightPath selects that file and shows its diff hunks", () => {
+    const html = renderToString(
+      <I18nProvider initialLocale="en-US">
+        <RepositoryChangesView data={mockData} highlightPath="src/main.ts" />
+      </I18nProvider>
+    );
+    expect(html).toContain('class="diff-tree-file active');
+    expect(html).toContain("@@ -1,5 +1,5 @@");
+    expect(html).toContain("console.log(");
+    // highlighted row flash class may also be present on first paint
+    expect(html).toMatch(/diff-tree-file[^"]*active/);
+  });
+
+
+  it("empty text hunks show clear 暂无 diff 内容 pane", () => {
+    const emptyHunkFile: VcsChangedFile = {
+      path: "src/empty.ts",
+      status: "modified",
+      additions: 0,
+      deletions: 0,
+      binary: false,
+      hunks: []
+    };
+    const html = renderToString(
+      <I18nProvider initialLocale="zh-CN">
+        <RepositoryChangesView
+          data={{
+            ...mockData,
+            changedFiles: [emptyHunkFile],
+            untrackedFiles: [],
+            dirtyFileCount: 1,
+            untrackedFileCount: 0
+          }}
+          highlightPath="src/empty.ts"
+        />
+      </I18nProvider>
+    );
+    expect(html).toContain("暂无 diff 内容");
+    expect(html).toContain("diff-empty-pane");
+    expect(html).toContain("src/empty.ts");
+  });
+
 });

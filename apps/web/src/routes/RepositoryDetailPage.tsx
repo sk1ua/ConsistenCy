@@ -24,8 +24,8 @@ import { Badge } from "../design-system/Badge";
 import { Tabs } from "../design-system/Tabs";
 import { SectionHeader } from "../design-system/SectionHeader";
 import { EmptyState } from "../design-system/EmptyState";
-import { isReviewStartDisabled, formatReviewMutationError } from "./reviewStart";
-export { isReviewStartDisabled, formatReviewMutationError };
+import { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError } from "./reviewStart";
+export { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError };
 import { useI18n } from "../i18n";
 import { ReviewComposerDialog } from "./ReviewComposerDialog";
 import { RepositoryChangesView } from "./RepositoryChangesView";
@@ -247,7 +247,7 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
           disabled={isReviewStartDisabled(prep)}
           title={
             isReviewStartDisabled(prep)
-              ? (prep?.blockingReasons[0] ?? (zh ? "审查尚未就绪" : "Review is not ready"))
+              ? reviewStartDisabledReason(prep, zh)
               : (zh ? "开始审查" : "Start Review")
           }
         >
@@ -282,8 +282,8 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
                       : (zh ? "当前没有可审查的变更" : "No reviewable changes")
                   : (zh ? "正在读取准备状态…" : "Loading preparation…")}
               </span>
-              {prep && !prep.canStartReview && prep.blockingReasons[0] && (
-                <span className="review-workbench__warn">· {prep.blockingReasons[0]}</span>
+              {isReviewStartDisabled(prep) && (
+                <span className="review-workbench__warn">· {reviewStartDisabledReason(prep, zh)}</span>
               )}
             </div>
             {prep && prep.model.default.provider === "none" && (

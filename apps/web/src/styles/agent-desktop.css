@@ -1586,3 +1586,154 @@
   background: var(--surface-subtle) !important;
   border-color: var(--border-strong) !important;
 }
+
+
+.repo-directory-section__empty {
+  margin: 0;
+  padding: 8px 4px 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.coming-soon-page--product {
+  max-width: 760px;
+  padding: 28px 24px 40px;
+}
+
+.coming-soon-hero {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.coming-soon-hero__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-subtle);
+  color: var(--muted-strong);
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.coming-soon-hero__kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.coming-soon-hero__meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.coming-soon-hero__title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.3px;
+}
+
+.coming-soon-hero__desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 52em;
+}
+
+.coming-soon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.coming-soon-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.coming-soon-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-strong);
+}
+
+.coming-soon-card h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.coming-soon-card p {
+  margin: 0;
+  flex: 1;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.coming-soon-live {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--surface-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.coming-soon-live__head h2 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.coming-soon-live__head p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.coming-soon-live__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.coming-soon-live__list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.coming-soon-live__list strong {
+  font-weight: 600;
+}
+
+.coming-soon-live__meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11.5px;
+}

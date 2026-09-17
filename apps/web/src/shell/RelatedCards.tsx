@@ -16,6 +16,7 @@ import {
 import { api } from "../api/client";
 import { workspaceQueryKeys } from "../query/client";
 import { Badge } from "../design-system/Badge";
+import { reviewStartDisabledReason } from "../routes/reviewStart";
 
 export type RelatedCardsFocus = "status" | "review" | "workflow" | "evidence" | null;
 
@@ -168,6 +169,11 @@ export const RelatedCards: React.FC<RelatedCardsProps> = ({
                 : (zh ? "审查待就绪" : "Not ready")}
             </span>
           </div>
+          {preparation && !preparation.canStartReview && (
+            <div className="related-card__muted" title={reviewStartDisabledReason(preparation, zh)}>
+              {reviewStartDisabledReason(preparation, zh)}
+            </div>
+          )}
           {gitStatus && (
             <div className="related-card__muted">
               {gitStatus.dirtyFileCount === 0
