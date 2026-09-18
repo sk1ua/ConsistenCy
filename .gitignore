@@ -105,3 +105,4 @@ apps/api/.mimosa/
 
 # Local dogfood / redesign capture artifacts (never review sources)
 /artifacts/
+apps/web/vite.dogfood.config.ts

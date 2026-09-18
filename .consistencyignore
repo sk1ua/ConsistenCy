@@ -4,3 +4,4 @@
 # Dogfood / local scratch noise
 artifacts/
 apps/web/src/shell/dogfood*.ts
+apps/web/vite.dogfood.config.ts
