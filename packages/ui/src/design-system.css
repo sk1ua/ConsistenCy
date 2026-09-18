@@ -1,8 +1,8 @@
 /* ConsistenCy vNext — Reference-Exact Design System Styles */
 
 :root {
-  --ds-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "IBM Plex Sans", Roboto, Helvetica, Arial, sans-serif;
-  --ds-font-mono: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --ds-font-sans: "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Sarasa Mono SC", ui-monospace, monospace;
+  --ds-font-mono: "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Sarasa Mono SC", ui-monospace, monospace;
 
   --ds-radius-sm: 4px;
   --ds-radius-md: 6px;
