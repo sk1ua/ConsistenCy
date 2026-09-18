@@ -15,7 +15,8 @@ export const notebookIndexStatusSchema = z.enum(["queued", "indexing", "ready", 
 export const notebookCitationSchema = z.object({
   id: z.string().trim().min(1),
   repository: z.string().trim().min(1),
-  pullRequestNumber: z.number().int().positive(),
+  /** Absent for local repository reviews, which have no pull request. */
+  pullRequestNumber: z.number().int().positive().optional(),
   jobId: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
   file: z.string().trim().min(1),

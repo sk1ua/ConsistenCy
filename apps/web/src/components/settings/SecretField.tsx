@@ -26,7 +26,7 @@ export function SecretField({ name, label, configured, value, clear, help, helpH
   const statusClass = isPendingSave ? "pending" : configured && !clear ? "configured" : "missing";
 
   return <div className="setting-field secret-field">
-    <label htmlFor={id}>{t(label)}<span className={statusClass}>{statusLabel}</span></label>
+    <label htmlFor={id}>{t(label)}<span className={`settings-status-chip ${statusClass}`}>{statusLabel}</span></label>
     {multiline
       ? <textarea id={id} aria-describedby={helpId} rows={3} value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Paste a PEM key or enter a readable file path")} />
       : <input id={id} aria-describedby={helpId} type="password" autoComplete="new-password" value={value} disabled={clear} onChange={event => onValue(name, event.target.value)} placeholder={t(configured ? "Leave blank to keep the stored value" : "Enter a new secret")} />}

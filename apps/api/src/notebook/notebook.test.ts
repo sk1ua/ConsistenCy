@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { WORKING_TREE_REV } from "@consistency/schema";
 import { InMemoryJobQueue } from "../jobQueue";
 import { openDatabase } from "../db/connection";
 import { runMigrations } from "../db/migrations";
@@ -137,6 +138,77 @@ describe("Repository Review Notebook", () => {
     expect(index.status).toBe("ready");
     expect(index.manifest).toContainEqual(expect.objectContaining({ path: "README.md" }));
     expect(seenToken).toBe("public-read-token");
+  });
+
+  it("streams a notebook answer for local_git WORKING_TREE sources without pullRequestNumber", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "consistency-notebook-local-"));
+    directories.push(directory);
+    mkdirSync(join(directory, "src"));
+    writeFileSync(join(directory, "src", "local.ts"), "export function localReview() {\n  return 'working-tree';\n}\n", "utf8");
+
+    const jobs = new InMemoryJobQueue();
+    const job = jobs.enqueue({
+      kind: "pull_request",
+      deliveryId: "local-notebook-1",
+      repository: "local/ConsistenCy",
+      accessMode: "local_git",
+      baseSha: "a".repeat(40),
+      headSha: WORKING_TREE_REV,
+      repoPath: directory,
+      publicationPolicy: "disabled"
+    });
+    expect(job.pullRequestNumber).toBeUndefined();
+    jobs.markRunning(job.id);
+    jobs.persistReportAndEnqueuePublish(job.id, {
+      jobId: job.id,
+      repositoryFullName: job.repository,
+      baseSha: job.baseSha!,
+      headSha: job.headSha!,
+      summary: "Local working-tree review",
+      score: 80,
+      riskLevel: "low",
+      agentRuns: [],
+      findings: [{
+        id: "finding_local_1",
+        agent: "Correctness",
+        title: "Local evidence",
+        severity: "low",
+        confidence: "confirmed",
+        file: "src/local.ts",
+        startLine: 1,
+        endLine: 2,
+        evidence: "The local helper returns a fixed value.",
+        reasoning: "Observable in the working tree.",
+        recommendation: "Keep reviewing locally."
+      }],
+      createdAt: "2026-09-18T00:00:00.000Z"
+    });
+
+    const notebooks = new InMemoryNotebookStore();
+    const ensured = notebooks.ensureForJob(jobs.get(job.id)!);
+    expect(ensured.source.pullRequestNumber).toBeUndefined();
+    const indexer = new RepositorySnapshotIndexer({ store: notebooks });
+    const graph = new NotebookGraph({ provider: new MockLLMProvider(), jobs, notebookStore: notebooks, indexer });
+
+    const events = [] as Array<{ event: string; data: unknown }>;
+    for await (const event of graph.streamMessage({
+      notebookId: ensured.notebook.id,
+      content: "What does the local helper return?",
+      sourceJobIds: [job.id]
+    })) {
+      events.push(event);
+    }
+
+    expect(events.some(event => event.event === "tool.started" && (event.data as { tool?: string }).tool === "search_repository")).toBe(true);
+    expect(events.some(event => event.event === "run.failed")).toBe(false);
+    expect(events.some(event => event.event === "text.delta" || event.event === "run.completed" || event.event === "run.degraded")).toBe(true);
+    const assistant = notebooks.get(ensured.notebook.id)?.messages.find(message => message.role === "assistant");
+    expect(assistant?.status === "completed" || assistant?.status === "degraded").toBe(true);
+    for (const citation of assistant?.citations ?? []) {
+      expect(citation.pullRequestNumber).toBeUndefined();
+      expect(citation.jobId).toBe(job.id);
+      expect(citation.headSha).toBe(WORKING_TREE_REV);
+    }
   });
 
   it("refuses to turn an ungrounded question into a code claim", async () => {

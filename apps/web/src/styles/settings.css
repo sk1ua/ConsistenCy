@@ -111,20 +111,39 @@
   background: var(--surface-muted);
   color: var(--muted);
 }
-.secret-field .configured, .secret-field .missing, .secret-field .pending {
-  font-size: 11px;
-  font-weight: 800;
+.settings-status-chip,
+.secret-field .configured,
+.secret-field .missing,
+.secret-field .pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
   letter-spacing: .04em;
   text-transform: uppercase;
+  line-height: 1.4;
+  border: 1px solid transparent;
 }
-.secret-field .configured {
-  color: var(--success);
+.secret-field .configured,
+.settings-status-chip.configured {
+  color: var(--success-strong);
+  background: var(--success-soft);
+  border-color: var(--success-faint);
 }
-.secret-field .pending {
-  color: var(--primary);
+.secret-field .pending,
+.settings-status-chip.pending {
+  color: var(--primary-strong);
+  background: var(--primary-wash, var(--primary-soft));
+  border-color: var(--border-subtle);
 }
-.secret-field .missing {
-  color: var(--warning);
+.secret-field .missing,
+.settings-status-chip.missing {
+  color: var(--warning-strong);
+  background: var(--warning-soft);
+  border-color: var(--warning-faint);
 }
 .clear-secret {
   width: fit-content;
@@ -222,18 +241,18 @@
   display: flex;
   flex-direction: row;
   gap: 0;
-  min-height: 320px;
+  min-height: 360px;
 }
 
 .settings-dialog-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  width: 180px;
+  gap: 4px;
+  width: 168px;
   flex-shrink: 0;
-  padding: 10px 8px;
+  padding: 16px 12px;
   border-right: 1px solid var(--border-subtle);
-  background: var(--surface-muted);
+  background: transparent;
 }
 
 .settings-dialog-nav-item {
@@ -242,9 +261,9 @@
   align-items: flex-start;
   gap: 2px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border: 1px solid transparent;
-  border-radius: var(--ds-radius-sm, 4px);
+  border-radius: 999px;
   background: transparent;
   color: var(--muted-strong);
   font-size: 12px;
@@ -261,9 +280,10 @@
 
 .settings-dialog-nav-item--active {
   background: var(--surface-subtle);
-  color: var(--primary-strong);
-  border-color: var(--border-subtle);
-  font-weight: 700;
+  color: var(--foreground);
+  border-color: transparent;
+  font-weight: 650;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 
 .settings-dialog-nav-item--disabled {
@@ -285,26 +305,41 @@
 .settings-dialog-content {
   flex: 1;
   min-width: 0;
-  max-height: 60vh;
+  max-height: 62vh;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: 20px 22px 24px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+}
+
+.settings-dialog-footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .settings-dialog-footer-status {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-size: 11px;
+  line-height: 1.4;
   color: var(--muted);
+}
+
+.settings-dialog-footer-status > span:last-child {
+  min-width: 0;
 }
 
 .settings-dialog-footer-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 /* ===== Dialog-scoped modal presentation ===== */
@@ -317,7 +352,7 @@
 }
 
 .settings-dialog-content .settings-group-title {
-  padding: 0 0 10px;
+  padding: 0 0 12px;
   flex-direction: column;
   gap: 4px;
   border-right: none;
@@ -332,22 +367,26 @@
 
 .settings-dialog-content .settings-group-title h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .settings-dialog-content .settings-group-title p {
   font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .settings-dialog-content .settings-fields {
   padding: 0;
-  gap: 14px;
+  gap: 12px;
 }
 
 /* ===== Simplified settings architecture ===== */
 .settings-general-stack {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .settings-advanced {
@@ -406,27 +445,29 @@
   border-top: 1px solid var(--border);
 }
 
-/* Settings navigation uses Button for behavior but owns its workbench rhythm. */
+/* Settings navigation uses Button for behavior but owns a quiet pill rhythm. */
 .settings-dialog-nav .ds-button.settings-dialog-nav-item {
-  min-height: 38px;
-  padding: 0 11px;
+  min-height: 34px;
+  padding: 0 12px;
   justify-content: flex-start;
   border: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   color: var(--muted-strong);
   background: transparent;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .settings-dialog-nav .ds-button.settings-dialog-nav-item:hover {
   color: var(--foreground);
-  background: var(--surface-hover);
+  background: var(--surface-subtle);
 }
 
 .settings-dialog-nav .ds-button.settings-dialog-nav-item--active {
-  color: var(--primary-strong);
-  background: var(--primary-soft);
+  color: var(--foreground);
+  background: var(--surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-weight: 650;
 }
 
 .setting-field .ds-select-menu {
@@ -506,4 +547,28 @@
 }
 .settings-switch-copy p {
   margin: 2px 0 0;
+}
+
+
+/* Quiet help copy under settings controls */
+.setting-help {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  font-weight: 450;
+}
+.setting-help a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-strong);
+  text-decoration: none;
+}
+.setting-help a:hover {
+  color: var(--foreground);
+  text-decoration: underline;
 }
