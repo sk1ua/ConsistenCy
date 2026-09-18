@@ -18,7 +18,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 :lang(zh-CN) {
-  /* Keep one UI sans (IBM Plex Sans + CJK fallbacks already in --font-ui) */
+  /* Shell UI uses monospace CJK-capable stack from --font-ui */
   font-family: var(--font-ui);
 }
 :lang(zh-CN) code,

@@ -1634,9 +1634,9 @@
 }
 
 :root {
-  --font-ui: "IBM Plex Sans", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-ui: "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Sarasa Mono SC", ui-monospace, monospace;
   --font-display: var(--font-ui);
-  --font-mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+  --font-mono: "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Sarasa Mono SC", ui-monospace, monospace;
   --rail-width: 48px;
   --explorer-width: 258px;
   --inspector-width: 360px;

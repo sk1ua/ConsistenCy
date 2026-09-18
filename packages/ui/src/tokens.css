@@ -1,3 +1,9 @@
+@font-face {
+  font-family: "Maple Mono NF CN";
+  src: local("Maple Mono NF CN"), local("MapleMono-NF-CN");
+  font-display: swap;
+}
+
 /* ===== Design Tokens =====
  *
  * Dual-theme token system. :root holds the light values (the historical
@@ -10,9 +16,9 @@
  * styles/tokens.test.ts.
  */
 :root {
-  --font-ui: "IBM Plex Sans", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --font-ui: "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Sarasa Mono SC", ui-monospace, monospace;
   --font-display: var(--font-ui);
-  --font-mono: "IBM Plex Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --font-mono: "Maple Mono NF CN", "Noto Sans Mono CJK SC", "Sarasa Mono SC", ui-monospace, monospace;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
