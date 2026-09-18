@@ -70,9 +70,11 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
   }
 
   const footer = (
-    <>
+    <div className="settings-dialog-footer">
       <span className="settings-dialog-footer-status">
-        {restartNeeded ? t("Saved — restart required") : <><LockKeyhole size={13} />{t("Secrets are encrypted locally and never returned.")}</>}
+        {restartNeeded
+          ? <span className="settings-status-chip pending">{t("Saved — restart required")}</span>
+          : <><LockKeyhole size={12} aria-hidden="true" /><span>{t("Secrets are encrypted locally and never returned.")}</span></>}
       </span>
       <div className="settings-dialog-footer-actions">
         <Button variant="outline" size="sm" icon={<RotateCcw size={13} />} onClick={resetChanges} disabled={loading || saving}>
@@ -82,7 +84,7 @@ export function SettingsDialog({ isOpen, onClose, health }: SettingsDialogProps)
           {t(saving ? "Saving" : "Save settings")}
         </Button>
       </div>
-    </>
+    </div>
   );
 
   return (

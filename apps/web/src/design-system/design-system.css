@@ -1214,25 +1214,35 @@
 }
 
 /* ===== Settings dialog visual redesign (dialog scope only) =====
- * The full SettingsPage keeps its page-level section-card layout; inside the
- * modal, sections drop the .section-block bordered-box chrome and land
- * directly on the dialog surface: kicker/title header, a 1px divider, then
- * full-width field rows in a label-left / control-right rhythm (stacking
- * vertically below 680px). Inputs use the quiet --surface-subtle fill plus a
- * focus ring instead of heavy borders. No settings logic is touched here. */
-.ds-dialog--settings .settings-group.section-block {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+ * Soft section cards + label/control rows with more whitespace. Active nav
+ * stays a quiet pill (see settings.css). No settings logic is touched here. */
+.ds-dialog.ds-dialog--settings {
+  max-width: min(920px, 94vw);
+}
+
+.ds-dialog--settings .ds-dialog-body {
   padding: 0;
 }
 
-/* When a section renders more than one settings-group (e.g. GitHub), the
-   groups separate on a 1px divider instead of boxed cards. */
+.ds-dialog--settings .ds-dialog-footer {
+  justify-content: stretch;
+  padding: 12px 18px;
+  background: var(--surface);
+}
+
+.ds-dialog--settings .settings-group.section-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: none;
+  padding: 16px 18px 18px;
+}
+
+/* Sibling groups breathe as separate soft cards. */
 .ds-dialog--settings .settings-group + .settings-group {
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 14px;
+  border-top: 0;
+  padding-top: 16px;
+  margin-top: 0;
 }
 
 .ds-dialog--settings .settings-group-title {
@@ -1242,13 +1252,15 @@
 }
 
 .ds-dialog--settings .settings-group-title h3 {
-  margin: 2px 0 4px;
-  font-size: 15px;
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 .ds-dialog--settings .settings-group-title p {
   margin: 0;
-  max-width: 62ch;
+  max-width: 64ch;
   font-size: 12px;
   line-height: 1.55;
   color: var(--muted);
@@ -1257,33 +1269,40 @@
 /* Field rows: stacked full width, label left / control right. */
 .ds-dialog--settings .settings-fields {
   grid-template-columns: minmax(0, 1fr);
-  gap: 0;
+  gap: 2px;
   align-content: start;
+  padding-top: 4px;
 }
 
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
   align-items: center;
-  gap: 6px 18px;
-  padding: 9px 0;
+  gap: 6px 20px;
+  padding: 12px 0;
 }
 
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > label:first-child {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
   min-width: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--foreground);
 }
 
-/* Everything outside the label/control pair (help text, danger zone)
-   spans the full row width below it. */
-.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > :not(label:first-child):not(input):not(select):not(textarea) {
+/* Help / danger zone span full width; SelectMenu sits in the control column. */
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > :not(label:first-child):not(input):not(select):not(textarea):not(.ds-select-menu) {
   grid-column: 1 / -1;
+}
+
+.ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > .ds-select-menu {
+  grid-column: 2;
+  width: 100%;
 }
 
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > input:not([type="checkbox"]),
@@ -1291,11 +1310,11 @@
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea {
   grid-column: 2;
   width: 100%;
-  min-height: 34px;
+  min-height: 36px;
   box-sizing: border-box;
-  padding: 6px 10px;
+  padding: 7px 11px;
   border: 1px solid transparent;
-  border-radius: var(--ds-radius-md);
+  border-radius: 8px;
   background: var(--surface-subtle);
   color: var(--foreground);
   font: 13px/1.5 var(--font-mono);
@@ -1304,14 +1323,14 @@
 }
 
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea {
-  min-height: 82px;
+  min-height: 84px;
   resize: vertical;
 }
 
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > input:not([type="checkbox"]):focus,
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > select:focus,
 .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea:focus {
-  border-color: var(--primary);
+  border-color: var(--primary-muted-text, var(--primary));
   background: var(--surface);
   box-shadow: 0 0 0 3px var(--primary-wash);
   outline: 0;
@@ -1324,13 +1343,18 @@
   cursor: not-allowed;
 }
 
-/* Informational note rows become quiet wash panels without the dashed
-   border; consecutive notes keep a small breathing gap. */
+.ds-dialog--settings .setting-field .ds-select-menu-trigger {
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
 .ds-dialog--settings .setting-field.setting-note {
   min-height: 0;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 0;
-  border-radius: var(--ds-radius-md);
+  border-radius: 10px;
   background: var(--surface-subtle);
 }
 
@@ -1338,14 +1362,12 @@
   margin-top: 8px;
 }
 
-
 .ds-dialog--settings .github-draft-test {
   display: grid;
   gap: 6px;
-  padding: 9px 0;
+  padding: 12px 0;
 }
 
-/* Danger zone (remove a stored secret): red text, no box. */
 .ds-dialog--settings .clear-secret {
   width: fit-content;
   padding: 0;
@@ -1354,7 +1376,12 @@
   color: var(--danger);
 }
 
-/* Narrow dialogs: the label/control pair stacks vertically. */
+.ds-dialog--settings .settings-advanced {
+  border-color: var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
 @media (max-width: 680px) {
   .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) {
     grid-template-columns: minmax(0, 1fr);
@@ -1362,7 +1389,8 @@
 
   .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > input:not([type="checkbox"]),
   .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > select,
-  .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea {
+  .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > textarea,
+  .ds-dialog--settings .setting-field:not(.setting-note):not(.source-mode-guide) > .ds-select-menu {
     grid-column: 1;
   }
 }
