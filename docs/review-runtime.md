@@ -79,3 +79,11 @@ This guarantees that identical findings produced on different Git commits have d
 Review runs can be inspected live via the Web/Desktop Runtime view or via HTTP endpoints:
 - `GET /api/runtime/runs`: List of active and recent runs.
 - `GET /api/runtime/runs/:runId`: Full runtime snapshot including Agent Control Blocks, process tree hierarchy, scheduler states (`WAIT_LLM`, `WAIT_TOOL`), Context VM page distribution, token consumption, and sanitized capability fingerprints.
+
+## Local finding patch preview and apply
+
+Succeeded review findings may include an optional `suggestedPatch` (unified diff). On the run overview:
+
+1. **Preview** — `GET /jobs/:id/findings/:findingId/patch` returns the diff read-only. For `accessMode=local_git`, the API also re-runs patch policy + `git apply --check` against the registered checkout.
+2. **Apply** — `POST /jobs/:id/findings/:findingId/patch/apply` is available only for `local_git` jobs. It re-validates, applies with `git apply` (no stage/commit/push), and leaves the working tree dirty. Public / GitHub App jobs never apply.
+

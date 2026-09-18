@@ -60,6 +60,8 @@ Execution domains describe the operating-system boundary in which code executes:
 
 ### Access Mode Security Invariants
 - **Public PR Analysis**: Analysis of public GitHub pull requests is strictly read-only (`accessMode=public_read`, `publicationPolicy=disabled`). It will never create GitHub comments, apply patches, or execute repository commands.
+- **Local finding patch apply**: Suggested patches may be previewed for any succeeded job that carries `suggestedPatch`. Applying is restricted to `accessMode=local_git` jobs against the registered checkout: policy inspection + `git apply --check` run first, then a non-committing `git apply` leaves the tree dirty. Public/GitHub App jobs never receive apply.
+
 - **Credential Storage**: Secret keys (DeepSeek API key, OpenAI API key, GitHub PAT, App private keys) remain server-side. In Electron desktop mode, credentials are encrypted via OS `safeStorage` and passed only to the API child process at startup. They are never returned to the Web UI or included in logs.
 - **Rate Limits**: Anonymous and authenticated requests strictly respect GitHub REST API rate limits and never attempt bypass via parallel rotation.
 

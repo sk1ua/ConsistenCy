@@ -183,6 +183,11 @@ import type { NotebookStore } from "./notebook/store";
 import type { ReviewJob } from "./jobQueue";
 import type { WorkflowStore } from "./workflows/store";
 import { JobDiffError, type JobDiffResult } from "./review/jobDiff";
+import {
+  FindingPatchError,
+  type FindingPatchApplyResult,
+  type FindingPatchPreview
+} from "./review/patch/findingPatch";
 import { createLocalReviewExcludeFilter } from "./review/localReviewExclude";
 import { AuditDomainError, type AuditDomainStore } from "./audit/store";
 import { validateLocalRepositoryRegistration } from "./audit/localRegistration";
@@ -866,6 +871,8 @@ export type CreateApiServerOptions = {
   };
   workflows?: WorkflowStore;
   jobDiff?: (jobId: string) => Promise<JobDiffResult>;
+  findingPatchPreview?: (jobId: string, findingId: string) => Promise<FindingPatchPreview>;
+  findingPatchApply?: (jobId: string, findingId: string) => Promise<FindingPatchApplyResult>;
   notebookEnabled?: boolean;
   notebookStore?: NotebookStore;
   notebookGraph?: NotebookGraph;
@@ -2852,6 +2859,48 @@ const routes: Route[] = [
       } catch (error) {
         if (error instanceof JobDiffError) {
           throw new ApiError(error.message, error.code, error.statusCode);
+        }
+        throw error;
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/findings\/([^/]+)\/patch$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.findingPatchPreview) {
+        throw new ApiError("Finding patch preview is not configured", "PATCH_PREVIEW_UNAVAILABLE", 503);
+      }
+      const jobId = decodeURIComponent(match?.[1] ?? "");
+      const findingId = decodeURIComponent(match?.[2] ?? "");
+      try {
+        const preview = await options.findingPatchPreview(jobId, findingId);
+        sendJson(request, response, 200, preview, allowedOrigins);
+      } catch (error) {
+        if (error instanceof FindingPatchError) {
+          throw new ApiError(error.message, error.code, error.statusCode, error.details);
+        }
+        throw error;
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/jobs\/([^/]+)\/findings\/([^/]+)\/patch\/apply$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.findingPatchApply) {
+        throw new ApiError("Finding patch apply is not configured", "PATCH_APPLY_UNAVAILABLE", 503);
+      }
+      const jobId = decodeURIComponent(match?.[1] ?? "");
+      const findingId = decodeURIComponent(match?.[2] ?? "");
+      try {
+        const result = await options.findingPatchApply(jobId, findingId);
+        sendJson(request, response, 200, result, allowedOrigins);
+      } catch (error) {
+        if (error instanceof FindingPatchError) {
+          throw new ApiError(error.message, error.code, error.statusCode, error.details);
         }
         throw error;
       }

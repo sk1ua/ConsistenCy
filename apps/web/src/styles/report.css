@@ -1500,3 +1500,61 @@
 .findings-show-dismissed input {
   margin: 0;
 }
+
+
+/* Suggested patch preview / local_git apply on run overview */
+.finding-disposition-pill--patch {
+  color: var(--accent, var(--foreground));
+  border-color: color-mix(in srgb, var(--accent, var(--border)) 35%, var(--border-subtle));
+}
+.finding-patch-teaser {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.finding-patch-preview-btn {
+  border-color: color-mix(in srgb, var(--accent, var(--border)) 40%, var(--border-subtle));
+}
+.finding-patch-dialog {
+  max-width: min(840px, 94vw);
+}
+.finding-patch-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.finding-patch-apply-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.finding-patch-status {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.finding-patch-status--ok { color: var(--success, var(--foreground)); }
+.finding-patch-status--warn,
+.finding-patch-status--error { color: var(--danger, var(--foreground)); }
+.finding-patch-status--muted { color: var(--muted); }
+.finding-patch-violations {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: var(--danger, var(--foreground));
+  font-size: 12px;
+}
+.finding-patch-diff {
+  margin: 0;
+  max-height: min(52vh, 520px);
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-muted, var(--surface));
+  color: var(--foreground);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}

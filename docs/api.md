@@ -39,6 +39,8 @@ For local browser dogfood (`npm run dev:web`), the Vite `/api` proxy can inject 
 | `GET` | `/jobs` | List review jobs | Authenticated |
 | `GET` | `/jobs/:id` | Get job details and execution status | Authenticated |
 | `GET` | `/jobs/:id/report` | Get completed `ReviewReport` JSON | Authenticated |
+| `GET` | `/jobs/:id/findings/:findingId/patch` | Preview a finding's suggested unified diff (read-only; verifies against local checkout when `accessMode=local_git`) | Authenticated |
+| `POST` | `/jobs/:id/findings/:findingId/patch/apply` | Apply a finding patch to the registered **local_git** working tree only (never commits / force-pushes) | Authenticated |
 | `POST` | `/reviews/local` | Trigger a review run for a local registered repository | Authenticated (Real LLM Required) |
 | `POST` | `/reviews/public-pr` | Ingest public GitHub PR URL and enqueue review run | Authenticated (Real LLM Required) |
 | `GET` | `/notebooks/:id` | Get notebook workspace, sources, and card history | Authenticated |

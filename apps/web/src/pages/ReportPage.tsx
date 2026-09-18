@@ -240,6 +240,8 @@ export function ReportPage({
                       onLocate={() => undefined}
                       disposition={dispositions[finding.id] ?? null}
                       onDispositionChange={disposition => updateDisposition(finding.id, disposition)}
+                      jobId={job.id}
+                      accessMode={job.accessMode}
                     />
                   ))}
                 </section>
