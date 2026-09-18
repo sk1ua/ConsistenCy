@@ -134,14 +134,14 @@ export class DeterministicAnalyzer {
 
   /**
    * Create a new DeterministicAnalyzer.
-   * @param pythonPath Path to the Python executable. Defaults to "python".
+   * @param pythonPath Path to the Python executable. Defaults to platform-aware python3/python.
    * @param engineModule The Python module to run as the engine. Defaults to "engine".
    * @param engineArgs Additional CLI args for the Python module. Defaults to [].
    * @param cwd Working directory for spawning Python engine. Defaults to project root.
    * @param spawnFn Injectable spawn factory. Defaults to node:child_process spawn.
    */
   constructor(
-    private pythonPath = "python",
+    private pythonPath = process.platform === "win32" ? "python" : "python3",
     private engineModule = "engine",
     private engineArgs: string[] = [],
     private cwd?: string,

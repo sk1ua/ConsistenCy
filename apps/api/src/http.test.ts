@@ -2060,6 +2060,56 @@ describe("createApiServer", () => {
     expect(preparation.blockingReasons).toContain("已保存 DeepSeek 配置，重启 API 后生效。");
   });
 
+
+  it("marks working-tree available when only untracked files exist", async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), "consistency-prep-untracked-"));
+    tempDirectories.push(repoPath);
+    execFileSync("git", ["init", "--quiet", "-b", "main"], { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repoPath, stdio: "ignore" });
+    writeFileSync(join(repoPath, "README.md"), "seed\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: repoPath, stdio: "ignore" });
+    execFileSync("git", ["commit", "--quiet", "-m", "seed"], { cwd: repoPath, stdio: "ignore" });
+    writeFileSync(join(repoPath, "only-untracked.ts"), "export const x = 1;\n", "utf8");
+
+    const auditStore = createAuditStore();
+    const repository = auditStore.registerLocal("Untracked only", repoPath);
+    const server = createApiServer({
+      auditStore,
+      apiToken: "",
+      healthDetails: () => ({
+        database: { ok: true },
+        worker: { running: true, activeJobs: 0, concurrency: 1 },
+        llmConfigured: true,
+        llmProvider: "deepseek",
+        llmModel: "deepseek-v4-flash",
+        llmCapabilities: {
+          providers: [
+            { id: "deepseek", label: "DeepSeek", configured: true, defaultModel: "deepseek-v4-flash" }
+          ]
+        },
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: false,
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory", configured: true },
+          workerConcurrency: 1
+        }
+      })
+    });
+    servers.push(server);
+    const port = await listen(server);
+
+    const response = await getJson(port, `/repositories/${repository.id}/review-preparation`);
+    const preparation = reviewPreparationResponseSchema.parse(response.body);
+    expect(response.status).toBe(200);
+    expect(preparation.sources.workingTree.available).toBe(true);
+    expect(preparation.sources.workingTree.changedFileCount).toBe(1);
+    expect(preparation.canStartReview).toBe(true);
+    expect(preparation.blockingReasons).not.toContain("当前无可用的审查来源 (工作区无变更且未检测到分支差异)");
+  });
+
   it("continues to report the active provider from health rather than saved settings", async () => {
     const savedSettings: SettingsSnapshot = {
       llm: {

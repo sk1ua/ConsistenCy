@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { WORKING_TREE_REV, type IVCSService, type VcsChangedFile } from "@consistency/schema";
 import { LocalGitAdapter } from "@consistency/vcs-core";
+import { collectWorkingTreeChanges } from "./context/buildLocalContext";
 import { workspacePathForJob } from "../github/clone";
 import type { ReviewJobStore } from "../jobQueue";
 
@@ -46,7 +47,7 @@ export async function resolveJobDiff(
       if (!job.baseSha) throw new JobDiffError("Local job is missing revision metadata", "JOB_DIFF_UNAVAILABLE", 404);
       const vcs = dependencies.vcsFactory?.(job.repoPath) ?? new LocalGitAdapter({ root: job.repoPath });
       files = job.headSha === WORKING_TREE_REV
-        ? await vcs.getWorkingDiff()
+        ? await collectWorkingTreeChanges(job.repoPath, vcs)
         : await vcs.getBranchDiff(job.baseSha, job.headSha ?? "");
     } else {
       const root = workspacePathForJob(dependencies.workspaceRoot, job.id);

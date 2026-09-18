@@ -13,10 +13,20 @@ export function resolveWorkspaceRoot(inputPath: string, root = findProjectRoot()
   return resolve(root, inputPath);
 }
 
-const optionalSecret = z.preprocess(
-  value => typeof value === "string" && value.trim() === "" ? undefined : value,
-  z.string().trim().min(1).optional()
-);
+/** Treat blank / whitespace-only env values as unset (common in .env templates). */
+function emptyAsUnset<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(
+    value => typeof value === "string" && value.trim() === "" ? undefined : value,
+    schema
+  );
+}
+
+const optionalSecret = emptyAsUnset(z.string().trim().min(1).optional());
+
+/** Prefer python3 on non-Windows hosts; Windows installers still expose `python`. */
+export function defaultPythonPath(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? "python" : "python3";
+}
 
 /**
  * Process environments are intentionally tolerant: PATH, HOME, and other OS
@@ -35,26 +45,26 @@ export const envSchema = z.object({
    * repository reviewable — narrow this before exposing the API off localhost.
    */
   CONSISTENCY_LOCAL_REVIEW_ROOTS: z.string().trim().optional(),
-  CONSISTENCY_PYTHON_PATH: z.string().trim().min(1).default("python"),
+  CONSISTENCY_PYTHON_PATH: emptyAsUnset(z.string().trim().min(1).default(defaultPythonPath())),
   CONSISTENCY_ENGINE_MODULE: z.string().trim().min(1).default("engine"),
-  CONSISTENCY_ENGINE_ROOT: z.string().trim().min(1).optional(),
+  CONSISTENCY_ENGINE_ROOT: emptyAsUnset(z.string().trim().min(1).optional()),
   /**
    * Any provider id from the bundled Pi runtime's built-in catalog (e.g.
    * deepseek, openai, anthropic, google, xai, openrouter, groq, moonshotai…).
    * The catalog is the source of truth; an unknown id fails closed at
    * provider creation with a typed error.
    */
-  LLM_PROVIDER: z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).optional(),
+  LLM_PROVIDER: emptyAsUnset(z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).optional()),
   // The LLM engine is the bundled Pi runtime (@earendil-works/pi-*). Keys are
   // injected in-memory via setRuntimeApiKey at provider creation; nothing is
   // written to Pi config files and no local Pi installation is required.
   // CONSISTENCY_PI_CONFIG_DIR only isolates the runtime's auth-storage path
   // away from any user-level ~/.pi directory.
   LLM_API_KEY: optionalSecret,
-  LLM_MODEL: z.string().trim().min(1).optional(),
+  LLM_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   ANTHROPIC_API_KEY: optionalSecret,
-  ANTHROPIC_MODEL: z.string().trim().min(1).optional(),
-  CONSISTENCY_PI_CONFIG_DIR: z.string().trim().min(1).optional(),
+  ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
+  CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_WORKERS_ENABLED: z
     .enum(["true", "false"])
     .transform(value => value === "true")
@@ -102,7 +112,7 @@ export const envSchema = z.object({
   CONSISTENCY_WEB_URL: z.string().url().default("http://127.0.0.1:5173"),
   CONSISTENCY_PUBLIC_PR_ANALYSIS_ENABLED: z.enum(["true", "false"]).default("true"),
   CONSISTENCY_REPORT_LANGUAGE: z.enum(["zh-CN", "en-US"]).default("zh-CN"),
-  CONSISTENCY_SETTINGS_WRITABLE: z.enum(["true", "false"]).optional(),
+  CONSISTENCY_SETTINGS_WRITABLE: emptyAsUnset(z.enum(["true", "false"]).optional()),
   CONSISTENCY_NOTEBOOK_ENABLED: z.enum(["true", "false"]).default("true"),
   CONSISTENCY_NOTEBOOK_MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(32).default(8),
   CONSISTENCY_NOTEBOOK_MAX_CONTEXT_TOKENS: z.coerce.number().int().min(1_000).max(64_000).default(16_000),
@@ -115,7 +125,7 @@ export const envSchema = z.object({
   GITHUB_OAUTH_CLIENT_ID: optionalSecret,
   // Product-operated desktop broker credentials stay server-side and are never
   // included in renderer-facing settings or desktop helper environments.
-  CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: z.string().url().optional(),
+  CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: emptyAsUnset(z.string().url().optional()),
   CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID: optionalSecret,
   CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET: optionalSecret,
   DEEPSEEK_API_KEY: optionalSecret,
