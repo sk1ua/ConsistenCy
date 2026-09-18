@@ -2007,16 +2007,19 @@ const routes: Route[] = [
       if (localPath) {
         try {
           const vcs = new LocalGitAdapter({ root: localPath });
-          const [branch, headSha, diff] = await Promise.all([
+          const [branch, headSha, diff, untracked] = await Promise.all([
             vcs.getCurrentBranch().catch(() => undefined),
             vcs.getHeadSha().catch(() => undefined),
-            vcs.getWorkingDiff().catch(() => [])
+            vcs.getWorkingDiff().catch(() => []),
+            vcs.getUntrackedFiles().catch(() => [] as string[])
           ]);
           const dirtyCount = diff.length;
+          const untrackedCount = untracked.length;
+          const changeCount = dirtyCount + untrackedCount;
           workingTree = {
-            available: dirtyCount > 0,
-            reason: dirtyCount === 0 ? "工作区无未提交变更" : undefined,
-            changedFileCount: dirtyCount
+            available: changeCount > 0,
+            reason: changeCount === 0 ? "工作区无未提交变更" : undefined,
+            changedFileCount: changeCount
           };
           const trunkRef = await vcs.resolveTrunkRef().catch(() => undefined);
           const onTrunk =

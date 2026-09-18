@@ -69,6 +69,23 @@ describe("buildLocalContext", { timeout: 30_000 }, () => {
     expect(context.projectMetadata["package.json"]).toContain("fixture");
   });
 
+
+  it("includes untracked-only files as added working-tree changes with content and patches", async () => {
+    // Ensure a clean tracked tree so this case is untracked-only.
+    await git(["checkout", "--", "."]).catch(() => undefined);
+    write("bait-untracked.ts", "export const bait = true;\n");
+
+    const context = await buildLocalContext({ jobId: "job_local_untracked", repoPath: root });
+
+    const bait = context.changedFiles.find((file) => file.path === "bait-untracked.ts");
+    expect(bait?.status).toBe("added");
+    expect(bait?.additions).toBeGreaterThan(0);
+    expect(bait?.patch).toContain("+export const bait = true;");
+    expect(context.fileContents["bait-untracked.ts"]).toBe("export const bait = true;\n");
+    expect(context.baseFileContents["bait-untracked.ts"]).toBeUndefined();
+    expect(context.diff).toContain("bait-untracked.ts");
+  });
+
   it("reviews a committed range with real revisions on both sides", async () => {
     await git(["add", "."]);
     await git(["commit", "-m", "second commit"]);

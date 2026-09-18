@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveDatabasePath, resolveWorkspaceRoot, loadEnv } from "./env";
+import { resolveDatabasePath, resolveWorkspaceRoot, loadEnv, defaultPythonPath } from "./env";
 import { findProjectRoot } from "./settings";
 import { basename, dirname, join } from "node:path";
 
@@ -91,6 +91,27 @@ describe("loadEnv", () => {
     });
     expect(config.publicPrAnalysisEnabled).toBe(true);
     expect(config.notebookEnabled).toBe(true);
+  });
+
+
+  it("treats empty or whitespace optional env strings as unset", () => {
+    expect(loadEnv({ LLM_PROVIDER: "" }).LLM_PROVIDER).toBeUndefined();
+    expect(loadEnv({ LLM_PROVIDER: "   " }).LLM_PROVIDER).toBeUndefined();
+    expect(loadEnv({ LLM_PROVIDER: "", DEEPSEEK_API_KEY: "configured" }).LLM_PROVIDER).toBe("deepseek");
+    expect(loadEnv({ LLM_MODEL: "" }).LLM_MODEL).toBeUndefined();
+    expect(loadEnv({ ANTHROPIC_MODEL: "  " }).ANTHROPIC_MODEL).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_PI_CONFIG_DIR: "" }).CONSISTENCY_PI_CONFIG_DIR).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: "" }).CONSISTENCY_DESKTOP_OAUTH_BROKER_URL).toBeUndefined();
+  });
+
+  it("defaults CONSISTENCY_PYTHON_PATH to python3 off Windows and accepts blank as default", () => {
+    expect(defaultPythonPath("linux")).toBe("python3");
+    expect(defaultPythonPath("darwin")).toBe("python3");
+    expect(defaultPythonPath("win32")).toBe("python");
+    expect(loadEnv({}).CONSISTENCY_PYTHON_PATH).toBe(defaultPythonPath());
+    expect(loadEnv({ CONSISTENCY_PYTHON_PATH: "" }).CONSISTENCY_PYTHON_PATH).toBe(defaultPythonPath());
+    expect(loadEnv({ CONSISTENCY_PYTHON_PATH: "   " }).CONSISTENCY_PYTHON_PATH).toBe(defaultPythonPath());
+    expect(loadEnv({ CONSISTENCY_PYTHON_PATH: "/usr/bin/python3.12" }).CONSISTENCY_PYTHON_PATH).toBe("/usr/bin/python3.12");
   });
 
   it("selects DeepSeek or OpenAI when configured and leaves LLM_PROVIDER undefined otherwise without mock fallback", () => {

@@ -1,4 +1,5 @@
-import { basename, resolve } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import {
   WORKING_TREE_REV,
   prReviewContextSchema,
@@ -29,6 +30,117 @@ const DEFAULT_MAX_DIFF_BYTES = 1024 * 1024;
 const DEFAULT_MAX_PATCH_BYTES = 64 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 256 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Turn untracked paths into reviewable changed files (status `untracked`,
+ * mapped to GitHub `added` downstream). Synthesizes a full-file addition
+ * patch from disk so the deterministic engine and LLM see content/hunks.
+ * Never mutates the working tree.
+ */
+export function untrackedPathToChangedFile(
+  repoPath: string,
+  relativePath: string,
+  maxFileBytes: number = DEFAULT_MAX_FILE_BYTES
+): VcsChangedFile | undefined {
+  if (!relativePath || relativePath.includes("\0") || isSecretPath(relativePath)) {
+    return undefined;
+  }
+  const absolute = join(repoPath, relativePath);
+  let size: number;
+  try {
+    const stats = statSync(absolute);
+    if (!stats.isFile()) return undefined;
+    size = stats.size;
+  } catch {
+    return undefined;
+  }
+
+  if (size > maxFileBytes) {
+    return {
+      path: relativePath,
+      status: "untracked",
+      additions: 0,
+      deletions: 0,
+      binary: true,
+      hunks: []
+    };
+  }
+
+  let buffer: Buffer;
+  try {
+    buffer = readFileSync(absolute);
+  } catch {
+    return undefined;
+  }
+  if (buffer.includes(0)) {
+    return {
+      path: relativePath,
+      status: "untracked",
+      additions: 0,
+      deletions: 0,
+      binary: true,
+      hunks: []
+    };
+  }
+
+  const textContent = buffer.toString("utf8");
+  let lines = textContent.split("\n");
+  if (textContent.endsWith("\n") && lines[lines.length - 1] === "") {
+    lines = lines.slice(0, -1);
+  }
+  const newLines = lines.length;
+  if (newLines === 0) {
+    return {
+      path: relativePath,
+      status: "untracked",
+      additions: 0,
+      deletions: 0,
+      binary: false,
+      hunks: []
+    };
+  }
+
+  return {
+    path: relativePath,
+    status: "untracked",
+    additions: newLines,
+    deletions: 0,
+    binary: false,
+    hunks: [{
+      header: `@@ -0,0 +1,${newLines} @@`,
+      oldStart: 0,
+      oldLines: 0,
+      newStart: 1,
+      newLines,
+      content: lines.map(line => `+${line}`).join("\n")
+    }]
+  };
+}
+
+/**
+ * Working-tree review surface: tracked dirty files plus untracked paths.
+ * Matches POST /reviews/local enqueue rules (dirty OR untracked).
+ */
+export async function collectWorkingTreeChanges(
+  repoPath: string,
+  vcs: IVCSService,
+  maxFileBytes: number = DEFAULT_MAX_FILE_BYTES
+): Promise<VcsChangedFile[]> {
+  const [tracked, untrackedPaths] = await Promise.all([
+    vcs.getWorkingDiff(),
+    vcs.getUntrackedFiles()
+  ]);
+  const seen = new Set(tracked.map(file => file.path));
+  const merged = [...tracked];
+  for (const relativePath of untrackedPaths) {
+    if (seen.has(relativePath)) continue;
+    const file = untrackedPathToChangedFile(repoPath, relativePath, maxFileBytes);
+    if (file === undefined) continue;
+    seen.add(relativePath);
+    merged.push(file);
+  }
+  return merged;
+}
 
 function truncateUtf8(value: string, maxBytes: number): string {
   const buffer = Buffer.from(value, "utf8");
@@ -113,7 +225,11 @@ export async function buildLocalContext(
 
   const changed = reviewingRange
     ? await vcs.getBranchDiff(input.baseRef as string, input.headRef as string)
-    : await vcs.getWorkingDiff();
+    : await collectWorkingTreeChanges(
+      repoPath,
+      vcs,
+      dependencies.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES
+    );
 
   const maxPatchBytes = dependencies.maxPatchBytes ?? DEFAULT_MAX_PATCH_BYTES;
   const changedFiles = changed.map((file) => toChangedFile(file, maxPatchBytes));
