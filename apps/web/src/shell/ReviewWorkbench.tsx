@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type {
@@ -8,6 +8,8 @@ import type {
   ReviewReport
 } from "@consistency/schema";
 import {
+  AlertTriangle,
+  CheckCircle2,
   FolderGit2,
   GitBranch,
   GitCommit,
@@ -20,7 +22,7 @@ import { Button } from "../design-system/Button";
 import { Badge } from "../design-system/Badge";
 import { EmptyState } from "../design-system/EmptyState";
 import { ReviewComposerDialog } from "../routes/ReviewComposerDialog";
-import { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError } from "../routes/reviewStart";
+import { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError, isSafeProductErrorMessage } from "../routes/reviewStart";
 import { openSettingsDialog } from "../settingsDialogStore";
 
 export interface ReviewWorkbenchProps {
@@ -40,6 +42,21 @@ const REPO_SURFACES = [
   { id: "workflows", zh: "工作流", en: "Workflows" }
 ] as const;
 
+function isActiveJobStatus(status: ReviewJob["status"]): boolean {
+  return status === "queued" || status === "running" || status === "awaiting_publish" || status === "publishing";
+}
+
+function isFailedJobStatus(status: ReviewJob["status"]): boolean {
+  return status === "failed" || status === "publish_failed";
+}
+
+/** User-safe summary for a finished/failed job; never echoes secret-looking text. */
+export function formatJobDispositionError(job: ReviewJob, zh: boolean): string {
+  const raw = job.error?.trim();
+  if (raw && isSafeProductErrorMessage(raw)) return raw;
+  return zh ? "审查执行失败。打开运行页查看详情。" : "Review failed. Open the run page for details.";
+}
+
 export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
   locale,
   repository,
@@ -51,6 +68,8 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
   const queryClient = useQueryClient();
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  /** Job id started from this workbench; kept for disposition if user returns. */
+  const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
 
   const repositoryId = repository?.id ?? "";
 
@@ -70,7 +89,17 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
     queryKey: workspaceQueryKeys.repositoryReviews(repositoryId),
     queryFn: () => api.repositoryReviews(repositoryId),
     enabled: Boolean(repositoryId),
-    staleTime: 30_000
+    staleTime: 5_000,
+    refetchInterval: query => {
+      const list = query.state.data as ReviewJob[] | undefined;
+      const latest = list?.[0];
+      if (latest && isActiveJobStatus(latest.status)) return 3_000;
+      if (trackedJobId) {
+        const tracked = list?.find(j => j.id === trackedJobId);
+        if (tracked && isActiveJobStatus(tracked.status)) return 3_000;
+      }
+      return 15_000;
+    }
   });
 
   const prep = prepQuery.data;
@@ -81,7 +110,9 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
     onSuccess: async result => {
       setIsReviewOpen(false);
       setReviewError(null);
+      setTrackedJobId(result.jobId);
       await queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all });
+      // Align with RepositoryDetailPage: jump straight to the run overview.
       navigate(`/runs/${encodeURIComponent(result.jobId)}/overview`);
     },
     onError: (error: unknown) => {
@@ -101,6 +132,21 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
       )
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }, [jobs, repository, repositoryId, reviewsQuery.data]);
+
+  const dispositionJob = useMemo(() => {
+    if (trackedJobId) {
+      const tracked = repoJobs.find(j => j.id === trackedJobId);
+      if (tracked) return tracked;
+    }
+    return repoJobs[0] ?? null;
+  }, [repoJobs, trackedJobId]);
+
+  useEffect(() => {
+    if (!dispositionJob || !trackedJobId) return;
+    if (dispositionJob.id !== trackedJobId) return;
+    if (isActiveJobStatus(dispositionJob.status)) return;
+    // Keep terminal tracked job visible for disposition; no-op otherwise.
+  }, [dispositionJob, trackedJobId]);
 
   const latestReport =
     repoJobs[0]?.report ??
@@ -128,6 +174,9 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
     ...(gitStatus?.untrackedFiles ?? []).slice(0, 4).map(path => ({ path, kind: "untracked" as const }))
   ];
   const repoBase = `/repositories/${encodeURIComponent(repository.id)}`;
+  const runOverviewPath = dispositionJob
+    ? `/runs/${encodeURIComponent(dispositionJob.id)}/overview`
+    : null;
 
   return (
     <div className="ds-page review-workbench">
@@ -217,6 +266,71 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
         )}
       </div>
 
+      {dispositionJob && runOverviewPath && (
+        <div
+          className={
+            isFailedJobStatus(dispositionJob.status)
+              ? "review-workbench__disposition review-workbench__disposition--fail"
+              : dispositionJob.status === "succeeded"
+                ? "review-workbench__disposition review-workbench__disposition--ok"
+                : isActiveJobStatus(dispositionJob.status)
+                  ? "review-workbench__disposition review-workbench__disposition--live"
+                  : "review-workbench__disposition"
+          }
+          data-testid="review-workbench-disposition"
+          role={isFailedJobStatus(dispositionJob.status) ? "alert" : "status"}
+        >
+          <div className="review-workbench__disposition-main">
+            {isFailedJobStatus(dispositionJob.status) ? (
+              <AlertTriangle size={16} aria-hidden />
+            ) : dispositionJob.status === "succeeded" ? (
+              <CheckCircle2 size={16} aria-hidden />
+            ) : isActiveJobStatus(dispositionJob.status) ? (
+              <Loader2 size={16} className="ds-spin" aria-hidden />
+            ) : (
+              <PlayCircle size={16} aria-hidden />
+            )}
+            <div className="review-workbench__disposition-copy">
+              <strong>
+                {isFailedJobStatus(dispositionJob.status)
+                  ? (zh ? "审查失败" : "Review failed")
+                  : dispositionJob.status === "succeeded"
+                    ? (zh ? "审查已完成" : "Review completed")
+                    : isActiveJobStatus(dispositionJob.status)
+                      ? (zh ? "审查进行中" : "Review in progress")
+                      : (zh ? "最近审查" : "Latest review")}
+              </strong>
+              {isFailedJobStatus(dispositionJob.status) ? (
+                <p className="review-workbench__disposition-error">
+                  {formatJobDispositionError(dispositionJob, zh)}
+                </p>
+              ) : dispositionJob.status === "succeeded" ? (
+                <p className="review-workbench__muted">
+                  {zh
+                    ? "打开运行概览查看发现、证据与结论。"
+                    : "Open the run overview for findings, evidence, and conclusion."}
+                </p>
+              ) : isActiveJobStatus(dispositionJob.status) ? (
+                <p className="review-workbench__muted">
+                  {zh ? "智能体正在执行。可打开运行页查看进度。" : "Agents are running. Open the run page for progress."}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          <Button
+            variant={dispositionJob.status === "succeeded" ? "primary" : "outline"}
+            size="sm"
+            onClick={() => navigate(runOverviewPath)}
+          >
+            {isFailedJobStatus(dispositionJob.status)
+              ? (zh ? "查看失败详情" : "Open failed run")
+              : dispositionJob.status === "succeeded"
+                ? (zh ? "打开运行概览" : "Open run overview")
+                : (zh ? "打开运行页" : "Open run")}
+          </Button>
+        </div>
+      )}
+
       <div className="review-workbench__grid">
         <section className="review-workbench__panel">
           <h2>{zh ? "最近审查" : "Recent reviews"}</h2>
@@ -247,9 +361,9 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
                       variant={
                         job.status === "succeeded"
                           ? "success"
-                          : job.status === "running"
+                          : isActiveJobStatus(job.status)
                             ? "warning"
-                            : job.status === "failed"
+                            : isFailedJobStatus(job.status)
                               ? "danger"
                               : "neutral"
                       }
@@ -262,7 +376,11 @@ export const ReviewWorkbench: React.FC<ReviewWorkbenchProps> = ({
                         ? `PR #${job.pullRequestNumber}`
                         : (zh ? "工作区审查" : "Working tree")}
                     </span>
-                    {report?.findings?.length ? (
+                    {isFailedJobStatus(job.status) ? (
+                      <span className="review-workbench__muted" title={formatJobDispositionError(job, zh)}>
+                        {formatJobDispositionError(job, zh)}
+                      </span>
+                    ) : report?.findings?.length ? (
                       <span className="review-workbench__muted" title={report.findings[0]?.title}>
                         {zh
                           ? `${report.findings.length} 项发现 · ${report.findings[0]?.title ?? ""}`

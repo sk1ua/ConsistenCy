@@ -556,4 +556,55 @@ describe("shell navigation happy path", () => {
     expect(lastState).toEqual({ highlightPath: "README.md" });
   });
 
+
+  it("workbench shows success disposition CTA to run overview", async () => {
+    const host = await mount(
+      <ReviewWorkbench locale="zh-CN" repository={demoRepo} jobs={[demoJob]} />
+    );
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 10));
+    });
+    const banner = host.querySelector('[data-testid="review-workbench-disposition"]');
+    expect(banner).toBeTruthy();
+    expect(banner?.textContent).toMatch(/审查已完成|打开运行概览/);
+    const cta = [...banner!.querySelectorAll("button")].find(b =>
+      b.textContent?.includes("打开运行概览")
+    );
+    expect(cta).toBeTruthy();
+    await act(async () => {
+      cta!.click();
+    });
+    expect(pathOf(host)).toBe("/runs/job_abc123/overview");
+  });
+
+  it("workbench shows failed job error summary with run link", async () => {
+    const failedJob = {
+      ...demoJob,
+      id: "job_fail_1",
+      status: "failed" as const,
+      error: "Agent pipeline aborted: model returned empty findings",
+      report: undefined
+    };
+    vi.spyOn(api, "repositoryReviews").mockResolvedValue([failedJob] as never);
+    const host = await mount(
+      <ReviewWorkbench locale="zh-CN" repository={demoRepo} jobs={[failedJob]} />
+    );
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 10));
+    });
+    const banner = host.querySelector('[data-testid="review-workbench-disposition"]');
+    expect(banner).toBeTruthy();
+    expect(banner?.getAttribute("role")).toBe("alert");
+    expect(banner?.textContent).toMatch(/审查失败/);
+    expect(banner?.textContent).toMatch(/Agent pipeline aborted/);
+    const cta = [...banner!.querySelectorAll("button")].find(b =>
+      b.textContent?.includes("查看失败详情")
+    );
+    expect(cta).toBeTruthy();
+    await act(async () => {
+      cta!.click();
+    });
+    expect(pathOf(host)).toBe("/runs/job_fail_1/overview");
+  });
+
 });
