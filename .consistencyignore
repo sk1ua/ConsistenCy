@@ -1,0 +1,6 @@
+# Paths excluded from local WORKING_TREE reviews (see apps/api/src/review/localReviewExclude.ts).
+# Also honor optional env CONSISTENCY_LOCAL_REVIEW_EXCLUDE (comma/newline-separated patterns).
+
+# Dogfood / local scratch noise
+artifacts/
+apps/web/src/shell/dogfood*.ts

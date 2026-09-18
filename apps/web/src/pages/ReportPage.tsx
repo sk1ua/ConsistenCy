@@ -1,7 +1,14 @@
 import { riskBandForFindings, type ReviewJob, type ReviewReport } from "@consistency/schema";
 import { CheckCircle2, FileSearch2, GitBranch, ShieldAlert, ShieldCheck, Sparkles } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FindingItem } from "../components/FindingItem";
+import {
+  filterFindingsByDisposition,
+  readFindingDispositions,
+  setFindingDisposition,
+  writeFindingDispositions,
+  type FindingDispositionMap
+} from "../utils/findingDisposition";
 import { StatusBadge } from "../components/StatusBadge";
 import { useI18n } from "../i18n";
 import { bindReportToJob } from "./reportIntegrity";
@@ -46,6 +53,8 @@ export function ReportPage({
   const { locale, t } = useI18n();
   const zh = locale === "zh-CN";
   const [groupBy, setGroupBy] = useState<"severity" | "agent">("severity");
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [dispositions, setDispositions] = useState<FindingDispositionMap>({});
 
   const binding = useMemo(() => job ? bindReportToJob(job, report) : { status: "missing" as const }, [job, report]);
   const boundReport = binding.status === "bound" ? binding.report : undefined;
@@ -58,17 +67,44 @@ export function ReportPage({
     ? `${resolvedProvider}${resolvedModel ? ` · ${resolvedModel}` : ""}`
     : t("unavailable");
 
+  useEffect(() => {
+    if (!job) {
+      setDispositions({});
+      return;
+    }
+    setDispositions(readFindingDispositions(job.id));
+  }, [job?.id]);
+
+  const visibleFindings = useMemo(() => {
+    if (!boundReport) return [];
+    return filterFindingsByDisposition(boundReport.findings, dispositions, { showDismissed });
+  }, [boundReport, dispositions, showDismissed]);
+
+  const dismissedCount = useMemo(() => {
+    if (!boundReport) return 0;
+    return boundReport.findings.filter(finding => dispositions[finding.id] === "dismissed").length;
+  }, [boundReport, dispositions]);
+
   const groups = useMemo(() => {
     if (!boundReport) return [];
     const map = new Map<string, typeof boundReport.findings>();
-    for (const finding of boundReport.findings) {
+    for (const finding of visibleFindings) {
       const key = groupBy === "severity" ? finding.severity : finding.agent;
       const current = map.get(key);
       if (current) current.push(finding);
       else map.set(key, [finding]);
     }
     return [...map.entries()];
-  }, [boundReport, groupBy]);
+  }, [boundReport, groupBy, visibleFindings]);
+
+  function updateDisposition(findingId: string, disposition: "accepted" | "dismissed" | null) {
+    if (!job) return;
+    setDispositions(current => {
+      const next = setFindingDisposition(current, findingId, disposition);
+      writeFindingDispositions(job.id, next);
+      return next;
+    });
+  }
 
   if (!job) return <div className="empty-state">{t("Select a review job to inspect its report.")}</div>;
 
@@ -160,9 +196,21 @@ export function ReportPage({
                 )}
               </div>
             </div>
-            <div className="segmented" role="group" aria-label={t("Findings")}>
-              <button type="button" aria-pressed={groupBy === "severity"} className={groupBy === "severity" ? "active" : ""} onClick={() => setGroupBy("severity")}>{zh ? "严重度" : "Severity"}</button>
-              <button type="button" aria-pressed={groupBy === "agent"} className={groupBy === "agent" ? "active" : ""} onClick={() => setGroupBy("agent")}>{zh ? "智能体" : "Agent"}</button>
+            <div className="findings-pane-controls">
+              <div className="segmented" role="group" aria-label={t("Findings")}>
+                <button type="button" aria-pressed={groupBy === "severity"} className={groupBy === "severity" ? "active" : ""} onClick={() => setGroupBy("severity")}>{zh ? "严重度" : "Severity"}</button>
+                <button type="button" aria-pressed={groupBy === "agent"} className={groupBy === "agent" ? "active" : ""} onClick={() => setGroupBy("agent")}>{zh ? "智能体" : "Agent"}</button>
+              </div>
+              {dismissedCount > 0 ? (
+                <label className="findings-show-dismissed">
+                  <input
+                    type="checkbox"
+                    checked={showDismissed}
+                    onChange={event => setShowDismissed(event.target.checked)}
+                  />
+                  <span>{t("Show dismissed")} ({dismissedCount})</span>
+                </label>
+              ) : null}
             </div>
           </div>
 
@@ -172,7 +220,11 @@ export function ReportPage({
             ) : groups.length === 0 ? (
               <div className="clean-inline-status">
                 <CheckCircle2 size={16} className="icon-success" />
-                <span>{zh ? "本次审查未发现代码缺陷。" : "No findings reported."}</span>
+                <span>
+                  {boundReport.findings.length > 0 && dismissedCount === boundReport.findings.length && !showDismissed
+                    ? t("All findings dismissed")
+                    : (zh ? "本次审查未发现代码缺陷。" : "No findings reported.")}
+                </span>
               </div>
             ) : (
               groups.map(([group, findings]) => (
@@ -186,6 +238,8 @@ export function ReportPage({
                       finding={finding}
                       key={finding.id}
                       onLocate={() => undefined}
+                      disposition={dispositions[finding.id] ?? null}
+                      onDispositionChange={disposition => updateDisposition(finding.id, disposition)}
                     />
                   ))}
                 </section>

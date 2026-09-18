@@ -45,6 +45,11 @@ export const envSchema = z.object({
    * repository reviewable — narrow this before exposing the API off localhost.
    */
   CONSISTENCY_LOCAL_REVIEW_ROOTS: z.string().trim().optional(),
+  /**
+   * Extra gitignore-style patterns excluded from local WORKING_TREE reviews
+   * (in addition to repo-root `.consistencyignore`). Comma or newline separated.
+   */
+  CONSISTENCY_LOCAL_REVIEW_EXCLUDE: z.string().trim().optional(),
   CONSISTENCY_PYTHON_PATH: emptyAsUnset(z.string().trim().min(1).default(defaultPythonPath())),
   CONSISTENCY_ENGINE_MODULE: z.string().trim().min(1).default("engine"),
   CONSISTENCY_ENGINE_ROOT: emptyAsUnset(z.string().trim().min(1).optional()),

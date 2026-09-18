@@ -169,3 +169,13 @@ the renderer.
 `GITHUB_PUBLIC_READ_TOKEN` remains a fallback for self-hosted deployments that
 have not configured OAuth sign-in. It is optional and is not required for the
 Desktop broker flow.
+
+## Local WORKING_TREE path excludes
+
+Local working-tree reviews (`buildLocalContext`, job diff for `WORKING_TREE`, and review-preparation changed-file counts) honor:
+
+1. A repo-root **`.consistencyignore`** file (gitignore-style: one pattern per line, `#` comments).
+2. Optional env **`CONSISTENCY_LOCAL_REVIEW_EXCLUDE`**: comma- or newline-separated extra patterns.
+
+The ConsistenCy repository ships a sample `.consistencyignore` that ignores `artifacts/` and `apps/web/src/shell/dogfood*.ts` so dogfood scratch files do not enter reviews.
+
