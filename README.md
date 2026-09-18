@@ -91,6 +91,8 @@ cp .env.example .env
 npm run dev:api
 
 # Terminal 2 — Start the Web UI (http://127.0.0.1:5173)
+# Export vars from .env first if CONSISTENCY_API_TOKEN is set — Vite's /api
+# proxy injects Authorization (dev-server only; never use VITE_ for the token).
 npm run dev:web
 ```
 

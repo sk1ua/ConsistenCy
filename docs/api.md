@@ -18,6 +18,8 @@ In Electron Desktop mode, the main process injects this token automatically via 
 x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
 ```
 
+For local browser dogfood (`npm run dev:web`), the Vite `/api` proxy can inject the same headers from `process.env` when set — **dev-server only**; do not rely on this in production or Electron.
+
 ---
 
 ## 2. API Routes Summary
