@@ -685,6 +685,12 @@ export const zh: Record<string, string> = {
   "Undo dismiss": "撤销忽略",
   "Show dismissed": "显示已忽略",
   "All findings dismissed": "全部发现已忽略。",
+  "Has patch": "有补丁",
+  "Preview patch": "预览补丁",
+  "Patch preview": "补丁预览",
+  "Suggested patch": "建议补丁",
+  "Apply to working tree": "应用到工作区",
+  "Applying…": "正在应用…",
   "Finding disposition": "发现处置",
   "Opens the desktop app's own data folder — where the main and API logs live — in your file manager. The folder location stays in the main process; no path is shown or sent to this page.": "在文件管理器中打开桌面端应用自身的数据文件夹（主进程与 API 日志均保存在其中）。文件夹位置只保留在主进程中；任何路径都不会显示或发送到此页面。"
 };

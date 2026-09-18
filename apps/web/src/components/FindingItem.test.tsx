@@ -80,4 +80,15 @@ describe("FindingItem", () => {
     expect(html).toContain("finding-item--dismissed");
     expect(html).toContain("Dismissed");
   });
+
+  it("shows a preview patch action when suggestedPatch is present", () => {
+    const withPatch = {
+      ...testFinding,
+      suggestedPatch: "diff --git a/apps/api/src/http.ts b/apps/api/src/http.ts\n--- a/apps/api/src/http.ts\n+++ b/apps/api/src/http.ts\n@@ -1 +1 @@\n-a\n+b\n"
+    } satisfies ReviewFinding;
+    const html = renderToString(<FindingItem finding={withPatch} />);
+    expect(html).toContain("Preview patch");
+    expect(html).toContain("Has patch");
+  });
+
 });

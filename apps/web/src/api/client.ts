@@ -7,6 +7,8 @@ import {
   notebookResponseSchema,
   notebookSourcesResponseSchema,
   jobDiffResponseSchema,
+  findingPatchPreviewResponseSchema,
+  findingPatchApplyResponseSchema,
   heartbeatPulseSchema,
   heartbeatStreamEventSchema,
   auditCapabilitiesSchema,
@@ -89,6 +91,8 @@ import {
   type KernelSyscallCatalogResponse,
   type EngineAllowlistCatalogResponse,
   type JobDiffResponse,
+  type FindingPatchPreviewResponse,
+  type FindingPatchApplyResponse,
   type AuditCapabilities,
   type Automation,
   type CreateAutomationRequest,
@@ -317,6 +321,19 @@ export const api = {
   },
   async jobDiff(id: string, signal?: AbortSignal): Promise<JobDiffResponse> {
     return jobDiffResponseSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/diff`, { signal }));
+  },
+  async findingPatchPreview(jobId: string, findingId: string, signal?: AbortSignal): Promise<FindingPatchPreviewResponse> {
+    return findingPatchPreviewResponseSchema.parse(
+      await request(`/jobs/${encodeURIComponent(jobId)}/findings/${encodeURIComponent(findingId)}/patch`, { signal })
+    );
+  },
+  async findingPatchApply(jobId: string, findingId: string): Promise<FindingPatchApplyResponse> {
+    return findingPatchApplyResponseSchema.parse(
+      await request(`/jobs/${encodeURIComponent(jobId)}/findings/${encodeURIComponent(findingId)}/patch/apply`, {
+        method: "POST",
+        body: "{}"
+      })
+    );
   },
   async jobNotebook(jobId: string, signal?: AbortSignal): Promise<string | null> {
     return (await request(`/jobs/${encodeURIComponent(jobId)}/notebook`, { signal }) as { notebookId: string | null }).notebookId;

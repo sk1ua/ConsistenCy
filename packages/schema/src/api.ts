@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { reviewJobSchema } from "./job";
+import { reviewAccessModeSchema, reviewJobSchema } from "./job";
 import { notebookCardKindSchema, notebookSchema, notebookSourceSchema } from "./notebook";
 import { reviewReportSchema, riskLevelSchema } from "./report";
 import { workflowSpecSchema } from "./workflow";
@@ -132,6 +132,48 @@ export const jobDiffResponseSchema = z.object({
   files: z.array(vcsChangedFileSchema),
   /** False when the checkout is gone and no diff can be computed. */
   available: z.boolean()
+}).strict();
+
+const patchViolationSchema = z.object({
+  code: z.enum([
+    "EMPTY_PATCH",
+    "TOO_LARGE",
+    "TOO_MANY_FILES",
+    "MALFORMED",
+    "PATH_TRAVERSAL",
+    "FORBIDDEN_PATH",
+    "SECRET_PATH",
+    "PATH_OUTSIDE_REVIEW"
+  ]),
+  message: z.string().trim().min(1),
+  path: z.string().trim().min(1).optional()
+}).strict();
+
+/** GET /jobs/:id/findings/:findingId/patch — read-only unified-diff preview. */
+export const findingPatchPreviewResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  findingId: z.string().trim().min(1),
+  accessMode: reviewAccessModeSchema,
+  patch: z.string().min(1),
+  touchedPaths: z.array(z.string().trim().min(1)),
+  applyAvailable: z.boolean(),
+  applyUnavailableReason: z.string().trim().min(1).optional(),
+  verification: z.object({
+    policyOk: z.boolean(),
+    violations: z.array(patchViolationSchema),
+    applies: z.boolean().optional(),
+    applyError: z.string().trim().min(1).optional()
+  }).strict()
+}).strict();
+
+/** POST /jobs/:id/findings/:findingId/patch/apply — local_git working-tree apply. */
+export const findingPatchApplyResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  findingId: z.string().trim().min(1),
+  applied: z.literal(true),
+  touchedPaths: z.array(z.string().trim().min(1)),
+  committed: z.literal(false),
+  message: z.string().trim().min(1)
 }).strict();
 
 export const gitRemoteInfoSchema = z.object({
@@ -654,3 +696,6 @@ export type WorkflowSummary = z.infer<typeof workflowSummarySchema>;
 export type WorkflowListResponse = z.infer<typeof workflowListResponseSchema>;
 export type WorkflowResponse = z.infer<typeof workflowResponseSchema>;
 export type JobDiffResponse = z.infer<typeof jobDiffResponseSchema>;
+export type FindingPatchPreviewResponse = z.infer<typeof findingPatchPreviewResponseSchema>;
+export type FindingPatchApplyResponse = z.infer<typeof findingPatchApplyResponseSchema>;
+

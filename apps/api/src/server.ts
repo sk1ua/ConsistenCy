@@ -32,6 +32,7 @@ import { NotebookGraph } from "./notebook/graph";
 import { enqueuePublicPrReview } from "./review/publicPr";
 import { WorkflowStore } from "./workflows/store";
 import { resolveJobDiff } from "./review/jobDiff";
+import { applyFindingPatch, previewFindingPatch } from "./review/patch/findingPatch";
 import { SQLiteAuditDomainStore } from "./audit/store";
 import type { AuditExecutionAvailability } from "./audit/store";
 import { buildRepositorySupervisorRegistrations } from "./audit/repositorySupervision";
@@ -501,6 +502,22 @@ export const server = createApiServer({
   jobDiff: jobId => resolveJobDiff(jobId, {
     jobs,
     workspaceRoot: config.workspaceRoot
+  }),
+  findingPatchPreview: (jobId, findingId) => previewFindingPatch(jobId, findingId, {
+    jobs,
+    resolveRegisteredPath: repositoryId => {
+      const repository = auditStore.getRepository(repositoryId);
+      if (repository?.source !== "local_git") return undefined;
+      return auditStore.getLocalRepositoryPath(repository.id);
+    }
+  }),
+  findingPatchApply: (jobId, findingId) => applyFindingPatch(jobId, findingId, {
+    jobs,
+    resolveRegisteredPath: repositoryId => {
+      const repository = auditStore.getRepository(repositoryId);
+      if (repository?.source !== "local_git") return undefined;
+      return auditStore.getLocalRepositoryPath(repository.id);
+    }
   }),
   heartbeat: {
     latest: () => heartbeat.latest(),
