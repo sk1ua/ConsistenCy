@@ -2,6 +2,7 @@ import { basename, relative, resolve, sep } from "node:path";
 import { WORKING_TREE_REV, type IVCSService } from "@consistency/schema";
 import { LocalGitAdapter } from "@consistency/vcs-core";
 import type { ReviewJobStore } from "../jobQueue";
+import { createLocalReviewExcludeFilter } from "../review/localReviewExclude";
 
 export type LocalTriggerInput = {
   /** Path to the checkout to review. */
@@ -113,7 +114,10 @@ export async function triggerLocalReview(
       if (head === undefined) throw new LocalTriggerError("Repository has no commits", "NOTHING_TO_REVIEW");
       const changed = await vcs.getWorkingDiff();
       const untracked = await vcs.getUntrackedFiles();
-      if (changed.length === 0 && untracked.length === 0) {
+      const exclude = createLocalReviewExcludeFilter(repoPath);
+      const reviewableChanged = changed.filter(file => !exclude.excludes(file.path));
+      const reviewableUntracked = untracked.filter(path => !exclude.excludes(path));
+      if (reviewableChanged.length === 0 && reviewableUntracked.length === 0) {
         throw new LocalTriggerError("The working tree is clean", "NOTHING_TO_REVIEW");
       }
       baseSha = head.sha;

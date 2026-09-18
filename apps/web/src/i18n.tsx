@@ -677,6 +677,15 @@ export const zh: Record<string, string> = {
   "Opening logs folder…": "正在打开日志文件夹…",
   "Logs folder opened.": "已打开日志文件夹。",
   "Could not open the logs folder.": "无法打开日志文件夹。",
+  "Accept": "接受",
+  "Dismiss": "忽略",
+  "Dismissed": "已忽略",
+  "Accepted": "已接受",
+  "Undo accept": "撤销接受",
+  "Undo dismiss": "撤销忽略",
+  "Show dismissed": "显示已忽略",
+  "All findings dismissed": "全部发现已忽略。",
+  "Finding disposition": "发现处置",
   "Opens the desktop app's own data folder — where the main and API logs live — in your file manager. The folder location stays in the main process; no path is shown or sent to this page.": "在文件管理器中打开桌面端应用自身的数据文件夹（主进程与 API 日志均保存在其中）。文件夹位置只保留在主进程中；任何路径都不会显示或发送到此页面。"
 };
 

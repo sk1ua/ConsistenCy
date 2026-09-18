@@ -183,6 +183,7 @@ import type { NotebookStore } from "./notebook/store";
 import type { ReviewJob } from "./jobQueue";
 import type { WorkflowStore } from "./workflows/store";
 import { JobDiffError, type JobDiffResult } from "./review/jobDiff";
+import { createLocalReviewExcludeFilter } from "./review/localReviewExclude";
 import { AuditDomainError, type AuditDomainStore } from "./audit/store";
 import { validateLocalRepositoryRegistration } from "./audit/localRegistration";
 import { AuditRunPlanner } from "./audit/planner";
@@ -2013,8 +2014,9 @@ const routes: Route[] = [
             vcs.getWorkingDiff().catch(() => []),
             vcs.getUntrackedFiles().catch(() => [] as string[])
           ]);
-          const dirtyCount = diff.length;
-          const untrackedCount = untracked.length;
+          const exclude = createLocalReviewExcludeFilter(localPath);
+          const dirtyCount = diff.filter(file => !exclude.excludes(file.path)).length;
+          const untrackedCount = untracked.filter(path => !exclude.excludes(path)).length;
           const changeCount = dirtyCount + untrackedCount;
           workingTree = {
             available: changeCount > 0,

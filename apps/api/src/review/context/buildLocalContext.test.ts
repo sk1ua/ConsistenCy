@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -115,5 +115,54 @@ describe("buildLocalContext", { timeout: 30_000 }, () => {
   it("rejects a half-specified range", async () => {
     await expect(buildLocalContext({ jobId: "job_local_5", repoPath: root, baseRef: "main" }))
       .rejects.toThrow(/must be supplied together/);
+  });
+});
+
+
+describe("buildLocalContext local excludes", { timeout: 30_000 }, () => {
+  let excludeRoot: string;
+  const excludeGit = (args: string[]) => execGit(args, { cwd: excludeRoot });
+  const excludeWrite = (relative: string, content: string) => {
+    const full = join(excludeRoot, relative);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, content);
+  };
+
+  beforeAll(async () => {
+    excludeRoot = mkdtempSync(join(tmpdir(), "consistency-local-exclude-"));
+    await excludeGit(["init"]);
+    await excludeGit(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    await excludeGit(["config", "user.name", "Test Runner"]);
+    await excludeGit(["config", "user.email", "test@example.com"]);
+    await excludeGit(["config", "commit.gpgsign", "false"]);
+    excludeWrite("keep.ts", "export const keep = 1;\n");
+    await excludeGit(["add", "."]);
+    await excludeGit(["commit", "-m", "initial"]);
+  }, 60_000);
+
+  afterAll(() => {
+    if (excludeRoot !== undefined) rmSync(excludeRoot, { recursive: true, force: true });
+  });
+
+  it("honors .consistencyignore and CONSISTENCY_LOCAL_REVIEW_EXCLUDE for WORKING_TREE", async () => {
+    excludeWrite(".consistencyignore", "artifacts/\napps/web/src/shell/dogfood*.ts\n");
+    excludeWrite("artifacts/noise.png", "png");
+    excludeWrite("apps/web/src/shell/dogfoodBait.ts", "export const bait = 1;\n");
+    excludeWrite("real-change.ts", "export const real = 1;\n");
+
+    const previous = process.env.CONSISTENCY_LOCAL_REVIEW_EXCLUDE;
+    process.env.CONSISTENCY_LOCAL_REVIEW_EXCLUDE = "scratch.tmp";
+    excludeWrite("scratch.tmp", "tmp");
+    try {
+      const context = await buildLocalContext({ jobId: "job_exclude", repoPath: excludeRoot });
+      const paths = context.changedFiles.map(file => file.path);
+      expect(paths).toContain("real-change.ts");
+      expect(paths).not.toContain("artifacts/noise.png");
+      expect(paths).not.toContain("apps/web/src/shell/dogfoodBait.ts");
+      expect(paths).not.toContain("scratch.tmp");
+    } finally {
+      if (previous === undefined) delete process.env.CONSISTENCY_LOCAL_REVIEW_EXCLUDE;
+      else process.env.CONSISTENCY_LOCAL_REVIEW_EXCLUDE = previous;
+    }
   });
 });

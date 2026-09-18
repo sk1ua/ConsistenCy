@@ -10,6 +10,7 @@ import {
 } from "@consistency/schema";
 import { LocalGitAdapter, execGit, type GitExec } from "@consistency/vcs-core";
 import { loadWorkspaceFiles, isSecretPath } from "./fileLoader";
+import { createLocalReviewExcludeFilter } from "../localReviewExclude";
 
 const PROJECT_METADATA_FILES = [
   "package.json",
@@ -130,9 +131,11 @@ export async function collectWorkingTreeChanges(
     vcs.getWorkingDiff(),
     vcs.getUntrackedFiles()
   ]);
+  const exclude = createLocalReviewExcludeFilter(repoPath);
   const seen = new Set(tracked.map(file => file.path));
-  const merged = [...tracked];
+  const merged = tracked.filter(file => !exclude.excludes(file.path));
   for (const relativePath of untrackedPaths) {
+    if (exclude.excludes(relativePath)) continue;
     if (seen.has(relativePath)) continue;
     const file = untrackedPathToChangedFile(repoPath, relativePath, maxFileBytes);
     if (file === undefined) continue;

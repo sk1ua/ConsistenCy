@@ -1437,3 +1437,66 @@
     margin-left: 32px;
   }
 }
+
+
+/* Client-side finding disposition (Accept / Dismiss) on run overview */
+.finding-item--dismissed {
+  opacity: 0.55;
+}
+.finding-item--accepted {
+  opacity: 0.85;
+}
+.finding-disposition-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.finding-disposition-pill--accepted {
+  color: var(--success, var(--foreground));
+  border-color: color-mix(in srgb, var(--success, var(--border)) 40%, var(--border-subtle));
+}
+.finding-disposition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 39px 10px;
+}
+.finding-disposition-btn {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.finding-disposition-btn:hover {
+  background: var(--surface-muted);
+}
+.findings-pane-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.findings-show-dismissed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.findings-show-dismissed input {
+  margin: 0;
+}

@@ -1,5 +1,8 @@
+// @vitest-environment happy-dom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewFinding } from "@consistency/schema";
 import { FindingItem } from "./FindingItem";
 
@@ -18,6 +21,18 @@ const testFinding: ReviewFinding = {
 };
 
 describe("FindingItem", () => {
+  let root: Root | undefined;
+  let host: HTMLDivElement | undefined;
+
+  afterEach(() => {
+    if (root && host) {
+      act(() => { root!.unmount(); });
+      host.remove();
+    }
+    root = undefined;
+    host = undefined;
+  });
+
   it("renders severity, confidence, file evidence, and title", () => {
     const html = renderToString(<FindingItem finding={testFinding} />);
     expect(html).toContain(testFinding.title);
@@ -34,5 +49,35 @@ describe("FindingItem", () => {
     expect(summaryEnd).toBeGreaterThan(0);
     expect(locatorStart).toBeGreaterThan(summaryEnd);
     expect(html.slice(0, summaryEnd)).not.toContain("finding-locate");
+  });
+
+  it("exposes accept/dismiss controls and reports disposition changes", () => {
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    const onDispositionChange = vi.fn();
+    act(() => {
+      root!.render(
+        <FindingItem
+          finding={testFinding}
+          disposition={null}
+          onDispositionChange={onDispositionChange}
+        />
+      );
+    });
+    const buttons = [...host.querySelectorAll("button")].map(btn => btn.textContent);
+    expect(buttons).toContain("Accept");
+    expect(buttons).toContain("Dismiss");
+    const dismiss = [...host.querySelectorAll("button")].find(btn => btn.textContent === "Dismiss");
+    act(() => { dismiss?.click(); });
+    expect(onDispositionChange).toHaveBeenCalledWith("dismissed");
+  });
+
+  it("mutes dismissed findings visually", () => {
+    const html = renderToString(
+      <FindingItem finding={testFinding} disposition="dismissed" onDispositionChange={() => undefined} />
+    );
+    expect(html).toContain("finding-item--dismissed");
+    expect(html).toContain("Dismissed");
   });
 });
