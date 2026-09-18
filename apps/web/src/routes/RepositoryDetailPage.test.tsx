@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReviewJob, Repository, ReviewPreparationResponse } from "@consistency/schema";
 import { repositoryGitStatusResponseSchema, repositoryCommitsResponseSchema, repositoryPullRequestsResponseSchema } from "@consistency/schema";
 import { I18nProvider, type Locale } from "../i18n";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { createRepositoryPullRequestsQueryOptions, formatReviewMutationError, isReviewStartDisabled, RepositoryDetailPage } from "./RepositoryDetailPage";
 import { buildLocalReviewRequest, calculateDialogTransition, createReviewSubmissionGate, getReviewComposerValidationMessage, ReviewComposerDialog } from "./ReviewComposerDialog";
 import { parseGitHubRemote } from "@consistency/vcs-core";
@@ -643,10 +643,12 @@ describe("Repository-Centric Harness (AC-UX-REPO-1..10)", () => {
     expect(source).toContain("<Input");
   });
 
-  it("AC-UX-REPO-17: review launch failures use only localized generic feedback", () => {
+  it("AC-UX-REPO-17: review launch failures never echo secrets; known codes map honestly", () => {
     const secretFailure = new Error("SECRET_TOKEN_XYZ /var/run/secrets/provider");
     expect(formatReviewMutationError(true, secretFailure)).toBe("请求失败，请稍后重试。");
     expect(formatReviewMutationError(false, secretFailure)).toBe("Request failed. Please try again later.");
+    expect(formatReviewMutationError(true, new ApiRequestError("x", "LLM_NOT_CONFIGURED", 503))).toMatch(/尚未配置/);
+    expect(formatReviewMutationError(false, new ApiRequestError("x", "PATH_NOT_ALLOWED", 403))).toMatch(/outside the configured/i);
   });
 
   it("AC-UX-REPO-19: composer disables dismissal and action buttons while pending", () => {

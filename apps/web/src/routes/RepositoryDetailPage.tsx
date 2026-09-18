@@ -14,6 +14,8 @@ import {
   GitBranch,
   GitCommit,
   PlayCircle,
+  AlertTriangle,
+  CheckCircle2,
   Loader2,
   Github
 } from "lucide-react";
@@ -24,9 +26,10 @@ import { Badge } from "../design-system/Badge";
 import { Tabs } from "../design-system/Tabs";
 import { SectionHeader } from "../design-system/SectionHeader";
 import { EmptyState } from "../design-system/EmptyState";
-import { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError } from "./reviewStart";
-export { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError };
+import { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError, isSafeProductErrorMessage } from "./reviewStart";
 import { useI18n } from "../i18n";
+
+export { isReviewStartDisabled, reviewStartDisabledReason, formatReviewMutationError };
 import { ReviewComposerDialog } from "./ReviewComposerDialog";
 import { RepositoryChangesView } from "./RepositoryChangesView";
 import { RepositoryHistoryView } from "./RepositoryHistoryView";
@@ -200,6 +203,19 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
   const prep = prepQuery.data;
   const commits = commitsData?.commits ?? [];
 
+  const latestJob = repoJobs[0];
+  const latestJobRunPath = latestJob ? `/runs/${encodeURIComponent(latestJob.id)}/overview` : null;
+  const latestJobFailed = latestJob?.status === "failed" || latestJob?.status === "publish_failed";
+  const latestJobActive = latestJob
+    ? latestJob.status === "queued" || latestJob.status === "running" || latestJob.status === "awaiting_publish" || latestJob.status === "publishing"
+    : false;
+  const latestJobError = (() => {
+    if (!latestJobFailed || !latestJob) return null;
+    const raw = latestJob.error?.trim();
+    if (raw && isSafeProductErrorMessage(raw)) return raw;
+    return zh ? "审查执行失败。打开运行页查看详情。" : "Review failed. Open the run page for details.";
+  })();
+
   return (
     <div className="repo-detail-page">
       {/* 1. REPOSITORY HEADER (Compact Desktop Strip) */}
@@ -290,6 +306,56 @@ export const RepositoryDetailPage: React.FC<RepositoryDetailPageProps> = ({
               <Button variant="outline" size="sm" onClick={openSettingsDialog}>{zh ? "配置模型" : "Configure model"}</Button>
             )}
           </div>
+
+
+          {latestJob && latestJobRunPath && (
+            <div
+              className={
+                latestJobFailed
+                  ? "review-workbench__disposition review-workbench__disposition--fail"
+                  : latestJob.status === "succeeded"
+                    ? "review-workbench__disposition review-workbench__disposition--ok"
+                    : latestJobActive
+                      ? "review-workbench__disposition review-workbench__disposition--live"
+                      : "review-workbench__disposition"
+              }
+              data-testid="repo-detail-disposition"
+              role={latestJobFailed ? "alert" : "status"}
+            >
+              <div className="review-workbench__disposition-main">
+                {latestJobFailed ? <AlertTriangle size={16} aria-hidden /> : latestJob.status === "succeeded" ? <CheckCircle2 size={16} aria-hidden /> : latestJobActive ? <Loader2 size={16} className="ds-spin" aria-hidden /> : null}
+                <div className="review-workbench__disposition-copy">
+                  <strong>
+                    {latestJobFailed
+                      ? (zh ? "审查失败" : "Review failed")
+                      : latestJob.status === "succeeded"
+                        ? (zh ? "审查已完成" : "Review completed")
+                        : latestJobActive
+                          ? (zh ? "审查进行中" : "Review in progress")
+                          : (zh ? "最近审查" : "Latest review")}
+                  </strong>
+                  {latestJobFailed ? (
+                    <p className="review-workbench__disposition-error">{latestJobError}</p>
+                  ) : latestJob.status === "succeeded" ? (
+                    <p className="review-workbench__muted">{zh ? "打开运行概览查看发现、证据与结论。" : "Open the run overview for findings, evidence, and conclusion."}</p>
+                  ) : latestJobActive ? (
+                    <p className="review-workbench__muted">{zh ? "智能体正在执行。可打开运行页查看进度。" : "Agents are running. Open the run page for progress."}</p>
+                  ) : null}
+                </div>
+              </div>
+              <Button
+                variant={latestJob.status === "succeeded" ? "primary" : "outline"}
+                size="sm"
+                onClick={() => navigate(latestJobRunPath)}
+              >
+                {latestJobFailed
+                  ? (zh ? "查看失败详情" : "Open failed run")
+                  : latestJob.status === "succeeded"
+                    ? (zh ? "打开运行概览" : "Open run overview")
+                    : (zh ? "打开运行页" : "Open run")}
+              </Button>
+            </div>
+          )}
 
           {/* DENSE CONTENT SECTIONS (NO CARD SOUP) */}
           <div className="repo-overview-grid">
