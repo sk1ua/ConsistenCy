@@ -86,7 +86,7 @@ When configuration changes are saved via the Web UI Settings page (`PUT /api/set
 | `PORT` | `8787` | Port to bind the API server (dynamic in Desktop mode) |
 | `DATABASE_PATH` | `.consistency/consistency.db` | Path to SQLite database |
 | `CONSISTENCY_WORKSPACE_ROOT` | `.consistency/workspaces` | Root directory for ephemeral review checkouts |
-| `CONSISTENCY_API_TOKEN` | *empty* | Bearer token required for API authentication in production |
+| `CONSISTENCY_API_TOKEN` | *empty* | Bearer token required for API authentication in production; for local `npm run dev:web` dogfood the Vite `/api` proxy injects it server-side when set (never expose via `VITE_`) |
 | `DEEPSEEK_API_KEY` | *empty* | API key for DeepSeek provider |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek model identifier |
 | `OPENAI_API_KEY` | *empty* | API key for OpenAI provider |
@@ -105,6 +105,10 @@ When configuration changes are saved via the Web UI Settings page (`PUT /api/set
 | `CONSISTENCY_ALLOWED_ORIGINS` | `http://127.0.0.1:5173,http://localhost:5173` | Allowed CORS origins for browser clients |
 | `CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED` | `true` | CKPT5 kill-switch for automatic execution of `on_change` workflow bindings from repository change events (planning continues while off; pending plans drain when re-enabled) |
 | `CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS` | `5000` | Poll interval of the workflow trigger executor loop |
+
+### 4.0 Local web dogfood (`npm run dev:web`)
+
+When `CONSISTENCY_API_TOKEN` (and optionally `CONSISTENCY_DESKTOP_CONTROL_TOKEN`) is set in the environment that launches Vite, the **dev-server-only** `/api` proxy in `apps/web/vite.config.ts` injects `Authorization: Bearer …` / `x-consistency-desktop-control` on proxied requests if those headers are absent. The browser client never receives the token. Production and Electron must not rely on this proxy behavior.
 
 ### 4.1 GitHub Sign-In (Desktop browser OAuth)
 
