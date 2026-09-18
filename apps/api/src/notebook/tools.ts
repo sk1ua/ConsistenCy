@@ -42,10 +42,11 @@ function citationFor(
 ): NotebookCitation {
   // excerpt 必须非空：空文件或行区间超出时回退到文件路径
   const excerpt = input.excerpt.trim().length > 0 ? input.excerpt : input.file;
+  const pullRequestNumber = selection.job.pullRequestNumber;
   return notebookCitationSchema.parse({
     id: `citation_${randomUUID()}`,
     repository: selection.job.repository,
-    pullRequestNumber: selection.job.pullRequestNumber,
+    ...(pullRequestNumber !== undefined ? { pullRequestNumber } : {}),
     jobId: selection.job.id,
     headSha: selection.source.headSha,
     ...input,
@@ -243,7 +244,7 @@ export function getReviewFindings(selection: NotebookSourceSelection): ReviewFin
 
 export function generatePatchRequest(selection: NotebookSourceSelection, file: string, instruction: string): {
   repository: string;
-  pullRequestNumber: number;
+  pullRequestNumber?: number;
   headSha: string;
   file: string;
   instruction: string;
@@ -252,9 +253,10 @@ export function generatePatchRequest(selection: NotebookSourceSelection, file: s
   if (!selection.index || !snapshotPathIsIndexed(selection.index, normaliseSnapshotPath(file))) {
     throw new NotebookToolError("Patch suggestions require a file present in the selected SHA", "FILE_NOT_INDEXED");
   }
+  const pullRequestNumber = selection.job.pullRequestNumber;
   return {
     repository: selection.job.repository,
-    pullRequestNumber: selection.job.pullRequestNumber!,
+    ...(pullRequestNumber !== undefined ? { pullRequestNumber } : {}),
     headSha: selection.source.headSha,
     file: normaliseSnapshotPath(file),
     instruction: instruction.slice(0, 2_000),
@@ -265,7 +267,7 @@ export function generatePatchRequest(selection: NotebookSourceSelection, file: s
 export function dedupeCitations(citations: NotebookCitation[]): NotebookCitation[] {
   const seen = new Set<string>();
   return citations.filter(citation => {
-    const key = `${citation.repository}:${citation.pullRequestNumber}:${citation.headSha}:${citation.file}:${citation.startLine}:${citation.endLine}`;
+    const key = `${citation.repository}:${citation.pullRequestNumber ?? "local"}:${citation.headSha}:${citation.file}:${citation.startLine}:${citation.endLine}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

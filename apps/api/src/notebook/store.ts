@@ -403,7 +403,7 @@ export class SQLiteNotebookStore implements NotebookStore {
     for (const citation of citations) {
       insert.run(
         citation.id, notebookId, messageId ?? null, cardId ?? null,
-        citation.repository, citation.pullRequestNumber, citation.jobId,
+        citation.repository, citation.pullRequestNumber ?? null, citation.jobId,
         citation.headSha, citation.file, citation.startLine, citation.endLine,
         citation.excerpt, citation.kind
       );
@@ -416,7 +416,7 @@ export class SQLiteNotebookStore implements NotebookStore {
       return rows.map(row => notebookCitationSchema.parse({
         id: row.id,
         repository: row.repository_full_name,
-        pullRequestNumber: row.pull_request_number,
+        pullRequestNumber: row.pull_request_number ?? undefined,
         jobId: row.job_id,
         headSha: row.head_sha,
         file: row.file,

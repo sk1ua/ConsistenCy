@@ -84,7 +84,7 @@ function contextFor(selections: NotebookSourceSelection[], citations: NotebookCi
       .slice(0, 60)
       .map(entry => ({ path: entry.path, lines: entry.lines, language: entry.language }));
     sections.push([
-      `SOURCE repository=${selection.job.repository} pr=${selection.job.pullRequestNumber} base=${selection.source.baseSha} head=${selection.source.headSha}`,
+      `SOURCE repository=${selection.job.repository} ${selection.job.pullRequestNumber !== undefined ? `pr=${selection.job.pullRequestNumber}` : `access=${selection.job.accessMode}`} base=${selection.source.baseSha} head=${selection.source.headSha}`,
       `REPORT summary=${report?.summary ?? "not ready"} score=${report?.score ?? "unknown"} risk=${report?.riskLevel ?? "unknown"}`,
       `FILES ${JSON.stringify(fileList)}`,
       `FINDINGS ${JSON.stringify(getReviewFindings(selection).slice(0, 8))}`,
