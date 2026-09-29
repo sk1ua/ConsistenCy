@@ -1,0 +1,109 @@
+% 第 12 章：Repository / Evidence Freshness
+\chapter{仓库与证据新鲜度}\label{ch:freshness}
+
+本章是“怀疑式文献审计”的产物：我们专门评估了信息年龄（Age of Information, AoI）理论是否适合描述 ConsistenCy 的仓库审查新鲜度，结论是\textbf{不适用（有窄例外）}——并给出更适合的度量。该结论与正面结果同等重要。
+
+\section{为什么线性时间年龄是错误的原始度量（负结果）}
+
+AoI 定义时间年龄 $\Delta(t)=t-u(t)$（$u(t)$ 为最近更新时刻）~\cite{yates2021}。\textbf{休眠反例}：仓库 90 天无提交且分析钉定在 HEAD——$\Delta=90$ 天，而版本滞后 $D=0$，每条发现都完美新鲜。反过来：分析后一小时内涌入 50 个琐碎提交——$\Delta\le1$ 小时而 $D=50$，发现可能引用已不存在的代码。在低变更率区间，时间年龄与真实新鲜度\emph{负相关}；在高变更率区间它没有信息量。结论：\textbf{拒绝} $\Delta(t)$ 作为新鲜度度量；它只保留“调度时延描述符”的身份。
+
+\section{版本滞后（\PROPOSED 度量，VAoI 接地）}
+
+\begin{definition}[版本滞后]\label{def:versionstaleness}
+$D(t)=d\bigl(\mathrm{analyzedSha}(t),\,\mathrm{HEAD}(R_t)\bigr)$，$d(s_1,s_2)=\bigl|\mathrm{anc}(s_2)\setminus\mathrm{anc}(s_1)\bigr|$（从 HEAD 可达而不从被分析提交可达的提交数）。
+\end{definition}
+\textbf{两个精确警示}：(i) $d$ 是\emph{非对称拟度量}——不满足三角不等式，含义是“HEAD 有而分析没有的提交”；$D$ 小\emph{不}排除“孤儿分支分析”（分析包含 HEAD 已不包含的提交——“引用不存在的代码”失败模式只被部分捕捉）；分叉历史上 $d$ 的解释需要合并基约定（线性历史上即提交计数）。(ii) 监督的“版本”实际是\textbf{摘要等价类} $[headSha, workflowDigest, changedFiles]$——重配置同 sha 也是新版本；$D$ 是它在线性历史上的影子。
+
+该度量的形状并非新造：\emph{版本}信息年龄（Version AoI）——监控者落后源的\emph{版本计数}——正由 Buyukates 等人的工作线建立~\cite{buyukates2021}。映射判定：定义层 \USEFUL（已有文献）；把 VAoI 实例化到“评审证据监督于 Git DAG 之上”= \PROPOSED 扩展（Gossip 网络分析机件不适用）。
+
+\section{检测时延与新鲜证据时刻（初等界）}
+
+\begin{assumptioninner}[{新鲜度界的确定性前提}]\label{ass:a9}
+变更时刻外生；扫描不重叠（$\delta_{\mathrm{scan}}\le T_{\mathrm{poll}}$；重叠扫描被丢弃）；触发变更之后\emph{不再发生}摘要变化（无再武装链）。
+\end{assumptioninner}
+
+\begin{proposition}[新鲜证据时刻的上界]\label{prop:freshbound}
+A9 下，时刻 $\theta$ 的变更最迟在 $\theta+T_{\mathrm{poll}}+\delta_{\mathrm{scan}}$ 被\emph{检测}（下一个轮询栅格点 + 扫描时长；摘要比较无噪声——这正是第~\ref{ch:monitoring} 章 CUSUM 不适用判定的事实基础~\cite{page1954}），再经 $T_{\mathrm{deb}}$ 后被\emph{冲刷}（防抖恰在最后一个变更后 $T_{\mathrm{deb}}$ 冲刷——A9 使其精确），再经 $T_{\mathrm{run}}$ 后有\emph{终态运行}（命题~\ref{prop:execsound} 的 F1--F3）。故对固定时刻 $t$，尾随窗口 $W:=T_{\mathrm{poll}}+\delta_{\mathrm{scan}}+T_{\mathrm{deb}}+T_{\mathrm{run}}$ 之外的滞后不可能存在：
+\begin{equation}
+D(t)\;\le\;N\bigl((t-W,\,t]\bigr)\quad(\text{提交计数过程})。
+\end{equation}
+\end{proposition}
+\begin{proof}
+逐段复合三个时延不等式 + 命题~\ref{prop:execsound}；窗口包含关系来自“变更至多等待 $W$ 即被终态运行覆盖”。
+\end{proof}
+\tagm{PROPOSITION（A9 下精确；A9 违背——再武装链、扫描重叠、崩溃（单次尝试 $\Rightarrow$ 时延无界）——即其失败条件）}
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=0.99\textwidth}
+\begin{tikzpicture}[x=1cm,y=1cm,
+  ev/.style={circle,fill=accentred!80,inner sep=1.6pt},
+  ln/.style={thick,inkgray}]
+\draw[->,thick] (-0.2,0) -- (13.4,0) node[below right,font=\small] {$t$};
+% poll grid
+\foreach \x in {0.5,1.7,2.9,4.1,5.3,6.5,7.7,8.9,10.1,11.3,12.5} \draw[inkgray!35] (\x,-0.12) -- (\x,0.12);
+\node[font=\tiny\itshape\color{inkgray}] at (6.5,0.42) {轮询栅格（间隔 $T_{\mathrm{poll}}$）};
+% change epoch
+\node[ev] (theta) at (2.3,0) {};
+\node[font=\scriptsize\bfseries,above=1pt of theta] {$\theta$：变更};
+% detection
+\node[ev,fill=accentblue!80] (det) at (4.1,0) {};
+\node[font=\scriptsize,above=1pt of det] {检测（$\le\theta+T_{\mathrm{poll}}+\delta_{\mathrm{scan}}$）};
+\draw[ln,decorate,decoration={brace,amplitude=3.5pt},accentblue!70] (2.3,-0.55) -- (4.1,-0.55) node[midway,below=4pt,font=\tiny\color{inkgray}] {$\le T_{\mathrm{poll}}+\delta_{\mathrm{scan}}$};
+% debounce
+\node[ev,fill=accentblue!60] (fl) at (5.3,0) {};
+\node[font=\scriptsize,above=1pt of fl] {冲刷};
+\draw[ln,decorate,decoration={brace,amplitude=3.5pt},accentblue!50] (4.1,-0.95) -- (5.3,-0.95) node[midway,below=4pt,font=\tiny\color{inkgray}] {$T_{\mathrm{deb}}$（驻留时间）};
+% run
+\node[fill=softamber,draw=framegray,rounded corners=2pt,font=\scriptsize,minimum height=1.2em,inner sep=3pt] (run) at (7.3,0) {运行 $T_{\mathrm{run}}$（单次尝试）};
+\node[ev,fill=softgreen!70,draw=framegray] (fin) at (9.1,0) {};
+\node[font=\scriptsize,above=1pt of fin] {终态 $\Rightarrow$ 新鲜证据};
+\draw[ln,decorate,decoration={brace,amplitude=3.5pt},inkgray] (2.3,-1.45) -- (9.1,-1.45) node[midway,below=4pt,font=\scriptsize\itshape] {$W=T_{\mathrm{poll}}+\delta_{\mathrm{scan}}+T_{\mathrm{deb}}+T_{\mathrm{run}}$：命题~\ref{prop:freshbound} 的尾随窗口};
+% version staleness step function above
+\draw[thick,accentred!80] (0.5,1.6) -- (2.3,1.6) (2.3,1.6) -- (2.3,2.05) (2.3,2.05) -- (4.1,2.05) (4.1,2.05)--(4.1,2.5) (4.1,2.5) -- (5.3,2.5) (5.3,2.5)--(5.3,2.9) (5.3,2.9) -- (9.1,2.9) (9.1,2.9) -- (9.1,1.6) (9.1,1.6) -- (12.5,1.6);
+\node[font=\scriptsize\bfseries\color{accentred!80},anchor=west] at (9.3,2.4) {$D(t)$：版本滞后};
+\node[font=\tiny\itshape\color{inkgray},anchor=west] at (9.3,2.05) {终态后降回 0};
+\end{tikzpicture}
+\end{adjustbox}
+\caption{证据新鲜度时间线（\textbf{理论}示意图）。变更 $\theta$ 经检测（轮询栅格+扫描）、防抖（驻留时间）、运行后产生新鲜证据；$D(t)$ 在此期间阶梯上升、终态后降回。所有量为理论参数，非实测。}
+\label{fig:freshness}
+\end{figure}
+
+\section{平均值与低速率近似（\PROPOSED 度量/推导）}
+
+\begin{assumptioninner}[{泊松变更（随机化前提）}]\label{ass:a10}
+变更时刻是速率 $\lambda_c$ 的泊松过程，且与轮询栅格独立。
+\end{assumptioninner}
+
+在 A10 下，变更的栅格相位在 $[0,T_{\mathrm{poll}})$ 上均匀（泊松增量平稳 + 与栅格独立；无检查悖论），故 $\E[\text{等到下一轮询}]=T_{\mathrm{poll}}/2$。\textbf{冲刷参照}的平均检测-冲刷时延为
+\begin{equation}
+\E[\text{delay}_{\mathrm{flush}}]\;=\;\tfrac{T_{\mathrm{poll}}}{2}+\delta_{\mathrm{scan}}+T_{\mathrm{deb}},
+\end{equation}
+（检测参照则为 $T_{\mathrm{poll}}/2+\delta_{\mathrm{scan}}$；两处都必须显式选择参照——本报告统一采用冲刷参照）。由更新报酬定理~\cite{ross1970}，低速率时长期平均等于逐变更均值。
+
+\paragraph{固定时刻的期望滞后（A9 与 A10 的交界，如实表述）。}
+由命题~\ref{prop:freshbound} 与泊松平稳增量：\textbf{A9 成立时}（确定性世界），$\E[D(t)]\le\lambda_c W$ 在固定 $t$ 处精确。\textbf{在 A10 下}，A9 的“无后续变更”以概率 $1-\mathrm{e}^{-\lambda_c T_{\mathrm{deb}}}>0$ 被违背——再武装链使尾随窗口包含关系失守，正确的低速率近似是
+\begin{equation}
+\E[D(t)]\;\lesssim\;\lambda_c\bigl(W+\E[\text{再武装扩散}]\bigr),\qquad \text{当 } \lambda_c\,(T_{\mathrm{poll}}+T_{\mathrm{deb}})\ll1\text{ 时误差为 }O\bigl(\lambda_c(T_{\mathrm{poll}}{+}T_{\mathrm{deb}})\bigr),
+\end{equation}
+再武装暴露窗口延伸到下一个扫描时刻（故条件用 $T_{\mathrm{poll}}+T_{\mathrm{deb}}$ 而非仅 $T_{\mathrm{deb}}$）。\textbf{明确不主张}“峰值滞后”的期望界：无界时域上窗口计数的运行最大值几乎必然无界，任何此类主张在 A10 下都是假的；峰值陈述只允许在声明的有限时域 $H$ 上给出。
+
+\section{AoI 迁移的最终账目}
+
+\begin{longtable}{@{}p{0.30\textwidth}p{0.16\textwidth}p{0.46\textwidth}@{}}
+\toprule
+\textbf{AoI 组成部分} & \textbf{判定} & \textbf{理由}\\
+\midrule
+\endhead
+线性/峰值时间年龄 & \NA & 休眠反例；版本离散状态。\\
+缓冲-大小-1 洞察 & \USEFUL & “单运行去重+新到替换”的真实理由~\cite{kaul2012}。\\
+峰值年龄记账 & \USEFUL & 检测时延+运行时间的初等界（命题~\ref{prop:freshbound}）。\\
+版本 AoI & \USEFUL/\PROPOSED & $D(t)$ 的定义接地~\cite{buyukates2021}；Git-DAG/摘要等价类两个皱褶是真正的扩展。\\
+事件触发 vs 周期 & \STRONG(结构) & 驻留时间框架~\cite{tabuada2007}；无定理迁移（无随机被控对象）~\cite{astrom1999}。\\
+更新或等待最优采样 & \WEAK & 观测免费且精确时退化为“总是更新”；只有给运行定价后才非平凡。\\
+信道/队列分析机件 & \NA & 无物理信道、无争用；拉取观测给出确定性界。\\
+CUSUM/变化检测 & \NA & 哈希等值无虚警/延迟权衡~\cite{page1954}。\\
+\bottomrule
+\caption{AoI/新鲜度理论向 ConsistenCy 的迁移账目（怀疑式审计结论）。}
+\label{tab:aoi}
+\end{longtable}

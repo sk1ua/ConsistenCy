@@ -1,0 +1,749 @@
+import { z } from "zod";
+import { reviewAccessModeSchema, reviewJobSchema } from "./job";
+import { notebookCardKindSchema, notebookSchema, notebookSourceSchema } from "./notebook";
+import { reviewReportSchema, riskLevelSchema } from "./report";
+import { workflowSpecSchema } from "./workflow";
+import { fileChangeStatusSchema, vcsChangedFileSchema, vcsCommitSummarySchema } from "./vcs";
+
+export const jobListResponseSchema = z.object({ jobs: z.array(reviewJobSchema) }).strict();
+export const jobDetailResponseSchema = z.object({ job: reviewJobSchema }).strict();
+
+/**
+ * H13 honest cancellation record. `externalOutcome: "unknown"` is the point:
+ * the API never promises a provider call or child process has already
+ * stopped — it reads "settled" only once the run's own promise concluded.
+ */
+export const jobCancellationSignalSchema = z.object({
+  signalled: z.boolean(),
+  cancelId: z.string().trim().min(1),
+  mode: z.enum(["workload-abort", "scheduler-only", "unregistered", "already-terminal"]),
+  externalOutcome: z.enum(["unknown", "settled"]),
+}).strict();
+export type JobCancellationSignal = z.infer<typeof jobCancellationSignalSchema>;
+
+export const jobCancelResponseSchema = z.object({
+  job: reviewJobSchema,
+  cancellation: jobCancellationSignalSchema,
+}).strict();
+export type JobCancelResponse = z.infer<typeof jobCancelResponseSchema>;
+export const REPOSITORY_REVIEWS_MAX_LIMIT = 200;
+export const repositoryReviewsResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1).max(255),
+  reviews: z.array(reviewJobSchema).max(REPOSITORY_REVIEWS_MAX_LIMIT)
+}).strict().superRefine((response, context) => {
+  response.reviews.forEach((review, index) => {
+    if (review.repositoryId !== response.repositoryId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reviews", index, "repositoryId"],
+        message: "repository review must match the canonical opaque repository identifier"
+      });
+    }
+  });
+});
+export const reportResponseSchema = z.object({ report: reviewReportSchema }).strict();
+export const recentReportsResponseSchema = z.object({ reports: z.array(reviewReportSchema) }).strict();
+export const statsResponseSchema = z.object({
+  totalJobs: z.number().int().nonnegative(),
+  succeededJobs: z.number().int().nonnegative(),
+  failedJobs: z.number().int().nonnegative(),
+  runningJobs: z.number().int().nonnegative(),
+  averageDuration: z.number().nonnegative(),
+  riskDistribution: z.record(riskLevelSchema, z.number().int().nonnegative()),
+  topRepositories: z.array(z.object({
+    repositoryFullName: z.string().trim().min(1),
+    jobCount: z.number().int().positive()
+  }).strict())
+}).strict();
+export const errorResponseSchema = z.object({
+  error: z.object({
+    code: z.string().trim().min(1),
+    message: z.string().trim().min(1),
+    details: z.record(z.unknown()).optional()
+  }).strict()
+}).strict();
+
+export const reviewModelOverrideSchema = z.object({
+  /** Any provider id from the bundled Pi catalog; validated at runtime. */
+  provider: z.string().trim().min(1).max(64).optional(),
+  /** @deprecated Legacy alias for `model`; prefer `model`. */
+  name: z.string().trim().min(1).max(100).optional(),
+  /** Canonical model id. Wins over legacy `name` when both are set. */
+  model: z.string().trim().min(1).max(100).optional()
+}).strict();
+
+export type ReviewModelOverride = z.infer<typeof reviewModelOverrideSchema>;
+
+export const publicPrRequestSchema = z.object({
+  url: z.string().trim().min(1).max(2_048),
+  /** Canonical per-request model override. Wins over legacy `llm`. */
+  model: reviewModelOverrideSchema.optional(),
+  /** @deprecated Legacy alias for `model`; prefer `model`. */
+  llm: reviewModelOverrideSchema.optional()
+}).strict();
+
+export const localReviewRequestSchema = z.object({
+  repositoryId: z.string().trim().min(1).max(255),
+  baseRef: z.string().trim().min(1).max(255).optional(),
+  headRef: z.string().trim().min(1).max(255).optional(),
+  /** Canonical per-request model override. Wins over legacy `llm`. */
+  model: reviewModelOverrideSchema.optional(),
+  /** @deprecated Legacy alias for `model`; prefer `model`. */
+  llm: reviewModelOverrideSchema.optional()
+}).strict();
+
+export const localReviewResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  repository: z.string().trim().min(1),
+  baseSha: z.string().trim().min(1),
+  headSha: z.string().trim().min(1),
+  publicationPolicy: z.literal("disabled"),
+  /** Pi catalog provider id. */
+  llmProvider: z.string().trim().min(1).max(64).optional(),
+  llmModel: z.string().trim().min(1).optional(),
+  status: z.literal("queued")
+}).strict();
+export const publicPrResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  notebookId: z.string().trim().min(1),
+  repository: z.string().trim().min(1),
+  pullRequestNumber: z.number().int().positive(),
+  baseSha: z.string().trim().min(1),
+  headSha: z.string().trim().min(1),
+  publicationPolicy: z.literal("disabled"),
+  /** Pi catalog provider id. */
+  llmProvider: z.string().trim().min(1).max(64).optional(),
+  llmModel: z.string().trim().min(1).optional(),
+  status: z.literal("queued")
+}).strict();
+
+export const notebookResponseSchema = z.object({ notebook: notebookSchema }).strict();
+export const notebookSourcesResponseSchema = z.object({ sources: z.array(notebookSourceSchema) }).strict();
+export const notebookMessageRequestSchema = z.object({
+  content: z.string().trim().min(1).max(20_000),
+  sourceJobIds: z.array(z.string().trim().min(1)).max(20).optional()
+}).strict();
+export const notebookCardRequestSchema = z.object({
+  kind: notebookCardKindSchema,
+  sourceJobIds: z.array(z.string().trim().min(1)).min(1).max(20)
+}).strict();
+
+export const workflowSourceSchema = z.enum(["builtin", "draft"]);
+export const workflowSummarySchema = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().optional(),
+  source: workflowSourceSchema,
+  nodeCount: z.number().int().nonnegative(),
+  verifierCount: z.number().int().nonnegative()
+}).strict();
+export const workflowListResponseSchema = z.object({
+  workflows: z.array(workflowSummarySchema)
+}).strict();
+export const workflowResponseSchema = z.object({
+  workflow: workflowSpecSchema,
+  source: workflowSourceSchema
+}).strict();
+/** PUT body for saving a workflow draft; the route name must equal `name`. */
+export const saveWorkflowRequestSchema = workflowSpecSchema;
+
+export const diffFileSummarySchema = z.object({
+  path: z.string().trim().min(1),
+  status: fileChangeStatusSchema,
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative()
+}).strict();
+
+export type DiffFileSummary = z.infer<typeof diffFileSummarySchema>;
+
+export const jobDiffResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  files: z.array(vcsChangedFileSchema),
+  /** False when the checkout is gone and no diff can be computed. */
+  available: z.boolean(),
+  /**
+   * False only for legacy working-tree jobs captured before review-time
+   * snapshots existed: their diff is read live and may have drifted from the
+   * reviewed content (audit P1-01). Consumers must disclose the drift, never
+   * hide it.
+   */
+  pinned: z.boolean().default(false),
+  /** Total number of changed files before truncation in large diffs. */
+  totalFiles: z.number().int().nonnegative().optional(),
+  /** True when the returned files array was truncated to fit limits. */
+  truncated: z.boolean().optional(),
+  /** 1-based page number for paged diff results. */
+  page: z.number().int().positive().optional(),
+  /** Page size (number of files per page). */
+  pageSize: z.number().int().positive().optional(),
+  /** Total number of pages available. */
+  totalPages: z.number().int().nonnegative().optional(),
+  /** Lightweight summary of all changed files in the review snapshot for client search and indexing. */
+  allFilesSummary: z.array(diffFileSummarySchema).optional()
+}).strict();
+
+const patchViolationSchema = z.object({
+  code: z.enum([
+    "EMPTY_PATCH",
+    "TOO_LARGE",
+    "TOO_MANY_FILES",
+    "MALFORMED",
+    "PATH_TRAVERSAL",
+    "FORBIDDEN_PATH",
+    "SECRET_PATH",
+    "PATH_OUTSIDE_REVIEW"
+  ]),
+  message: z.string().trim().min(1),
+  path: z.string().trim().min(1).optional()
+}).strict();
+
+/** GET /jobs/:id/findings/:findingId/patch — read-only unified-diff preview. */
+export const findingPatchPreviewResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  findingId: z.string().trim().min(1),
+  accessMode: reviewAccessModeSchema,
+  patch: z.string().min(1),
+  touchedPaths: z.array(z.string().trim().min(1)),
+  applyAvailable: z.boolean(),
+  applyUnavailableReason: z.string().trim().min(1).optional(),
+  verification: z.object({
+    policyOk: z.boolean(),
+    violations: z.array(patchViolationSchema),
+    applies: z.boolean().optional(),
+    applyError: z.string().trim().min(1).optional()
+  }).strict()
+}).strict();
+
+/** POST /jobs/:id/findings/:findingId/patch/apply — local_git working-tree apply. */
+export const findingPatchApplyResponseSchema = z.object({
+  jobId: z.string().trim().min(1),
+  findingId: z.string().trim().min(1),
+  applied: z.literal(true),
+  touchedPaths: z.array(z.string().trim().min(1)),
+  committed: z.literal(false),
+  message: z.string().trim().min(1)
+}).strict();
+
+export const gitRemoteInfoSchema = z.object({
+  name: z.string().trim().min(1),
+  githubFullName: z.string().optional()
+}).strict();
+
+export const repositoryGitStatusResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.boolean().optional(),
+  reason: z.string().optional(),
+  branch: z.string().nullable().optional(),
+  headSha: z.string().nullable().optional(),
+  dirtyFileCount: z.number().int().nonnegative(),
+  untrackedFileCount: z.number().int().nonnegative(),
+  changedFiles: z.array(vcsChangedFileSchema),
+  untrackedFiles: z.array(z.string()),
+  remotes: z.array(gitRemoteInfoSchema),
+  primaryRemote: gitRemoteInfoSchema.optional()
+}).strict();
+
+const repositoryCommitsAvailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(true),
+  commits: z.array(vcsCommitSummarySchema)
+}).strict();
+
+const repositoryCommitsUnavailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(false),
+  reason: z.string().trim().min(1),
+  commits: z.array(vcsCommitSummarySchema).length(0)
+}).strict();
+
+export const repositoryCommitsResponseSchema = z.discriminatedUnion("available", [
+  repositoryCommitsAvailableResponseSchema,
+  repositoryCommitsUnavailableResponseSchema
+]);
+
+export const repositoryTreeEntrySchema = z.object({
+  path: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  type: z.enum(["blob", "tree"]),
+  sha: z.string().optional(),
+  size: z.number().int().nonnegative().optional(),
+  changeKind: z.enum(["unchanged", "changed", "untracked"]).optional()
+}).strict();
+
+const repositoryTreeAvailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(true),
+  revision: z.string().nullable(),
+  path: z.string(),
+  truncated: z.boolean(),
+  entries: z.array(repositoryTreeEntrySchema)
+}).strict();
+
+const repositoryTreeUnavailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(false),
+  reason: z.string().trim().min(1),
+  path: z.string(),
+  truncated: z.literal(false),
+  entries: z.array(repositoryTreeEntrySchema).length(0)
+}).strict();
+
+export const repositoryTreeResponseSchema = z.discriminatedUnion("available", [
+  repositoryTreeAvailableResponseSchema,
+  repositoryTreeUnavailableResponseSchema
+]);
+
+/** Max bytes returned by GET /repositories/:id/git/file (worktree preview). */
+export const REPOSITORY_FILE_PREVIEW_MAX_BYTES = 256 * 1024;
+
+const repositoryFileContentAvailableSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  path: z.string().trim().min(1),
+  available: z.literal(true),
+  encoding: z.enum(["utf-8", "utf-8-lossy"]),
+  truncated: z.boolean(),
+  size: z.number().int().nonnegative(),
+  content: z.string(),
+  binary: z.literal(false).optional()
+}).strict();
+
+const repositoryFileContentBinarySchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  path: z.string().trim().min(1),
+  available: z.literal(true),
+  binary: z.literal(true),
+  size: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1)
+}).strict();
+
+const repositoryFileContentUnavailableSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  path: z.string(),
+  available: z.literal(false),
+  reason: z.string().trim().min(1)
+}).strict();
+
+export const repositoryFileContentResponseSchema = z.union([
+  repositoryFileContentAvailableSchema,
+  repositoryFileContentBinarySchema,
+  repositoryFileContentUnavailableSchema
+]);
+
+
+const providerTextSchema = (maxLength: number) => z.string()
+  .min(1)
+  .max(maxLength)
+  .refine(value => value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value), {
+    message: "provider text must be clean and unmodified"
+  });
+
+export type GitHubRepositoryIdentity = {
+  readonly owner: string;
+  readonly repo: string;
+  readonly fullName: string;
+};
+
+export function parseGitHubRepositoryFullName(value: string): GitHubRepositoryIdentity | null {
+  if (value !== value.trim() || /[\s\u0000-\u001f\u007f]/.test(value)) return null;
+  const parts = value.split("/");
+  if (parts.length !== 2) return null;
+  const owner = parts[0]!;
+  const repo = parts[1]!;
+  if (owner.length < 1 || owner.length > 39) return null;
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(owner)) return null;
+  if (repo.length < 1 || repo.length > 100) return null;
+  if (!/^[A-Za-z0-9._-]+$/.test(repo) || /^\.+$/.test(repo)) return null;
+  return { owner, repo, fullName: `${owner}/${repo}` };
+}
+
+export function parseCanonicalGitHubRepositoryUrl(value: string): GitHubRepositoryIdentity | null {
+  if (
+    value !== value.trim()
+    || value.includes("%")
+    || value.includes("\\")
+    || /[\s\u0000-\u001f\u007f]/.test(value)
+    || !value.startsWith("https://github.com/")
+  ) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:"
+      || url.hostname !== "github.com"
+      || url.username !== ""
+      || url.password !== ""
+      || url.port !== ""
+      || url.search !== ""
+      || url.hash !== ""
+    ) return null;
+    const match = /^\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+    if (!match) return null;
+    const identity = parseGitHubRepositoryFullName(`${match[1]}/${match[2]}`);
+    if (identity === null) return null;
+    return value === `https://github.com/${identity.fullName}` ? identity : null;
+  } catch {
+    return null;
+  }
+}
+
+export type CanonicalGitHubPullRequestUrl = GitHubRepositoryIdentity & {
+  readonly pullRequestNumber: number;
+};
+
+export function parseCanonicalGitHubPullRequestUrl(value: string): CanonicalGitHubPullRequestUrl | null {
+  if (
+    value !== value.trim()
+    || value.includes("%")
+    || value.includes("\\")
+    || /[\s\u0000-\u001f\u007f]/.test(value)
+    || !value.startsWith("https://github.com/")
+  ) return null;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:"
+      || url.hostname !== "github.com"
+      || url.username !== ""
+      || url.password !== ""
+      || url.port !== ""
+      || url.search !== ""
+      || url.hash !== ""
+    ) return null;
+    const match = /^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)$/.exec(url.pathname);
+    if (!match) return null;
+    const identity = parseGitHubRepositoryFullName(`${match[1]}/${match[2]}`);
+    if (identity === null) return null;
+    const pullRequestNumber = Number(match[3]);
+    if (
+      !Number.isSafeInteger(pullRequestNumber)
+      || pullRequestNumber <= 0
+      || match[3] !== String(pullRequestNumber)
+    ) return null;
+    const canonical = `https://github.com/${identity.fullName}/pull/${pullRequestNumber}`;
+    return value === canonical ? { ...identity, pullRequestNumber } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isCanonicalGitHubPullRequestUrl(
+  value: string,
+  pullRequestNumber?: number,
+  repositoryFullName?: string
+): boolean {
+  const parsed = parseCanonicalGitHubPullRequestUrl(value);
+  if (parsed === null) return false;
+  if (pullRequestNumber !== undefined && parsed.pullRequestNumber !== pullRequestNumber) return false;
+  if (repositoryFullName === undefined) return true;
+  const expectedIdentity = parseGitHubRepositoryFullName(repositoryFullName);
+  return expectedIdentity !== null
+    && parsed.fullName.toLowerCase() === expectedIdentity.fullName.toLowerCase();
+}
+
+export function pullRequestLifecycleErrors(input: {
+  readonly state: "open" | "closed";
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly closedAt: string | null;
+  readonly mergedAt: string | null;
+}): string[] {
+  const errors: string[] = [];
+  const createdAt = Date.parse(input.createdAt);
+  const updatedAt = Date.parse(input.updatedAt);
+  const closedAt = input.closedAt === null ? undefined : Date.parse(input.closedAt);
+  const mergedAt = input.mergedAt === null ? undefined : Date.parse(input.mergedAt);
+  if (input.state === "open" && (closedAt !== undefined || mergedAt !== undefined)) {
+    errors.push("open pull request must not have closed or merged timestamps");
+  }
+  if (input.state === "closed" && closedAt === undefined) {
+    errors.push("closed pull request must have a closed timestamp");
+  }
+  if (updatedAt < createdAt || (closedAt !== undefined && closedAt < createdAt) || (mergedAt !== undefined && mergedAt < createdAt)) {
+    errors.push("pull request lifecycle timestamps must not predate creation");
+  }
+  if (mergedAt !== undefined && (closedAt === undefined || mergedAt > closedAt)) {
+    errors.push("merged timestamp must not follow the closed timestamp");
+  }
+  if ((closedAt !== undefined && updatedAt < closedAt) || (mergedAt !== undefined && updatedAt < mergedAt)) {
+    errors.push("pull request update timestamp must not predate closure or merge");
+  }
+  return errors;
+}
+
+const safePullRequestUrlSchema = z.string().url().max(2_048).refine(
+  value => isCanonicalGitHubPullRequestUrl(value),
+  { message: "pull request URL must be a canonical github.com pull URL" }
+);
+
+const githubRepositoryFullNameSchema = providerTextSchema(140).refine(
+  value => parseGitHubRepositoryFullName(value) !== null,
+  { message: "repository identity must use canonical GitHub owner/repository coordinates" }
+);
+
+export const pullRequestSummarySchema = z.object({
+  provider: z.literal("github"),
+  number: z.number().int().positive().safe(),
+  title: providerTextSchema(1_024),
+  state: z.enum(["open", "closed"]),
+  draft: z.boolean(),
+  labels: z.array(z.object({
+    name: providerTextSchema(100),
+    color: providerTextSchema(100)
+  }).strict()).max(100),
+  author: providerTextSchema(100).nullable(),
+  baseRef: providerTextSchema(255),
+  headRef: providerTextSchema(255),
+  baseSha: providerTextSchema(64),
+  headSha: providerTextSchema(64),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  closedAt: z.string().datetime().nullable(),
+  mergedAt: z.string().datetime().nullable(),
+  htmlUrl: safePullRequestUrlSchema,
+  latestReview: z.object({
+    jobId: z.string().trim().min(1),
+    status: z.enum(["queued", "running", "awaiting_publish", "publishing", "succeeded", "failed", "publish_failed", "cancelled"]),
+    score: z.number().optional(),
+    riskLevel: riskLevelSchema.optional(),
+    createdAt: z.string().datetime()
+  }).strict().optional()
+}).strict().superRefine((pullRequest, context) => {
+  if (!isCanonicalGitHubPullRequestUrl(pullRequest.htmlUrl, pullRequest.number)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["htmlUrl"], message: "pull request URL number mismatch" });
+  }
+  for (const message of pullRequestLifecycleErrors(pullRequest)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message });
+  }
+});
+
+export const repositoryPullRequestsUnavailableReasonCodeSchema = z.enum([
+  "not_github",
+  "identity_unavailable",
+  "not_found",
+  "access_denied",
+  "rate_limited",
+  "provider_unavailable",
+  "invalid_provider_data"
+]);
+
+const repositoryPullRequestsAvailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  repositoryFullName: githubRepositoryFullNameSchema,
+  available: z.literal(true),
+  page: z.object({
+    limit: z.literal(100),
+    truncated: z.boolean()
+  }).strict(),
+  pullRequests: z.array(pullRequestSummarySchema).max(100)
+}).strict();
+
+const repositoryPullRequestsUnavailableResponseSchema = z.object({
+  repositoryId: z.string().trim().min(1),
+  available: z.literal(false),
+  reasonCode: repositoryPullRequestsUnavailableReasonCodeSchema,
+  reason: providerTextSchema(255),
+  pullRequests: z.array(pullRequestSummarySchema).length(0)
+}).strict();
+
+export const repositoryPullRequestsResponseSchema = z.discriminatedUnion("available", [
+  repositoryPullRequestsAvailableResponseSchema,
+  repositoryPullRequestsUnavailableResponseSchema
+]).superRefine((response, context) => {
+  if (!response.available) return;
+  response.pullRequests.forEach((pullRequest, index) => {
+    if (!isCanonicalGitHubPullRequestUrl(pullRequest.htmlUrl, pullRequest.number, response.repositoryFullName)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pullRequests", index, "htmlUrl"],
+        message: "pull request URL repository identity mismatch"
+      });
+    }
+  });
+});
+
+/**
+ * Truthful GitHub connection probe statuses (CKPT4 Slice 2). The probe is a
+ * single bounded read-only call against the ACTIVE runtime credential; the
+ * response carries status enums and bounded metadata only — never a token,
+ * URL, or filesystem path.
+ */
+export const githubConnectionTestStatusSchema = z.enum([
+  "connected",
+  "anonymous_available",
+  "invalid_credential",
+  "rate_limited",
+  "unavailable",
+  "not_configured"
+]);
+
+export const githubConnectionTestResponseSchema = z.object({
+  status: githubConnectionTestStatusSchema,
+  mode: z.enum(["pat", "app", "anonymous"]).optional(),
+  retryAfterMs: z.number().int().positive().optional(),
+  testedAt: z.string().datetime(),
+  login: z.string().optional()
+}).strict();
+
+/**
+ * Request body for POST /settings/github/test-connection (CKPT4 Phase 2C).
+ * An optional non-empty `publicReadToken` probes one UNSAVED draft PAT instead
+ * of the ACTIVE runtime credential; an empty body or a missing field keeps
+ * probing the ACTIVE credential. Draft tokens are never persisted, logged, or
+ * echoed back in any response.
+ */
+export const githubConnectionTestRequestSchema = z.object({
+  publicReadToken: z.string().min(1).optional()
+}).strict();
+
+export type GitHubConnectionTestStatus = z.infer<typeof githubConnectionTestStatusSchema>;
+export type GitHubConnectionTestResponse = z.infer<typeof githubConnectionTestResponseSchema>;
+export type GitHubConnectionTestRequest = z.infer<typeof githubConnectionTestRequestSchema>;
+
+/**
+ * GitHub OAuth Device Flow responses. The device_code never leaves the API
+ * process: the start response carries only the human code and polling window,
+ * and the poll response carries the access token exactly ONCE on the
+ * `connected` branch so the renderer can hand it to the existing credential
+ * save path (desktop safeStorage bridge / web encrypted settings). The token
+ * is never echoed again, logged, or persisted in any other payload.
+ */
+export const githubOauthDeviceStartResponseSchema = z.object({
+  flowId: z.string().min(1),
+  userCode: z.string().min(1),
+  verificationUri: z.string().url(),
+  expiresAt: z.string().datetime(),
+  intervalSeconds: z.number().int().positive().max(120)
+}).strict();
+
+export const githubOauthDevicePollRequestSchema = z.object({
+  flowId: z.string().min(1)
+}).strict();
+
+export const githubOauthDevicePollResponseSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("pending"),
+    retryAfterSeconds: z.number().int().positive()
+  }).strict(),
+  z.object({
+    status: z.literal("connected"),
+    login: z.string().min(1),
+    /** One-time handoff token; the renderer forwards it to the credential save path. */
+    publicReadToken: z.string().min(1)
+  }).strict(),
+  z.object({ status: z.literal("expired") }).strict(),
+  z.object({ status: z.literal("denied") }).strict(),
+  z.object({ status: z.literal("unavailable") }).strict()
+]);
+
+export type GitHubOauthDeviceStartResponse = z.infer<typeof githubOauthDeviceStartResponseSchema>;
+export type GitHubOauthDevicePollRequest = z.infer<typeof githubOauthDevicePollRequestSchema>;
+export type GitHubOauthDevicePollResponse = z.infer<typeof githubOauthDevicePollResponseSchema>;
+
+
+export const reviewPreparationSourceWorkingTreeSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().optional(),
+  changedFileCount: z.number().int().nonnegative()
+}).strict();
+
+export const reviewPreparationSourceBranchSchema = z.object({
+  available: z.boolean(),
+  base: z.string().optional(),
+  head: z.string().optional(),
+  reason: z.string().optional()
+}).strict();
+
+export const reviewPreparationSourcePullRequestSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().optional(),
+  pullRequestCount: z.number().int().nonnegative().optional()
+}).strict();
+
+/**
+ * Providers come from the bundled Pi runtime's built-in catalog; the id set
+ * is dynamic (33+ providers) and must never be a closed enum.
+ */
+export const reviewPreparationModelProviderSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(128).optional(),
+  configured: z.boolean(),
+  defaultModel: z.string().optional()
+}).strict();
+
+export const reviewPreparationModelSchema = z.object({
+  default: z.object({
+    provider: z.string().trim().min(1).max(64),
+    model: z.string()
+  }).strict(),
+  providers: z.array(reviewPreparationModelProviderSchema),
+  pendingRestart: z.object({
+    provider: z.string().trim().min(1).max(64),
+    model: z.string().trim().min(1),
+    credentialConfigured: z.boolean()
+  }).strict().nullable()
+}).strict();
+
+/** GET /llm/catalog — safe Pi catalog metadata for Web dropdowns. */
+export type LlmCatalogResponse = z.infer<typeof llmCatalogResponseSchema>;
+
+export const llmCatalogResponseSchema = z.object({
+  providers: z.array(z.object({
+    id: z.string().trim().min(1).max(64),
+    label: z.string().trim().min(1).max(128),
+    modelCount: z.number().int().min(0),
+    models: z.array(z.object({
+      id: z.string().trim().min(1).max(256),
+      name: z.string().trim().min(1).max(256)
+    }).strict())
+  }).strict())
+}).strict();
+
+export const reviewPreparationRepositorySchema = z.object({
+  id: z.string().trim().min(1),
+  displayName: z.string().trim().min(1),
+  sourceKind: z.enum(["local_git", "github", "gitlab"]),
+  trust: z.enum(["trusted_local", "untrusted_readonly"])
+}).strict();
+
+export const reviewPreparationResponseSchema = z.object({
+  repository: reviewPreparationRepositorySchema,
+  sources: z.object({
+    workingTree: reviewPreparationSourceWorkingTreeSchema,
+    branch: reviewPreparationSourceBranchSchema,
+    pullRequest: reviewPreparationSourcePullRequestSchema.optional()
+  }).strict(),
+  model: reviewPreparationModelSchema,
+  canStartReview: z.boolean(),
+  blockingReasons: z.array(z.string())
+}).strict();
+
+export type GitRemoteInfo = z.infer<typeof gitRemoteInfoSchema>;
+export type RepositoryGitStatusResponse = z.infer<typeof repositoryGitStatusResponseSchema>;
+export type RepositoryCommitsResponse = z.infer<typeof repositoryCommitsResponseSchema>;
+export type RepositoryTreeEntry = z.infer<typeof repositoryTreeEntrySchema>;
+export type RepositoryTreeResponse = z.infer<typeof repositoryTreeResponseSchema>;
+export type RepositoryFileContentResponse = z.infer<typeof repositoryFileContentResponseSchema>;
+export type PullRequestSummary = z.infer<typeof pullRequestSummarySchema>;
+export type RepositoryPullRequestsUnavailableReasonCode = z.infer<typeof repositoryPullRequestsUnavailableReasonCodeSchema>;
+export type RepositoryPullRequestsResponse = z.infer<typeof repositoryPullRequestsResponseSchema>;
+export type ReviewPreparationResponse = z.infer<typeof reviewPreparationResponseSchema>;
+
+export type JobListResponse = z.infer<typeof jobListResponseSchema>;
+export type JobDetailResponse = z.infer<typeof jobDetailResponseSchema>;
+export type RepositoryReviewsResponse = z.infer<typeof repositoryReviewsResponseSchema>;
+export type ReportResponse = z.infer<typeof reportResponseSchema>;
+export type RecentReportsResponse = z.infer<typeof recentReportsResponseSchema>;
+export type StatsResponse = z.infer<typeof statsResponseSchema>;
+export type ErrorResponse = z.infer<typeof errorResponseSchema>;
+export type PublicPrRequest = z.infer<typeof publicPrRequestSchema>;
+export type PublicPrResponse = z.infer<typeof publicPrResponseSchema>;
+export type LocalReviewRequest = z.infer<typeof localReviewRequestSchema>;
+export type LocalReviewResponse = z.infer<typeof localReviewResponseSchema>;
+export type NotebookMessageRequest = z.infer<typeof notebookMessageRequestSchema>;
+export type NotebookCardRequest = z.infer<typeof notebookCardRequestSchema>;
+export type WorkflowSource = z.infer<typeof workflowSourceSchema>;
+export type WorkflowSummary = z.infer<typeof workflowSummarySchema>;
+export type WorkflowListResponse = z.infer<typeof workflowListResponseSchema>;
+export type WorkflowResponse = z.infer<typeof workflowResponseSchema>;
+export type JobDiffResponse = z.infer<typeof jobDiffResponseSchema>;
+export type FindingPatchPreviewResponse = z.infer<typeof findingPatchPreviewResponseSchema>;
+export type FindingPatchApplyResponse = z.infer<typeof findingPatchApplyResponseSchema>;
+

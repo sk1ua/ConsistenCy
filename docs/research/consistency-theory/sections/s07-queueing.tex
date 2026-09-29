@@ -1,0 +1,148 @@
+% 第 9 章：Queueing / Scheduling / Resource Governance
+\chapter{排队、调度与资源治理}\label{ch:queueing}
+
+\section{调度器的真实形状}
+
+KernelScheduler 的准入是三路串行判定（源码核验，\tcode{scheduler.ts:225--271}）：
+\begin{enumerate}[itemsep=0.05em]
+  \item \textbf{P1 截止期执法}：ACTIVE 运行中已过期（$now\ge deadline$）的 READY Agent 被\emph{取消}而非准入；
+  \item \textbf{P2 容量守卫}：$runningCount\ge c$（$c=$ \tcode{maxRunningAgents}，当前工作流执行器接线为 $c=1$）则不准入；
+  \item \textbf{P3 优先级-先来先服务}：最大 \tcode{priority} 者胜出，严格 $>$ 平局决断 $=$ 同优先级内 FIFO——确定性准入。
+\end{enumerate}
+远程 LLM 推理\textbf{不可物理抢占}：调度器的真实模型是“准入控制 $+$ 协作调度 $+$ 预算/并发控制”，而不是抢占式 CPU 调度器。这一形状声明直接决定了本章理论的适用边界。
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[
+  b/.style={draw=framegray,fill=boxgray,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.0em,inner sep=4pt},
+  q/.style={draw=accentblue!70,fill=softblue,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.0em,inner sep=4pt},
+  r/.style={draw=framegray,fill=softamber,rounded corners=2pt,font=\scriptsize,align=center,minimum height=2.0em,inner sep=4pt},
+  ln/.style={-{Stealth[length=2mm]},inkgray!80,thick},
+  lb/.style={font=\tiny\itshape\color{inkgray},midway,fill=white,inner sep=1pt}]
+\node[b] (repo) at (0,0) {仓库\\（外部状态 $R_t$）};
+\node[b] (sup) at (2.6,0) {轮询监督\\digest 去重};
+\node[q] (ev) at (5.2,0) {RepositoryEvent\\（去重后）};
+\node[q] (qq) at (7.9,0) {触发计划 $\to$ 运行队列 $Q_t$};
+\node[q] (sch) at (10.6,0) {3 路准入\\P1/P2/P3};
+\node[r] (run) at (10.6,-1.9) {Run（$c$ 并发）\\ACB/Fiber};
+\node[r] (llm) at (7.9,-1.9) {LLM 网关\\预算反压};
+\node[r] (evid) at (5.2,-1.9) {证据/发现\\$E_t,F_t$};
+\node[b] (out) at (2.3,-1.9) {人类决策\\（WAIT\_HUMAN）};
+\draw[ln] (repo) -- (sup) node[lb,above]{$\lambda_c$（变更流）};
+\draw[ln] (sup) -- (ev);
+\draw[ln] (ev) -- (qq);
+\draw[ln] (qq) -- (sch);
+\draw[ln] (sch) -- (run) node[lb,right]{$u_t=\pi$};
+\draw[ln] (run) -- (llm) node[lb,above]{逐调用授权};
+\draw[ln] (llm) -- (evid) node[lb,above]{接地};
+\draw[ln] (evid) -- (out);
+\draw[ln,dashed,inkgray!50] (sch.south) to[bend right=20] node[lb,below]{截止期取消} (out.east);
+\end{tikzpicture}
+\end{adjustbox}
+\caption{仓库事件 $\rightarrow$ 队列 $\rightarrow$ 调度器 $\rightarrow$ 运行 $\rightarrow$ 证据的端到端管线（本章的排队对象即此管线的 $Q_t$ 与 Run 段）。}
+\label{fig:pipeline}
+\end{figure}
+
+\section{排队基线模型（\textbf{基线近似}）}
+
+本节全部内容是\textbf{显式声明的简化}：以 Kendall 记号~\cite{kendall1953} 的词汇做容量级推理。设 $\lambda$ 为评审任务到达率、$\mu$ 为单服务器完成率、$\tau=1/\mu$、$A_e=\lambda/\mu$、$\rho=\lambda/(c\mu)$。
+
+\begin{theorem}[稳定性（$M/M/c$ 理想化的定理）]\label{thm:stability}
+$\lambda<c\mu$ 是 $M/M/c$ 正常返的充要条件~\cite{kleinrock1975}。
+\end{theorem}
+
+\begin{theorem}[Erlang-C 等待（$M/M/c$ 理想化的定理）]\label{thm:erlangc}
+到达需等待的概率与均值等待：
+\begin{equation}
+P_{\mathrm{wait}}=\frac{\dfrac{A_e^{c}}{c!\,(1-\rho)}}{\displaystyle\sum_{k=0}^{c-1}\frac{A_e^{k}}{k!}+\dfrac{A_e^{c}}{c!\,(1-\rho)}},\qquad
+\E[W_q]=\frac{P_{\mathrm{wait}}}{c\mu-\lambda},\qquad \E[W]=\E[W_q]+\tau.
+\end{equation}
+$c=1$ 时退化为 $P_{\mathrm{wait}}=\rho$、$\E[W_q]=\rho/(\mu-\lambda)$~\cite{kleinrock1975}。
+\end{theorem}
+
+\begin{theorem}[Little 定律]\label{thm:little}
+$L=\lambda W$ 与 $L_q=\lambda W_q$：平均在队数 $=$ 到达率 $\times$ 平均逗留时间，\emph{与排队纪律无关}（优先级下同样成立）~\cite{little1961}。对 READY 积压的工程含义：测得 $L$ 与 $\lambda$ 即可估计 $W$，无需解整个系统。
+\end{theorem}
+
+\begin{theorem}[Kingman 重交通近似（GI/G/1 理想化的定理）]\label{thm:kingman}
+单服务器情形（$c=1$；\textbf{非}等式，且不直接适用于 $c>1$）：
+\begin{equation}
+W_q\;\approx\;\frac{\rho}{1-\rho}\cdot\frac{c_a^{2}+c_s^{2}}{2}\cdot\tau,
+\end{equation}
+$c_a^2,c_s^2$ 为到达间隔与服务时间的平方变异系数；$M/M/1$（$c_a^2=c_s^2=1$）时精确~\cite{kingman1962}。信息：接近容量时延迟随\emph{变异性}成倍膨胀。
+\end{theorem}
+
+\begin{theorem}[非抢占 HOL 优先级（$M/G/1$ 类理想化的定理）]\label{thm:hol}
+优先级类 $1>2>\cdots$，类内 FIFO（即 P3 的形状）。记 $R_k=\sum_{i\le k}\rho_i$、$W_0=\sum_i\lambda_i\,\E[S_i^2]/2$，则
+\begin{equation}
+\E\bigl[W_q^{(k)}\bigr]=\frac{W_0}{(1-R_{k-1})(1-R_k)}
+\end{equation}
+（Kleinrock 非抢占优先级均值等待~\cite{kleinrock1975}。）
+\textbf{饥饿形状}：当高类饱和 $R_{k-1}\to1$ 时 $\E[W_q^{(k)}]\to\infty$——即使总体 $\rho<1$；低优先级均值延迟以 $(1-R_{k-1})^{-1}$ 爆炸。公平份额替代（逐流隔离、加权份额）在文献中成熟~\cite{demers1989}，但\textbf{未实现}——ConsistenCy 以确定性严格优先级换取简单性，把低类饥饿留给截止期取消兜底。
+\end{theorem}
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.94\textwidth, height=6.4cm,
+  xlabel={利用率 $\rho=\lambda/(c\mu)$},
+  ylabel={$\E[W_q]/\tau$（无量纲）},
+  xmin=0, xmax=0.97, ymin=0, ymax=14,
+  legend style={font=\scriptsize,at={(0.03,0.97)},anchor=north west,draw=none,fill=none},
+  grid=major, grid style={dashed,inkgray!25},
+  tick label style={font=\scriptsize}, label style={font=\small}]
+\addplot[very thick, accentblue, domain=0:0.95,samples=200] {x/(1-x)};
+\addlegendentry{$M/M/1$ 精确：$\rho/(1-\rho)$（$c_a^2=c_s^2=1$）}
+\addplot[thick, accentred!85, dashed, domain=0:0.93,samples=200] {x/(1-x)*2.5};
+\addlegendentry{Kingman 变异性项：批化到达 + 重尾服务（$(c_a^2{+}c_s^2)/2=2.5$）}
+\addplot[thick, inkgray!80, dotted, domain=0:0.90,samples=200] {x/(1-x)*0.6};
+\addlegendentry{低变异性服务（$=0.6$，供对照）}
+\end{axis}
+\end{tikzpicture}
+\end{adjustbox}
+\caption{排队模型的\textbf{理论}曲线（theoretical queueing illustration, \emph{not} a measured ConsistenCy benchmark）：接近容量时延迟爆炸，且被服务时间变异性乘性放大（Kingman）。LLM 服务时间的实证形状（令牌量化、共批耦合、历史相关）见 \S\ref{sec:servicetime}。}
+\label{fig:queueing}
+\end{figure}
+
+\paragraph{图~\ref{fig:queueing} 的系特异性推论（使其非装饰性）。}
+排队曲线本身是教科书结论；把它接入 ConsistenCy 的实际架构可以得到两条可行动的推论。其一，\textbf{到达结构偏离泊松是架构决定的，容量余量必须显式计入 $c_a^2$}：监督管线对变更流做了三重变换——轮询栅格量化检测、防抖冲刷（检测时刻 $+\,T_{\mathrm{deb}}$，离栅格连续变化）、突发合并（去重把一次观测窗口内的多次变更折为至多一个待执行计划）。前两者在单仓库稀疏情形反而\emph{降低}到达间隔的变异（趋于规则化），第三者则在高峰期同时降低有效到达率与增大到达的间歇性——三个效应方向不一，任何单向断言（如“批化必然使 $c_a^2>1$”）都不成立；正确结论是\emph{$c_a^2$ 是由 $T_{\mathrm{poll}},T_{\mathrm{deb}}$ 与合并策略共同决定的、可测的量}，容量规划不应假设它为 1。其二，\textbf{Kingman 项给出参数化的余量规则}：若目标是 $\E[W_q]\le\kappa\cdot\tau$（平均等待不超过 $\kappa$ 个服务时间），由定理~\ref{thm:kingman} 解 $\frac{\rho}{1-\rho}\cdot\frac{c_a^2+c_s^2}{2}\le\kappa$，记 $S=c_a^2+c_s^2$，得
+\begin{equation}
+\rho\;\le\;\frac{2\kappa}{S+2\kappa},
+\end{equation}
+即容许利用率随 $S$ 递减——这是从该图直接读出的、以 $(\kappa,S)$ 为参数的容量上界规则：给定实测的 $S$，它能立即回答“$c=1$ 的接线最多安全承载多大的 $\lambda/\mu$”。
+
+\subsection{假设表（含“违背”列）}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.24\textwidth}>{\raggedright\arraybackslash}p{0.68\textwidth}@{}}
+\toprule
+\textbf{假设} & \textbf{在 ConsistenCy 中的状态}\\
+\midrule
+\endhead
+Poisson 到达 & \textbf{违背}。到达是轮询批化的：事件在轮询栅格时刻发射（每个 (repo, head, 配置摘要) 每次观测至多一个），再经防抖冲刷与去重削减；多仓库叠加\emph{趋向} Poisson，但少仓库时栅格结构主导。\\
+指数服务 & \textbf{违背}。LLM 服务时间被输出令牌数量化（块状）、随共批负载耦合（非独立）~\cite{yu2022orca}、随服务器内部状态漂移（客户端不可见）~\cite{kwon2023vllm}。既非独立同分布也非指数。\\
+类内 FCFS & \textbf{成立}。P3 严格平局 FIFO，代码可证的确定性。\\
+单服务器“一次一个在服务” & \textbf{部分违背}。\tcode{RUNNING}$\to$\tcode{WAIT}$^\tau$ 记录 \tcode{PendingOperation} 后可释放运行位，使 LLM 调用在飞期间其他 Agent 的服务可与其重叠——$M/M/1$ 抽象在 LLM 等待窗口内失真。\\
+无限缓冲 & 近似（未观察到队列容量上限）。\\
+平稳性 & 存疑（仓库变更突发、负载日周期）。\\
+\bottomrule
+\caption{排队基线的假设状态表。整体标签：\textbf{基线近似}——诚实的记号是“带批化到达的 G/G/c 样系统”~\cite{kendall1953}；本节任何数值都不构成架构不变式。}
+\label{tab:qassump}
+\end{longtable}
+
+\section{LLM 服务时间为何必须非指数建模}\label{sec:servicetime}
+
+三个来自 LLM 服务系统的实证事实使得“把远程推理当 $M$ 服务”不可辩护：(i) Orca 的\emph{迭代级}调度与连续组批使一个请求的逗留时间取决于同批负载~\cite{yu2022orca}；(ii) PagedAttention 表明服务器端内存管理可同延迟下改变 2--4 倍吞吐——有效服务率 $\mu$ 对客户端是隐变量~\cite{kwon2023vllm}；(iii) 本报告文献核验中确认的进一步证据（KV 缓存复用使服务时间历史相关）强化同一结论。这些事实\emph{不}否定 Little 定律（它对任意纪律/分布成立），但否定了把 Erlang-C 当作预测器使用；它们正是 Kingman 变异性项（定理~\ref{thm:kingman}）值得引用的原因：预算式反压（reserve 阶段）在\emph{接近}容量之前介入，是对“$\mu$ 不可知”的正确工程响应，而不是速率限制器的缺席。
+
+\section{CMDP 研究模型（\PROPOSED，未实现）}
+
+把“在 token/成本/截止期约束下调度多审查 Agent”表述为约束马尔可夫决策过程~\cite{altman1999}：$\mathrm{CMDP}=(\mathcal{S},\mathcal{A},P,c,\{g_k\},\gamma)$，状态含队列构成、剩余预算、提供商可用性、运行计数；动作是准入决定（准入/推迟/取消）；$P$ 在实践中\emph{未知}（需估计，且 \S\ref{sec:servicetime} 的违背使估计困难）；目标
+\begin{equation}
+\min_\pi \E_\pi\Bigl[\textstyle\sum_t\gamma^t c(s_t,a_t)\Bigr]\quad\text{s.t.}\quad \E_\pi\Bigl[\textstyle\sum_t\gamma^t g_k(s_t,a_t)\Bigr]\le B_k\;\;\forall k,
+\end{equation}
+在有限状态/紧致动作集与 Slater 型严格可行条件下强对偶成立，鞍点处存在平稳随机最优策略~\cite{altman1999}。
+
+\paragraph{强制诚实（三条）。}
+(i) 当前调度器\textbf{不是}优化器：3 路确定性可行启发式，无值函数、无前瞻。(ii) \textbf{预算不在准入处执法}：调度器源码零预算引用；ACB 的 token/成本/墙钟预算是策略元数据，未被任何路径强制；唯一强制的预算是系统调用授权处的两阶段 reserve/commit（$\chi_9$）。若要忠实建模，约束必须迁到授权边界或扩展准入状态。(iii) \tcode{costUsdMicros} 通道端到端存在但 LLM 门面只报告 token——成本约束在实践中不可消耗。这三条是\emph{现状的}工程不变式；CMDP 是把“应该是什么”形式化的\emph{提议}（第~\ref{ch:future} 章研究问题 RQ2）。

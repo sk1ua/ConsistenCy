@@ -1,0 +1,53 @@
+% 附录 B：文献映射矩阵
+\chapter{文献映射矩阵}\label{app:mapping}
+
+下表为“ConsistenCy 概念 $\times$ 理论 $\times$ 关键文献 $\times$ 支持强度”的完整矩阵（正文的浓缩版是图~\ref{fig:matrix} 与表~\ref{tab:decisions}）。文献键与 \tcode{references.bib} 一致；全部 45 篇均经 2026-08-28 网络核验（研究笔记 02/06 记录了核验证据与五处修正）。
+
+\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{1.5cm}>{\raggedright\arraybackslash}p{3.0cm}@{}}
+\toprule
+\textbf{ConsistenCy 概念} & \textbf{理论} & \textbf{关键文献} & \textbf{强度} & \textbf{备注}\\
+\midrule
+\endhead
+默认拒绝 broker、9 步链、逐调用重评 & 引用监视器/完全中介/失败默认 & anderson1972; saltzer1975 & \DIRECT & RVM 三性质逐条对上；broker 是完全中介者（A1 边界）\\
+逐调用重评（不缓存）+ sha 钉定作用域 & TOCTOU & bishop1996 & \DIRECT & 定义了所防御的漏洞类\\
+不可猜测 256 位句柄；12 位指纹审计 & 对象能力不可伪造引用 & dennis1966; miller2003 & \DIRECT & 不可伪造性以熵实现（无硬件标签）\\
+能力模式（默认拒绝运行时） & OS 能力模式实践 & watson2010 & \STRONG & “能力层可在通用环境落地”的先例\\
+形式化验证的能力内核（金标准差距） & 机器检查证明 & klein2009 & \STRONG & ConsistenCy 无证明——正是 \S\ref{ch:limits} 的局限 1\\
+撤销：永久单调 + 经中介 & 撤销理论 & redell1974; miller2003; miller2006 & \DIRECT & 退化（更易）情形；A4/A5 代码可证\\
+vat/事件循环响应式并发 + 访问控制统一 & 健壮组合 & miller2006 & \DIRECT & 与“事件循环内核 + 响应式 Fiber”最同构\\
+LLM 作为不可信提议者 & 混淆代理人/POLA & hardy1988; miller2003 & \DIRECT & 提示注入 $=$ 现代混淆代理人\\
+能力式 Agent 控制层（平行现代工作） & 提示注入的系统性防御 & debenedetti2025 & \STRONG & 未经评审预印本；与 CaMeL 论点平行\\
+intent 门（不可逆效果不内联） & 幂等意图/效果分级 & debenedetti2025 & \STRONG & 无已确立的“预算化权威”理论（诚实空白）\\
+Fiber 监督生命周期 & Actor 语义/OTP 监督树 & agha1986; armstrong2003 & \STRONG & 分歧点：单次尝试诚实失败 vs OTP 重启掩盖\\
+ACB 12 状态机 & 带标迁移系统 & keller1976 & \DIRECT & 字面实例\\
+迁移不变式/fail-closed & 时序逻辑 & pnueli1977 & \DIRECT & S1--S3 的规范语言\\
+内核为持久响应式运行时 & 响应式系统 & harel1985 & \STRONG & 响应式/变换式二分定位\\
+积 LTS 的自动检验（未接线） & CTL 模型检验 & clarke1981 & \PROPOSED & 48 状态积空间是现成对象\\
+工作流 DAG 校验 & WF-net 健全性 & vanderaalst1998 & \NA-for-now & 负结果：无环 DAG 上 Kahn 已给终止/无死锁\\
+准入队列词汇/稳定性 & Kendall 记号/M/M/c & kendall1953; kleinrock1975 & \DIRECT & 词汇直用；公式是声明近似\\
+积压-逗留不变式 & Little 定律 & little1961 & \DIRECT & 纪律无关——违背表下仍可用\\
+近容量延迟爆炸 $\times$ 变异性 & Kingman 重交通 & kingman1962 & \DIRECT & GI/G/1 警示随行\\
+优先级-then-FIFO 饥饿形状 & 非抢占 HOL & kleinrock1975 & \DIRECT & P1 截止期取消是兜底而非公平份额\\
+公平份额替代（未实现） & 公平排队 & demers1989 & \STRONG & 对照框架\\
+预算约束准入（研究模型） & CMDP & altman1999 & \PROPOSED & 现状是可行启发式；预算在授权处执法\\
+LLM 服务时间非指数实证 & 迭代级调度/连续组批/内存管理 & yu2022orca; kwon2023vllm & \STRONG & $\mu$ 是客户端不可见的隐变量\\
+发现-证据 why/where 溯源 & 数据溯源 & buneman2001 & \STRONG & 两个溯源问题逐字迁移\\
+prov 四元组结构 & PROV-DM & provdm2013 & \DIRECT & 实体/活动/派生词汇的实例化\\
+SHA-256 规范元组身份；快照寻址 & 内容寻址承诺/哈希树 & merkle1989 & \DIRECT & 单叶退化 Merkle\\
+仅追加审计日志 & 安全审计日志/防篡改结构 & schneier1999; crosby2009 & \STRONG & 对手模型更弱；一致性证明是升级路径\\
+分析器-步骤-材料-产品链 & 供应链证明 & torresarias2019 & \STRONG & in-toto 同构\\
+模型输出事后接地 & 事后归因修订 & gao2023rarr & \STRONG & 接地依据是内核证据而非另一模型\\
+原始模型输出不可靠的动机 & 审查评论处置率实证 & goldman2025 & \STRONG & ASE 2025 实证\\
+神经代码审查基线（任务锚点） & 预训练代码审查 & li2022codereviewer & \STRONG & 无接地语义——正是差距\\
+变更触发 vs 周期触发（结构） & 事件触发采样/最小事件间隔 & astrom1999; tabuada2007 & \STRONG(结构) & 定量最优性 \WEAK（无随机被控对象）\\
+单运行去重 + 新到替换 & AoI 缓冲-1 洞察 & kaul2012 & \USEFUL & AoI 真正迁移的一条\\
+AoI 词汇/峰值年龄记账 & AoI 综述 & yates2021 & \USEFUL & 词汇与记账框架\\
+版本滞后 $D(t)$ & 版本 AoI & buyukates2021 & \USEFUL{} + \PROPOSED & 定义接地；Git-DAG/摘要等价类是扩展\\
+摘要等值触发（无噪声观测） & 顺序变化检测 & page1954 & \NA & 负结果：无虚警/延迟权衡可优化\\
+平均检测时延框架 & 更新报酬 & ross1970 & \USEFUL & 时延半边成立；代价半边未建模\\
+Agent 框架对照（无权威中介） & ReAct / AutoGen / MetaGPT & yao2023react; wu2024autogen; hong2024metagpt & 对照 & 工作负载形态而非同类竞争者\\
+\bottomrule
+\caption{完整文献映射矩阵。强度列的分级记号（\DIRECT、\STRONG、\USEFUL、\PROPOSED、\WEAK、\NA）与正文六类分级一致。}
+\label{tab:mapping}
+\end{longtable}

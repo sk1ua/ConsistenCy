@@ -1,0 +1,62 @@
+% 第 1-2 章：项目定位与研究动机
+\chapter{ConsistenCy v3 是什么}\label{ch:intro}
+
+\section{一句话定位}
+
+ConsistenCy v3 是一个\textbf{仓库原生（Repository-Native）的 Agent Harness 操作系统}：它以内核化的方式为“多 Agent 持续修改同一仓库”这一场景提供权限、上下文、调度、证据与运行生命周期的统一治理，而\emph{公共 PR 审查（Public PR Review）只是其上运行的第一个工作负载}。系统的物理核心可以写成一个极简公式：
+\begin{equation}
+\text{ConsistenCy v3} \;=\; \text{Kernel} \;+\; \text{Cordis Harness} \;+\; \text{Evidence Engine},
+\end{equation}
+其中 Kernel 负责能力授权（Capability Broker）、系统调用中介（Syscall Gateway）、调度（Kernel Scheduler）、上下文虚拟机（Context VM）与审计日志（Audit Journal）；Cordis Harness 提供响应式的 Fiber 生命周期与共效（Coeffect）依赖注入；Evidence Engine 以确定性分析器与内容寻址指纹提供可复现的证据底座。
+
+本报告的研究对象是\textbf{当前工作树中的真实实现}（分支 \tcode{v3}，2026-08-28，含未提交的 CKPT5 变更），而非任何历史设计稿。所有架构事实均以只读源码调查为准，并给出文件与行号定位；文档与代码不一致之处（例如能力授权检查“8 步”注释与实际 9 步实现的差异）一律以代码为准并在正文中如实记录。
+
+\section{产品要回答的五个问题}
+
+ConsistenCy v3 的产品核心价值可以概括为五个问题：
+\begin{enumerate}[itemsep=0.1em]
+  \item \textbf{谁被允许做什么}（Who may do what?）——Kernel Capability 授权；
+  \item \textbf{哪些组件当前应当存活}（Which components should be alive?）——Cordis Fiber 与共效生命周期；
+  \item \textbf{谁现在运行}（Who runs now?）——Kernel Scheduler 的准入、并发与预算；
+  \item \textbf{Agent 看见什么}（What does the agent see?）——Context VM 的 ContextImage 与工作集；
+  \item \textbf{什么事实证明结果}（What facts prove the result?）——Evidence Engine、RepositorySnapshot 与溯源。
+\end{enumerate}
+这五个问题恰好构成本报告五个理论主题（能力安全、生命周期与授权分离、可见性与权限分离、调度与资源治理、证据与可复现性）的工程原型。换言之，本报告的任务不是给项目“贴数学”，而是把工程上已经成立的边界条件翻译成可以被检查、讨论与继续研究的数学对象。
+
+\section{本报告的证据纪律}
+
+本报告执行严格的分类纪律，任何“理论映射”都必须归入下列六类之一，并在正文与附录 B 的映射矩阵中显式标注：
+\begin{itemize}[itemsep=0.05em]
+  \item \DIRECT{}（直接理论支撑）：该机制是已有理论的标准实例化；
+  \item \STRONG{}（强类比）：理论结构与机制同构，但场景假设不完全重合；
+  \item \USEFUL{}（有用的形式化）：理论提供描述工具而非结论；
+  \item \PROPOSED{}（提议的形式化/扩展）：本报告首次给出的模型，非已确立理论；
+  \item \WEAK{}（弱或投机）：仅作背景，不承担论证责任；
+  \item \NA{}（不适用）：经研究判定不应映射，作为负结果记录。
+\end{itemize}
+所有数学结论同样分类为：\textsc{TheoremFromKnownModel}（已知模型的定理实例）、\textsc{Proposition}（ConsistenCy 模型级命题）、\textsc{EngineeringInvariant}（工程不变式，源码可证）、\textsc{Conjecture}（猜想）与\textsc{ProposedMetric}（提议度量）。除非明确声明，任何命题证明的都是\textbf{架构模型} $\mathcal{M}_C$ 的性质，而不是运行中实现的性质；源码可证的部分会单独标注。报告还区分三类贡献：\textbf{既有工程贡献}（项目已实现）、\textbf{形式化解释}（本报告首次给出）与\textbf{新研究假设}（未来可验证）。
+
+\chapter{为什么 Agent Harness 需要理论基础}\label{ch:why}
+
+\section{问题背景：LLM Agent 的结构性风险}
+
+大模型 Agent 系统在 2023--2026 年间快速发展，但主流框架（如以 ReAct~\cite{yao2023react} 为代表的推理-行动循环、以 AutoGen~\cite{wu2024autogen} 为代表的多 Agent 会话编程、以 MetaGPT~\cite{hong2024metagpt} 为代表的 SOP 编排工作流）普遍将\textbf{权限}问题留给宿主应用的约定，而非系统的构造性属性。经验研究也印证了这一风险的现实性：对大规模真实代码审查评论的实证测量表明，LLM 生成的审查评论中被开发者实际处置的比例呈现强烈的类型依赖性，原始模型输出本身并不是可靠的审查工件~\cite{goldman2025}。攻击面研究进一步表明，提示注入（prompt injection）本质上是\emph{混淆代理人}（confused deputy）问题在 LLM 时代的再现~\cite{hardy1988,debenedetti2025}：拥有权限的代理人被不可信内容诱导，以其\emph{环境固有权限}（ambient authority）执行违背委托人意图的操作。
+
+ConsistenCy 的核心论点是：\textbf{当 Agent 成为仓库的一等修改者时，Agent Harness 必须像一个操作系统内核一样回答权限问题}，而这类问题恰恰是系统安全领域六十余年积累的成熟理论对象——能力系统（capability-based security）~\cite{dennis1966,saltzer1975,miller2003,miller2006}、引用监视器（reference monitor）~\cite{anderson1972}、撤销理论~\cite{redell1974}。
+
+\section{工程直觉为何不够}
+
+ConsistenCy v3 的七条架构公理（Coeffect $\neq$ Authorization；Effect $\neq$ Rollback；Ring $\neq$ Execution Domain；Cordis Context Isolation $\neq$ Process Security Isolation；Context VM $\neq$ Permission System；Scheduler 属于 Kernel；Evidence 是 correctness 而非日志）目前以工程断言的形式存在。它们在实践中有效，但存在三个未被回答的问题：
+\begin{enumerate}[itemsep=0.1em]
+  \item \textbf{可检查性}：公理之间是否一致？“撤销在下一个系统调用处同步生效”与“Fiber 生命周期异步传播”并存的正确性条件是什么？
+  \item \textbf{可比较性}：缺少形式化描述时，无法将 ConsistenCy 与 seL4~\cite{klein2009}、Capsicum~\cite{watson2010}、in-toto~\cite{torresarias2019} 等系统在\emph{同一维度}上比较，只能停留在术语层面的类比。
+  \item \textbf{可研究性}：调度、新鲜度、证据接地等机制的未来改进（例如预算感知准入、基于版本滞后的触发策略）需要数学模型才能提出并证伪。
+\end{enumerate}
+
+\section{本报告的立场}
+
+本报告的立场可以概括为一句话：
+\begin{quote}
+\itshape 找到 ConsistenCy 的真实理论基础，并把项目已有的工程直觉转化为可以被检查、讨论和继续研究的数学对象；同时诚实标记所有“看似相关实则不然”的理论，把它们作为负结果记录。
+\end{quote}
+因此，报告包含大量\textbf{非主张}（non-claims）：当前调度器\emph{不是}约束马尔可夫决策过程（CMDP）优化器；信息年龄（Age of Information）对仓库审查新鲜度\emph{不是}正确的原始度量；当前架构\emph{没有}经过形式化验证（seL4 意义上）；证据接地在遗留评审 schema 层允许无证据引用的 finding 存在。这些非主张与正面结果同等重要——它们划定了“已确立理论”与“提议模型”的边界，防止理论包装（theory washing）。

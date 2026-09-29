@@ -1,0 +1,84 @@
+% 第 7 章：Agent / Run / Fiber 状态模型
+\chapter{Agent / Run / Fiber 状态模型}\label{ch:states}
+
+\section{三个状态机，三种所有者}
+
+ConsistenCy 的运行时由三个显式状态机组成，分属不同所有者：
+\begin{enumerate}[itemsep=0.1em]
+  \item \textbf{ACB（Agent Control Block）LTS}：12 状态，由 KernelScheduler \emph{独占写入}。状态集 $\States$ 含 12 个状态：NEW、READY、RUNNING、五个等待态（WAIT\_LLM / WAIT\_TOOL / WAIT\_IO / WAIT\_AGENT / WAIT\_HUMAN）、SUSPENDED 与三个终态；终态集 $T_{\mathrm{term}}=\{\tcode{SUCCEEDED},\tcode{FAILED},\tcode{CANCELLED}\}$ 吸收（迁移表 \tcode{agent/state.ts:27--50}）。执行器/Agent 代码只能\emph{请求}阻塞与唤醒（\tcode{RUNNING}$\to$\tcode{WAIT}$^\tau$ 与 \tcode{WAIT}$^\tau\to$\tcode{READY} 的原因），且必须经调度器原语生效；网关\emph{不拥有}任何 ACB 迁移（其拒绝结果作为执行器层的失败请求传播）。
+  \item \textbf{Run LTS}：\tcode{CREATED}$\to$\tcode{ACTIVE}$\to$终态；运行取消级联到所有非终态 Agent；\emph{已派发的外部工作不被回滚}。
+  \item \textbf{Fiber LTS}：4 状态 PENDING / LOADING / ACTIVE / UNLOADING，语义由 Cordis 库拥有（外部公理；升级 Cordis 版本会重新打开本章结论）。
+\end{enumerate}
+
+理论上，ACB 的 12 状态迁移表就是 Keller 意义下的\textbf{带标迁移系统（labelled transition system, LTS）}~\cite{keller1976}；对迁移不变式（“没有任何迁移离开 \tcode{SUCCEEDED}”、“\tcode{WAIT}$^\tau$ 最终恢复或失败”）的自然语言是 Pnueli 的\textbf{时序逻辑}~\cite{pnueli1977}。映射强度：\DIRECT{}（不是类比——它字面上就是有限 LTS）。
+
+\section{单向耦合积}
+
+\begin{definition}[单向耦合 $\varphi$]\label{def:coupling}
+部分函数 $\varphi$ 把调度器标签映射为 Fiber 标签：$\varphi(\mathrm{admit})=\mathrm{activate}$，$\varphi(\mathrm{suspend})=\mathrm{cleanup}$，$\varphi(\mathrm{cancel})=\mathrm{dispose}$；内核事件 $\mathrm{revoke}$ 自主触发 $\mathrm{dispose}$。方向性：内核事件可以\emph{禁用} Fiber 迁移（撤销禁用后续激活并强制销毁），但\emph{永不启用}任何调度器未准入的激活；没有任何 Fiber 事件改变 ACB 状态。
+\end{definition}
+
+\begin{proposition}[积的良好定义与派生不变式]\label{prop:product}
+$\varphi$-受限异步积 $\mathcal{T}=\mathcal{T}_{\mathrm{ACB}}\parallel_\varphi\mathcal{T}_{\mathrm{F}}$（两迁移关系的交错，Fiber 激活/清理标签须与其 $\varphi$-原像共现，dispose 允许自主发生）是良定义 LTS：$\varphi$ 是不相交标签集之间的部分函数，复合迁移关系在每个复合标签处单值。状态空间 $\subseteq\States\times S_{\mathrm{F}}$（48 对）。由桥接映射派生：$\text{Fiber ACTIVE}\Rightarrow \text{ACB}\in\{\tcode{RUNNING}\}\cup\{\tcode{WAIT}^\tau\}$；故 $(\tcode{WAIT\_LLM},\text{ACTIVE})$ 可达（已证事实），而 $(\tcode{NEW},\text{ACTIVE})$ 与 $(\tcode{SUSPENDED},\text{ACTIVE})$ 不可达。
+\end{proposition}
+\begin{proof}
+$\varphi$ 的部分性与函数性保证合成约束无歧义；不可达性由 $\varphi$-共现要求直接得出（\tcode{NEW} 与 \tcode{SUSPENDED} 不出现在任何 $\varphi$ 定义域原像的使能条件中）。
+\end{proof}
+\tagm{PROPOSITION（LTS 定义为 ENGINEERING\_INVARIANT；积性质为模型级）}
+
+$(\tcode{WAIT\_LLM},\text{ACTIVE})$ 的可达性值得强调：它说明 \emph{Fiber ACTIVE $\neq$ 调度器 RUNNING} 是系统的\emph{设计事实}而非缺陷——Fiber 反映 harness 侧的组件存活，调度器跟踪协作式等待。这一分离与第~\ref{ch:sep} 章的正交性共同构成“安全看内核、活性看生命周期”的二分。
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[
+  st/.style={draw=framegray,fill=boxgray,rounded corners=2pt,font=\scriptsize,minimum height=1.5em,inner sep=3.5pt},
+  tr/.style={draw=accentred!70,fill=softrose,rounded corners=2pt,font=\scriptsize\bfseries,minimum height=1.5em,inner sep=3.5pt},
+  fs/.style={draw=framegray,fill=softgreen,rounded corners=2pt,font=\scriptsize,minimum height=1.5em,inner sep=3.5pt},
+  ln/.style={-{Stealth[length=1.8mm]},inkgray!80},
+  lb/.style={font=\tiny\itshape\color{inkgray}, midway, fill=white, inner sep=1pt}]
+% ---- ACB LTS (left) ----
+\node[font=\small\bfseries] at (3.1,4.6) {ACB LTS（12 状态，调度器所有）};
+\node[st] (new) at (0.4,3.7) {NEW};
+\node[st] (rdy) at (2.2,3.7) {READY};
+\node[st] (run) at (4.2,3.7) {RUNNING};
+\node[st] (sus) at (0.4,2.2) {SUSPENDED};
+\node[tr,minimum width=3.2cm] (wait) at (3.1,2.2) {WAIT\_LLM / TOOL / IO / AGENT / HUMAN};
+\node[tr] (ok) at (5.8,3.7) {SUCCEEDED};
+\node[tr] (fail) at (5.8,2.2) {FAILED};
+\node[tr] (canc) at (3.1,0.9) {CANCELLED};
+\draw[ln] (new) -- (rdy) node[lb,above]{register};
+\draw[ln] (rdy) -- (run) node[lb,above]{admit};
+\draw[ln] (run) -- (wait) node[lb,right=1pt]{wait};
+\draw[ln] (wait) -- (rdy) node[lb,left=1pt]{wake};
+\draw[ln] (sus) -- (2.0,3.05) node[lb,left=1pt]{resume};
+\draw[ln] (rdy.south west) -- (sus.north east) node[lb,left=1pt]{suspend};
+\draw[ln] (run) -- (ok) node[lb,above]{succeed};
+\draw[ln] (wait) -- (fail) node[lb,below]{fail};
+\draw[ln] (run.south) to[bend left=8] (canc.east) node[lb,right]{cancel};
+\draw[ln] (rdy.south) to[bend right=8] (canc.west) node[lb,left]{cancel/deadline};
+\node[font=\tiny\itshape\color{inkgray},align=center] at (3.1,0.15) {终态吸收；截止期到期的 READY 在 ACTIVE 运行中被 CANCEL（P1 路pass），绝不准入};
+% ---- Fiber LTS (right) ----
+\node[font=\small\bfseries] at (10.6,4.6) {Fiber LTS（4 状态，Cordis 库所有）};
+\node[fs] (pend) at (9.2,3.4) {PENDING};
+\node[fs] (load) at (11.2,3.4) {LOADING};
+\node[fs] (act) at (11.2,2.0) {ACTIVE};
+\node[fs] (unl) at (9.2,2.0) {UNLOADING};
+\draw[ln] (pend) -- (load) node[lb,above]{facade 提供};
+\draw[ln] (load) -- (act) node[lb,right=1pt]{};
+\draw[ln] (act) -- (unl) node[lb,below]{dispose / revoke};
+\draw[ln] (unl) -- (pend) node[lb,left=1pt]{cleanup};
+\draw[ln,dashed,inkgray!60] (act.west) to[bend left=28] (pend.north west) node[lb,above left=1pt]{依赖从未提供};
+\node[font=\tiny\itshape\color{inkgray},align=center] at (10.6,0.9) {共效缺失 $\Rightarrow$ PENDING 吸收；\\撤销 $\Rightarrow$ dispose（异步，经微任务）};
+% coupling arrows
+\draw[ln,accentred!70,dashed,thick] (run.north east) to[bend left=16] node[lb,above,font=\tiny\color{accentred}]{ $\varphi(\mathrm{admit}){=}\mathrm{activate}$} (act.north west);
+\draw[ln,accentred!70,dashed,thick] (sus.north west) to[bend left=40] node[lb,below left,font=\tiny\color{accentred}]{$\varphi(\mathrm{suspend}){=}\mathrm{cleanup}$} (unl.south west);
+\end{tikzpicture}
+\end{adjustbox}
+\caption{ACB/Fiber 状态迁移图。左：12 状态 ACB（红框为终态）；右：4 状态 Fiber（绿色）。红色虚线为单向耦合 $\varphi$：内核事件可以禁用 Fiber 迁移、强制销毁，但永不启用未被调度器准入的激活；没有 Fiber 事件改变 ACB 状态（命题~\ref{prop:product}）。}
+\label{fig:states}
+\end{figure}
+
+\section{模型检验扩展（\PROPOSED）}\label{sec:modelcheck}
+
+48 对的有限积空间提示了一个尚未接线的验证路径：把 S1--S3 与积 LTS 的不变式编码为 CTL 公式并模型检验——这正是 Clarke--Emerson 分支时序逻辑模型检验的诞生场景~\cite{clarke1981}。当前实现以测试钉住若干不变式（终态吸收、重复入队防御、不可达组合），但未做穷举检验。该扩展不改变任何结论的效力，只是把“逐条断言”升级为“穷举排除”；列入第~\ref{ch:future} 章的研究议程。

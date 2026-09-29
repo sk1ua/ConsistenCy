@@ -1,0 +1,61 @@
+% 附录 A：完整数学推导
+\chapter{完整数学推导}\label{app:derivations}
+
+本附录给出正文中压缩陈述的完整推导。所有推导针对架构模型 $\mathcal{M}_C$；随机性只在显式声明的假设（A9/A10、随机预言机）下出现。
+
+\section{Erlang-C 公式的推导梗概（定理~\ref{thm:erlangc}）}
+
+$M/M/c$ 的稳态是生灭链：$\pi_{n+1}=\frac{\lambda}{\min(n{+}1,c)\mu}\pi_{n}$。记 $a=A_e=\lambda/\mu$，则 $\pi_n=\pi_0\,a^n/n!\ (n\le c)$，$\pi_n=\pi_0\,a^n/(c!\,c^{\,n-c})\ (n>c)$。等待概率即 Erlang-C：
+\begin{equation}
+P_{\mathrm{wait}}=\sum_{n\ge c}\pi_n=\frac{a^c}{c!}\cdot\frac{1}{1-\rho}\cdot\Bigl[\sum_{k=0}^{c-1}\frac{a^k}{k!}+\frac{a^c}{c!}\cdot\frac{1}{1-\rho}\Bigr]^{-1},\qquad \rho=\frac{a}{c}<1.
+\end{equation}
+条件等待是速率为 $c\mu$ 的指数剩余服务 $k$ 次（$k$ 为到达时队长 $-c$），几何混合后 $\E[W_q\mid\text{wait}]=1/(c\mu-\lambda)$，故 $\E[W_q]=P_{\mathrm{wait}}/(c\mu-\lambda)$。$c=1$：$P_{\mathrm{wait}}=\rho$，$\E[W_q]=\rho/(\mu-\lambda)=\rho\cdot\tau/(1-\rho)$。到达看到稳态（PASTA）使“到达时队长分布 $=$ 稳态分布”成立——这是把 $\pi$ 读作到达分布的合法性来源。以上为 $M/M/c$ \emph{理想化}内的定理~\cite{kleinrock1975}。
+
+\section{Little 定律的证明梗概（定理~\ref{thm:little}）}
+
+以 $A(t)$ 记 $[0,t]$ 到达数、$D(t)$ 离去数，系统内人数 $L(t)=A(t)-D(t)$。每个顾客的累积在系统时间 $\int_0^t L(s)\,ds=\sum_{i\text{ 已离去}}W_i+\sum_{i\text{ 在系统}}(\text{部分})$。若 (i) 到达率极限 $\lambda=\lim_{t\to\infty}A(t)/t$ 存在且有限，(ii) 均值逗留 $W=\lim_{n\to\infty}\frac1n\sum_{i\le n}W_i$ 存在且有限，(iii) 顾客最终离去（无永久滞留），则由 Cauchy--Stolz 型论证 $L=\lim_{t\to\infty}\frac1t\int_0^tL=\lambda W$~\cite{little1961}。证明\emph{完全不使用}分布假设、服务纪律或优先级——这正是它在表~\ref{tab:qassump} 的违背下仍然可用的原因；代价是它只约束均值关系，不给出 $W$ 本身。
+
+\section{非抢占 HOL 优先级均值等待（定理~\ref{thm:hol}）}
+
+类 $k$ 顾客的等待 $=$ 残余服务 $R$（到达时刻正在服务的剩余时间）$+$ 到达时已在队的类 $\le k$ 工作量 $W_{\text{backlog}}^{(k)}$ $+$ 等待期间新到的类 $<k$ 工作量 $W_{\text{new}}^{(k)}$。均值版本（指数平滑假设下的标准分解）：
+\begin{equation}
+\E[W_q^{(k)}]=\E[R]+\sum_{i\le k}\lambda_i\E[W_q^{(i)}]\E[S_i]+\sum_{i<k}\lambda_i\E[W_q^{(k)}]\E[S_i],
+\end{equation}
+其中 $\E[R]=W_0=\sum_i\lambda_i\E[S_i^2]/2$（平均剩余服务悖论）。对 $k=1,2,\dots$ 递推求解得
+\begin{equation}
+\E[W_q^{(k)}]=\frac{W_0}{(1-R_{k-1})(1-R_k)},\qquad R_k=\sum_{i\le k}\rho_i
+\end{equation}
+（$R_k$ 为类 $\le k$ 累积利用率~\cite{kleinrock1975}。）
+分母结构即饥饿形状：$R_{k-1}\uparrow1$ 时类 $k$ 均值等待 $\sim(1-R_{k-1})^{-1}$ 爆炸，即使 $R_\text{all}=\rho<1$。P3 的“严格优先级 + 类内 FIFO”是其在两类（高/低）情形的实例；ConsistenCy 的兜底是 P1 截止期取消（把无限等待转化为终态），不是公平份额~\cite{demers1989}。
+
+\section{碰撞界的完整证明（命题~\ref{prop:collision}）}
+
+设规范编码 $\{c_1,\dots,c_n\}$ 两两不同（A7$'$ + 前置条件），$\fp_i=H(c_i)$，$H$ 为随机预言机。对固定对 $(i,j)$：$\Pr[H(c_i)=H(c_j)]=2^{-256}$（RO 在不同输入上取值独立均匀）。则
+\begin{equation}
+\Pr\Bigl[\bigcup_{i<j}\{\fp_i=\fp_j\}\Bigr]\;\overset{\text{Boole}}{\le}\;\sum_{i<j}\Pr[\fp_i=\fp_j]\;=\;\binom{n}{2}\,2^{-256}\;\le\;\frac{n^2}{2}\,2^{-256}=\frac{n^2}{2^{257}}.
+\end{equation}
+\textbf{关键点}：Boole 不等式对事件独立性\emph{零假设}——它只需要逐对概率界，而逐对界来自 RO 在\emph{两个不同输入}上的独立取值。因此本证明没有走私任何未声明的独立性假设。数值代入 $n=2^{30}$：上界 $=2^{60}/2^{257}=2^{-197}$。
+
+\section{确定性命题（命题~\ref{prop:determinism}）}
+
+设 $(x,v)=(x',v')$。A6：$A_v$ 是函数且 $A_v(x)=A_v(x')$（结构化输出相等——注意这要求 A6 的\emph{字节稳定}版本而非仅仅“语义确定”）。$N$（路径规范化、校验、冻结）是函数：$N(A_v(x))=N(A_v(x'))$。$\canon$（A7 确定性渲染 + A7$'$ 单射，这里只需确定性）是函数。SHA-256 是函数。函数复合保持相等：$\fp(N(A_v(x)))=\fp(N(A_v(x')))$。$\blacksquare$。注意该证明对“同输入同输出”零概率假设；全部重量压在 A6/A7 的工程事实上，A7$'$ 只在\emph{逆命题}（不同内容 $\Rightarrow$ 不同指纹）中需要。
+
+\section{新鲜证据时刻上界的完整证明（命题~\ref{prop:freshbound}）}
+
+设变更（摘要变化）发生在 $\theta\in(t_g,t_{g+1}]$，$t_g$ 为轮询栅格点，栅格间隔 $T_{\mathrm{poll}}$。(1) \emph{检测}：下一次观测在 $t_{g+1}$ 开始，扫描时长 $\delta_{\mathrm{scan}}$，A9 保证不重叠（$\delta_{\mathrm{scan}}\le T_{\mathrm{poll}}$）且该次观测必看到新摘要（摘要只依赖仓库状态，观测无噪声）；故检测完成时刻 $\le t_{g+1}+\delta_{\mathrm{scan}}\le\theta+T_{\mathrm{poll}}+\delta_{\mathrm{scan}}$。(2) \emph{冲刷}：防抖计时器在检测时刻武装，A9（无后续变更）下恰经 $T_{\mathrm{deb}}$ 冲刷；冲刷时刻 $\le\theta+T_{\mathrm{poll}}+\delta_{\mathrm{scan}}+T_{\mathrm{deb}}$。(3) \emph{终态}：冲刷触发计划（去重键唯一 $\Rightarrow$ 发起一次运行），运行按命题~\ref{prop:execsound} 的 F1--F3 在有限步内到达终态；以 $T_{\mathrm{run}}$ 记其上界，新鲜证据时刻 $\le\theta+W$，$W:=T_{\mathrm{poll}}+\delta_{\mathrm{scan}}+T_{\mathrm{deb}}+T_{\mathrm{run}}$。(4) \emph{窗口包含}：任意固定 $t$，若某提交 $u\in(t-W,t]$ 且其触发链未完成，则与 (1)--(3) 矛盾；故未被终态运行覆盖的提交只能落在 $t-W$ 之前，即 $D(t)\le N((t-W,t])$。\textbf{失败条件}即 A9 的三违背：再武装链（$D(t)$ 可超窗）、扫描重叠（有效栅格变宽）、崩溃（单次尝试 $\Rightarrow$ 时延无界）。
+
+\section{栅格相位均匀性与平均冲刷时延}
+
+A10 下，$[0,T_{\mathrm{poll}})$ 上的相位分布：泊松过程与独立栅格的平移不变性给出 $P(\text{phase}\in ds)=ds/T_{\mathrm{poll}}$（平稳增量 + 独立性；无检查悖论——栅格不依赖变更过程）。\textbf{冲刷参照}：
+\begin{equation}
+\E[\text{delay}_{\mathrm{flush}}]=\E[\text{phase 的剩余等待}]+\delta_{\mathrm{scan}}+T_{\mathrm{deb}}=\frac{T_{\mathrm{poll}}}{2}+\delta_{\mathrm{scan}}+T_{\mathrm{deb}},
+\end{equation}
+均匀分布的期望剩余 $=T_{\mathrm{poll}}/2$。更新报酬定理~\cite{ross1970}：长期平均冲刷时延 $=$ 每周期期望总延迟/每周期期望变更数；低速率（$\lambda_c(T_{\mathrm{poll}}{+}T_{\mathrm{deb}})\ll1$，再武装概率 $1-\mathrm{e}^{-\lambda_cT_{\mathrm{deb}}}\approx\lambda_cT_{\mathrm{deb}}$ 可忽略）时逐变更均值即长期平均。\textbf{交界警示}（正文 \S\ref{ch:freshness}）：固定 $t$ 的 $\E[D(t)]\le\lambda_cW$ 只在 A9（确定性世界）内精确；A10 世界里必须加再武装扩散修正项，且无界时域“峰值”主张非法。
+
+\section{撤销支配与传播无关性（命题~\ref{prop:revocation}、\ref{prop:propagation}）}
+
+见正文证明；此处补全独立性论证的语义细节。$\Auth$ 的定义（定义~\ref{def:auth}）是\emph{显式给出}的公式，其自由变元集 $\mathrm{FV}(\Auth)=\{C_t,B_t,h,a,\alpha,r,s,t\}$ 由构造确定。设 $\mathcal{G}_t=(K_t,V_t,P_t,\mathfrak{A}_t,Q_t)$ 为任意其他分量組。对任意两个轨迹片段 $(X,X')$ 满足 $C=B$（逐分量）而 $\mathcal{G}\ne\mathcal{G}'$：$\Auth$ 在两轨迹上逐点相等——因为求值只读取 $\mathrm{FV}$。故“$\delta_{\mathrm{prop}}$ 任意（含 $\infty$）”与“窗口内全部拒绝”不矛盾：前者只改变 $\mathcal{G}$（Fiber/K 侧），后者由 $C$ 侧单调决定。$\blacksquare$
+
+\section{积 LTS 良定义性（命题~\ref{prop:product}）}
+
+$\varphi:L_{\mathrm{sched}}\rightharpoonup L_{\mathrm{fiber}}$ 部分函数且两标签集不相交。定义积迁移 $(s,f)\xrightarrow{\ell}(s',f')$ 当且仅当 (a) $\ell\in L_{\mathrm{sched}}$、$s\xrightarrow{\ell}s'$、$f=f'$，且 $\varphi(\ell)$ 未定义或与 $f$ 的共存约束一致（fiber 同步执行 $\varphi(\ell)$）；或 (b) $\ell\in L_{\mathrm{fiber}}\setminus\varphi(L_{\mathrm{sched}})$（如自主 dispose）、$f\xrightarrow{\ell}f'$、$s=s'$。每个复合标签下的迁移由分支条件互斥给出唯一性——$\varphi$ 的函数性排除“一个调度标签对应两个 fiber 标签”的歧义。不可达性：$(\tcode{NEW},\text{ACTIVE})$ 要求存在使 fiber 激活的标签共现，而 $\tcode{NEW}$ 下唯一使能标签是 register（$\varphi$ 未定义于其上），矛盾；$(\tcode{SUSPENDED},\text{ACTIVE})$ 同理由 suspend 的 $\varphi$-像 cleanup 排除。$\blacksquare$

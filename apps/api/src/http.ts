@@ -1,0 +1,3853 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { resolve as pathResolve, sep as pathSep } from "node:path";
+import { z, ZodError } from "zod";
+import {
+  auditCapabilitiesSchema,
+  auditIssueActionRequestSchema,
+  auditIssueActionSchema,
+  auditIssueStateSchema,
+  auditRunEventsResponseSchema,
+  auditRunExportSchema,
+  createAuditIssueRequestSchema,
+  createAuditRunRequestSchema,
+  createAutomationRequestSchema,
+  createPolicyRevisionRequestSchema,
+  createRepositoryRequestSchema,
+  createWorkflowRevisionRequestSchema,
+  DEFAULT_SECURITY_GUARANTEES,
+  evaluateAuditPolicy,
+  githubConnectionTestRequestSchema,
+  githubConnectionTestResponseSchema,
+  githubOauthDevicePollRequestSchema,
+  githubOauthDevicePollResponseSchema,
+  githubOauthDeviceStartResponseSchema,
+  desktopOAuthStartResponseSchema,
+  desktopOAuthCompleteResponseSchema,
+  desktopOAuthCancelResponseSchema,
+  internalLocalRepositoryRegistrationRequestSchema,
+  llmConnectionTestRequestSchema,
+  llmConnectionTestResponseSchema,
+  localReviewRequestSchema,
+  notebookCardRequestSchema,
+  notebookMessageRequestSchema,
+  publicPrRequestSchema,
+  REPOSITORY_REVIEWS_MAX_LIMIT,
+  repositoryPullRequestsResponseSchema,
+  REPOSITORY_FILE_PREVIEW_MAX_BYTES,
+  repositoryReviewsResponseSchema,
+  reviewPreparationResponseSchema,
+  riskScoreSchema,
+  saveWorkflowRequestSchema,
+  stepIdSchema,
+  workflowSpecSchema,
+  type EffectiveSettingsView,
+  type GitRemoteInfo,
+  type GitHubConnectionTestRequest,
+  type GitHubConnectionTestResponse,
+  type LlmConnectionTestRequest,
+  type LlmConnectionTestResponse,
+  type ReviewModelOverride,
+  type TokenUsage
+} from "@consistency/schema";
+import type { HeartbeatPulse, HeartbeatStreamEvent, Repository, VcsChangedFile } from "@consistency/schema";
+import { LocalGitAdapter, assertSafeTreePath } from "@consistency/vcs-core";
+import { RepositoryPullRequestService, type RepositoryPullRequestRequest } from "./github/pullRequestReader";
+import type { GitHubOauthDeviceFlow } from "./github/oauthDeviceFlow";
+import type { GitHubDesktopOAuthBroker } from "./github/oauthBroker";
+import { PublicRepositoryError } from "./github/publicRepository";
+import { ReviewModelResolutionError, type ResolvedReviewModel } from "./review/llm/factory";
+import type { DiagnosticsService } from "./diagnostics/service";
+
+function resolveLocalPathForRepository(repositoryId: string, options: CreateApiServerOptions): string | undefined {
+  const repository = options.auditStore?.getRepository(repositoryId);
+  if (repository?.source !== "local_git") return undefined;
+  return options.auditStore?.getLocalRepositoryPath?.(repository.id);
+}
+
+/**
+ * Resolve a repository-relative path to an absolute file under a registered
+ * local_git root. Rejects absolute paths, parent traversal (via assertSafeTreePath),
+ * and any resolved location outside the repo sandbox (symlink escape).
+ */
+function resolveSandboxedRepoFile(repoRoot: string, relativePath: string): { absolutePath: string; safeRel: string } {
+  const safeRel = assertSafeTreePath(relativePath);
+  if (safeRel.length === 0) {
+    throw new ApiError("Query parameter path must identify a file", "INVALID_FILE_PATH", 400);
+  }
+  let rootReal: string;
+  try {
+    rootReal = realpathSync(repoRoot);
+  } catch {
+    throw new ApiError("Local repository path unavailable", "REPOSITORY_PATH_UNAVAILABLE", 404);
+  }
+  const candidate = pathResolve(rootReal, ...safeRel.split("/"));
+  const rootPrefix = rootReal.endsWith(pathSep) ? rootReal : rootReal + pathSep;
+  if (candidate !== rootReal && !candidate.startsWith(rootPrefix)) {
+    throw new ApiError("Path escapes repository sandbox", "INVALID_FILE_PATH", 400);
+  }
+  if (!existsSync(candidate)) {
+    return { absolutePath: candidate, safeRel };
+  }
+  let fileReal: string;
+  try {
+    fileReal = realpathSync(candidate);
+  } catch {
+    throw new ApiError("Unable to resolve file path", "INVALID_FILE_PATH", 400);
+  }
+  if (fileReal !== rootReal && !fileReal.startsWith(rootPrefix)) {
+    throw new ApiError("Path escapes repository sandbox", "INVALID_FILE_PATH", 400);
+  }
+  return { absolutePath: fileReal, safeRel };
+}
+
+function looksLikeBinary(buffer: Buffer): boolean {
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8_192));
+  if (sample.includes(0)) return true;
+  let suspicious = 0;
+  for (const byte of sample) {
+    if (byte === 9 || byte === 10 || byte === 13) continue;
+    if (byte < 32 || byte === 127) suspicious += 1;
+  }
+  return sample.length > 0 && suspicious / sample.length > 0.3;
+}
+
+function decodeUtf8WithFallback(buffer: Buffer): { text: string; encoding: "utf-8" | "utf-8-lossy" } {
+  const strict = buffer.toString("utf8");
+  if (!strict.includes("\uFFFD") && Buffer.from(strict, "utf8").equals(buffer)) {
+    return { text: strict, encoding: "utf-8" };
+  }
+  // Lossy: replace invalid sequences via TextDecoder when available, else Buffer utf8 (already uses U+FFFD).
+  try {
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    return { text: decoder.decode(buffer), encoding: "utf-8-lossy" };
+  } catch {
+    return { text: strict, encoding: "utf-8-lossy" };
+  }
+}
+
+
+
+function toRendererGitRemote(remote: {
+  readonly name: string;
+  readonly githubFullName?: string;
+}): GitRemoteInfo {
+  return {
+    name: remote.name,
+    ...(remote.githubFullName === undefined ? {} : { githubFullName: remote.githubFullName })
+  };
+}
+
+
+const REPOSITORY_TREE_MAX_ENTRIES = 500;
+
+type TreeChangeKind = "unchanged" | "changed" | "untracked";
+
+function classifyTreeChangeKind(
+  entryPath: string,
+  entryType: "blob" | "tree",
+  changedPaths: ReadonlySet<string>,
+  untrackedPaths: readonly string[]
+): TreeChangeKind {
+  if (entryType === "blob") {
+    if (untrackedPaths.includes(entryPath)) return "untracked";
+    if (changedPaths.has(entryPath)) return "changed";
+    return "unchanged";
+  }
+  const prefix = `${entryPath}/`;
+  if (untrackedPaths.some((path) => path === entryPath || path.startsWith(prefix))) return "untracked";
+  for (const path of changedPaths) {
+    if (path === entryPath || path.startsWith(prefix)) return "changed";
+  }
+  return "unchanged";
+}
+
+function entryName(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? path : path.slice(idx + 1);
+}
+
+function fulfilledValue<T>(result: PromiseSettledResult<T>): T | undefined {
+  switch (result.status) {
+    case "fulfilled":
+      return result.value;
+    case "rejected":
+      return undefined;
+  }
+}
+import { filterJobs, buildStats, recentReports, toApiJob } from "./api/jobView";
+import { buildHealthPayload } from "./health";
+import { processGitHubWebhook, WebhookError } from "./trigger/webhook";
+import { LocalTriggerError } from "./trigger/local";
+import { InMemoryJobQueue, type ReviewJobStore } from "./jobQueue";
+import { sanitizeExecutionError, sanitizePublicError, sanitizeValidationIssues, sanitizeStructuredData } from "./security/redact";
+import { settingsPatchSchema, toRendererSettings, type SettingsSnapshot } from "./config/settings";
+import type { RealDataSnapshot } from "./data/realData";
+import { PublicPrError } from "./review/publicPr";
+import type { NotebookGraph } from "./notebook/graph";
+import type { NotebookStore } from "./notebook/store";
+import type { ReviewJob } from "./jobQueue";
+import type { WorkflowStore } from "./workflows/store";
+import { JobDiffError, type JobDiffResult } from "./review/jobDiff";
+import {
+  FindingPatchError,
+  type FindingPatchApplyResult,
+  type FindingPatchPreview
+} from "./review/patch/findingPatch";
+import { createLocalReviewExcludeFilter } from "./review/localReviewExclude";
+import { AuditDomainError, type AuditDomainStore } from "./audit/store";
+import { validateLocalRepositoryRegistration } from "./audit/localRegistration";
+import { AuditRunPlanner } from "./audit/planner";
+import {
+  AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON,
+  AUDIT_EXECUTION_DISABLED_REASON,
+  AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON
+} from "./audit/executor";
+import { RuntimeRegistry } from "./review/runtimeRegistry";
+import type { JobCancelResult } from "./review/jobCancel";
+import {
+  WorkflowRuntimeHost,
+  WorkflowRepositoryNotFoundError,
+  WorkflowSnapshotUnavailableError,
+  WorkflowDefinitionNotFoundError,
+  WorkflowDefinitionNotExecutableError,
+  WorkflowDefinitionInvalidError,
+  WorkflowRuntimePersistenceError,
+} from "./workflow-runtime/host";
+import { WorkflowRuntimeStoreError } from "./workflow-runtime/store";
+import { compileWorkflowRuntimeDefinition } from "./workflow-runtime/compile";
+import { listWorkflowNodeTypes } from "./workflow-runtime/registry";
+import type { LLMProvider } from "./review/llm/types";
+import { invokeHostStructured, usageOrUndefined } from "./review/llm/hostInvoke";
+import {
+  workflowRuntimeCopilotChatRequestSchema,
+  llmCatalogResponseSchema,
+  workflowRuntimeCopilotChatResponseSchema,
+  workflowRuntimeCopilotProposalRequestSchema,
+  workflowRuntimeCopilotProposalResponseSchema,
+  workflowRuntimeCopilotProposalSchema,
+  workflowRuntimeCopilotPatchOperationSchema,
+  type WorkflowRuntimeCopilotPatchOperation,
+  type WorkflowRuntimeCopilotChatMessage,
+  type WorkflowRuntimeCopilotProposal,
+  type WorkflowRuntimeDefinition,
+  type WorkflowRuntimeNodeType,
+} from "@consistency/schema";
+import {
+  workflowRuntimeSaveDefinitionRequestSchema,
+  workflowRuntimeSetBindingRequestSchema,
+  workflowRuntimeRepositoryTriggerRequestSchema,
+  workflowRuntimeTriggerRequestV2Schema,
+  workflowRuntimeRunEventsPageSchema,
+  workflowRuntimeRecoveryPlanSchema,
+  workflowRuntimeApprovalDecisionRequestSchema,
+  workflowRuntimeApprovalDecisionResponseSchema,
+  workflowRuntimePlanRevisionRequestSchema,
+  workflowRuntimePlanRevisionResponseSchema,
+  workflowRuntimeRecoveryRequestSchema,
+  workflowRuntimeRecoveryResponseSchema,
+} from "@consistency/schema";
+import { buildEngineAllowlistCatalog, buildKernelSyscallCatalog, buildPluginCatalog, buildReviewPipelineCatalog } from "./catalog/catalog";
+import {
+  engineAllowlistCatalogResponseSchema,
+  kernelSyscallCatalogResponseSchema,
+  pluginCatalogResponseSchema,
+  reviewPipelineCatalogResponseSchema
+} from "@consistency/schema";
+
+const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * H12: parse a bounded, non-negative integer query parameter (seq cursor /
+ * page size). Absent → undefined; malformed, negative or non-integer →
+ * undefined (treated as absent) rather than a 400 — resuming clients always
+ * send a valid cursor and a stale client must still be able to recover by
+ * falling back to the full snapshot.
+ */
+function parseBoundedSeqParam(url: URL, name: string): number | undefined {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw.trim() === "") return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) return undefined;
+  return value;
+}
+
+/** Sanitized fail-closed mapping for workflow-runtime host/store errors. */
+function mapWorkflowRuntimeError(error: unknown): unknown {
+  if (error instanceof WorkflowRepositoryNotFoundError) {
+    return new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+  }
+  if (error instanceof WorkflowSnapshotUnavailableError) {
+    return new ApiError(error.message, "WORKFLOW_SNAPSHOT_UNAVAILABLE", 503);
+  }
+  if (error instanceof WorkflowDefinitionNotFoundError) {
+    return new ApiError("Workflow definition not found", "WORKFLOW_DEFINITION_NOT_FOUND", 404);
+  }
+  if (error instanceof WorkflowDefinitionNotExecutableError) {
+    return new ApiError(sanitizePublicError(error.message), "WORKFLOW_DEFINITION_NOT_EXECUTABLE", 409);
+  }
+  if (error instanceof WorkflowDefinitionInvalidError) {
+    return new ApiError(
+      "Workflow definition failed canonical runtime validation",
+      "WORKFLOW_DEFINITION_INVALID",
+      400,
+      { issues: sanitizeValidationIssues(error.issues) }
+    );
+  }
+  if (error instanceof WorkflowRuntimePersistenceError) {
+    return new ApiError("Workflow runtime persistence is unavailable", "WORKFLOW_RUNTIME_STORE_UNAVAILABLE", 503);
+  }
+  if (error instanceof WorkflowRuntimeStoreError) {
+    return new ApiError(error.message, error.code, error.statusCode);
+  }
+  return error;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, readonly code: string, readonly statusCode = 500, readonly details?: Record<string, unknown>) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+/**
+ * CKPT6 Phase 3 — Workflow Copilot proposal support (SPEC §18.2/§18.3/§36).
+ * The endpoint is a pure advisor: zero persistence, zero run/dry-load side
+ * effects, and the only path to a persisted change is a human Apply through
+ * the Studio reducer and the canonical validate → save-revision gates. The
+ * LLM can never bypass the compiler.
+ */
+
+/** Deterministic JSON with recursively sorted object keys (fingerprint input only). */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function buildWorkflowCopilotPrompt(input: {
+  instruction: string;
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): { systemPrompt: string; userPrompt: string } {
+  const registryLines = input.nodeTypes.map(nodeType => {
+    const fields = nodeType.parameterSchema.fields
+      .map(field => `${field.name}:${field.type}${field.required ? "(required)" : ""}${field.enumValues ? `(${field.enumValues.join("|")})` : ""}`)
+      .join(", ") || "none";
+    return `- type=${nodeType.type} serviceRef=${nodeType.serviceRef} role=${nodeType.role} parameters: ${fields}`;
+  }).join("\n");
+  const systemPrompt = [
+    "You are the ConsistenCy Workflow Copilot. You translate one natural-language instruction into a structured WorkflowPatch proposal for the Workflow Studio execution graph.",
+    "Hard rules:",
+    "- Output ONLY a JSON object that satisfies the provided schema. No prose, no markdown fences.",
+    "- Every ADD_NODE.serviceRef MUST be copied verbatim from the registry whitelist below. Never invent node types, serviceRefs, or capabilities.",
+    "- Every ADD_EDGE.from/to MUST reference a node id that exists in the current definition OR is introduced by an ADD_NODE operation in the same patch.",
+    "- The patch vocabulary is ADD_NODE and ADD_EDGE only; never remove or modify existing nodes or edges.",
+    "- Edge conditions do not exist in this contract version; never emit a condition field.",
+    "- Parameters must follow the registry parameter descriptors; prefer omitting parameters over guessing values.",
+    "- failurePolicy is always fail-closed and cannot be changed.",
+    "",
+    "Registry whitelist (the only allowed node types / serviceRefs):",
+    registryLines,
+    "",
+    "Current definition:",
+    JSON.stringify(input.definition)
+  ].join("\n");
+  return { systemPrompt, userPrompt: `Instruction:\n${input.instruction}\n\nReturn the WorkflowPatch JSON object only.` };
+}
+
+const workflowRuntimeCopilotChatTurnSchema = z.object({
+  /** Natural-language answer to the user's latest message. */
+  reply: z.string().trim().min(1).max(4000),
+  /** Empty when the turn is purely conversational (answers or clarifies). */
+  patch: z.array(workflowRuntimeCopilotPatchOperationSchema).max(32)
+}).strict();
+
+/**
+ * Conversational Copilot system prompt: same hard hallucination rules as the
+ * single-shot proposal, extended with the full reducer vocabulary, ordered
+ * patch semantics, and multi-turn continuity. An empty patch is the honest
+ * way to answer a question or ask for clarification.
+ */
+function buildWorkflowCopilotChatPrompt(input: {
+  messages: WorkflowRuntimeCopilotChatMessage[];
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): { systemPrompt: string; userPrompt: string } {
+  const registryLines = input.nodeTypes.map(nodeType => {
+    const fields = nodeType.parameterSchema.fields
+      .map(field => `${field.name}:${field.type}${field.required ? "(required)" : ""}${field.enumValues ? `(${field.enumValues.join("|")})` : ""}`)
+      .join(", ") || "none";
+    return `- type=${nodeType.type} serviceRef=${nodeType.serviceRef} role=${nodeType.role} parameters: ${fields}`;
+  }).join("\n");
+  const systemPrompt = [
+    "You are the ConsistenCy Workflow Copilot: a conversational assistant that helps a human edit the Workflow Studio execution graph across multiple turns.",
+    "Hard rules:",
+    "- Output ONLY a JSON object that satisfies the provided schema. No prose, no markdown fences.",
+    "- reply always carries your natural-language answer. Use an EMPTY patch array to answer questions or ask for clarification without changing the graph.",
+    "- Every ADD_NODE.serviceRef MUST be copied verbatim from the registry whitelist below. Never invent node types, serviceRefs, or capabilities.",
+    "- Edges and removals MUST reference node ids that exist at that point of the ordered patch: the current definition, or nodes added earlier in the same patch. REMOVE_EDGE must reference an existing edge. REMOVE_NODE also removes the node's edges.",
+    "- The full vocabulary is ADD_NODE, ADD_EDGE, REMOVE_NODE, REMOVE_EDGE, UPDATE_PARAMS. Propose only the delta relative to the current definition; re-adding an existing node or edge is an error.",
+    "- Edge conditions do not exist in this contract version; never emit a condition field.",
+    "- Parameters must follow the registry parameter descriptors; prefer omitting parameters over guessing values. UPDATE_PARAMS replaces a node's whole parameter object.",
+    "- failurePolicy is always fail-closed and cannot be changed.",
+    "- Stay consistent with earlier turns; treat the current definition below as the authoritative state (earlier patches that were applied are already part of it).",
+    "",
+    "Registry whitelist (the only allowed node types / serviceRefs):",
+    registryLines,
+    "",
+    "Current definition:",
+    JSON.stringify(input.definition)
+  ].join("\n");
+  const transcript = input.messages
+    .map(message => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
+    .join("\n\n");
+  return { systemPrompt, userPrompt: `Conversation so far:\n${transcript}\n\nRespond to the last user message. Return the JSON object only.` };
+}
+
+async function generateWorkflowCopilotChatTurn(provider: LLMProvider, input: {
+  messages: WorkflowRuntimeCopilotChatMessage[];
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+  signal?: AbortSignal;
+}): Promise<{ reply: string; patch: WorkflowRuntimeCopilotPatchOperation[]; tokenUsage?: TokenUsage }> {
+  const { systemPrompt, userPrompt } = buildWorkflowCopilotChatPrompt(input);
+  try {
+    const result = await invokeHostStructured(provider, {
+      schema: workflowRuntimeCopilotChatTurnSchema,
+      schemaName: "workflow-copilot-chat-turn",
+      systemPrompt,
+      userPrompt,
+      signal: input.signal
+    });
+    return { ...result.data, tokenUsage: usageOrUndefined(result.tokenUsage) };
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    // One sanitized 502 for EVERY generation failure (schema-invalid output
+    // after the provider's own repair attempt included). The raw LLM output,
+    // provider errors, prompts, and conversation content are never echoed.
+    throw new ApiError("The configured LLM failed to produce a schema-valid workflow reply", "WORKFLOW_PATCH_GENERATION_FAILED", 502);
+  }
+}
+
+async function generateWorkflowCopilotProposal(provider: LLMProvider, input: {
+  instruction: string;
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+  signal?: AbortSignal;
+}): Promise<WorkflowRuntimeCopilotProposal & { tokenUsage?: TokenUsage }> {
+  const { systemPrompt, userPrompt } = buildWorkflowCopilotPrompt(input);
+  try {
+    const result = await invokeHostStructured(provider, {
+      schema: workflowRuntimeCopilotProposalSchema,
+      schemaName: "workflow-copilot-proposal",
+      systemPrompt,
+      userPrompt,
+      signal: input.signal
+    });
+    return { ...result.data, tokenUsage: usageOrUndefined(result.tokenUsage) };
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    // One sanitized 502 for EVERY generation failure (schema-invalid output
+    // after the provider's own repair attempt included). The raw LLM output,
+    // provider errors, and prompts are never echoed back or logged.
+    throw new ApiError("The configured LLM failed to produce a schema-valid workflow proposal", "WORKFLOW_PATCH_GENERATION_FAILED", 502);
+  }
+}
+
+/**
+ * Fail-closed post-generation validation (hallucination detection):
+ * 1. registry serviceRef whitelist against the server-owned registry;
+ * 2. ADD_EDGE endpoint existence, counting nodes the patch itself adds;
+ * 3. ADD_EDGE duplication — an edge that already exists in the definition or
+ *    was added earlier in the same patch is rejected (fail-closed: the reducer
+ *    would otherwise silently skip it at Apply time);
+ * 4. zero-side-effect compile of "current definition + patch applied".
+ * Any violation throws the sanitized 400 WORKFLOW_PATCH_INVALID.
+ */
+/**
+ * Fail-closed post-generation validation (hallucination detection), shared by
+ * the single-shot proposal and the conversational chat endpoints. Operations
+ * are SIMULATED IN ORDER against the current definition:
+ * 1. registry serviceRef whitelist against the server-owned registry;
+ * 2. ADD_EDGE endpoint existence, counting nodes the patch itself adds;
+ * 3. ADD_EDGE duplication — an edge that already exists in the definition or
+ *    was added earlier in the same patch is rejected (fail-closed: the reducer
+ *    would otherwise silently skip it at Apply time);
+ * 4. REMOVE_NODE / REMOVE_EDGE / UPDATE_PARAMS reference nodes and edges that
+ *    exist at their position in the ordered patch (conversational vocabulary);
+ * 5. zero-side-effect compile of "current definition + patch applied in order"
+ *    — including registry-descriptor parameter validation.
+ * Any violation throws the sanitized 400 WORKFLOW_PATCH_INVALID.
+ */
+function validateWorkflowCopilotPatch(input: {
+  patch: WorkflowRuntimeCopilotPatchOperation[];
+  definition: WorkflowRuntimeDefinition;
+  nodeTypes: WorkflowRuntimeNodeType[];
+}): void {
+  const issues: Array<{ code: string; path: (string | number)[]; message: string }> = [];
+  const registryByRef = new Map(input.nodeTypes.map(nodeType => [nodeType.serviceRef, nodeType]));
+  // Ordered simulation state: node id → serviceRef (undefined for pre-existing
+  // nodes whose type the patch never needs), edge keys as from\0to.
+  const nodeServices = new Map<string, string | undefined>(
+    input.definition.nodes.map(node => [node.id, node.serviceRef])
+  );
+  const knownEdges = new Set(input.definition.edges.map(edge => `${edge.from}\0${edge.to}`));
+
+  const removeNodeAt = (nodeId: string): void => {
+    nodeServices.delete(nodeId);
+    for (const edgeKey of [...knownEdges]) {
+      const [from, to] = edgeKey.split("\0");
+      if (from === nodeId || to === nodeId) knownEdges.delete(edgeKey);
+    }
+  };
+
+  for (const [index, operation] of input.patch.entries()) {
+    if (operation.op === "ADD_NODE") {
+      if (!registryByRef.has(operation.serviceRef)) {
+        issues.push({ code: "unknown_service_ref", path: ["patch", index, "serviceRef"], message: `serviceRef '${operation.serviceRef}' is not registered in the runtime Node Registry` });
+        continue;
+      }
+      if (nodeServices.has(operation.nodeId)) {
+        issues.push({ code: "duplicate_node_id", path: ["patch", index, "nodeId"], message: `Node id '${operation.nodeId}' already exists` });
+        continue;
+      }
+      nodeServices.set(operation.nodeId, operation.serviceRef);
+      continue;
+    }
+    if (operation.op === "REMOVE_NODE") {
+      if (!nodeServices.has(operation.nodeId)) {
+        issues.push({ code: "unknown_node_id", path: ["patch", index, "nodeId"], message: `REMOVE_NODE references unknown node '${operation.nodeId}'` });
+        continue;
+      }
+      removeNodeAt(operation.nodeId);
+      continue;
+    }
+    if (operation.op === "UPDATE_PARAMS") {
+      if (!nodeServices.has(operation.nodeId)) {
+        issues.push({ code: "unknown_node_id", path: ["patch", index, "nodeId"], message: `UPDATE_PARAMS references unknown node '${operation.nodeId}'` });
+      }
+      continue;
+    }
+    const edgeKey = `${operation.from}\0${operation.to}`;
+    if (operation.op === "REMOVE_EDGE") {
+      if (!knownEdges.has(edgeKey)) {
+        issues.push({ code: "unknown_edge", path: ["patch", index], message: `REMOVE_EDGE references a missing edge '${operation.from}' → '${operation.to}'` });
+        continue;
+      }
+      knownEdges.delete(edgeKey);
+      continue;
+    }
+    if (knownEdges.has(edgeKey)) {
+      issues.push({ code: "duplicate_edge", path: ["patch", index], message: `Edge '${operation.from}' → '${operation.to}' is a duplicate edge (already present in the definition or added earlier in this patch)` });
+      continue;
+    }
+    for (const [key, endpoint] of [["from", operation.from], ["to", operation.to]] as const) {
+      if (!nodeServices.has(endpoint)) {
+        issues.push({ code: "unknown_node_reference", path: ["patch", index, key], message: `Edge ${key} references unknown node '${endpoint}'` });
+      }
+    }
+    knownEdges.add(edgeKey);
+  }
+  if (issues.length > 0) {
+    throw new ApiError("Workflow copilot proposal references unknown registry services or nodes", "WORKFLOW_PATCH_INVALID", 400, { issues: sanitizeValidationIssues(issues) });
+  }
+
+  // Apply the patch in order to build the candidate definition for the
+  // canonical compile precheck (parameter descriptors are validated there).
+  let nodes = [...input.definition.nodes];
+  let edges = [...input.definition.edges];
+  for (const operation of input.patch) {
+    if (operation.op === "ADD_NODE") {
+      const nodeType = registryByRef.get(operation.serviceRef)!;
+      nodes.push({ id: operation.nodeId, type: nodeType.type, serviceRef: nodeType.serviceRef, parameters: operation.parameters ?? {}, failurePolicy: "fail-closed" });
+      continue;
+    }
+    if (operation.op === "REMOVE_NODE") {
+      nodes = nodes.filter(node => node.id !== operation.nodeId);
+      edges = edges.filter(edge => edge.from !== operation.nodeId && edge.to !== operation.nodeId);
+      continue;
+    }
+    if (operation.op === "REMOVE_EDGE") {
+      edges = edges.filter(edge => !(edge.from === operation.from && edge.to === operation.to));
+      continue;
+    }
+    if (operation.op === "UPDATE_PARAMS") {
+      nodes = nodes.map(node => node.id === operation.nodeId ? { ...node, parameters: operation.parameters } : node);
+      continue;
+    }
+    edges.push({ from: operation.from, to: operation.to });
+  }
+  const candidate: WorkflowRuntimeDefinition = { ...input.definition, nodes, edges };
+  const compilation = compileWorkflowRuntimeDefinition(candidate);
+  if (!compilation.ok) {
+    throw new ApiError("Workflow copilot proposal failed canonical runtime compilation", "WORKFLOW_PATCH_INVALID", 400, { issues: sanitizeValidationIssues(compilation.errors) });
+  }
+}
+
+async function readBody(request: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_BODY_BYTES) throw new ApiError("Request body exceeds 1 MB", "BODY_TOO_LARGE", 413);
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  const body = await readBody(request);
+  if (body.length === 0) return {};
+  try {
+    return JSON.parse(body.toString("utf8"));
+  } catch {
+    throw new ApiError("Request body must be valid JSON", "INVALID_JSON", 400);
+  }
+}
+
+function responseHeaders(request: IncomingMessage, allowedOrigins: string[]): Record<string, string> {
+  const origin = request.headers.origin;
+  return {
+    "access-control-allow-headers": "authorization,content-type,x-consistency-desktop-control,x-github-event,x-github-delivery,x-hub-signature-256",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+    ...(origin && allowedOrigins.includes(origin) ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    "content-type": "application/json; charset=utf-8"
+  };
+}
+
+function sendJson(request: IncomingMessage, response: ServerResponse, statusCode: number, payload: unknown, allowedOrigins: string[]): void {
+  response.writeHead(statusCode, responseHeaders(request, allowedOrigins));
+  response.end(statusCode === 204 ? undefined : JSON.stringify(payload));
+}
+
+function sendOAuthJson(request: IncomingMessage, response: ServerResponse, statusCode: number, payload: unknown, allowedOrigins: string[]): void {
+  response.writeHead(statusCode, {
+    ...responseHeaders(request, allowedOrigins),
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(statusCode === 204 ? undefined : JSON.stringify(payload));
+}
+
+function sendOAuthRedirect(response: ServerResponse, location: string): void {
+  response.writeHead(302, {
+    "cache-control": "no-store",
+    "content-length": "0",
+    location,
+    "x-content-type-options": "nosniff"
+  });
+  response.end();
+}
+
+function startSse(request: IncomingMessage, response: ServerResponse, allowedOrigins: string[]): void {
+  const headers = responseHeaders(request, allowedOrigins);
+  response.writeHead(200, {
+    ...headers,
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-accel-buffering": "no"
+  });
+}
+
+function writeSse(response: ServerResponse, event: string, data: unknown): void {
+  if (response.writableEnded) return;
+  response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+function errorPayload(code: string, message: string, details?: Record<string, unknown>) {
+  return { error: { code, message, ...(details ? { details } : {}) } };
+}
+
+function parseAuditInput<TSchema extends z.ZodTypeAny>(schema: TSchema, value: unknown): z.output<TSchema> {
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ApiError(
+        error.issues[0]?.message ?? "Audit request is invalid",
+        "INVALID_AUDIT_REQUEST",
+        400
+      );
+    }
+    throw error;
+  }
+}
+
+function auditInputWithPathId(value: unknown, field: "workflowId" | "policyId", id: string): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  return { ...(value as Record<string, unknown>), [field]: id };
+}
+
+function requireAuditPlanner(options: CreateApiServerOptions): AuditRunPlanner {
+  if (options.auditPlanner) return options.auditPlanner;
+  if (options.auditStore) return new AuditRunPlanner(options.auditStore);
+  throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+}
+
+/**
+ * Durable run export document (GET/POST /audit-runs/:id/export). The shape is
+ * declared once in @consistency/schema (docs/output_schema.md contract) and
+ * re-validated at this boundary; an unknown run keeps the canonical
+ * AUDIT_RUN_NOT_FOUND 404. Counts mirror the workflow-runtime summary logic
+ * without leaking evidence payloads or absolute paths.
+ */
+function auditExecutionForDraft(options: CreateApiServerOptions, run: Pick<import("@consistency/schema").AuditRun, "repositoryId" | "automationId">) {
+  if (options.auditExecution?.enabled !== true) {
+    return { available: false, reason: AUDIT_EXECUTION_DISABLED_REASON } as const;
+  }
+  const automation = run.automationId === undefined ? undefined : options.auditStore?.getAutomation(run.automationId);
+  if (automation?.runtimeDefinitionId === undefined) {
+    return { available: false, reason: AUDIT_EXECUTION_AUTOMATION_NOT_MAPPED_REASON } as const;
+  }
+  const repository = options.auditStore?.getRepository(run.repositoryId);
+  if (repository?.source !== "local_git") {
+    return { available: false, reason: AUDIT_EXECUTION_LOCAL_REPOSITORY_REQUIRED_REASON } as const;
+  }
+  return { available: true } as const;
+}
+
+function buildAuditRunExport(options: CreateApiServerOptions, auditRunId: string) {
+  const store = options.auditStore;
+  if (!store) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+  const run = store.getAuditRun(auditRunId);
+  if (!run) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+  const safeRun = {
+    ...run,
+    ...(run.error === undefined ? {} : { error: sanitizeExecutionError(run.error) }),
+    ...(run.executionError === undefined ? {} : { executionError: sanitizeExecutionError(run.executionError) })
+  };
+  const automation = run.automationId === undefined ? undefined : store.getAutomation(run.automationId);
+  const detail = run.workflowRuntimeRunId === undefined
+    ? undefined
+    : options.workflowRuntime?.getRun(run.workflowRuntimeRunId);
+  const miniReport = detail?.miniReport as { findings?: unknown[]; evidenceCount?: number } | undefined;
+  return auditRunExportSchema.parse(sanitizeStructuredData({
+    schemaVersion: 1 as const,
+    // A run export is a deterministic projection: repeated GET/POST requests
+    // for the same durable run have identical bytes.
+    generatedAt: run.createdAt,
+    run: safeRun,
+    events: store.listRunEvents(run.id).map(event => ({
+      ...event,
+      payload: Object.fromEntries(Object.entries(event.payload).map(([key, value]) => [
+        key,
+          typeof value === "string" ? sanitizeExecutionError(value) : value
+      ]))
+    })),
+    ...(automation === undefined ? {} : { automation }),
+    ...(detail === undefined ? {} : {
+      workflowRuntimeRun: {
+        runId: detail.runId,
+        definitionId: detail.definitionId,
+        revisionId: detail.revisionId,
+        status: detail.status,
+        createdAt: detail.createdAt,
+        ...(detail.finishedAt === undefined ? {} : { finishedAt: detail.finishedAt }),
+        repository: detail.snapshot.repository,
+        headSha: detail.snapshot.headSha,
+        findingCount: Array.isArray(miniReport?.findings) ? miniReport.findings.length : 0,
+        evidenceCount: typeof miniReport?.evidenceCount === "number" ? miniReport.evidenceCount : 0,
+        ...(detail.error === undefined ? {} : { error: sanitizeExecutionError(detail.error) }),
+        ...(detail.trigger === undefined ? {} : { trigger: detail.trigger })
+      }
+    })
+  }));
+}
+
+function sendError(request: IncomingMessage, response: ServerResponse, error: unknown, allowedOrigins: string[]): void {
+  if (error instanceof ZodError) {
+    sendJson(request, response, 400, errorPayload("INVALID_SETTINGS", error.issues[0]?.message ?? "Settings are invalid"), allowedOrigins);
+    return;
+  }
+  if (error instanceof ApiError || error instanceof WebhookError) {
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error instanceof ApiError ? error.details : undefined), allowedOrigins);
+    return;
+  }
+  if (error instanceof PublicPrError || error instanceof PublicRepositoryError) {
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message), error.details), allowedOrigins);
+    return;
+  }
+  if (error instanceof AuditDomainError) {
+    sendJson(request, response, error.statusCode, errorPayload(error.code, sanitizePublicError(error.message)), allowedOrigins);
+    return;
+  }
+  sendJson(request, response, 500, errorPayload("INTERNAL_ERROR", "Unexpected API error"), allowedOrigins);
+}
+
+function constantTimeTokenMatches(supplied: string | undefined, expected: string): boolean {
+  const suppliedDigest = createHash("sha256").update(supplied ?? "").digest();
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  return supplied !== undefined && timingSafeEqual(suppliedDigest, expectedDigest);
+}
+
+function isAuthorized(request: IncomingMessage, token: string): boolean {
+  return constantTimeTokenMatches(request.headers.authorization, `Bearer ${token}`);
+}
+
+function isDesktopControlAuthorized(request: IncomingMessage, token: string): boolean {
+  const supplied = request.headers["x-consistency-desktop-control"];
+  return constantTimeTokenMatches(typeof supplied === "string" ? supplied : undefined, token);
+}
+
+function parseUrl(url: string | undefined): URL {
+  return new URL(url ?? "/", "http://localhost");
+}
+
+function filesystemDisplayLabel(value: string): string {
+  const segments = value.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? "Local repository";
+}
+
+function toRendererHeartbeatPulse(pulse: HeartbeatPulse): HeartbeatPulse {
+  return {
+    ...pulse,
+    repository: {
+      ...pulse.repository,
+      root: pulse.repository.root === "unknown"
+        ? "Local repository"
+        : filesystemDisplayLabel(pulse.repository.root)
+    },
+    ...(pulse.lastError === undefined ? {} : { lastError: sanitizePublicError(pulse.lastError) })
+  };
+}
+
+function toRendererHeartbeatEvent(event: HeartbeatStreamEvent): HeartbeatStreamEvent {
+  if (event.event === "pulse") return { ...event, pulse: toRendererHeartbeatPulse(event.pulse) };
+  if (event.event === "change") {
+    return {
+      ...event,
+      change: {
+        ...event.change,
+        repository: {
+          ...event.change.repository,
+          root: filesystemDisplayLabel(event.change.repository.root)
+        }
+      }
+    };
+  }
+  if (event.event === "index_progress" && event.currentPath !== undefined) {
+    const currentPath = /^(?:[A-Za-z]:[\\/]|[\\/]{1,2}|file:)/i.test(event.currentPath)
+      ? filesystemDisplayLabel(event.currentPath)
+      : event.currentPath;
+    return { ...event, currentPath };
+  }
+  if (event.event === "error") return { ...event, message: sanitizePublicError(event.message) };
+  return event;
+}
+
+export type ApiHealthDetails = {
+  database: { ok: boolean };
+  worker: { running: boolean; activeJobs: number; concurrency: number; lastPollAt?: string };
+  llmConfigured?: boolean;
+  llmProvider: string;
+  llmModel?: string;
+  llmCapabilities?: {
+    /** Dynamic projection over the bundled Pi catalog (33+ providers). */
+    providers?: Array<{ id: string; label?: string; configured: boolean; defaultModel?: string }>;
+  };
+  publicPrAnalysis?: boolean;
+  publicPrAccessMode?: "anonymous" | "pat" | "disabled";
+  notebook?: boolean;
+  configuration: {
+    githubAppConfigured: boolean;
+    webhookSecretConfigured: boolean;
+    publicReadTokenConfigured: boolean;
+    storage: { kind: "memory" | "file"; configured: boolean };
+    workerConcurrency: number;
+    publishWorkerConcurrency?: number;
+    // Effective review pipeline workflow name (a public-safe workflow name,
+    // never a path or credential). Optional so older details stay valid.
+    reviewWorkflow?: string;
+  };
+};
+
+function isLlmProviderConfigured(options: Pick<CreateApiServerOptions, "llmProviderConfigured">): boolean {
+  const configured = options.llmProviderConfigured;
+  return typeof configured === "function" ? configured() : configured !== false;
+}
+
+export type CreateApiServerOptions = {
+  runProcess?: any;
+  jobs?: ReviewJobStore;
+  githubWebhookSecret?: string;
+  apiToken?: string;
+  desktopControlToken?: string;
+  nodeEnv?: "development" | "test" | "production";
+  allowedOrigins?: string[];
+  healthDetails?: () => ApiHealthDetails;
+  /** Pi built-in catalog projection for dynamic provider lists (safe metadata). */
+  llmCatalogProviders?: () => Array<{ id: string; label: string; modelCount: number; models: Array<{ id: string; name: string }> }>;
+  workspaceRoot?: string;
+  settingsWritable?: boolean;
+  settings?: {
+    get: () => SettingsSnapshot;
+    update: (patch: unknown) => SettingsSnapshot;
+    /** H09: H07 effective-config projection for the grouped settings forms. */
+    effective?: () => EffectiveSettingsView;
+  };
+  realData?: () => RealDataSnapshot | undefined;
+  resolveReviewModel?: (override?: ReviewModelOverride) => ResolvedReviewModel;
+  publicPr?: (url: string, modelOverride?: ResolvedReviewModel) => Promise<{ coordinates: { repository: string; pullRequestNumber: number; owner: string; repo: string }; job: ReviewJob }>;
+  publicRepositoryConnect?: (input: string) => Promise<Repository>;
+  publicPrAnalysisEnabled?: boolean;
+  llmProviderConfigured?: boolean | (() => boolean);
+  localReview?: (input: { repoPath: string; repositoryId?: string; baseRef?: string; headRef?: string; llmProvider?: string; llmModel?: string }) => Promise<{ jobId: string }>;
+  auditStore?: AuditDomainStore;
+  auditPlanner?: AuditRunPlanner;
+  automationScheduler?: { available: boolean };
+  /** Executor-slice arm state from the composition root (audit execution bridge). */
+  auditExecution?: { enabled: boolean };
+  onAuditRepositoriesChanged?: () => Promise<void> | void;
+  /** CKPT5: binding changes (enable/mode) re-arm repository supervision. */
+  onWorkflowBindingsChanged?: () => Promise<void> | void;
+  heartbeat?: {
+    latest: () => HeartbeatPulse | undefined;
+    subscribe: (subscriber: (event: HeartbeatStreamEvent) => void) => () => void;
+  };
+  workflows?: WorkflowStore;
+  jobDiff?: (jobId: string, options?: { allowTruncate?: boolean; page?: number; pageSize?: number; search?: string; file?: string }) => Promise<JobDiffResult>;
+  /**
+   * Audit P1-07①: cancel a review job. Returns the updated job PLUS the H13
+   * honest cancellation record (single causal id; externalOutcome "unknown"
+   * until the run's own promise settles). Throws nothing for itself — the
+   * implementation owns status-code semantics via ApiError (404 unknown, 409
+   * terminal).
+   */
+  jobCancel?: (jobId: string) => Promise<JobCancelResult>;
+  findingPatchPreview?: (jobId: string, findingId: string) => Promise<FindingPatchPreview>;
+  findingPatchApply?: (jobId: string, findingId: string) => Promise<FindingPatchApplyResult>;
+  notebookEnabled?: boolean;
+  notebookStore?: NotebookStore;
+  notebookGraph?: NotebookGraph;
+  runtimeRegistry?: RuntimeRegistry;
+  pullRequestService?: Pick<RepositoryPullRequestService, "list">;
+  workflowRuntime?: WorkflowRuntimeHost;
+  /**
+   * H26 diagnostics service (optional; absent ⇒ the export endpoint answers
+   * 503 DIAGNOSTICS_UNAVAILABLE — an unconfigured feature is an availability
+   * fact, never a fabricated empty bundle). The service itself is
+   * failure-contained: it never throws into this pipeline.
+   */
+  diagnostics?: DiagnosticsService;
+  /** CKPT6 Phase 3: LLM provider channel for POST /workflow-runtime/copilot/proposal. */
+  copilotProvider?: (resolved?: ResolvedReviewModel) => LLMProvider | undefined;
+  testGitHubConnection?: (input?: GitHubConnectionTestRequest) => Promise<GitHubConnectionTestResponse>;
+  /** H09: user-triggered LLM probe; draft keys exist for one request only. */
+  testLlmConnection?: (input: LlmConnectionTestRequest) => Promise<LlmConnectionTestResponse>;
+  /** GitHub OAuth Device Flow; absent or unconfigured disables the sign-in routes. */
+  githubOauth?: GitHubOauthDeviceFlow;
+  /** Product-operated desktop OAuth broker; never exposes its client secret. */
+  desktopOAuthBroker?: GitHubDesktopOAuthBroker;
+};
+
+type RequestContext = {
+  request: IncomingMessage;
+  response: ServerResponse;
+  url: URL;
+  path: string;
+  allowedOrigins: string[];
+  options: CreateApiServerOptions;
+  jobs: ReviewJobStore;
+  githubWebhookSecret?: string;
+  apiToken?: string;
+  desktopControlToken?: string;
+  nodeEnv: "development" | "test" | "production";
+  match?: RegExpExecArray | null;
+};
+
+type Route = {
+  method: string;
+  path: string | RegExp;
+  handler: (ctx: RequestContext) => Promise<void> | void;
+  auth?: boolean;
+};
+
+const routes: Route[] = [
+  {
+    method: "GET",
+    path: "/audit/capabilities",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      const persistence = options.auditStore !== undefined;
+      // Executor-slice truth: computed from process wiring (executor armed ×
+      // persistence), never a hard-coded promise.
+      const auditExecutionAvailable = persistence
+        && options.auditExecution?.enabled === true;
+      sendJson(request, response, 200, auditCapabilitiesSchema.parse({
+        domainVersion: 2,
+        persistence,
+        repositoryRegistration: persistence,
+        localPathRegistration: false,
+        repositoryTimeline: persistence,
+        repositoryMetrics: persistence,
+        workflowValidation: true,
+        automationDefinitions: persistence,
+        automationScheduling: persistence && options.automationScheduler?.available === true,
+        automationHistory: persistence,
+        auditRunDrafts: persistence,
+        auditExecution: auditExecutionAvailable,
+        auditRunArtifacts: persistence,
+        auditRunEvents: persistence,
+        auditReports: persistence,
+        auditExport: persistence,
+        issueTriage: persistence,
+        evolutionPersistence: persistence,
+        policyEvaluation: true
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/internal/repositories/local",
+    auth: true,
+    handler: async ({
+      request,
+      response,
+      allowedOrigins,
+      options,
+      apiToken,
+      desktopControlToken
+    }) => {
+      if (!apiToken || !desktopControlToken) {
+        throw new ApiError(
+          "Desktop repository control is not configured",
+          "DESKTOP_CONTROL_UNAVAILABLE",
+          503
+        );
+      }
+      if (!isDesktopControlAuthorized(request, desktopControlToken)) {
+        throw new ApiError(
+          "Valid desktop control authorization is required",
+          "DESKTOP_CONTROL_UNAUTHORIZED",
+          401
+        );
+      }
+      if (!options.auditStore) {
+        throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      }
+
+      const input = parseAuditInput(
+        internalLocalRepositoryRegistrationRequestSchema,
+        await readJson(request)
+      );
+      const validated = await validateLocalRepositoryRegistration(input);
+      const repository = options.auditStore.registerLocalRepository({
+        displayName: validated.displayName,
+        source: "local_git",
+        monitoringEnabled: validated.monitoringEnabled,
+        ...(validated.remoteFullName === undefined ? {} : { remoteFullName: validated.remoteFullName }),
+        ...(validated.defaultBranch === undefined ? {} : { defaultBranch: validated.defaultBranch })
+      }, {
+        serverLocator: validated.serverLocator
+      });
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 201, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflows\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const workflowId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        workflowId,
+        workflowRevisions: options.auditStore.listWorkflowRevisions(workflowId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/workflows\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const workflowId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(
+        createWorkflowRevisionRequestSchema,
+        auditInputWithPathId(await readJson(request), "workflowId", workflowId)
+      );
+      const workflowRevision = options.auditStore.createWorkflowRevision(input);
+      sendJson(request, response, 201, { workflowRevision }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/workflows\/([^/]+)\/validate$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match }) => {
+      const workflowId = decodeURIComponent(match?.[1] ?? "");
+      const raw = await readJson(request);
+      const specCandidate = raw !== null && typeof raw === "object" && !Array.isArray(raw) && "spec" in raw
+        ? (raw as { spec: unknown }).spec
+        : raw;
+      const spec = parseAuditInput(workflowSpecSchema, specCandidate);
+      sendJson(request, response, 200, { valid: true, workflowId, spec }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-runtime/overview",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      sendJson(request, response, 200, options.workflowRuntime.overview(), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-runtime/validate",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const raw = await readJson(request);
+      const definition =
+        raw !== null && typeof raw === "object" && !Array.isArray(raw) && "definition" in raw
+          ? (raw as { definition: unknown }).definition
+          : raw;
+      const compilation = options.workflowRuntime.validate(definition);
+      sendJson(
+        request,
+        response,
+        200,
+        { ok: compilation.ok, errors: sanitizeValidationIssues(compilation.errors), ...(compilation.plan === undefined ? {} : { plan: compilation.plan }) },
+        allowedOrigins
+      );
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-runtime/definitions",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        sendJson(request, response, 200, { definitions: options.workflowRuntime.listDefinitions() }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-runtime/definitions",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const parsed = workflowRuntimeSaveDefinitionRequestSchema.safeParse(await readJson(request));
+      if (!parsed.success) {
+        throw new ApiError(
+          "Workflow definition request is invalid",
+          "WORKFLOW_DEFINITION_INVALID",
+          400,
+          { issues: sanitizeValidationIssues(parsed.error.issues.map(issue => ({ code: "schema_invalid", path: issue.path, message: issue.message }))) }
+        );
+      }
+      try {
+        const revision = options.workflowRuntime.saveDefinition(parsed.data);
+        sendJson(request, response, 201, { revision }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/definitions\/([^/]+)\/revisions\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const revision = options.workflowRuntime.getDefinitionRevision(
+          decodeURIComponent(match?.[1] ?? ""),
+          decodeURIComponent(match?.[2] ?? "")
+        );
+        sendJson(request, response, 200, { revision }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/definitions\/([^/]+)\/revisions\/([^/]+)\/dry-load$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const result = options.workflowRuntime.dryLoad(
+          decodeURIComponent(match?.[1] ?? ""),
+          decodeURIComponent(match?.[2] ?? "")
+        );
+        sendJson(request, response, 200, result, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "DELETE",
+    path: /^\/workflow-runtime\/definitions\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        options.workflowRuntime.deleteDefinition(decodeURIComponent(match?.[1] ?? ""));
+        sendJson(request, response, 200, { deleted: true }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-runtime/runs",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+      try {
+        sendJson(request, response, 200, { runs: options.workflowRuntime.listRuns(limit) }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-runtime/runs",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const input = parseAuditInput(workflowRuntimeTriggerRequestV2Schema, await readJson(request));
+      try {
+        const created = await options.workflowRuntime.trigger(input);
+        sendJson(request, response, 201, created, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/bindings$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const repositoryId = decodeURIComponent(match?.[1] ?? "");
+        sendJson(request, response, 200, { bindings: options.workflowRuntime.listBindings(repositoryId) }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "PUT",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/bindings\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const definitionId = decodeURIComponent(match?.[2] ?? "");
+      const input = parseAuditInput(workflowRuntimeSetBindingRequestSchema, await readJson(request));
+      try {
+        const binding = options.workflowRuntime.setBinding({
+          repositoryId,
+          definitionId,
+          enabled: input.enabled,
+          ...(input.triggerMode === undefined ? {} : { triggerMode: input.triggerMode })
+        });
+        await options.onWorkflowBindingsChanged?.();
+        sendJson(request, response, 200, { binding }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/runs$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(workflowRuntimeRepositoryTriggerRequestSchema, await readJson(request));
+      try {
+        const created = await options.workflowRuntime.triggerBinding({ repositoryId, definitionId: input.definitionId });
+        sendJson(request, response, 201, created, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/repositories\/([^/]+)\/runs$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, url }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+      try {
+        sendJson(request, response, 200, { runs: options.workflowRuntime.listRunsForRepository(repositoryId, limit) }, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflow-runtime\/runs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const run = options.workflowRuntime.getRun(decodeURIComponent(match?.[1] ?? ""));
+        if (!run) throw new ApiError("Workflow run not found", "WORKFLOW_RUN_NOT_FOUND", 404);
+        sendJson(request, response, 200, run, allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    // H19: read the effective append-only plan, validated against its base.
+    method: "GET",
+    path: /^\/workflow-runtime\/runs\/([^/]+)\/plan-revision$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      try {
+        const result = options.workflowRuntime.getWaitingPlanRevision(decodeURIComponent(match?.[1] ?? ""));
+        sendJson(request, response, 200, workflowRuntimePlanRevisionResponseSchema.parse(result), allowedOrigins);
+      } catch (error) { throw mapWorkflowRuntimeError(error); }
+    },
+  },
+  {
+    // Only the pending approval tail can acquire a bounded read-only verifier.
+    method: "POST",
+    path: /^\/workflow-runtime\/runs\/([^/]+)\/plan-revision$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const input = parseAuditInput(workflowRuntimePlanRevisionRequestSchema, await readJson(request));
+      try {
+        const result = options.workflowRuntime.reviseWaitingPlan({ runId: decodeURIComponent(match?.[1] ?? ""), ...input });
+        sendJson(request, response, 201, workflowRuntimePlanRevisionResponseSchema.parse(result), allowedOrigins);
+      } catch (error) { throw mapWorkflowRuntimeError(error); }
+    },
+  },
+  {
+    // H18: one human decision. Approval claims continuation of the same run;
+    // rejection fails closed. A repeat cannot obtain another dispatch claim.
+    method: "POST",
+    path: /^\/workflow-runtime\/runs\/([^/]+)\/approval$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const runId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(workflowRuntimeApprovalDecisionRequestSchema, await readJson(request));
+      try {
+        const outcome = await options.workflowRuntime.decideApproval({ runId, ...input });
+        sendJson(request, response, 200, workflowRuntimeApprovalDecisionResponseSchema.parse(outcome), allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    // H14: the honest recovery plan for one run — folded from the H11 ledger
+    // plus the checkpoint store. Pure read; computing it never executes.
+    method: "GET",
+    path: /^\/workflow-runtime\/runs\/([^/]+)\/recovery$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const runId = decodeURIComponent(match?.[1] ?? "");
+      try {
+        const plan = options.workflowRuntime.getRunRecoveryPlan(runId);
+        sendJson(request, response, 200, workflowRuntimeRecoveryPlanSchema.parse(plan), allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    // H14: execute one EXPLICIT recovery action (continue / retry / rerun /
+    // readonly_view). Every action re-validates its gates and refuses with
+    // structured blockers — outcome_unknown steps are never replayed and
+    // nothing is auto-resumed.
+    method: "POST",
+    path: /^\/workflow-runtime\/runs\/([^/]+)\/recovery$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      const runId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(workflowRuntimeRecoveryRequestSchema, await readJson(request));
+      try {
+        const outcome = await options.workflowRuntime.executeRecovery({ runId, action: input.action });
+        sendJson(request, response, outcome.executed ? 200 : 409, workflowRuntimeRecoveryResponseSchema.parse(outcome), allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    // H12: authoritative event page read — snapshot + seq-cursor resume.
+    // `after` returns only events with seq > after (default 0 = full snapshot);
+    // `limit` bounds the page (default 200, max 500). The run state rides on
+    // every page; `terminal` is the server's OWN verdict, never inferred.
+    method: "GET",
+    path: /^\/workflow-runtime\/runs\/([^/]+)\/events$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, url }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      if (!options.workflowRuntime.runEventsAvailable()) {
+        throw new ApiError("Workflow run events are unavailable (no execution-event ledger attached)", "WORKFLOW_RUN_EVENTS_UNAVAILABLE", 503);
+      }
+      const runId = decodeURIComponent(match?.[1] ?? "");
+      try {
+        const page = options.workflowRuntime.getRunEventPage(runId, {
+          after: parseBoundedSeqParam(url, "after") ?? 0,
+          limit: parseBoundedSeqParam(url, "limit") ?? undefined,
+        });
+        sendJson(request, response, 200, workflowRuntimeRunEventsPageSchema.parse(page), allowedOrigins);
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+    }
+  },
+  {
+    // H12: SSE resume stream over the same durable ledger. Snapshot first,
+    // then incremental `events` frames, then a single `done` frame when the
+    // SERVER sees a terminal run with no further events. A dropped socket only
+    // stops the stream — it never mutates run state nor implies failure;
+    // clients resume by reconnecting with their last `after` cursor.
+    method: "GET",
+    path: /^\/workflow-runtime\/runs\/([^/]+)\/events\/stream$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, url }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      if (!options.workflowRuntime.runEventsAvailable()) {
+        throw new ApiError("Workflow run events are unavailable (no execution-event ledger attached)", "WORKFLOW_RUN_EVENTS_UNAVAILABLE", 503);
+      }
+      const runId = decodeURIComponent(match?.[1] ?? "");
+      // Fail closed BEFORE the stream opens: an unknown run is a canonical
+      // 404 response, never a stream that fakes an error frame.
+      try {
+        options.workflowRuntime.getRunEventPage(runId, { after: 0, limit: 1 });
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+
+      startSse(request, response, allowedOrigins);
+      response.flushHeaders?.();
+      response.write(": connected\n\n");
+
+      let cursor = parseBoundedSeqParam(url, "after") ?? 0;
+      let closed = false;
+      let pollTimer: NodeJS.Timeout | undefined;
+      let heartbeatTimer: NodeJS.Timeout | undefined;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        if (pollTimer) clearInterval(pollTimer);
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        if (!response.writableEnded) response.end();
+      };
+      // Socket close is a transport fact ONLY: no run-state write, no failure
+      // inference. The durable ledger stays the single source of truth.
+      request.on("close", close);
+      request.on("error", close);
+      response.on("error", close);
+
+      /** Drain one page from the cursor; returns whether the stream is done. */
+      const drain = (firstFrame: boolean): boolean => {
+        if (closed) return true;
+        let page;
+        try {
+          page = workflowRuntimeRunEventsPageSchema.parse(
+            options.workflowRuntime!.getRunEventPage(runId, { after: cursor, limit: 500 }),
+          );
+        } catch {
+          // Persistence vanished mid-stream (e.g. shutdown): end honestly —
+          // never fabricate a terminal frame for a run that is not terminal.
+          return true;
+        }
+        if (page.events.length > 0 || firstFrame) {
+          writeSse(response, firstFrame ? "snapshot" : "events", page);
+          cursor = page.nextSeq;
+        }
+        if (page.hasMore) return false;
+        if (page.terminal) {
+          // Terminal comes from the run row (server authority), and only once
+          // the cursor has consumed every persisted event.
+          writeSse(response, "done", { run: page.run });
+          return true;
+        }
+        return false;
+      };
+
+      const finished = drain(true);
+      if (finished) {
+        close();
+        return;
+      }
+      pollTimer = setInterval(() => {
+        if (drain(false)) close();
+      }, 1_000);
+      heartbeatTimer = setInterval(() => {
+        if (!closed && !response.writableEnded) response.write(": ping\n\n");
+      }, 15_000);
+    }
+  },
+  {
+    // H26: sanitized diagnostics bundle export (auth-protected). The service
+    // is failure-contained — it returns typed failures instead of throwing, so
+    // an observability defect can never break the request pipeline. Absent
+    // service ⇒ honest 503 availability fact (feature silently off).
+    method: "GET",
+    path: /^\/diagnostics\/runs\/([^/]+)\/bundle$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.diagnostics) {
+        throw new ApiError("Diagnostics export is unavailable (feature is not configured)", "DIAGNOSTICS_UNAVAILABLE", 503);
+      }
+      const runId = decodeURIComponent(match?.[1] ?? "");
+      const result = options.diagnostics.exportRunBundle(runId);
+      if (!result.ok) {
+        throw new ApiError(result.reason, result.code, result.statusCode);
+      }
+      sendJson(request, response, 200, result.bundle, allowedOrigins);
+    }
+  },
+  {
+    // CKPT6 Phase 3: Workflow Copilot proposal (structured WorkflowPatch).
+    // Pure advisor: zero persistence, zero run/dry-load side effects, zero
+    // authorization. Human Apply goes through the Studio reducer + canonical
+    // validate → save-revision gates; the LLM can never bypass the compiler.
+    method: "POST",
+    path: "/workflow-runtime/copilot/proposal",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      if (!isLlmProviderConfigured(options)) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const parsed = workflowRuntimeCopilotProposalRequestSchema.safeParse(await readJson(request));
+      if (!parsed.success) {
+        throw new ApiError("Workflow copilot proposal request is invalid", "WORKFLOW_PATCH_INVALID", 400, {
+          issues: sanitizeValidationIssues(parsed.error.issues.map(issue => ({ code: "schema_invalid", path: issue.path, message: issue.message })))
+        });
+      }
+      // Base definition: inline body XOR the latest persisted revision of a
+      // definitionId; host/store failures keep their sanitized mapping.
+      let baseDefinition: WorkflowRuntimeDefinition;
+      try {
+        if (parsed.data.definition) {
+          baseDefinition = parsed.data.definition;
+        } else if (parsed.data.definitionId) {
+          const summary = options.workflowRuntime.listDefinitions().find(item => item.definitionId === parsed.data.definitionId);
+          if (!summary?.latestRevisionId) throw new ApiError("Workflow definition not found", "WORKFLOW_DEFINITION_NOT_FOUND", 404);
+          baseDefinition = options.workflowRuntime.getDefinitionRevision(parsed.data.definitionId, summary.latestRevisionId).definition;
+        } else {
+          throw new ApiError("Workflow copilot proposal request is invalid", "WORKFLOW_PATCH_INVALID", 400);
+        }
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel();
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, error.code === "INVALID_REVIEW_MODEL" ? 400 : 503);
+          }
+          throw error;
+        }
+      }
+      const provider = options.copilotProvider?.(resolvedModel);
+      if (!provider) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const nodeTypes = listWorkflowNodeTypes();
+      const abort = new AbortController();
+      const onClose = () => abort.abort(new Error("copilot client disconnected"));
+      request.on("close", onClose);
+      request.on("error", onClose);
+      try {
+        const proposal = await generateWorkflowCopilotProposal(provider, {
+          instruction: parsed.data.instruction,
+          definition: baseDefinition,
+          nodeTypes,
+          signal: abort.signal
+        });
+        // Fail-closed hallucination detection BEFORE anything reaches the client.
+        validateWorkflowCopilotPatch({ patch: proposal.patch, definition: baseDefinition, nodeTypes });
+        const definitionFingerprint = createHash("sha256").update(canonicalJson(baseDefinition)).digest("hex");
+        const { tokenUsage, ...proposalBody } = proposal;
+        sendJson(request, response, 200, workflowRuntimeCopilotProposalResponseSchema.parse({
+          proposal: { ...proposalBody, basis: { definitionFingerprint } },
+          ...(tokenUsage ? { tokenUsage } : {})
+        }), allowedOrigins);
+      } catch (error) {
+        if (abort.signal.aborted) return;
+        throw error;
+      } finally {
+        request.off("close", onClose);
+        request.off("error", onClose);
+      }
+    }
+  },
+  {
+    // Conversational Copilot: multi-turn graph editing. Same zero-side-effect
+    // posture as /proposal — no persistence, no run/dry-load side effects, no
+    // authorization. The client owns the message history; the server holds no
+    // conversation state. Human Apply goes through the Studio reducer and the
+    // canonical validate → save-revision gates; the LLM can never bypass the
+    // compiler.
+    method: "POST",
+    path: "/workflow-runtime/copilot/chat",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflowRuntime) throw new ApiError("Workflow runtime is unavailable", "WORKFLOW_RUNTIME_UNAVAILABLE", 503);
+      if (!isLlmProviderConfigured(options)) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const parsed = workflowRuntimeCopilotChatRequestSchema.safeParse(await readJson(request));
+      if (!parsed.success) {
+        throw new ApiError("Workflow copilot chat request is invalid", "WORKFLOW_PATCH_INVALID", 400, {
+          issues: sanitizeValidationIssues(parsed.error.issues.map(issue => ({ code: "schema_invalid", path: issue.path, message: issue.message })))
+        });
+      }
+      // Base definition: inline body XOR the latest persisted revision of a
+      // definitionId; host/store failures keep their sanitized mapping.
+      let baseDefinition: WorkflowRuntimeDefinition;
+      try {
+        if (parsed.data.definition) {
+          baseDefinition = parsed.data.definition;
+        } else if (parsed.data.definitionId) {
+          const summary = options.workflowRuntime.listDefinitions().find(item => item.definitionId === parsed.data.definitionId);
+          if (!summary?.latestRevisionId) throw new ApiError("Workflow definition not found", "WORKFLOW_DEFINITION_NOT_FOUND", 404);
+          baseDefinition = options.workflowRuntime.getDefinitionRevision(parsed.data.definitionId, summary.latestRevisionId).definition;
+        } else {
+          throw new ApiError("Workflow copilot chat request is invalid", "WORKFLOW_PATCH_INVALID", 400);
+        }
+      } catch (error) {
+        throw mapWorkflowRuntimeError(error);
+      }
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel();
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, error.code === "INVALID_REVIEW_MODEL" ? 400 : 503);
+          }
+          throw error;
+        }
+      }
+      const provider = options.copilotProvider?.(resolvedModel);
+      if (!provider) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能生成工作流提案。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      const nodeTypes = listWorkflowNodeTypes();
+      const abort = new AbortController();
+      const onClose = () => abort.abort(new Error("copilot client disconnected"));
+      request.on("close", onClose);
+      request.on("error", onClose);
+      try {
+        const turn = await generateWorkflowCopilotChatTurn(provider, {
+          messages: parsed.data.messages,
+          definition: baseDefinition,
+          nodeTypes,
+          signal: abort.signal
+        });
+        // Fail-closed hallucination detection BEFORE anything reaches the client.
+        validateWorkflowCopilotPatch({ patch: turn.patch, definition: baseDefinition, nodeTypes });
+        const definitionFingerprint = createHash("sha256").update(canonicalJson(baseDefinition)).digest("hex");
+        sendJson(request, response, 200, workflowRuntimeCopilotChatResponseSchema.parse({
+          reply: turn.reply,
+          patch: turn.patch,
+          basis: { definitionFingerprint },
+          ...(turn.tokenUsage ? { tokenUsage: turn.tokenUsage } : {})
+        }), allowedOrigins);
+      } catch (error) {
+        if (abort.signal.aborted) return;
+        throw error;
+      } finally {
+        request.off("close", onClose);
+        request.off("error", onClose);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/policies\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const policyId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        policyId,
+        policyRevisions: options.auditStore.listPolicyRevisions(policyId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/policies\/([^/]+)\/revisions$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const policyId = decodeURIComponent(match?.[1] ?? "");
+      const input = parseAuditInput(
+        createPolicyRevisionRequestSchema,
+        auditInputWithPathId(await readJson(request), "policyId", policyId)
+      );
+      const policyRevision = options.auditStore.createPolicyRevision(input);
+      sendJson(request, response, 201, { policyRevision }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/policies\/([^/]+)\/evaluate$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const policyId = decodeURIComponent(match?.[1] ?? "");
+      const policyRevision = options.auditStore.listPolicyRevisions(policyId)[0];
+      if (!policyRevision) throw new ApiError("Policy not found", "POLICY_NOT_FOUND", 404);
+      const input = parseAuditInput(z.object({
+        riskScore: riskScoreSchema,
+        coverage: z.number().min(0).max(1),
+        completedChecks: z.array(stepIdSchema).default([])
+      }).strict(), await readJson(request));
+      const evaluation = evaluateAuditPolicy(policyRevision, input);
+      sendJson(request, response, 200, {
+        policyId,
+        policyRevisionId: policyRevision.id,
+        evaluation
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/repositories",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, { repositories: options.auditStore.listRepositories() }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/repositories/connect-public",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      if (!options.publicRepositoryConnect) {
+        throw new ApiError("Public repository connection is unavailable", "PUBLIC_REPOSITORY_CONNECTION_UNAVAILABLE", 503);
+      }
+      const parsedBody = z.object({ input: z.string().max(500) }).strict().safeParse(await readJson(request));
+      if (!parsedBody.success) {
+        throw new PublicRepositoryError(
+          "Enter owner/repository or a canonical GitHub URL",
+          "PUBLIC_REPOSITORY_INVALID_INPUT",
+          400
+        );
+      }
+      const repository = await options.publicRepositoryConnect(parsedBody.data.input);
+      sendJson(request, response, 200, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/repositories",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const input = parseAuditInput(createRepositoryRequestSchema, await readJson(request));
+      // Local checkout paths are intentionally not accepted by this public DTO.
+      // Desktop main uses the separately authenticated internal registration route.
+      if (input.source === "local_git") {
+        throw new ApiError(
+          "Local repository registration requires the privileged desktop adapter",
+          "LOCAL_PATH_REGISTRATION_UNAVAILABLE",
+          501
+        );
+      }
+      if (input.source === "github") {
+        throw new ApiError(
+          "GitHub repositories must be verified through the public connection endpoint",
+          "GITHUB_REPOSITORY_VERIFICATION_REQUIRED",
+          422
+        );
+      }
+      const repository = options.auditStore.createRepository(input);
+      sendJson(request, response, 201, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repository = options.auditStore.getRepository(decodeURIComponent(match?.[1] ?? ""));
+      if (!repository) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      sendJson(request, response, 200, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/events$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getRepository(repositoryId)) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      sendJson(request, response, 200, { events: options.auditStore.listRepositoryEvents(repositoryId) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/timeline$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getRepository(repositoryId)) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      sendJson(request, response, 200, {
+        repositoryId,
+        repositoryEvents: options.auditStore.listRepositoryEvents(repositoryId),
+        repositoryPulses: options.auditStore.listRepositoryPulses(repositoryId),
+        auditRuns: options.auditStore.listAuditRuns(repositoryId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/metrics$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        repositoryId,
+        evolutionSnapshots: options.auditStore.listEvolutionSnapshots(repositoryId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/issues$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getRepository(repositoryId)) throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      const stateRaw = url.searchParams.get("state") ?? undefined;
+      const state = stateRaw === undefined ? undefined : parseAuditInput(auditIssueStateSchema, stateRaw);
+      sendJson(request, response, 200, {
+        repositoryId,
+        issues: options.auditStore.listIssues(repositoryId, state)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/status$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "local repository path unavailable",
+          branch: null,
+          headSha: null,
+          dirtyFileCount: 0,
+          untrackedFileCount: 0,
+          changedFiles: [],
+          untrackedFiles: [],
+          remotes: []
+        }, allowedOrigins);
+        return;
+      }
+      try {
+        const vcs = new LocalGitAdapter({ root: localPath });
+        const [branchResult, headShaResult, diffResult, untrackedResult, remotesResult] = await Promise.allSettled([
+          vcs.getCurrentBranch(),
+          vcs.getHeadSha(),
+          vcs.getWorkingDiff(),
+          vcs.getUntrackedFiles(),
+          vcs.getRemotes()
+        ] as const);
+        if (diffResult.status === "rejected" || untrackedResult.status === "rejected") {
+          sendJson(request, response, 200, {
+            repositoryId,
+            available: false,
+            reason: "failed to execute git status",
+            branch: null,
+            headSha: null,
+            dirtyFileCount: 0,
+            untrackedFileCount: 0,
+            changedFiles: [],
+            untrackedFiles: [],
+            remotes: []
+          }, allowedOrigins);
+          return;
+        }
+        const branch = fulfilledValue(branchResult);
+        const headSha = fulfilledValue(headShaResult);
+        const remotes = fulfilledValue(remotesResult) ?? [];
+        const rendererRemotes = remotes.map(toRendererGitRemote);
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: true,
+          branch: branch ?? null,
+          headSha: headSha ?? null,
+          dirtyFileCount: diffResult.value.length,
+          untrackedFileCount: untrackedResult.value.length,
+          changedFiles: diffResult.value,
+          untrackedFiles: untrackedResult.value,
+          remotes: rendererRemotes,
+          ...(rendererRemotes[0] === undefined ? {} : { primaryRemote: rendererRemotes[0] })
+        }, allowedOrigins);
+      } catch {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "failed to execute git status",
+          branch: null,
+          headSha: null,
+          dirtyFileCount: 0,
+          untrackedFileCount: 0,
+          changedFiles: [],
+          untrackedFiles: [],
+          remotes: []
+        }, allowedOrigins);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/commits$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const depthRaw = url.searchParams.get("depth");
+      let depth = 30;
+      if (depthRaw !== null) {
+        if (!/^[1-9]\d*$/.test(depthRaw)) {
+          throw new ApiError("Query parameter depth must be a positive integer", "INVALID_DEPTH", 400);
+        }
+        depth = Math.min(50, Number(depthRaw));
+      }
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "local repository path unavailable",
+          commits: []
+        }, allowedOrigins);
+        return;
+      }
+      try {
+        const vcs = new LocalGitAdapter({ root: localPath });
+        const commits = await vcs.getCommitHistory(depth);
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: true,
+          commits
+        }, allowedOrigins);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "unable to read commit history",
+          commits: []
+        }, allowedOrigins);
+      }
+    }
+  },
+
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/tree$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const rawPath = url.searchParams.get("path") ?? "";
+      let directoryPath = "";
+      try {
+        directoryPath = assertSafeTreePath(rawPath);
+      } catch {
+        throw new ApiError("Query parameter path must be a relative repository path", "INVALID_TREE_PATH", 400);
+      }
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "local repository path unavailable",
+          path: directoryPath,
+          truncated: false,
+          entries: []
+        }, allowedOrigins);
+        return;
+      }
+      try {
+        const vcs = new LocalGitAdapter({ root: localPath });
+        const headSha = await vcs.getHeadSha();
+        if (!headSha) {
+          sendJson(request, response, 200, {
+            repositoryId,
+            available: false,
+            reason: "repository has no commits yet",
+            path: directoryPath,
+            truncated: false,
+            entries: []
+          }, allowedOrigins);
+          return;
+        }
+        const [children, changedFiles, untrackedFiles] = await Promise.all([
+          vcs.listTreeChildren(headSha, directoryPath),
+          vcs.getWorkingDiff().catch(() => [] as Awaited<ReturnType<LocalGitAdapter["getWorkingDiff"]>>),
+          vcs.getUntrackedFiles().catch(() => [] as string[])
+        ]);
+        const changedPaths = new Set(changedFiles.map((file) => file.path));
+        const prefix = directoryPath.length === 0 ? "" : `${directoryPath}/`;
+        const byPath = new Map<string, {
+          path: string;
+          name: string;
+          type: "blob" | "tree";
+          sha?: string;
+          size?: number;
+          changeKind: TreeChangeKind;
+        }>();
+
+        for (const entry of children) {
+          byPath.set(entry.path, {
+            path: entry.path,
+            name: entryName(entry.path),
+            type: entry.type,
+            sha: entry.sha,
+            ...(entry.size === undefined ? {} : { size: entry.size }),
+            changeKind: classifyTreeChangeKind(entry.path, entry.type, changedPaths, untrackedFiles)
+          });
+        }
+
+        // Surface untracked files that live directly in this directory (not in HEAD).
+        for (const untracked of untrackedFiles) {
+          if (prefix.length > 0 && !untracked.startsWith(prefix)) continue;
+          const remainder = prefix.length === 0 ? untracked : untracked.slice(prefix.length);
+          if (!remainder || remainder.includes("/")) continue;
+          const path = untracked;
+          if (byPath.has(path)) continue;
+          byPath.set(path, {
+            path,
+            name: remainder,
+            type: "blob",
+            changeKind: "untracked"
+          });
+        }
+
+        // Surface untracked nested folders as expandable tree nodes.
+        for (const untracked of untrackedFiles) {
+          if (prefix.length > 0 && !untracked.startsWith(prefix)) continue;
+          const remainder = prefix.length === 0 ? untracked : untracked.slice(prefix.length);
+          const slash = remainder.indexOf("/");
+          if (slash <= 0) continue;
+          const folderName = remainder.slice(0, slash);
+          const path = prefix.length === 0 ? folderName : `${directoryPath}/${folderName}`;
+          const existing = byPath.get(path);
+          if (existing) {
+            if (existing.changeKind === "unchanged") existing.changeKind = "untracked";
+            continue;
+          }
+          byPath.set(path, {
+            path,
+            name: folderName,
+            type: "tree",
+            changeKind: "untracked"
+          });
+        }
+
+        const sorted = [...byPath.values()].sort((a, b) => {
+          if (a.type !== b.type) return a.type === "tree" ? -1 : 1;
+          return a.path.localeCompare(b.path);
+        });
+        const truncated = sorted.length > REPOSITORY_TREE_MAX_ENTRIES;
+        const entries = truncated ? sorted.slice(0, REPOSITORY_TREE_MAX_ENTRIES) : sorted;
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: true,
+          revision: headSha,
+          path: directoryPath,
+          truncated,
+          entries
+        }, allowedOrigins);
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        sendJson(request, response, 200, {
+          repositoryId,
+          available: false,
+          reason: "failed to read repository tree",
+          path: directoryPath,
+          truncated: false,
+          entries: []
+        }, allowedOrigins);
+      }
+    }
+  },
+
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/git\/file$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const rawPath = url.searchParams.get("path") ?? "";
+      let safeRel = "";
+      try {
+        safeRel = assertSafeTreePath(rawPath);
+      } catch {
+        throw new ApiError("Query parameter path must be a relative repository path", "INVALID_FILE_PATH", 400);
+      }
+      if (safeRel.length === 0) {
+        throw new ApiError("Query parameter path must identify a file", "INVALID_FILE_PATH", 400);
+      }
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      if (!localPath) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "local repository path unavailable"
+        }, allowedOrigins);
+        return;
+      }
+      let absolutePath: string;
+      try {
+        ({ absolutePath, safeRel } = resolveSandboxedRepoFile(localPath, rawPath));
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError("Query parameter path must be a relative repository path", "INVALID_FILE_PATH", 400);
+      }
+      if (!existsSync(absolutePath)) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "file not found in working tree"
+        }, allowedOrigins);
+        return;
+      }
+      let stats;
+      try {
+        stats = statSync(absolutePath);
+      } catch {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "unable to read file metadata"
+        }, allowedOrigins);
+        return;
+      }
+      if (!stats.isFile()) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "path is not a regular file"
+        }, allowedOrigins);
+        return;
+      }
+      const size = stats.size;
+      const maxBytes = REPOSITORY_FILE_PREVIEW_MAX_BYTES;
+      let buffer: Buffer;
+      try {
+        // Read only up to cap + 1 to detect truncation without loading huge files fully when possible.
+        // Node readFileSync always loads whole file; for oversized files refuse with clear reason.
+        if (size > maxBytes * 4) {
+          sendJson(request, response, 200, {
+            repositoryId,
+            path: safeRel,
+            available: false,
+            reason: `file too large to preview (>${maxBytes} bytes cap)`
+          }, allowedOrigins);
+          return;
+        }
+        buffer = readFileSync(absolutePath);
+      } catch {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: false,
+          reason: "failed to read file"
+        }, allowedOrigins);
+        return;
+      }
+      if (looksLikeBinary(buffer)) {
+        sendJson(request, response, 200, {
+          repositoryId,
+          path: safeRel,
+          available: true,
+          binary: true,
+          size,
+          reason: "binary file — preview not shown"
+        }, allowedOrigins);
+        return;
+      }
+      const truncated = buffer.length > maxBytes;
+      const slice = truncated ? buffer.subarray(0, maxBytes) : buffer;
+      const { text: content, encoding } = decodeUtf8WithFallback(slice);
+      sendJson(request, response, 200, {
+        repositoryId,
+        path: safeRel,
+        available: true,
+        encoding,
+        truncated,
+        size,
+        content,
+        binary: false
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/pull-requests$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, jobs, match }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const registered = options.auditStore?.getRepository(repositoryId);
+      if (!registered) {
+        throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      }
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+      const input: RepositoryPullRequestRequest = {
+        repositoryId,
+        ...(registered.remoteFullName === undefined ? {} : { registeredRemoteFullName: registered.remoteFullName }),
+        registeredSource: registered.source,
+        ...(localPath === undefined ? {} : { localPath })
+      };
+      const service = options.pullRequestService ?? new RepositoryPullRequestService({
+        jobs,
+        listRemotes: async localPath => new LocalGitAdapter({ root: localPath }).getRemotes()
+      });
+      const servicePayload = await service.list(input);
+      const parsedPayload = repositoryPullRequestsResponseSchema.safeParse(servicePayload);
+      if (!parsedPayload.success) {
+        throw new ApiError(
+          "Pull request history response is unavailable",
+          "PULL_REQUEST_HISTORY_RESPONSE_INVALID",
+          502
+        );
+      }
+      sendJson(request, response, 200, parsedPayload.data, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/review-preparation$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      const repo = options.auditStore?.getRepository(repositoryId);
+      const localPath = resolveLocalPathForRepository(repositoryId, options);
+
+      if (!repo) {
+        throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      }
+
+      const id = repo.id;
+      const displayName = repo.displayName;
+      const sourceKind = repo.source;
+      const trust = repo.trustLevel;
+
+      let workingTree = {
+        available: false,
+        reason: undefined as string | undefined,
+        changedFileCount: 0
+      };
+      let branchSource = {
+        available: false,
+        base: undefined as string | undefined,
+        head: undefined as string | undefined,
+        reason: undefined as string | undefined
+      };
+
+      if (localPath) {
+        try {
+          const vcs = new LocalGitAdapter({ root: localPath });
+          const [branch, headSha, diff, untracked] = await Promise.all([
+            vcs.getCurrentBranch().catch(() => undefined),
+            vcs.getHeadSha().catch(() => undefined),
+            vcs.getWorkingDiff().catch(() => []),
+            vcs.getUntrackedFiles().catch(() => [] as string[])
+          ]);
+          const exclude = createLocalReviewExcludeFilter(localPath);
+          const dirtyCount = diff.filter(file => !exclude.excludes(file.path)).length;
+          const untrackedCount = untracked.filter(path => !exclude.excludes(path)).length;
+          const changeCount = dirtyCount + untrackedCount;
+          workingTree = {
+            available: changeCount > 0,
+            reason: changeCount === 0 ? "工作区无未提交变更" : undefined,
+            changedFileCount: changeCount
+          };
+          const trunkRef = await vcs.resolveTrunkRef().catch(() => undefined);
+          const onTrunk =
+            branch !== undefined &&
+            (branch === trunkRef || (trunkRef === undefined && (branch === "main" || branch === "master")));
+          branchSource = onTrunk
+            ? {
+                available: false,
+                base: undefined,
+                head: branch,
+                reason: "当前处于主分支，无法自动对比分支差异"
+              }
+            : trunkRef === undefined
+              ? {
+                  available: false,
+                  base: undefined,
+                  head: branch ?? undefined,
+                  reason: "无法确定基准分支"
+                }
+              : {
+                  available: Boolean(branch),
+                  base: trunkRef,
+                  head: branch ?? undefined,
+                  reason: branch ? undefined : "未检测到有效分支"
+                };
+        } catch {
+          workingTree = {
+            available: false,
+            reason: "无法读取本地 Git 状态",
+            changedFileCount: 0
+          };
+          branchSource = {
+            available: false,
+            base: undefined,
+            head: undefined,
+            reason: "无法读取本地 Git 分支"
+          };
+        }
+      } else {
+        workingTree = {
+          available: false,
+          reason: "远程仓库不支持工作区变更审查",
+          changedFileCount: 0
+        };
+        branchSource = {
+          available: false,
+          base: undefined,
+          head: undefined,
+          reason: "远程仓库请使用 Pull Request 审查"
+        };
+      }
+
+      const allJobs = options.jobs?.list() ?? [];
+      const prJobs = allJobs.filter(job =>
+        job.repository === repositoryId ||
+        job.repository === repo.remoteFullName
+      );
+      const prSource = {
+        available: prJobs.length > 0 || sourceKind === "github",
+        pullRequestCount: prJobs.length,
+        reason: (prJobs.length === 0 && sourceKind !== "github") ? "未检测到 Pull Request" : undefined
+      };
+
+      const health = options.healthDetails?.();
+      const settings = options.settings?.get();
+      // Provider readiness comes from health's dynamic Pi-catalog projection;
+      // the catalog list (id/label) is shared with GET /llm/catalog.
+      const healthProviders = health?.llmCapabilities?.providers ?? [];
+      const catalogProviders = options.llmCatalogProviders?.() ?? [];
+      const providerSource = catalogProviders.length > 0
+        ? catalogProviders.map(provider => ({ id: provider.id, label: provider.label as string | undefined }))
+        : healthProviders.map(provider => ({ id: provider.id, label: provider.label }));
+      const providersPayload = providerSource.map(provider => {
+        const healthEntry = healthProviders.find(entry => entry.id === provider.id);
+        return {
+          id: provider.id,
+          label: provider.label,
+          configured: healthEntry?.configured === true,
+          ...(healthEntry?.defaultModel ? { defaultModel: healthEntry.defaultModel } : {})
+        };
+      });
+      const activeProvider = typeof health?.llmProvider === "string" && health.llmProvider !== "none"
+        ? health.llmProvider
+        : undefined;
+      const hasConfiguredLlm = activeProvider !== undefined;
+      const defaultModelName = activeProvider
+        ? health?.llmModel ?? healthProviders.find(entry => entry.id === activeProvider)?.defaultModel ?? ""
+        : "";
+      const pendingProvider = typeof settings?.llm.provider === "string" && settings.llm.provider !== "none"
+        ? settings.llm.provider
+        : undefined;
+      const pendingRestart = settings?.restartRequired === true && pendingProvider
+        ? {
+            provider: pendingProvider,
+            model: settings.llm.llmModel
+              || (pendingProvider === "deepseek" ? settings.llm.deepseekModel : "")
+              || (pendingProvider === "openai" ? settings.llm.openaiModel : "")
+              || settings.llm.anthropicModel
+              || defaultModelName
+              || "catalog default",
+            credentialConfigured: pendingProvider === "deepseek"
+              ? settings.llm.deepseekApiKeyConfigured
+              : pendingProvider === "openai"
+                ? settings.llm.openaiApiKeyConfigured
+                : pendingProvider === "anthropic"
+                  ? settings.llm.anthropicApiKeyConfigured
+                  : settings.llm.llmApiKeyConfigured
+          }
+        : null;
+
+      const blockingReasons: string[] = [];
+      if (!hasConfiguredLlm) {
+        const pendingLabel = pendingRestart
+          ? providersPayload.find(entry => entry.id === pendingRestart.provider)?.label ?? pendingRestart.provider
+          : undefined;
+        blockingReasons.push(pendingRestart
+          ? `已保存 ${pendingLabel} 配置，重启 API 后生效。`
+          : "尚未配置大语言模型。请前往设置页从 Pi 模型目录中选择服务商并配置密钥。");
+      }
+      if (!workingTree.available && !branchSource.available && !prSource.available) {
+        blockingReasons.push("当前无可用的审查来源 (工作区无变更且未检测到分支差异)");
+      }
+
+      const canStartReview = blockingReasons.length === 0;
+
+      const payload = reviewPreparationResponseSchema.parse({
+        repository: {
+          id,
+          displayName,
+          sourceKind,
+          trust
+        },
+        sources: {
+          workingTree,
+          branch: branchSource,
+          pullRequest: prSource
+        },
+        model: {
+          default: {
+            provider: activeProvider ?? "none",
+            model: defaultModelName
+          },
+          providers: providersPayload,
+          pendingRestart
+        },
+        canStartReview,
+        blockingReasons
+      });
+
+      sendJson(request, response, 200, payload, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/repositories\/([^/]+)\/reviews$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, jobs, match, url }) => {
+      const repositoryId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore?.getRepository(repositoryId)) {
+        throw new ApiError("Repository not found", "REPOSITORY_NOT_FOUND", 404);
+      }
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0
+        ? Math.min(Math.trunc(limitParam), REPOSITORY_REVIEWS_MAX_LIMIT)
+        : undefined;
+      // ONLY canonically associated jobs (repository_id matches); legacy
+      // unassociated jobs never appear via name inference (CKPT3 Phase 4 / D1).
+      let storedReviews: ReviewJob[];
+      try {
+        storedReviews = jobs.listJobsForRepository(repositoryId, limit);
+      } catch {
+        throw new ApiError("Review history is unavailable", "REVIEWS_UNAVAILABLE", 503);
+      }
+      let payload;
+      try {
+        payload = repositoryReviewsResponseSchema.parse({
+          repositoryId,
+          reviews: storedReviews.map(toApiJob)
+        });
+      } catch {
+        throw new ApiError(
+          "Repository review history response is unavailable",
+          "REPOSITORY_REVIEWS_RESPONSE_INVALID",
+          500
+        );
+      }
+      sendJson(request, response, 200, payload, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/repositories\/([^/]+)\/actions\/set-monitoring$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const body = parseAuditInput(z.object({ enabled: z.boolean() }).strict(), await readJson(request));
+      const repository = options.auditStore.setRepositoryMonitoring(decodeURIComponent(match?.[1] ?? ""), body.enabled);
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 200, { repository }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflow-revisions",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        workflowRevisions: options.auditStore.listWorkflowRevisions(url.searchParams.get("workflowId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/workflow-revisions",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const revision = options.auditStore.createWorkflowRevision(
+        parseAuditInput(createWorkflowRevisionRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, { workflowRevision: revision }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/policy-revisions",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        policyRevisions: options.auditStore.listPolicyRevisions(url.searchParams.get("policyId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/policy-revisions",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const revision = options.auditStore.createPolicyRevision(
+        parseAuditInput(createPolicyRevisionRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, { policyRevision: revision }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/automations",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        automations: options.auditStore.listAutomations(url.searchParams.get("repositoryId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/automations",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.createAutomation(
+        parseAuditInput(createAutomationRequestSchema, await readJson(request))
+      );
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 201, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/automations\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.getAutomation(decodeURIComponent(match?.[1] ?? ""));
+      if (!automation) throw new ApiError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
+      sendJson(request, response, 200, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/automations\/([^/]+)\/(pause|resume)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.setAutomationEnabled(
+        decodeURIComponent(match?.[1] ?? ""),
+        match?.[2] === "resume"
+      );
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 200, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/automations\/([^/]+)\/history$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automationId = decodeURIComponent(match?.[1] ?? "");
+      const automation = options.auditStore.getAutomation(automationId);
+      if (!automation) throw new ApiError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
+      const auditRuns = options.auditStore.listAuditRuns(automation.repositoryId)
+        .filter(run => run.automationId === automationId);
+      const planningReceipts = options.auditStore.listAuditRunPlanningReceipts(automationId);
+      const scheduleState = options.auditStore.getAutomationScheduleState(automationId) ?? null;
+      const scheduleWindows = automation.trigger.type === "schedule"
+        ? options.auditStore.listAutomationScheduleWindows(automationId)
+        : [];
+      sendJson(request, response, 200, {
+        automationId,
+        auditRuns,
+        planningReceipts,
+        scheduleState,
+        scheduleWindows
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/automations\/([^/]+)\/schedule$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automationId = decodeURIComponent(match?.[1] ?? "");
+      const automation = options.auditStore.getAutomation(automationId);
+      if (!automation) throw new ApiError("Automation not found", "AUTOMATION_NOT_FOUND", 404);
+      if (automation.trigger.type !== "schedule") {
+        throw new ApiError("Automation is not schedule-triggered", "AUTOMATION_TRIGGER_NOT_MATCHED", 409);
+      }
+      sendJson(request, response, 200, {
+        automationId,
+        scheduleState: options.auditStore.getAutomationScheduleState(automationId) ?? null,
+        scheduleWindows: options.auditStore.listAutomationScheduleWindows(automationId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/automations\/([^/]+)\/run$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automationId = decodeURIComponent(match?.[1] ?? "");
+      const planning = requireAuditPlanner(options).planManualRun(automationId);
+      sendJson(request, response, 202, { planning }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/automations\/([^/]+)\/actions\/(pause|resume)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const automation = options.auditStore.setAutomationEnabled(
+        decodeURIComponent(match?.[1] ?? ""),
+        match?.[2] === "resume"
+      );
+      await options.onAuditRepositoriesChanged?.();
+      sendJson(request, response, 200, { automation }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/audit-runs",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      sendJson(request, response, 200, {
+        auditRuns: options.auditStore.listAuditRuns(url.searchParams.get("repositoryId") ?? undefined)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/audit-runs",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.createAuditRunDraft(
+        parseAuditInput(createAuditRunRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, {
+        auditRun,
+        execution: auditExecutionForDraft(options, auditRun)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/steps$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      sendJson(request, response, 200, {
+        auditRunId,
+        steps: options.auditStore.listRunStepArtifacts(auditRunId)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/report$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      const report = options.auditStore.getAuditReport(auditRunId);
+      if (!report) throw new ApiError("Audit report not found", "AUDIT_REPORT_NOT_FOUND", 404);
+      sendJson(request, response, 200, { report }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/events$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRunId = decodeURIComponent(match?.[1] ?? "");
+      // listRunEvents asserts run existence; the explicit check keeps the
+      // canonical AUDIT_RUN_NOT_FOUND semantics identical across audit routes.
+      if (!options.auditStore.getAuditRun(auditRunId)) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      sendJson(request, response, 200, auditRunEventsResponseSchema.parse({
+        events: options.auditStore.listRunEvents(auditRunId)
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/audit-runs\/([^/]+)\/cancel$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.cancelAuditRun(decodeURIComponent(match?.[1] ?? ""));
+      sendJson(request, response, 200, { auditRun }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)\/export$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      sendJson(request, response, 200, buildAuditRunExport(options, decodeURIComponent(match?.[1] ?? "")), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/audit-runs\/([^/]+)\/export$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      // Export is read-only; POST exists for clients that must fetch via POST.
+      sendJson(request, response, 200, buildAuditRunExport(options, decodeURIComponent(match?.[1] ?? "")), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/audit-runs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.getAuditRun(decodeURIComponent(match?.[1] ?? ""));
+      if (!auditRun) throw new ApiError("Audit run not found", "AUDIT_RUN_NOT_FOUND", 404);
+      sendJson(request, response, 200, { auditRun }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/audit-runs\/([^/]+)\/actions\/cancel$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const auditRun = options.auditStore.cancelAuditRun(decodeURIComponent(match?.[1] ?? ""));
+      sendJson(request, response, 200, { auditRun }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/issues",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, url }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const stateRaw = url.searchParams.get("state") ?? undefined;
+      const state = stateRaw === undefined ? undefined : parseAuditInput(auditIssueStateSchema, stateRaw);
+      sendJson(request, response, 200, {
+        issues: options.auditStore.listIssues(url.searchParams.get("repositoryId") ?? undefined, state)
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/issues",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const issue = options.auditStore.createIssue(
+        parseAuditInput(createAuditIssueRequestSchema, await readJson(request))
+      );
+      sendJson(request, response, 201, { issue }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/issues\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const issue = options.auditStore.getIssue(decodeURIComponent(match?.[1] ?? ""));
+      if (!issue) throw new ApiError("Issue not found", "ISSUE_NOT_FOUND", 404);
+      sendJson(request, response, 200, { issue }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/issues\/([^/]+)\/triage$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const body = parseAuditInput(z.object({
+        action: auditIssueActionSchema,
+        reason: z.string().trim().min(1).max(2_000).optional()
+      }).strict(), await readJson(request));
+      const issue = options.auditStore.applyIssueAction(
+        decodeURIComponent(match?.[1] ?? ""),
+        body.action,
+        body.reason
+      );
+      sendJson(request, response, 200, { issue }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/issues\/([^/]+)\/actions\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.auditStore) throw new ApiError("Audit persistence is unavailable", "AUDIT_DOMAIN_UNAVAILABLE", 503);
+      const action = parseAuditInput(auditIssueActionSchema, decodeURIComponent(match?.[2] ?? ""));
+      const body = parseAuditInput(auditIssueActionRequestSchema, await readJson(request));
+      const issue = options.auditStore.applyIssueAction(decodeURIComponent(match?.[1] ?? ""), action, body.reason);
+      sendJson(request, response, 200, { issue }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/reviews/public-pr",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, nodeEnv }) => {
+      if (options.publicPrAnalysisEnabled === false || (nodeEnv === "production" && options.publicPrAnalysisEnabled !== true)) {
+        throw new ApiError("Public PR analysis is disabled", "PUBLIC_PR_ANALYSIS_DISABLED", 404);
+      }
+      if (!isLlmProviderConfigured(options)) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能执行审查。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      if (!options.publicPr || !options.notebookStore) {
+        throw new ApiError("Public PR analysis requires a configured public GitHub read source", "PUBLIC_PR_ANALYSIS_UNAVAILABLE", 503);
+      }
+      let body;
+      try {
+        body = publicPrRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("A GitHub pull request URL is required", "INVALID_PUBLIC_PR_REQUEST", 400);
+        throw error;
+      }
+      const modelOverride = body.model ?? body.llm;
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel(modelOverride);
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, 400);
+          }
+          throw error;
+        }
+      }
+      const result = await options.publicPr(body.url, resolvedModel);
+      const ensured = options.notebookStore.ensureForJob(result.job);
+      sendJson(request, response, 202, {
+        jobId: result.job.id,
+        notebookId: ensured.notebook.id,
+        repository: result.coordinates.repository,
+        pullRequestNumber: result.coordinates.pullRequestNumber,
+        baseSha: result.job.baseSha,
+        headSha: result.job.headSha,
+        publicationPolicy: "disabled",
+        llmProvider: result.job.llmProvider,
+        llmModel: result.job.llmModel,
+        status: "queued"
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/heartbeat",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.heartbeat) throw new ApiError("Heartbeat is disabled", "HEARTBEAT_DISABLED", 404);
+      const pulse = options.heartbeat.latest();
+      sendJson(request, response, 200, { pulse: pulse === undefined ? null : toRendererHeartbeatPulse(pulse) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/heartbeat/stream",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.heartbeat) throw new ApiError("Heartbeat is disabled", "HEARTBEAT_DISABLED", 404);
+
+      startSse(request, response, allowedOrigins);
+      // writeHead alone does not put bytes on the wire, so a client would hang
+      // without response headers until the first pulse — up to a full interval.
+      response.flushHeaders?.();
+      response.write(": connected\n\n");
+
+      const unsubscribe = options.heartbeat.subscribe(event => {
+        writeSse(response, event.event, toRendererHeartbeatEvent(event));
+      });
+
+      // The stream stays open until the client disconnects; without this the
+      // daemon would accumulate a subscriber per dropped connection. A single
+      // disconnect fires several of these events, so unsubscribing is latched
+      // — callers must not see a second release for one subscription.
+      let closed = false;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        unsubscribe();
+        if (!response.writableEnded) response.end();
+      };
+      request.on("close", close);
+      request.on("error", close);
+      response.on("error", close);
+    }
+  },
+  {
+    method: "POST",
+    path: "/reviews/local",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, jobs }) => {
+      if (!options.localReview) {
+        throw new ApiError("Local review is not configured", "LOCAL_REVIEW_UNAVAILABLE", 503);
+      }
+      if (!isLlmProviderConfigured(options)) {
+        throw new ApiError(
+          "尚未配置大语言模型。ConsistenCy 需要配置真实 LLM Provider (DeepSeek、OpenAI 或 Anthropic) 后才能执行审查。请前往设置页配置。",
+          "LLM_NOT_CONFIGURED",
+          503
+        );
+      }
+      let body;
+      try {
+        body = localReviewRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) {
+          throw new ApiError("A valid repository identity is required", "INVALID_LOCAL_REVIEW_REQUEST", 400);
+        }
+        throw error;
+      }
+
+      const modelOverride = body.model ?? body.llm;
+      let resolvedModel: ResolvedReviewModel | undefined;
+      if (options.resolveReviewModel) {
+        try {
+          resolvedModel = options.resolveReviewModel(modelOverride);
+        } catch (error) {
+          if (error instanceof ReviewModelResolutionError) {
+            throw new ApiError(error.message, error.code, 400);
+          }
+          throw error;
+        }
+      }
+
+      const targetPath = resolveLocalPathForRepository(body.repositoryId, options);
+      if (!targetPath) {
+        throw new ApiError("The requested local repository could not be found or is not registered", "LOCAL_REPOSITORY_NOT_FOUND", 404);
+      }
+
+      let result: { jobId: string };
+      try {
+        result = await options.localReview({
+          repoPath: targetPath,
+          repositoryId: body.repositoryId,
+          baseRef: body.baseRef,
+          headRef: body.headRef,
+          llmProvider: resolvedModel?.provider,
+          llmModel: resolvedModel?.model
+        });
+      } catch (error: any) {
+        if (
+          error instanceof LocalTriggerError ||
+          error?.name === "LocalTriggerError" ||
+          error?.code === "PATH_NOT_ALLOWED" ||
+          error?.code === "NOTHING_TO_REVIEW" ||
+          error?.code === "NOT_A_REPOSITORY"
+        ) {
+          const code = error.code ?? "LOCAL_REVIEW_ERROR";
+          const status = code === "PATH_NOT_ALLOWED"
+            ? 403
+            : code === "NOTHING_TO_REVIEW" ? 409 : 400;
+          throw new ApiError(error.message, code, status);
+        }
+        throw error;
+      }
+
+      const job = jobs.get(result.jobId);
+      if (!job) throw new ApiError("Local review job was not persisted", "LOCAL_REVIEW_UNAVAILABLE", 500);
+      sendJson(request, response, 202, {
+        jobId: job.id,
+        repository: job.repository,
+        baseSha: job.baseSha,
+        headSha: job.headSha,
+        publicationPolicy: "disabled",
+        llmProvider: job.llmProvider,
+        llmModel: job.llmModel,
+        status: "queued"
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/workflows",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      sendJson(request, response, 200, { workflows: options.workflows.list() }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/workflows\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const found = options.workflows.get(name);
+      if (!found) throw new ApiError("Workflow not found", "WORKFLOW_NOT_FOUND", 404);
+      sendJson(request, response, 200, { workflow: found.spec, source: found.source }, allowedOrigins);
+    }
+  },
+  {
+    method: "PUT",
+    path: /^\/workflows\/([^/]+)$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      const name = decodeURIComponent(match?.[1] ?? "");
+      const body = await readJson(request);
+      const parsed = saveWorkflowRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new ApiError("Workflow is invalid", "INVALID_WORKFLOW", 400, {
+          issues: parsed.error.issues.map(issue => ({ path: issue.path, message: issue.message }))
+        });
+      }
+      if (parsed.data.name !== name) {
+        throw new ApiError("Workflow name in the body must match the route", "WORKFLOW_NAME_MISMATCH", 400);
+      }
+      try {
+        options.workflows.saveDraft(parsed.data);
+      } catch (error) {
+        throw new ApiError(error instanceof Error ? error.message : "Workflow draft could not be saved", "WORKFLOW_SAVE_FAILED", 400);
+      }
+      sendJson(request, response, 200, { workflow: parsed.data, source: "draft" }, allowedOrigins);
+    }
+  },
+  {
+    method: "DELETE",
+    path: /^\/workflows\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.workflows) throw new ApiError("Workflows are not configured", "WORKFLOWS_UNAVAILABLE", 503);
+      const name = decodeURIComponent(match?.[1] ?? "");
+      if (options.workflows.isBuiltin(name)) {
+        throw new ApiError("Builtin workflows cannot be deleted", "BUILTIN_WORKFLOW_PROTECTED", 409);
+      }
+      if (!options.workflows.deleteDraft(name)) {
+        throw new ApiError("Workflow draft not found", "WORKFLOW_DRAFT_NOT_FOUND", 404);
+      }
+      sendJson(request, response, 204, undefined, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/github/webhook",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, githubWebhookSecret, jobs, options }) => {
+      if (!githubWebhookSecret) throw new WebhookError("GitHub webhook is not configured", "WEBHOOK_NOT_CONFIGURED", 503);
+      const result = processGitHubWebhook({
+        headers: request.headers,
+        body: await readBody(request),
+        secret: githubWebhookSecret,
+        jobs,
+        llmConfigured: isLlmProviderConfigured(options),
+        repositoryStore: options.auditStore
+      });
+      sendJson(request, response, result.status === "enqueued" ? 202 : 200, result, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/notebooks\/([^/]+)\/sources$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const notebook = options.notebookStore.get(id);
+      if (!notebook) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      sendJson(request, response, 200, { sources: notebook.sources }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/diff$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.jobDiff) throw new ApiError("Diff is not configured", "DIFF_UNAVAILABLE", 503);
+      const jobId = decodeURIComponent(match?.[1] ?? "");
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      const pageParam = Number(url.searchParams.get("page"));
+      const pageSizeParam = Number(url.searchParams.get("pageSize"));
+      const searchParam = url.searchParams.get("search") ?? undefined;
+      const fileParam = url.searchParams.get("file") ?? undefined;
+
+      try {
+        const result = await options.jobDiff(jobId, {
+          allowTruncate: true,
+          page: Number.isInteger(pageParam) && pageParam > 0 ? pageParam : undefined,
+          pageSize: Number.isInteger(pageSizeParam) && pageSizeParam > 0 ? pageSizeParam : undefined,
+          search: searchParam,
+          file: fileParam
+        });
+        sendJson(request, response, 200, {
+          jobId,
+          files: result.files,
+          available: result.available,
+          pinned: result.pinned,
+          totalFiles: result.totalFiles,
+          truncated: result.truncated,
+          page: result.page,
+          pageSize: result.pageSize,
+          totalPages: result.totalPages,
+          allFilesSummary: result.allFilesSummary
+        }, allowedOrigins);
+      } catch (error) {
+        if (error instanceof JobDiffError) {
+          throw new ApiError(error.message, error.code, error.statusCode);
+        }
+        throw error;
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/jobs\/([^/]+)\/cancel$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, match }) => {
+      if (!options.jobCancel) throw new ApiError("Job cancellation is not configured", "JOB_CANCEL_UNAVAILABLE", 503);
+      const jobId = decodeURIComponent(match?.[1] ?? "");
+      const { job, cancellation } = await options.jobCancel(jobId);
+      // H13 honest cancel semantics: the response carries the single causal
+      // id and the truthful external-outcome label. externalOutcome stays
+      // "unknown" until the run's own promise settles — the API never
+      // promises a provider call or child process has already stopped.
+      sendJson(request, response, 200, { job, cancellation }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/findings\/([^/]+)\/patch$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.findingPatchPreview) {
+        throw new ApiError("Finding patch preview is not configured", "PATCH_PREVIEW_UNAVAILABLE", 503);
+      }
+      const jobId = decodeURIComponent(match?.[1] ?? "");
+      const findingId = decodeURIComponent(match?.[2] ?? "");
+      try {
+        const preview = await options.findingPatchPreview(jobId, findingId);
+        sendJson(request, response, 200, preview, allowedOrigins);
+      } catch (error) {
+        if (error instanceof FindingPatchError) {
+          throw new ApiError(error.message, error.code, error.statusCode, error.details);
+        }
+        throw error;
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/jobs\/([^/]+)\/findings\/([^/]+)\/patch\/apply$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (!options.findingPatchApply) {
+        throw new ApiError("Finding patch apply is not configured", "PATCH_APPLY_UNAVAILABLE", 503);
+      }
+      const jobId = decodeURIComponent(match?.[1] ?? "");
+      const findingId = decodeURIComponent(match?.[2] ?? "");
+      try {
+        const result = await options.findingPatchApply(jobId, findingId);
+        sendJson(request, response, 200, result, allowedOrigins);
+      } catch (error) {
+        if (error instanceof FindingPatchError) {
+          throw new ApiError(error.message, error.code, error.statusCode, error.details);
+        }
+        throw error;
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/notebooks\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const notebook = options.notebookStore.get(id);
+      if (!notebook) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      sendJson(request, response, 200, { notebook }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/notebooks\/([^/]+)\/messages$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore || !options.notebookGraph) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const notebookId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.notebookStore.get(notebookId)) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      let body;
+      try {
+        body = notebookMessageRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("Notebook message content is invalid", "INVALID_NOTEBOOK_MESSAGE", 400);
+        throw error;
+      }
+      startSse(request, response, allowedOrigins);
+      // Audit P2-05: client disconnect aborts the in-flight provider call.
+      const abort = new AbortController();
+      const onClose = () => abort.abort(new Error("notebook client disconnected"));
+      request.on("close", onClose);
+      request.on("error", onClose);
+      try {
+        for await (const event of options.notebookGraph.streamMessage({
+          notebookId,
+          content: body.content,
+          sourceJobIds: body.sourceJobIds,
+          signal: abort.signal
+        })) {
+          writeSse(response, event.event, event.data);
+        }
+      } catch (error) {
+        writeSse(response, "run.failed", { error: sanitizePublicError(error instanceof Error ? error.message : "Notebook run failed") });
+      } finally {
+        request.off("close", onClose);
+        request.off("error", onClose);
+        response.end();
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: /^\/notebooks\/([^/]+)\/cards$/,
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, match, options }) => {
+      if (options.notebookEnabled === false || !options.notebookStore || !options.notebookGraph) throw new ApiError("Notebook is disabled", "NOTEBOOK_DISABLED", 404);
+      const notebookId = decodeURIComponent(match?.[1] ?? "");
+      if (!options.notebookStore.get(notebookId)) throw new ApiError("Notebook not found", "NOTEBOOK_NOT_FOUND", 404);
+      let body;
+      try {
+        body = notebookCardRequestSchema.parse(await readJson(request));
+      } catch (error) {
+        if (error instanceof ZodError) throw new ApiError("Notebook card request is invalid", "INVALID_NOTEBOOK_CARD", 400);
+        throw error;
+      }
+      startSse(request, response, allowedOrigins);
+      const abort = new AbortController();
+      const onClose = () => abort.abort(new Error("notebook client disconnected"));
+      request.on("close", onClose);
+      request.on("error", onClose);
+      try {
+        for await (const event of options.notebookGraph.streamCard({
+          notebookId,
+          kind: body.kind,
+          sourceJobIds: body.sourceJobIds,
+          signal: abort.signal
+        })) {
+          writeSse(response, event.event, event.data);
+        }
+      } catch (error) {
+        writeSse(response, "card.failed", { error: sanitizePublicError(error instanceof Error ? error.message : "Notebook card failed") });
+      } finally {
+        request.off("close", onClose);
+        request.off("error", onClose);
+        response.end();
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: "/health",
+    auth: false,
+    handler: ({ request, response, allowedOrigins, options, githubWebhookSecret }) => {
+      const details = options.healthDetails?.() ?? {
+        database: { ok: true },
+        worker: { running: false, activeJobs: 0, concurrency: 1 },
+        llmConfigured: false,
+        llmProvider: "none",
+        publicPrAccessMode: "disabled" as const,
+        configuration: {
+          githubAppConfigured: false,
+          webhookSecretConfigured: Boolean(githubWebhookSecret),
+          publicReadTokenConfigured: false,
+          storage: { kind: "memory" as const, configured: true },
+          workerConcurrency: 1
+        }
+      };
+      sendJson(request, response, 200, {
+        ...buildHealthPayload(),
+        ...details,
+        configuration: {
+          githubAppConfigured: details.configuration.githubAppConfigured,
+          webhookSecretConfigured: details.configuration.webhookSecretConfigured,
+          publicReadTokenConfigured: details.configuration.publicReadTokenConfigured,
+          storage: details.configuration.storage,
+          workerConcurrency: details.configuration.workerConcurrency,
+          ...(details.configuration.publishWorkerConcurrency === undefined
+            ? {}
+            : { publishWorkerConcurrency: details.configuration.publishWorkerConcurrency }),
+          ...(details.configuration.reviewWorkflow === undefined
+            ? {}
+            : { reviewWorkflow: details.configuration.reviewWorkflow })
+        }
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/settings",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (!options.settings) throw new ApiError("Settings service is unavailable", "SETTINGS_UNAVAILABLE", 404);
+      sendJson(request, response, 200, { settings: toRendererSettings(options.settings.get()) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/settings/effective",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      // H09: per-field effective-config view (source / lock / restart / secret
+      // presence). Secrets and local paths contribute presence metadata only;
+      // the view builder never carries a plaintext value for them.
+      if (!options.settings?.effective) throw new ApiError("Settings service is unavailable", "SETTINGS_UNAVAILABLE", 404);
+      sendJson(request, response, 200, { effective: options.settings.effective() }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/llm/catalog",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      const providers = options.llmCatalogProviders?.() ?? [];
+      sendJson(request, response, 200, llmCatalogResponseSchema.parse({ providers }), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/real-data",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      sendJson(request, response, 200, { realData: options.realData?.() ?? null }, allowedOrigins);
+    }
+  },
+  {
+    method: "PUT",
+    path: "/settings",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options, nodeEnv }) => {
+      const settingsWritable = options.settingsWritable ?? (nodeEnv !== "production");
+      if (!options.settings || !settingsWritable) {
+        throw new ApiError("Settings updates are disabled", "SETTINGS_READ_ONLY", 404);
+      }
+      const patch = settingsPatchSchema.parse(await readJson(request));
+      sendJson(request, response, 200, {
+        settings: toRendererSettings(options.settings.update(patch))
+      }, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/settings/llm/test-connection",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      // H09: user-triggered probe. A strict-schema body may carry one unsaved
+      // draft API key to probe instead of the ACTIVE runtime credential; the
+      // draft exists only for this request and is never persisted, logged, or
+      // echoed back. Every response flows through the sanitized
+      // llmConnectionTestResponseSchema 502 path below — statuses and bounded
+      // metadata only, never credential material or upstream error text.
+      const draft = llmConnectionTestRequestSchema.parse(await readJson(request));
+      if (!options.testLlmConnection) {
+        throw new ApiError("LLM connection test is unavailable", "LLM_CONNECTION_TEST_UNAVAILABLE", 503);
+      }
+      let result: LlmConnectionTestResponse;
+      try {
+        result = await options.testLlmConnection(draft);
+      } catch {
+        throw new ApiError("LLM connection test is unavailable", "LLM_CONNECTION_TEST_FAILED", 502);
+      }
+      const parsed = llmConnectionTestResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new ApiError(
+          "LLM connection test response is unavailable",
+          "LLM_CONNECTION_TEST_RESPONSE_INVALID",
+          502
+        );
+      }
+      sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/settings/github/test-connection",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      // CKPT4 Phase 2C: a strict-schema body may carry one unsaved draft PAT
+      // to probe instead of the ACTIVE runtime credential; an empty body or a
+      // missing field keeps probing the ACTIVE credential. The draft exists
+      // only for this request and is never persisted, logged, or echoed back;
+      // every response still flows through the sanitized
+      // githubConnectionTestResponseSchema 502 path below.
+      const draft = githubConnectionTestRequestSchema.parse(await readJson(request));
+      if (!options.testGitHubConnection) {
+        throw new ApiError("GitHub connection test is unavailable", "GITHUB_CONNECTION_TEST_UNAVAILABLE", 503);
+      }
+      let result: GitHubConnectionTestResponse;
+      try {
+        result = await options.testGitHubConnection(draft);
+      } catch {
+        throw new ApiError("GitHub connection test is unavailable", "GITHUB_CONNECTION_TEST_FAILED", 502);
+      }
+      const parsed = githubConnectionTestResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new ApiError(
+          "GitHub connection test response is unavailable",
+          "GITHUB_CONNECTION_TEST_RESPONSE_INVALID",
+          502
+        );
+      }
+      sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/oauth/desktop/start",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_UNAVAILABLE", 503);
+      try {
+        const result = broker.start(await readJson(request));
+        sendOAuthJson(request, response, 200, desktopOAuthStartResponseSchema.parse(result), allowedOrigins);
+      } catch (error) {
+        if (error instanceof ZodError || error instanceof ApiError) throw error;
+        throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_START_FAILED", 503);
+      }
+    }
+  },
+  {
+    method: "GET",
+    path: "/oauth/github/callback",
+    auth: false,
+    handler: async ({ response, url, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) {
+        response.writeHead(503, {
+          "cache-control": "no-store",
+          "content-type": "text/plain; charset=utf-8",
+          "x-content-type-options": "nosniff"
+        });
+        response.end("GitHub OAuth sign-in is unavailable.");
+        return;
+      }
+      const result = await broker.githubCallback({
+        state: url.searchParams.get("state") ?? undefined,
+        code: url.searchParams.get("code") ?? undefined,
+        error: url.searchParams.get("error") ?? undefined
+      });
+      if (!result.redirectUrl) {
+        response.writeHead(result.status === "expired" ? 410 : 400, {
+          "cache-control": "no-store",
+          "content-type": "text/plain; charset=utf-8",
+          "x-content-type-options": "nosniff"
+        });
+        response.end("GitHub authorization callback is no longer active.");
+        return;
+      }
+      sendOAuthRedirect(response, result.redirectUrl);
+    }
+  },
+  {
+    method: "POST",
+    path: "/oauth/desktop/complete",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_UNAVAILABLE", 503);
+      try {
+        const result = await broker.complete(await readJson(request));
+        sendOAuthJson(request, response, 200, desktopOAuthCompleteResponseSchema.parse(result), allowedOrigins);
+      } catch (error) {
+        if (error instanceof ZodError || error instanceof ApiError) throw error;
+        throw new ApiError("OAuth handoff is unavailable", "GITHUB_OAUTH_HANDOFF_INVALID", 400);
+      }
+    }
+  },
+  {
+    method: "POST",
+    path: "/oauth/desktop/cancel",
+    auth: false,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      const broker = options.desktopOAuthBroker;
+      if (!broker) throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_UNAVAILABLE", 503);
+      const result = broker.cancel(await readJson(request));
+      sendOAuthJson(request, response, 200, desktopOAuthCancelResponseSchema.parse(result), allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/settings/github/oauth/start",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      // GitHub OAuth Device Flow sign-in. The device_code stays inside the API
+      // process for its whole lifetime; the start response only carries the
+      // human user code and polling metadata.
+      const flow = options.githubOauth;
+      if (!flow || !flow.configured) {
+        throw new ApiError("GitHub OAuth sign-in is not configured", "GITHUB_OAUTH_NOT_CONFIGURED", 503);
+      }
+      let result;
+      try {
+        result = await flow.start();
+      } catch {
+        throw new ApiError("GitHub OAuth sign-in is unavailable", "GITHUB_OAUTH_START_FAILED", 502);
+      }
+      const parsed = githubOauthDeviceStartResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new ApiError("GitHub OAuth response is unavailable", "GITHUB_OAUTH_RESPONSE_INVALID", 502);
+      }
+      sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "POST",
+    path: "/settings/github/oauth/poll",
+    auth: true,
+    handler: async ({ request, response, allowedOrigins, options }) => {
+      // On `connected` the response carries the access token exactly ONCE for
+      // the one-time handoff into the existing credential save path (desktop
+      // safeStorage bridge / web encrypted settings). The API itself never
+      // persists, logs, or echoes it anywhere else.
+      const flow = options.githubOauth;
+      if (!flow || !flow.configured) {
+        throw new ApiError("GitHub OAuth sign-in is not configured", "GITHUB_OAUTH_NOT_CONFIGURED", 503);
+      }
+      const input = githubOauthDevicePollRequestSchema.parse(await readJson(request));
+      const result = await flow.poll(input.flowId);
+      if (result === undefined) {
+        throw new ApiError("Unknown OAuth sign-in flow", "GITHUB_OAUTH_FLOW_NOT_FOUND", 404);
+      }
+      const parsed = githubOauthDevicePollResponseSchema.safeParse(result);
+      if (!parsed.success) {
+        throw new ApiError("GitHub OAuth response is unavailable", "GITHUB_OAUTH_RESPONSE_INVALID", 502);
+      }
+      sendJson(request, response, 200, parsed.data, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/catalog/review-pipeline",
+    auth: true,
+    handler: ({ request, response, allowedOrigins }) => {
+      sendJson(request, response, 200, reviewPipelineCatalogResponseSchema.parse({
+        pipeline: buildReviewPipelineCatalog()
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/catalog/kernel-syscalls",
+    auth: true,
+    handler: ({ request, response, allowedOrigins }) => {
+      sendJson(request, response, 200, kernelSyscallCatalogResponseSchema.parse({
+        catalog: buildKernelSyscallCatalog()
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/catalog/engine-allowlist",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      if (options.workflows) {
+        const builtin = options.workflows.list()
+          .filter(summary => summary.source === "builtin")
+          .map(summary => ({ name: summary.name, ...(summary.description === undefined ? {} : { description: summary.description }) }));
+        sendJson(request, response, 200, engineAllowlistCatalogResponseSchema.parse({
+          catalog: buildEngineAllowlistCatalog(builtin, { runtimeVerification: options.workflowRuntime?.hasVerificationReceipt.bind(options.workflowRuntime) })
+        }), allowedOrigins);
+        return;
+      }
+      // Workflow store unconfigured: the static allowlist stays truthful while
+      // the builtin workflow names are reported as unavailable — never guessed.
+      sendJson(request, response, 200, engineAllowlistCatalogResponseSchema.parse({
+        catalog: buildEngineAllowlistCatalog([], { builtinWorkflowsUnavailable: true, runtimeVerification: options.workflowRuntime?.hasVerificationReceipt.bind(options.workflowRuntime) })
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/catalog/plugins",
+    auth: true,
+    handler: ({ request, response, allowedOrigins }) => {
+      // Read-only projection. No install/uninstall route exists beside this.
+      sendJson(request, response, 200, pluginCatalogResponseSchema.parse({
+        catalog: buildPluginCatalog()
+      }), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/jobs",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, url, jobs }) => {
+      sendJson(request, response, 200, { jobs: filterJobs(jobs.list(), url.searchParams).map(toApiJob) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/reports/recent",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, url, jobs }) => {
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 10) || 10));
+      sendJson(request, response, 200, { reports: recentReports(jobs.list(), limit) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: "/stats",
+    auth: true,
+    handler: ({ request, response, allowedOrigins, jobs }) => {
+      sendJson(request, response, 200, buildStats(jobs.list()), allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/report$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      if (!job.result) throw new ApiError("Job report is not ready", "JOB_NOT_READY", 409);
+      sendJson(request, response, 200, { report: job.result }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)\/notebook$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs, options }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      if (options.notebookEnabled === false || !options.notebookStore) {
+        sendJson(request, response, 200, { notebookId: null }, allowedOrigins);
+        return;
+      }
+      const notebook = options.notebookStore.findByJobId(id);
+      sendJson(request, response, 200, { notebookId: notebook?.id ?? null }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/jobs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const job = jobs.get(id);
+      if (!job) throw new ApiError("Job not found", "JOB_NOT_FOUND", 404);
+      sendJson(request, response, 200, { job: toApiJob(job) }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/(?:api\/)?runtime\/runs$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options }) => {
+      const registry = options.runtimeRegistry ?? defaultRuntimeRegistry;
+      sendJson(request, response, 200, { runs: registry.listRunSummaries() }, allowedOrigins);
+    }
+  },
+  {
+    method: "GET",
+    path: /^\/(?:api\/)?runtime\/runs\/([^/]+)$/,
+    auth: true,
+    handler: ({ request, response, allowedOrigins, options, match, jobs }) => {
+      const id = decodeURIComponent(match?.[1] ?? "");
+      const registry = options.runtimeRegistry ?? defaultRuntimeRegistry;
+      const snapshot = registry.getSnapshot(id);
+
+      if (snapshot) {
+        sendJson(request, response, 200, snapshot, allowedOrigins);
+        return;
+      }
+
+      // Check if job exists in jobStore to see if it's an old run without telemetry
+      const job = jobs.get(id) ?? jobs.list().find(j => j.id === id);
+      if (job) {
+        sendJson(request, response, 200, {
+          runId: job.id,
+          workloadKind: "pr_review",
+          jobId: job.id,
+          state: job.status.toUpperCase(),
+          createdAt: job.createdAt,
+          finishedAt: job.finishedAt,
+          telemetryStatus: "unavailable",
+          agentCounts: { total: 0, running: 0, waiting: 0, terminal: 0 },
+          concurrency: 1,
+          securityGuarantees: DEFAULT_SECURITY_GUARANTEES,
+          agents: []
+        }, allowedOrigins);
+        return;
+      }
+
+      throw new ApiError("Run runtime snapshot not found", "RUN_NOT_FOUND", 404);
+    }
+  }
+];
+
+const defaultRuntimeRegistry = new RuntimeRegistry();
+
+export function createApiServer(options: CreateApiServerOptions = {}) {
+  const jobs = options.jobs ?? new InMemoryJobQueue();
+  const githubWebhookSecret = options.githubWebhookSecret ?? process.env.GITHUB_WEBHOOK_SECRET;
+  const apiToken = options.apiToken ?? process.env.CONSISTENCY_API_TOKEN;
+  const desktopControlToken = options.desktopControlToken ?? process.env.CONSISTENCY_DESKTOP_CONTROL_TOKEN;
+  const nodeEnv = options.nodeEnv ?? (process.env.NODE_ENV as "development" | "test" | "production" | undefined) ?? "development";
+  const allowedOrigins = options.allowedOrigins ?? ["http://127.0.0.1:5173", "http://localhost:5173"];
+
+      return createServer(async (request, response) => {
+    try {
+      const contentLength = Number(request.headers["content-length"] ?? 0);
+      if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+        throw new ApiError("Request body exceeds 1 MB", "BODY_TOO_LARGE", 413);
+      }
+      const url = parseUrl(request.url);
+      const path = url.pathname;
+
+      if (request.method === "OPTIONS") {
+        sendJson(request, response, 204, {}, allowedOrigins);
+        return;
+      }
+
+      let matchedRoute: Route | undefined;
+      let routeMatch: RegExpExecArray | null = null;
+
+      for (const route of routes) {
+        if (route.method === request.method) {
+          if (typeof route.path === "string") {
+            if (route.path === path) {
+              matchedRoute = route;
+              break;
+            }
+          } else {
+            const match = route.path.exec(path);
+            if (match) {
+              matchedRoute = route;
+              routeMatch = match;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!matchedRoute) {
+        throw new ApiError("Not found", "NOT_FOUND", 404);
+      }
+
+      const requiresAuth = matchedRoute.auth !== false;
+      if (requiresAuth && apiToken && !isAuthorized(request, apiToken)) {
+        throw new ApiError("A valid bearer token is required", "UNAUTHORIZED", 401);
+      }
+
+      await matchedRoute.handler({
+        request,
+        response,
+        url,
+        path,
+        allowedOrigins,
+        options,
+        jobs,
+        githubWebhookSecret,
+        apiToken,
+        desktopControlToken,
+        nodeEnv,
+        match: routeMatch
+      });
+
+    } catch (error) {
+      console.error(`[api error] ${sanitizePublicError(error instanceof Error ? error.message : String(error))}`);
+      if (nodeEnv === "development" && error instanceof Error) console.error(error.stack);
+      sendError(request, response, error, allowedOrigins);
+    }
+  });
+}

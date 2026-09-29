@@ -1,0 +1,16 @@
+{
+  "repo": "owner/name",
+  "pr_number": 0,
+  "annotator_id": "annotator_1",
+  "overall_risk": "medium",
+  "top_risky_files": [
+    "src/example.py"
+  ],
+  "reasons": [
+    "semantic",
+    "evolution/churn"
+  ],
+  "rationale": "Short reviewer rationale explaining why these files or signals matter.",
+  "time_to_identify_seconds": null,
+  "understandability_rating_1_to_5": null
+}

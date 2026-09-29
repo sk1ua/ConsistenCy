@@ -1,0 +1,134 @@
+% 第 3 章：当前系统架构与形式化对象
+\chapter{当前系统架构与形式化对象}\label{ch:arch}
+
+本章把当前工作树中的 ConsistenCy v3 架构压缩为后续形式化所需的组件清单。每个组件的“工程不变式”都经过只读源码核验（定位到文件与行号），第~\ref{ch:security} 章起再逐一给出数学对象。
+
+\section{三层物理结构与形式化对象总览}
+
+图~\ref{fig:theorymap} 给出“架构组件 $\rightarrow$ 理论域”的总映射。每个组件旁标注了本报告采用的主要理论域与支持强度（六类分级见第~\ref{ch:intro} 章）；详细的逐组件论证分布于第~\ref{ch:security}--\ref{ch:freshness} 章，完整的文献映射矩阵见附录~\ref{app:mapping}。
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[
+  comp/.style={draw=framegray,fill=boxgray,rounded corners=2pt,minimum height=1.55em,inner sep=4pt,font=\scriptsize,align=center},
+  dom/.style={draw=accentblue!60,fill=softblue,rounded corners=2pt,minimum height=1.55em,inner sep=4pt,font=\scriptsize\itshape,align=center},
+  lnk/.style={-{Stealth[length=2mm]},draw=inkgray!70},
+  lab/.style={font=\tiny\itshape\color{inkgray},align=center}]
+% Kernel column
+\node[comp] (broker) at (0,0) {CapabilityBroker\\（9 步授权链）};
+\node[comp] (gateway) at (0,-1.25) {SyscallGateway\\+ CommitCoordinator};
+\node[comp] (sched) at (0,-2.5) {KernelScheduler\\（3 路准入）};
+\node[comp] (context) at (0,-3.75) {Context VM\\（页面表/COW）};
+\node[comp] (audit) at (0,-5.0) {AuditJournal\\（仅追加）};
+\node[comp,fit=(broker)(gateway)(sched)(context)(audit),inner sep=7pt,fill=softblue!35,draw=accentblue!40] (kernelbox) {};
+\node[font=\small\bfseries\color{accentblue}] at (kernelbox.north) [above=1pt] {Kernel 层};
+% Harness
+\node[comp] (fiber) at (4.4,-1.25) {Cordis Fiber\\生命周期};
+\node[comp] (coe) at (4.4,-2.5) {Coeffect\\声明式依赖};
+\node[comp,fit=(fiber)(coe),inner sep=7pt,fill=softgreen!50,draw=framegray] (harnessbox) {};
+\node[font=\small\bfseries] at (harnessbox.north) [above=1pt] {Cordis 层};
+% Workload
+\node[comp] (sup) at (4.4,-4.3) {Supervisor Planner\\+ 评审 Agent};
+\node[comp] (wf) at (4.4,-5.5) {Workflow Runtime\\（DAG/触发）};
+% Evidence
+\node[comp] (evid) at (8.8,-1.25) {EvidenceStore\\（内容指纹）};
+\node[comp] (snap) at (8.8,-2.5) {RepositorySnapshot\\（SHA 钉定）};
+\node[comp] (eng) at (8.8,-3.75) {确定性分析器\\（Python/TS）};
+\node[comp,fit=(evid)(snap)(eng),inner sep=7pt,fill=softamber!60,draw=framegray] (evbox) {};
+\node[font=\small\bfseries] at (evbox.north) [above=1pt] {Evidence 层};
+% Theory domains (right)
+\node[dom] (t1) at (13.0,0) {能力安全 / 引用监视器\\（\DIRECT）};
+\node[dom] (t2) at (13.0,-1.25) {排队的业务效果建模\\（幂等意图）};
+\node[dom] (t3) at (13.0,-2.5) {排队论 / 准入控制\\（\DIRECT{} 词汇）};
+\node[dom] (t4) at (13.0,-3.75) {信息可见性 $\neq$ 权限\\（\DIRECT{} 分离）};
+\node[dom] (t5) at (13.0,-5.0) {防篡改日志 / 事件溯源\\（\STRONG）};
+\node[dom] (t6) at (13.0,-6.3) {监督式生命周期\\（\STRONG）};
+\node[dom] (t7) at (13.0,-7.6) {工作流 DAG / 数据流\\（\STRONG）};
+\node[dom] (t8) at (13.0,-8.9) {溯源 / 可复现计算\\（\STRONG--\DIRECT）};
+\draw[lnk] (broker.east) to[bend left=8] (t1.west);
+\draw[lnk] (gateway.east) to[bend left=4] (t2.west);
+\draw[lnk] (sched.east) to[bend left=2] (t3.west);
+\draw[lnk] (context.east) to (t4.west);
+\draw[lnk] (audit.east) to[bend right=2] (t5.west);
+\draw[lnk] (harnessbox.east) to[bend left=6] (t6.west);
+\draw[lnk] (wf.east) to (t7.west);
+\draw[lnk] (evbox.east) to[bend right=6] (t8.west);
+\end{tikzpicture}
+\end{adjustbox}
+\caption{架构 $\rightarrow$ 理论域总映射（ConsistenCy Architecture--Theory Domain Map）。支持强度为六类分级的简写；每条映射的完整论证与关键文献见对应章节及附录 B。}
+\label{fig:theorymap}
+\end{figure}
+
+\section{组件清单与工程不变式}
+
+下表汇总源码核验后的 14 个组件及其当前不变式（详细档案见研究笔记；行号针对 2026-08-28 工作树）：
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.21\textwidth}>{\raggedright\arraybackslash}p{0.44\textwidth}>{\raggedright\arraybackslash}p{0.27\textwidth}@{}}
+\toprule
+\textbf{组件} & \textbf{源码核验的不变式（摘要）} & \textbf{主要定位}\\
+\midrule
+\endhead
+CapabilityBroker & 授权 = 9 个谓词的有序首败拒绝链，每次受保护系统调用都重新求值；撤销/过期单调；允许与拒绝都写审计 & \path{capability/broker.ts:245-328}\\
+SyscallGateway & \tcode{intent} 类动作（\tcode{repo.write}、\tcode{github.publish}）永不内联分发，必须经 CommitCoordinator；\tcode{llm.invoke} 为 commit/direct，用量由可信 Ring-1 处理器提交 & \path{syscall/authorize.ts:46-102}\\
+CommitCoordinator & 幂等键去重的意图接受器；$payloadHash=\mathrm{SHA256}(\canon(payload))$；内存态，持久性委托给注入的 Sink & \path{commit/coordinator.ts:39-183}\\
+KernelScheduler & 3 路准入（截止期取消 $\rightarrow$ 容量 $\rightarrow$ 优先级-先来先服务，严格平局决断 = 确定性）；终态吸收 & \path{scheduler/scheduler.ts:225-271}\\
+AgentControlBlock & 12 状态 LTS；能力引用只存 12 位十六进制\emph{指纹}（描述符，非凭证） & \path{agent/state.ts:27-50}\\
+Cordis Fiber & PENDING / LOADING / ACTIVE / UNLOADING（Cordis 4.0.0-rc.8 库语义）；共效缺失 $\Rightarrow$ PENDING；撤销经微任务异步传播 & \path{harness-core/runtime/adapter.ts:46-130}\\
+Context VM & 页面不可变、SHA-256 内容寻址；驻留级在覆盖层；\tcode{pinned$\rightarrow$evicted} 抛错（失败关闭）；页面持有不授予任何权限 & \path{context/manager.ts:16-19,102-174}\\
+AuditJournal & 仅 \tcode{record}+\tcode{entries} 接口（无可变性 API）；5 类事件；只出现指纹与哈希，永不出现原始句柄 & \path{audit/types.ts:21-100}\\
+Evidence Engine & 指纹 $=$ SHA-256（11 元组规范 JSON）；\tcode{provenance.sha} 参与哈希；store 自行计算指纹、不信任分析器 & \path{evidence/fingerprint.ts:35-103}\\
+RepositorySnapshot & 以 \tcode{rev-parse --verify} 失败关闭地钉定 \tcode{headSha}；读取只经对象库；后续工作树变更不影响既有快照 & \path{snapshot/snapshot.ts:1-120}\\
+Workflow Runtime & 校验（Kahn）$\rightarrow$ 编译（注册表解析，不发放持久授权）$\rightarrow$ 运行（逐系统调用授权）；触发是“纯观测溯源，绝非授权” & \path{workflow-runtime/validate,compile,host.ts}\\
+触发计划 & 持久去重键 $\mathrm{SHA256}[\text{domain},\text{repo},\text{def},\text{event}]$；围栏式单飞执行；单次尝试，无重试循环 & \path{workflow-runtime/triggers.ts,store.ts}\\
+仓库监督 & 轮询 + 观测摘要去重 + 防抖；每个 (repo, head, 配置摘要) 至多一个事件；只观测记录，不自行入队 & \path{heartbeat/repositorySupervisor.ts}\\
+LLM 网关 & Ring-3 到提供商的唯一路径是逐调用授权的 \tcode{llm.invoke}；密钥仅服务端；预算是唯一在代码内的反压 & \path{workload-review/facades/llm-facade.ts:73-140}\\
+\bottomrule
+\caption{组件级工程不变式（源码核验摘要）。}
+\label{tab:components}
+\end{longtable}
+
+\section{权威结构图}
+
+图~\ref{fig:authority} 展示系统的\textbf{权威（authority）流向}：所有外部效果必须穿过 Kernel 的授权谓词；Cordis 与工作流层只能“触发与描述”；证据层只提供可复现事实。该图是后续所有安全命题（S1--S3）的几何底图。
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[
+  layer/.style={draw=framegray,rounded corners=3pt,inner sep=6pt},
+  box/.style={draw=framegray,fill=boxgray,rounded corners=2pt,font=\scriptsize,align=center,minimum height=1.5em,inner sep=4pt},
+  gate/.style={draw=accentred!80,fill=softrose,rounded corners=2pt,font=\scriptsize\bfseries,align=center,inner sep=5pt},
+  lnk/.style={-{Stealth[length=2.2mm]},draw=inkgray!80,thick},
+  nolnk/.style={draw=inkgray!40,dashed}]
+\node[layer,fill=softblue!30] (api) at (0,4.2) {\shortstack[c]{\small\bfseries 触发与描述层（无权威）\\ Web UI / API / Workflow 定义 / 绑定 / 触发事件}};
+\node[layer,fill=softgreen!40] (harness) at (0,2.5) {\shortstack[c]{\small\bfseries Cordis Harness（生命周期权威）\\ Fiber PENDING/ACTIVE $\cdot$ 共效可用性 $\cdot$ 异步传播}};
+\node[gate] (authz) at (0,0.9) {\shortstack[c]{Kernel 授权谓词 $\Auth(a,\alpha,r,s,t)$\\ 9 步首败拒绝链 $\cdot$ 每次调用重评 $\cdot$ 失败关闭}};
+\node[layer,fill=softamber!40] (eff) at (0,-0.9) {\shortstack[c]{\small\bfseries 效果世界\\ git 读 / LLM 调用 / GitHub 发布（经意图门）}};
+\node[layer,fill=boxgray] (ev) at (6.4,0.9) {\shortstack[c]{\small\bfseries Evidence Engine（事实权威）\\ 快照 SHA 钉定 $\cdot$ 内容指纹 $\cdot$ 确定性分析器}};
+\node[layer,fill=boxgray] (audit2) at (6.4,-0.9) {\shortstack[c]{\small\bfseries AuditJournal（历史权威）\\ 仅追加 $\cdot$ 全决策记录 $\cdot$ 指纹化}};
+\draw[lnk] (api) -- (harness) node[midway,right=1pt,font=\tiny\itshape\color{inkgray}] {触发};
+\draw[lnk] (harness) -- (authz) node[midway,right=1pt,font=\tiny\itshape\color{inkgray}] {受保护 syscall};
+\draw[lnk] (authz) -- (eff) node[midway,right=1pt,font=\tiny\itshape\color{inkgray}] {允许才执行};
+\draw[lnk] (authz) -- (audit2) node[midway,above,font=\tiny\itshape\color{inkgray}] {全决策入账};
+\draw[lnk] (eff) -- (ev) node[midway,right=1pt,font=\tiny\itshape\color{inkgray}] {证据落地};
+\draw[nolnk] (api.west) to[bend left=25] node[midway,left=2pt,font=\tiny\itshape\color{inkgray},align=right] {无直达路径\\（S3：数据非权威）} (eff.west);
+\end{tikzpicture}
+\end{adjustbox}
+\caption{Kernel / Cordis / Agent / Evidence 权威结构图。实线为允许的权威路径；虚线标注被架构排除的路径（触发与描述层数据不能直接成为权威来源，详见命题~\ref{prop:verdictplane}）。}
+\label{fig:authority}
+\end{figure}
+
+\section{形式化对象预览}
+
+基于上述事实，本报告在后续章节构造以下数学对象（完整定义见第~\ref{ch:security}--\ref{ch:unified} 章，符号表见附录~\ref{app:symbols}）：
+\begin{itemize}[itemsep=0.05em]
+  \item 全局状态 $X_t=(R_t,S_t,Q_t,\mathfrak{A}_t,C_t,V_t,K_t,E_t,P_t,B_t)$ 与演化 $X_{t+1}=\Phi(X_t,u_t,\zeta_t)$（\PROPOSED{} 统一模型）；
+  \item 授权谓词 $\Auth$ 与安全不变式 S1--S3（时序逻辑表述）；
+  \item 可用性 $\Avail$、可见性 $\Vis$ 与 $\Auth$ 的正交性命题；
+  \item 12 状态 ACB LTS 与 4 状态 Fiber LTS 的单向耦合关系；
+  \item 工作流 DAG $G=(V,E)$、拓扑序 $\sigma$ 与“校验 $\neq$ 授权”的裁决面独立性；
+  \item $M/M/c$ 基线排队模型（显式声明的近似）与 CMDP 研究模型（\PROPOSED）；
+  \item 证据指纹函数 $\fp$、接地分类器 $\ground$ 与确定性/碰撞界命题；
+  \item 版本滞后（Version Staleness）度量 $D(t)$ 与检测时延界（\PROPOSED{} 度量 + \STRONG{} 结构类比）。
+\end{itemize}

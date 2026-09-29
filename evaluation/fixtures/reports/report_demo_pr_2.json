@@ -1,0 +1,36 @@
+{
+  "avg_risk": 0.3,
+  "top_risky_files": [
+    {
+      "file": "lib/parser.ts",
+      "risk": "medium",
+      "score": 0.45
+    },
+    {
+      "file": "lib/index.ts",
+      "risk": "low",
+      "score": 0.1
+    }
+  ],
+  "retrieval": {
+    "summary": {
+      "files_with_evidence": 1
+    },
+    "packs": [
+      {
+        "file": "lib/parser.ts",
+        "compression": {
+          "selected_count": 1,
+          "compression_ratio": 0.5
+        },
+        "selected_evidence": [
+          {
+            "candidate": {
+              "file": "lib/parser.ts"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

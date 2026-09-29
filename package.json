@@ -1,0 +1,48 @@
+{
+  "name": "consistency-workspace",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0 <23"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run consistency",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:workspaces": "npm run test --workspaces --if-present",
+    "test:runtime-gate": "vitest run scripts/verify-baseline.test.mjs",
+    "test": "npm run test:workspaces && npm run test:runtime-gate",
+    "build": "npm run build --workspaces --if-present",
+    "test:python": "python -m pytest -q",
+    "audit:deps": "npm audit --audit-level=high",
+    "verify:runtime": "node scripts/verify-baseline.mjs",
+    "verify:docs": "node scripts/verify-docs.mjs",
+    "verify": "npm run verify:runtime && npm run verify:docs && npm run audit:deps && npm run typecheck && npm test && npm run build && npm run test:python",
+    "setup": "tsx apps/api/src/config/cli.ts setup",
+    "config": "tsx apps/api/src/config/cli.ts config",
+    "review": "tsx apps/cli/src/main.ts review",
+    "consistency": "tsx apps/cli/src/main.ts",
+    "data:import": "tsx apps/api/src/data/importRealData.ts",
+    "dev:webhook": "node scripts/dev-webhook.mjs",
+    "dev:api": "npm run dev -w @consistency/api",
+    "test:api-bundle": "npm run build -w @consistency/api && node scripts/smoke-api-bundle.mjs"
+  },
+  "overrides": {
+    "fast-uri": "4.1.5",
+    "@xmldom/xmldom": "0.9.12",
+    "js-yaml": "4.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "base_ref": "base123",
+  "head_ref": "head456",
+  "commit_count": 1,
+  "avg_risk": 0.42,
+  "max_risk": 0.42,
+  "high_risk_commits": 0,
+  "commits": [
+    {
+      "sha": "head456",
+      "date": "2026-06-01T00:00:00+00:00",
+      "author": "sk1ua",
+      "message": "docs: update evaluation workflow",
+      "risk_score": 0.42,
+      "risk_level": "Minor Drift",
+      "evolution_score": 0.1,
+      "evolution_details": {},
+      "files_analyzed": 1,
+      "evolution_evidence": []
+    }
+  ],
+  "commit_trend": [
+    {
+      "sha": "head456",
+      "date": "2026-06-01T00:00:00+00:00",
+      "risk_score": 0.42,
+      "delta": null,
+      "delta_pct": null
+    }
+  ],
+  "risk_composition": {
+    "formula": "R_c = 0.90*Agg_f(R_f) + 0.10*S_evo; R_pr = h({R_c}, {R_f})",
+    "file_formula": "R_f = g(S_style, S_struct, S_sem, S_dup, S_sec)",
+    "components_avg": {
+      "style": 0.05,
+      "structural": 0.2,
+      "semantic": 0.3,
+      "duplication": 0.0,
+      "security": 0.0,
+      "evolution": 0.1
+    },
+    "contributions_pct": {
+      "style": 0.05,
+      "structural": 0.35,
+      "semantic": 0.45,
+      "duplication": 0.0,
+      "security": 0.0,
+      "evolution": 0.15
+    },
+    "percentile_basis": "within_pr_files",
+    "scale_max": 1.0,
+    "confidence_formula": "C_f = q(baseline_sufficiency, signal_agreement, history_depth)"
+  },
+  "evidence_summary": [
+    {
+      "type": "churn_anomaly",
+      "text": "Code churn: baseline 10 -> current 15 lines/commit",
+      "baseline": 10,
+      "current": 15,
+      "delta": 5,
+      "delta_pct": 0.5
+    }
+  ],
+  "top_risky_files": [
+    {
+      "file": "docs/EVALUATION.md",
+      "avg_risk": 0.42,
+      "max_risk": 0.42,
+      "hits": 1,
+      "churn_lines": 44,
+      "complexity": 0.0,
+      "owner": "sk1ua",
+      "owner_share": 1.0,
+      "hotspot_impact": 0.022,
+      "risk_breakdown": {
+        "style": 0.05,
+        "structural": 0.2,
+        "semantic": 0.3,
+        "duplication": 0.0,
+        "security": 0.0
+      },
+      "signal_composition": {
+        "style": 0.05,
+        "structural": 0.35,
+        "semantic": 0.6,
+        "duplication": 0.0,
+        "security": 0.0
+      },
+      "dominant_signals": ["semantic", "structural"],
+      "confidence": 0.7,
+      "explainability": {
+        "dominant_signals": ["semantic", "structural"],
+        "contributions": {
+          "style": 0.05,
+          "structural": 0.35,
+          "semantic": 0.6,
+          "duplication": 0.0,
+          "security": 0.0
+        },
+        "evidence_chain": [
+          {
+            "signal_name": "semantic",
+            "text": "Review workflow semantics changed.",
+            "source": "agent",
+            "confidence": 1.0,
+            "metadata": {}
+          }
+        ],
+        "confidence": 0.7,
+        "uncertainty_note": "Fixture"
+      },
+      "agent_collaboration": {
+        "scope": "docs/EVALUATION.md",
+        "decision": "monitor",
+        "consensus_score": 0.25,
+        "confidence": 0.7,
+        "quorum": "5/5",
+        "participants": ["StyleAgent", "StructuralAgent", "SemanticAgent", "DuplicationAgent", "SecurityAgent"],
+        "votes": [],
+        "top_findings": [],
+        "disagreements": [],
+        "next_actions": [],
+        "review_queue": [],
+        "protocol": "parallel_agents -> evidence_normalization -> weighted_consensus -> reviewer_handoff"
+      },
+      "risk_percentile": 1.0,
+      "rank_in_pr": 1,
+      "total_pr_files": 1,
+      "review_effort_min": 3,
+      "review_effort_max": 5
+    }
+  ],
+  "file_deep_dive": [
+    {
+      "file": "docs/EVALUATION.md",
+      "risk": 0.42,
+      "rank_in_pr": 1,
+      "total_pr_files": 1,
+      "risk_breakdown": {
+        "style": 0.05,
+        "structural": 0.2,
+        "semantic": 0.3,
+        "duplication": 0.0,
+        "security": 0.0
+      },
+      "signal_contributions": {
+        "style": 0.05,
+        "structural": 0.35,
+        "semantic": 0.6,
+        "duplication": 0.0,
+        "security": 0.0
+      },
+      "dominant_signals": ["semantic", "structural"],
+      "confidence": 0.7,
+      "evidence_chain": [
+        {
+          "signal_name": "semantic",
+          "text": "Review workflow semantics changed.",
+          "source": "agent",
+          "confidence": 1.0,
+          "metadata": {}
+        }
+      ],
+      "risky_lines": [12, 18],
+      "primary_risk_region": "L12-L18",
+      "estimated_review_effort": "3-5 minutes",
+      "structural_signals": ["Schema contract added."],
+      "semantic_signals": ["Weak-label benchmark semantics changed."],
+      "code_excerpt": "  12: Manual audit is optional",
+      "diff_excerpt": "@@ -1,1 +1,1 @@"
+    }
+  ],
+  "security_findings": [],
+  "agent_collaboration": {
+    "scope": "pull_request",
+    "decision": "monitor",
+    "consensus_score": 0.25,
+    "confidence": 0.7,
+    "quorum": "5/5",
+    "participants": ["StyleAgent", "StructuralAgent", "SemanticAgent", "DuplicationAgent", "SecurityAgent"],
+    "votes": [],
+    "top_findings": [],
+    "disagreements": [],
+    "next_actions": [],
+    "review_queue": [],
+    "protocol": "parallel_agents -> evidence_normalization -> weighted_consensus -> reviewer_handoff"
+  },
+  "code_snippets": [],
+  "cache": {
+    "file_source_hit": 0,
+    "file_source_miss": 0,
+    "baseline_hit": 0,
+    "baseline_miss": 0,
+    "file_source_entries": 0,
+    "baseline_entries": 0
+  }
+}

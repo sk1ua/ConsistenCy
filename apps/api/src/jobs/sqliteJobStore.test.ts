@@ -1,0 +1,360 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { openDatabase } from "../db/connection";
+import { runMigrations } from "../db/migrations";
+import { SQLiteJobStore } from "./sqliteJobStore";
+
+const tempDirectories: string[] = [];
+
+function createStore(path = ":memory:") {
+  const database = openDatabase(path);
+  runMigrations(database);
+  return { database, store: new SQLiteJobStore(database) };
+}
+
+function acceptJob(store: SQLiteJobStore, deliveryId = "delivery-1") {
+  const acceptance = store.acceptWebhookJob({
+    delivery: { deliveryId, event: "pull_request", action: "opened" },
+    job: {
+      kind: "pull_request",
+      repository: "sk1ua/ConsistenCy",
+      pullRequestNumber: 34,
+      installationId: 123,
+      baseSha: "base123",
+      headSha: "head456",
+      senderLogin: "octocat",
+      action: "opened"
+    }
+  });
+  if (!acceptance.job) throw new Error("Expected a new job");
+  return acceptance.job;
+}
+
+afterEach(() => {
+  for (const directory of tempDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe("SQLiteJobStore", () => {
+  it("atomically deduplicates webhook deliveries", () => {
+    const { database, store } = createStore();
+    try {
+      const job = acceptJob(store);
+      const duplicate = store.acceptWebhookJob({
+        delivery: { deliveryId: "delivery-1", event: "pull_request", action: "opened" },
+        job: {
+          kind: "pull_request",
+          repository: "sk1ua/ConsistenCy",
+          pullRequestNumber: 34,
+          installationId: 123,
+          baseSha: "base123",
+          headSha: "head456"
+        }
+      });
+      expect(duplicate.duplicate).toBe(true);
+      expect(store.list()).toHaveLength(1);
+      expect(store.get(job.id)?.senderLogin).toBe("octocat");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("forces public-read jobs to remain analysis-only in SQLite", () => {
+    const { database, store } = createStore();
+    try {
+      store.recordWebhookDelivery({ deliveryId: "public-read-sqlite", event: "pull_request", status: "enqueued" });
+      const job = store.enqueue({
+        kind: "pull_request",
+        deliveryId: "public-read-sqlite",
+        repository: "espnet/espnet",
+        pullRequestNumber: 6327,
+        accessMode: "public_read",
+        publicationPolicy: "github_comment",
+        baseSha: "base123",
+        headSha: "head456",
+        installationId: 999
+      });
+      expect(job).toMatchObject({ accessMode: "public_read", publicationPolicy: "disabled" });
+      expect(job.installationId).toBeUndefined();
+
+      store.markRunning(job.id);
+      store.persistReportAndEnqueuePublish(job.id, {
+        jobId: job.id,
+        repositoryFullName: job.repository,
+        pullRequestNumber: 6327,
+        baseSha: job.baseSha!,
+        headSha: job.headSha!,
+        summary: "Public read report",
+        score: 100,
+        riskLevel: "low",
+        agentRuns: [],
+        findings: [],
+        createdAt: "2026-08-01T00:00:00.000Z"
+      });
+      expect(store.getPublishOutbox(job.id)).toHaveLength(0);
+      expect(store.get(job.id)?.status).toBe("succeeded");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("persists job state, reports, and agent runs across restarts", () => {
+    const directory = mkdtempSync(join(tmpdir(), "consistency-db-"));
+    tempDirectories.push(directory);
+    const path = join(directory, "consistency.db");
+    const first = createStore(path);
+    const job = acceptJob(first.store, "delivery-persisted");
+    first.store.markRunning(job.id);
+    first.store.saveAgentRun({
+      id: "agent-run-1",
+      jobId: job.id,
+      agentName: "Planner",
+      status: "succeeded",
+      startedAt: "2026-06-11T00:00:00.000Z",
+      finishedAt: "2026-06-11T00:00:01.000Z",
+      inputSummary: "Plan the pull request review",
+      findings: []
+    });
+    first.store.markSucceeded(job.id, {
+      jobId: job.id,
+      repositoryFullName: "sk1ua/ConsistenCy",
+      pullRequestNumber: 34,
+      baseSha: "base123",
+      headSha: "head456",
+      summary: "No confirmed findings",
+      score: 100,
+      riskLevel: "low",
+      agentRuns: [],
+      findings: [],
+      createdAt: "2026-06-11T00:00:02.000Z"
+    });
+    first.database.close();
+
+    const second = createStore(path);
+    try {
+      expect(second.store.get(job.id)).toMatchObject({
+        status: "succeeded",
+        result: { jobId: job.id, score: 100 }
+      });
+      expect(second.store.listAgentRuns(job.id)).toHaveLength(1);
+      expect(second.store.getWebhookDelivery("delivery-persisted")?.status).toBe("enqueued");
+    } finally {
+      second.database.close();
+    }
+  });
+
+  it("requeues stale running jobs", () => {
+    const { database, store } = createStore();
+    try {
+      const job = acceptJob(store, "delivery-stale");
+      store.markRunning(job.id);
+      database.prepare("UPDATE jobs SET started_at = ? WHERE id = ?")
+        .run("2026-06-10T00:00:00.000Z", job.id);
+
+      expect(store.recoverStaleRunningJobs(new Date("2026-06-11T00:00:00.000Z"))).toBe(1);
+      expect(store.get(job.id)).toMatchObject({
+        status: "failed",
+        error: "Job execution timed out while running"
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("fails EVERY running job at boot, including ones the stale cutoff would miss (P1-07)", () => {
+    const { database, store } = createStore();
+    try {
+      const recent = acceptJob(store, "delivery-recent");
+      const old = acceptJob(store, "delivery-old");
+      store.markRunning(recent.id);
+      store.markRunning(old.id);
+      // `recent` started seconds ago — the previous 15-minute-cutoff recovery
+      // left exactly this job stuck in `running` forever after a crash.
+      database.prepare("UPDATE jobs SET started_at = ? WHERE id = ?")
+        .run(new Date().toISOString(), recent.id);
+      database.prepare("UPDATE jobs SET started_at = ? WHERE id = ?")
+        .run("2026-06-10T00:00:00.000Z", old.id);
+
+      expect(store.failInterruptedRunningJobs()).toBe(2);
+      for (const job of [recent, old]) {
+        expect(store.get(job.id)).toMatchObject({
+          status: "failed",
+          error: "Job interrupted by API restart"
+        });
+      }
+      // Non-running jobs are untouched.
+      const queued = acceptJob(store, "delivery-queued");
+      store.failInterruptedRunningJobs();
+      expect(store.get(queued.id)?.status).toBe("queued");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("claims each queued job only once", () => {
+    const { database, store } = createStore();
+    try {
+      const first = acceptJob(store, "delivery-claim-1");
+      const second = acceptJob(store, "delivery-claim-2");
+      expect(store.claimNextQueued()?.id).toBe(first.id);
+      expect(store.claimNextQueued()?.id).toBe(second.id);
+      expect(store.claimNextQueued()).toBeUndefined();
+      expect(store.list().every(job => job.status === "running")).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("persists review jobs and filters by status", () => {
+    const { database, store } = createStore();
+    try {
+      const job1 = acceptJob(store, "delivery-1");
+      const job2 = acceptJob(store, "delivery-2");
+      store.markRunning(job1.id);
+      expect(store.list()).toHaveLength(2);
+      expect(store.list().filter(job => job.status === "running")).toHaveLength(1);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("atomically and idempotently persists report and enqueues publish outbox", () => {
+    const { database, store } = createStore();
+    try {
+      const job = acceptJob(store, "delivery-outbox");
+      store.markRunning(job.id);
+
+      const report = {
+        jobId: job.id,
+        repositoryFullName: "sk1ua/ConsistenCy",
+        pullRequestNumber: 34,
+        baseSha: "base123",
+        headSha: "head456",
+        summary: "One finding",
+        score: 85,
+        riskLevel: "medium" as const,
+        agentRuns: [],
+        findings: [],
+        createdAt: "2026-07-30T10:00:00.000Z"
+      };
+
+      // Call 1: running -> awaiting_publish
+      const updated1 = store.persistReportAndEnqueuePublish(job.id, report);
+      expect(updated1?.status).toBe("awaiting_publish");
+      expect(updated1?.result?.score).toBe(85);
+
+      const outboxRows1 = database.prepare("SELECT * FROM publish_outbox WHERE job_id = ?").all(job.id);
+      expect(outboxRows1).toHaveLength(1);
+      expect(outboxRows1[0]).toMatchObject({ status: "pending", target: "github_comment" });
+
+      // Call 2 (Idempotent Replay): awaiting_publish -> awaiting_publish
+      const updated2 = store.persistReportAndEnqueuePublish(job.id, report);
+      expect(updated2?.status).toBe("awaiting_publish");
+
+      const outboxRows2 = database.prepare("SELECT * FROM publish_outbox WHERE job_id = ?").all(job.id);
+      expect(outboxRows2).toHaveLength(1); // No duplicate outbox row created
+
+      // Call 3 on terminal/publishing state -> complete no-op (no status regression or ZodError on invalid payload)
+      database.prepare("UPDATE jobs SET status = 'publishing' WHERE id = ?").run(job.id);
+      const updated3 = store.persistReportAndEnqueuePublish(job.id, {} as any);
+      expect(updated3?.status).toBe("publishing"); // Preserves 'publishing'
+
+      // Outbox item must pass publishOutboxItemSchema
+      const outboxItems = store.getPublishOutbox(job.id);
+      expect(outboxItems).toHaveLength(1);
+      expect(typeof outboxItems[0]!.id).toBe("string");
+
+      // Invalid status test (queued/failed/cancelled) -> throws
+      const queuedJob = acceptJob(store, "delivery-queued");
+      expect(() => store.persistReportAndEnqueuePublish(queuedJob.id, report)).toThrow(/Invalid job status/);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("returns the exact latest pull request job per requested number with memory-store parity", () => {
+    vi.useFakeTimers();
+    const { database, store } = createStore();
+    try {
+      vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+      const pr1 = store.enqueue({
+        kind: "pull_request",
+        repository: "owner/repo",
+        repositoryId: "repository-1",
+        pullRequestNumber: 1,
+        baseSha: "base-1",
+        headSha: "head-1"
+      });
+      let newestPr2 = "";
+      for (let index = 0; index < 201; index += 1) {
+        vi.setSystemTime(new Date(Date.parse("2026-08-02T00:00:00.000Z") + index * 1_000));
+        newestPr2 = store.enqueue({
+          kind: "pull_request",
+          repository: "owner/repo",
+          repositoryId: "repository-1",
+          pullRequestNumber: 2,
+          baseSha: "base-2",
+          headSha: "head-2"
+        }).id;
+      }
+      store.enqueue({ kind: "pull_request", repository: "other/repo", repositoryId: "repository-2", pullRequestNumber: 1, baseSha: "base-other", headSha: "head-other" });
+      store.enqueue({ kind: "pull_request", repository: "owner/repo", pullRequestNumber: 1, baseSha: "base-legacy", headSha: "head-legacy" });
+
+      expect(store.listLatestPullRequestJobsForRepository("repository-1", [1, 2, 2]).map(job => job.id))
+        .toEqual([newestPr2, pr1.id]);
+      expect(store.listLatestPullRequestJobsForRepository("repository-1", [])).toEqual([]);
+      expect(() => store.listLatestPullRequestJobsForRepository(
+        "repository-1",
+        Array.from({ length: 101 }, (_, index) => index + 1)
+      )).toThrow();
+    } finally {
+      vi.useRealTimers();
+      database.close();
+    }
+  });
+
+  it("rolls back transaction cleanly when outbox insertion fails mid-transaction", () => {
+    const { database, store } = createStore();
+    try {
+      const job = acceptJob(store, "delivery-rollback");
+      store.markRunning(job.id);
+
+      database.exec(`
+        CREATE TRIGGER fail_publish_outbox
+        BEFORE INSERT ON publish_outbox
+        BEGIN
+          SELECT RAISE(ABORT, 'forced outbox failure');
+        END;
+      `);
+
+      const report = {
+        jobId: job.id,
+        repositoryFullName: "sk1ua/ConsistenCy",
+        pullRequestNumber: 34,
+        baseSha: "base123",
+        headSha: "head456",
+        summary: "Rollback test",
+        score: 90,
+        riskLevel: "low" as const,
+        agentRuns: [],
+        findings: [],
+        createdAt: "2026-07-30T10:00:00.000Z"
+      };
+
+      expect(() => store.persistReportAndEnqueuePublish(job.id, report)).toThrow(/forced outbox failure/);
+
+      const reportCount = (database.prepare("SELECT count(*) as count FROM reports WHERE job_id = ?").get(job.id) as { count: number }).count;
+      const outboxCount = (database.prepare("SELECT count(*) as count FROM publish_outbox WHERE job_id = ?").get(job.id) as { count: number }).count;
+      const currentJob = store.get(job.id);
+
+      expect(reportCount).toBe(0);
+      expect(outboxCount).toBe(0);
+      expect(currentJob?.status).toBe("running");
+    } finally {
+      database.close();
+    }
+  });
+});

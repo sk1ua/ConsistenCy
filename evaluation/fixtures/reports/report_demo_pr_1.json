@@ -1,0 +1,55 @@
+{
+  "avg_risk": 0.7,
+  "top_risky_files": [
+    {
+      "file": "src/auth.py",
+      "risk": "high",
+      "score": 0.9
+    },
+    {
+      "file": "src/db.py",
+      "risk": "medium",
+      "score": 0.5
+    },
+    {
+      "file": "src/util.py",
+      "risk": "low",
+      "score": 0.1
+    }
+  ],
+  "retrieval": {
+    "summary": {
+      "files_with_evidence": 2
+    },
+    "packs": [
+      {
+        "file": "src/auth.py",
+        "compression": {
+          "selected_count": 2,
+          "compression_ratio": 0.25
+        },
+        "selected_evidence": [
+          {
+            "candidate": {
+              "file": "src/auth.py"
+            }
+          }
+        ]
+      },
+      {
+        "file": "src/db.py",
+        "compression": {
+          "selected_count": 1,
+          "compression_ratio": 0.4
+        },
+        "selected_evidence": [
+          {
+            "candidate": {
+              "file": "src/db.py"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

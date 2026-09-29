@@ -1,0 +1,56 @@
+% 附录 C：符号表
+\chapter{符号表}\label{app:symbols}
+
+\small
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}p{11.4cm}@{}}
+\toprule
+\textbf{符号} & \textbf{定义（一行）}\\
+\midrule
+\endhead
+$\Nat,\;t$ & 离散时间域；步指标（内核中介循环的串行化序）\\
+$X_t$ & 全局状态 $(R_t,S_t,Q_t,\mathfrak{A}_t,C_t,V_t,K_t,E_t,P_t,B_t)$\\
+$R_t$ & 外部仓库状态（HEAD、对象库、工作树）——经观测摘要部分可观测\\
+$S_t$ & 不可变钉定快照集 $(repo,sha)$\\
+$Q_t$ & 准入队列（优先级 + FIFO 序）\\
+$\mathfrak{A}_t$ & ACB 注册表：AgentId $\to$ 12 状态 LTS 状态\\
+$C_t$ & 能力表：句柄 $\to$ 记录（subject/runId/action/resource/scope/expiresAt/revoked/budgetRef）\\
+$V_t$ & 上下文可见性：内容寻址存储 $H:\text{text}\to\{0,1\}^{256}$ 上的逐 Agent 页表 $\mathrm{PT}_a$\\
+$K_t$ & 共效/Fiber 可用性状态\\
+$E_t$ & 证据库（不可变记录，内容派生指纹）\\
+$P_t$ & 提供商状态（密钥、可用性、有效速率）——隐藏\\
+$B_t$ & 逐能力预算态 $(used_c,reserved_c)$，不变式 $used+reserved\le max$\\
+$\Pi,\;\Pi_{\mathrm{intent}}$ & 受保护系统调用动作集（12 项）；意图子集 $\{\tcode{repo.write},\tcode{github.publish}\}$\\
+$q=(h,a,\alpha,r,s)$ & 系统调用请求：句柄、主语、动作、资源、作用域\\
+$\kappa(r)$ & 资源类别函数（$\chi_5$ 使用）\\
+$\chi_1..\chi_9$ & 九个授权检查（定义~\ref{def:auth}）\\
+$\Auth$ & 授权谓词 $\bigwedge_i\chi_i$（有序首败拒绝）\\
+$\Exec,\;m(q),\;\prec_{\mathrm{ser}}$ & 执行事件；其中介点；内核中介循环串行化序\\
+S1, S2, S3 & 安全不变式（\S\ref{ch:security}、\S\ref{sec:revocation}、命题~\ref{prop:verdictplane}）\\
+$t_r,\;t_{\mathrm{unload}},\;\delta_{\mathrm{prop}}$ & 撤销时刻；Fiber 卸载完成时刻；传播延迟\\
+$W_{\mathrm{stale}}$ & 陈旧门面窗口 $[t_r,t_{\mathrm{unload}}]$\\
+$\Avail,\;\Vis$ & 共效/Fiber 可用性；工作集页可见性\\
+$\States,\;\to_A,\;T_{\mathrm{term}}$ & 12 状态 ACB LTS、其迁移关系、吸收终态集\\
+$S_F,\;\to_F$ & 4 状态 Fiber LTS（Cordis 库语义）\\
+$\varphi,\;\parallel_\varphi$ & 单向调度器$\to$Fiber 耦合；受限异步积\\
+$G=(V,E),\;\sigma$ & 工作流 DAG；确定性拓扑序\\
+$\mathcal{D}_t,\;Y_t,\;\varphi(\text{数据谓词})$ & 数据面坐标；权威坐标；数据面命题（重载 $\varphi$ 由语境区分）\\
+$\mathcal{V}$ & 裁决泛函 $(q,X)\mapsto\Auth(q)$（命题~\ref{prop:verdictplane}）\\
+$\operatorname{validate}$, $\operatorname{compile}$, $\operatorname{dryload}$, $\operatorname{execute}$ & 工作流四段管线函数\\
+$e,\;\mathrm{prov},\;N,\;\canon,\;\fp$ & 证据记录；溯源；store 规范化；规范 JSON；SHA-256 指纹\\
+$A_v$ & 版本钉定的全函数确定性分析器\\
+$\ground$ & 确定性接地分类器 $\mathrm{Finding}^*\to\{\text{accept},\text{downgrade},\text{reject}\}^*$\\
+$\lambda,\;\mu,\;\tau,\;c,\;\rho,\;A_e$ & 到达率、服务率、均值服务、并发上限、利用率、 offered load（erlangs）\\
+$P_{\mathrm{wait}},\;W_q,\;W,\;L,\;L_q$ & Erlang-C 等待概率；排队/总逗留；Little 关系\\
+$c_a^2,\;c_s^2$ & 到达间隔/服务时间的平方变异系数（Kingman）\\
+$R_k,\;W_0$ & 类 $\le k$ 累积利用率；平均残余工作（HOL）——注意与仓库状态 $R_t$ 区分（下标）\\
+$\mathcal{S},\mathcal{A},P,c,g_k,B_k,\gamma,\pi$ & CMDP 组元；折扣；策略\\
+$\Delta(t),\;D(t),\;d(\cdot,\cdot),\;\Delta_v(t)$ & 时间年龄（已拒绝）；版本滞后；DAG 拟距离；版本 AoI\\
+$T_{\mathrm{poll}},\;\delta_{\mathrm{scan}},\;T_{\mathrm{deb}},\;T_{\mathrm{run}}$ & 轮询周期、扫描时长、防抖（驻留时间）、运行时长；$W=\sum$（尾随窗口）\\
+$\theta,\;\lambda_c$ & 变更时刻；泊松变更率（A10）\\
+$\Phi,\;u_t,\;\zeta_t$ & 统一模型演化映射；控制；外生噪声（\PROPOSED）\\
+A1--A10 & 常设假设（A1--A3 中介、A4--A5 撤销、A6--A8 分析器/规范、A7$'$ 单射、A9--A10 新鲜度）\\
+F1--F5 & 运行活性的公平/终止假设（命题~\ref{prop:execsound}）\\
+\bottomrule
+\caption{符号表。重载符号（$R_k$ vs $R_t$、数据谓词 $\varphi$ vs 耦合 $\varphi$）已由上下文与下标消歧；本表为准。}
+\label{tab:symbols}
+\end{longtable}

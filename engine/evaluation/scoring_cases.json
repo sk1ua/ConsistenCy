@@ -1,0 +1,996 @@
+{
+  "dataset_version": "scoring-set/v1",
+  "created_at": "2026-09-27",
+  "base_commit": "0b20fa2",
+  "pin_basis": "样本正文与 file_sha256_at_pin/slice_sha256 记录的是 2026-09-27 重建时刻的工作树内容（基线提交 0b20fa2 + 当日未提交改动）；因此部分样本与 0b20fa2 的提交内容逐字节不同，校验一律以本文件记录的哈希与 pin_basis 为准，不要假定样本等同于 base_commit。",
+  "rule_version_under_test": "risk-rules/v3.1",
+  "frozen_reference_version": "risk-rules/v3.0",
+  "clean_pool_size": 36,
+  "annotation_rule": "human_risk_label 是人工判定：以该单元自身证据的真实可利用性为准，并显式说明理由；canonical 档位只作为 expected_rule_band 记录，不作为人工真值。synthetic_boundary 变更集的人工真值 = 其峰值分数所属 canonical 档（预先声明的标注规则）。",
+  "evidence_boundary": "小样本人工标注集：只证明规则在固定样本上的单调性与阈值行为，不证明真实项目上的模型质量或误报率。",
+  "samples": [
+    {
+      "id": "clean_engine___init__",
+      "path": "engine/__init__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/__init__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "c0808a3ba8d59f19fcfd69d6691fdcca17d3dca08cdb9121236dd5a6976de3ab"
+      }
+    },
+    {
+      "id": "clean_engine___main__",
+      "path": "engine/__main__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/__main__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "2163f104accf15ee12aeafa4472d82f4b7aa2827e2e9c55243c5d4a49e6c9add"
+      }
+    },
+    {
+      "id": "clean_engine_agents___init__",
+      "path": "engine/agents/__init__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/__init__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "111ab9e44cebaf949b25f7bb188e0deeb7b622b66ce202160d4059d20218d52d"
+      }
+    },
+    {
+      "id": "clean_engine_agents_base_agent",
+      "path": "engine/agents/base_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/base_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "c4f45660e9143910767a0441542d0b75d74427a47d66e5f412e790bff20097ab"
+      }
+    },
+    {
+      "id": "clean_engine_agents_duplication_agent",
+      "path": "engine/agents/duplication_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/duplication_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "5fcf0c65b9a8407fd5f8dd1d95a794c923ca6a36801d804839a4aab3088c2d08"
+      }
+    },
+    {
+      "id": "clean_engine_agents_evolution_agent",
+      "path": "engine/agents/evolution_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/evolution_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "23c8ff75457b4d3842fad0a881906d97e5ab182d1bfcee5320c5a18db659c3bd"
+      }
+    },
+    {
+      "id": "clean_engine_agents_parser_agent",
+      "path": "engine/agents/parser_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/parser_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "75ebd74772705867692f323906d483ee2ac2fa55d54dd366e58ef1053b4847fb"
+      }
+    },
+    {
+      "id": "clean_engine_agents_registry",
+      "path": "engine/agents/registry.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/registry.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "cd8b0d6b3991824d543e46c14b6aa6cd6b57719b4eae46918f90e58626022c16"
+      }
+    },
+    {
+      "id": "clean_engine_agents_risk_scoring_agent",
+      "path": "engine/agents/risk_scoring_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/risk_scoring_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "9d4c2f25d1a26053e43faef3e9caa473c51eb870c5a519f759af4100b31fffcd"
+      }
+    },
+    {
+      "id": "clean_engine_agents_security_agent",
+      "path": "engine/agents/security_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/security_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "314acef1505de8a908a1e3d2e06032c0ca08ff3b856ae297d752894f3ef93588"
+      }
+    },
+    {
+      "id": "clean_engine_agents_semantic_agent",
+      "path": "engine/agents/semantic_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/semantic_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "a5c45b0022b4a4598539eeb99e1b00c28b244be3b311a4577c70b3a3a7f85205"
+      }
+    },
+    {
+      "id": "clean_engine_agents_structural_agent",
+      "path": "engine/agents/structural_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/structural_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "942efa5c9a1017dd2851c24b42ac2e126e9c771bee101e709d067e9c7c9d22d0"
+      }
+    },
+    {
+      "id": "clean_engine_agents_style_agent",
+      "path": "engine/agents/style_agent.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/agents/style_agent.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "cc0c19653f43570cf5d2211000edb83fc93b9709876e741e064479d8f6e39067"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers___init__",
+      "path": "engine/analyzers/__init__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/__init__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "4fa3d8541681e2ee6982cca627993e34acf9b9c2a55f965c78a9369d0b978307"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_base_analyzer",
+      "path": "engine/analyzers/base_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/base_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "7567506fcdc27917eb06946210d746a3cf0ba399fa388fc4525bd1b4e30b4db3"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_duplication_analyzer",
+      "path": "engine/analyzers/duplication_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/duplication_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "3185a13b2f8e9d2e5b6808a90a36f7a1440db4953691bc437bdfc44ed4588cee"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_evolution_analyzer",
+      "path": "engine/analyzers/evolution_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/evolution_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "43c1df9ee1dc287d3595cb49243d62e608cab0c343a91baaed697c501cc4555a"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_parser_analyzer",
+      "path": "engine/analyzers/parser_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/parser_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "f6496b5dc64ba91b45468498222015f6da4c3d118004b492a5e09cb0f2b94a44"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_registry",
+      "path": "engine/analyzers/registry.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/registry.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "e3ab598047c9d9003c5387617ef58507e830ec8741e685031ac618381d958690"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_risk_scoring_analyzer",
+      "path": "engine/analyzers/risk_scoring_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/risk_scoring_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "b4de194575d5c911891c49792416be7623adc36a5f23ee12f8d86c4b9d9b36df"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_security_analyzer",
+      "path": "engine/analyzers/security_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/security_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "8027f8edae809718a7a1883138c4e682f5b981ebbfeb66087bbb237c444468e7"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_semantic_analyzer",
+      "path": "engine/analyzers/semantic_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/semantic_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "c1ea1addf9103f2461a9264e0461f485bc4e82adfdde06fd8e9e6eae99fc3f1c"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_structural_analyzer",
+      "path": "engine/analyzers/structural_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/structural_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "c1879072d70faedeac696100bd17a2011e090fbbcfcf42bd8fe98e7fb8087604"
+      }
+    },
+    {
+      "id": "clean_engine_analyzers_style_analyzer",
+      "path": "engine/analyzers/style_analyzer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/analyzers/style_analyzer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "fead6e01e90d0693db5e1480af101b4cc8d99b2fb8ffc60d71a67ab7cab44184"
+      }
+    },
+    {
+      "id": "clean_engine_config",
+      "path": "engine/config.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/config.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "ac2608f52b0a6d569517f39a9f0b0552e11b3489a170ee33fe20dc179709ea52"
+      }
+    },
+    {
+      "id": "clean_engine_knowledge___init__",
+      "path": "engine/knowledge/__init__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/knowledge/__init__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "143ec1272b04808600cb8774b2c0be3d4a76d95bc3e9f13ce6475939e10f0861"
+      }
+    },
+    {
+      "id": "clean_engine_knowledge_bridge",
+      "path": "engine/knowledge/bridge.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/knowledge/bridge.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "73a5f6f8f8ff5905cfa83ee51feed74245f801cc62880de2d22becbf0b4b4b43"
+      }
+    },
+    {
+      "id": "clean_engine_knowledge_context",
+      "path": "engine/knowledge/context.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/knowledge/context.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "aee37215048126b09e38f7ce3caca81e07ffe5ad1b406d60413c84990e3c0f45"
+      }
+    },
+    {
+      "id": "clean_engine_models___init__",
+      "path": "engine/models/__init__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/models/__init__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "47aaaae98314ca44055bc4feb65330b39ab4cdb19b3413746a790d6f9f0b153f"
+      }
+    },
+    {
+      "id": "clean_engine_models_schemas",
+      "path": "engine/models/schemas.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/models/schemas.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "d32724fad7491190759e20dd0417e549a15811fa011621ab8e2ddcc0eb48750c"
+      }
+    },
+    {
+      "id": "clean_engine_parsers___init__",
+      "path": "engine/parsers/__init__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/parsers/__init__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "a85242758d59af5f946cba4b173b161c42080df70741554cee538f631183806b"
+      }
+    },
+    {
+      "id": "clean_engine_parsers_base_parser",
+      "path": "engine/parsers/base_parser.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/parsers/base_parser.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "de5bb70cddb07bbd18a8b0bd72be726beba9b4d2db383660aa4cc2fdab035082"
+      }
+    },
+    {
+      "id": "clean_engine_parsers_python_parser",
+      "path": "engine/parsers/python_parser.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/parsers/python_parser.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "8308635f8a5120e6e5a11a7751bf996d81ee5cddca0f4514b030c0f1630040a9"
+      }
+    },
+    {
+      "id": "clean_engine_parsers_tree_sitter_parser",
+      "path": "engine/parsers/tree_sitter_parser.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/parsers/tree_sitter_parser.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "408a2625deb1018f75f5b3e816f0d5c94c2b5da1882928e08a2282bedd4345b9"
+      }
+    },
+    {
+      "id": "clean_engine_retrieval___init__",
+      "path": "engine/retrieval/__init__.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/retrieval/__init__.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "0df62790bb21add327aaebd5825b7a53cb4131b64f9956a8c94a362947319287"
+      }
+    },
+    {
+      "id": "clean_engine_retrieval_evidence_index",
+      "path": "engine/retrieval/evidence_index.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": "clean",
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "仓库内真实未改动文件（baseline = 自身内容）：漂移信号应为 0，人工判定为低风险。",
+      "provenance": {
+        "source_path": "engine/retrieval/evidence_index.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "acfff6ca42d8f269e8120f3e675c6d51f95005a4017ca92d4acc574a617c1d94"
+      }
+    },
+    {
+      "id": "frag_pip_shell_true",
+      "path": "pip_configuration_slice.py",
+      "kind": "real_fragment",
+      "language": "python",
+      "baseline": "empty",
+      "content": "def open_in_editor(self, options: Values, args: list[str]) -> None:\n    editor = self._determine_editor(options)\n\n    fname = self.configuration.get_file_to_edit()\n    if fname is None:\n        raise PipError(\"Could not determine appropriate file.\")\n    elif '\"' in fname:\n        # This shouldn't happen, unless we see a username like that.\n        # If that happens, we'd appreciate a pull request fixing this.\n        raise PipError(\n            f'Can not open an editor for a file name containing \"\\n{fname}'\n        )\n\n    try:\n        subprocess.check_call(f'{editor} \"{fname}\"', shell=True)\n    except FileNotFoundError as e:\n        if not e.filename:\n            e.filename = editor\n        raise\n",
+      "provenance": {
+        "source_path": "apps/desktop/staged/runtime/python/Lib/site-packages/pip/_internal/commands/configuration.py",
+        "source_lines": [
+          234,
+          252
+        ],
+        "slice_transform": "dedent",
+        "transform": "verbatim line slice, common leading indentation removed so it parses as a module (no other edits)",
+        "file_sha256_at_pin": "e4ce8a337d06de2ea830702c5544963f813dddc492250a09e9ebd4442ef9e04f",
+        "slice_sha256": "18cce05aff2a853079151b01a1c6cd6cca8a8e91b2ade521313c0bbbb898843b"
+      },
+      "expected_rule_band": "high",
+      "human_risk_label": "high",
+      "rationale": "上游 pip 真实代码 configuration.py:234-252 的逐字切片（去除公共缩进以便作为模块解析，无其他改动）：subprocess.check_call(f'{editor} \"{fname}\"', shell=True)。插值的 editor 来自配置/环境，shell=True 使该调用成为真实命令注入面；人工判定 high。切片外的第 5 行 import subprocess 不在样本内。"
+    },
+    {
+      "id": "frag_js_eval_fixture",
+      "path": "fixture_eval.js",
+      "kind": "real_fragment",
+      "language": "javascript",
+      "baseline": "empty",
+      "content": "function dangerous(userInput) {\n    eval(userInput);\n}\n",
+      "provenance": {
+        "source_path": "tests/test_multilang.py",
+        "source_lines": [
+          247,
+          249
+        ],
+        "slice_transform": "verbatim",
+        "transform": "verbatim line slice (no edits)",
+        "file_sha256_at_pin": "29236b76ab05ae2f1896e480aa9eae0c8002df4b1c6bfaac2269d75d2bcd7fb1",
+        "slice_sha256": "a6db572b69697f8f0e5b8706e5dfb4c59860a4b7a0773b1c2ac344f3e8543634"
+      },
+      "expected_rule_band": "high",
+      "human_risk_label": "high",
+      "rationale": "仓库真实 fixture 的 JS 源码片段：function dangerous(userInput) { eval(userInput); }。eval 作用于入参即任意代码执行面；人工判定 high（该片段本身就是被扫描对象，不是字符串里的说明文字）。"
+    },
+    {
+      "id": "frag_github_token_fixture",
+      "path": "fixture_token.ts",
+      "kind": "real_fragment",
+      "language": "typescript",
+      "baseline": "empty",
+      "content": "      const maliciousError = [\n        \"failed at C:\\\\\\\\Users\\\\\\\\alice\\\\\\\\secret.ts\",\n        \"also /home/alice/private/repo/src/index.ts\",\n        \"ghp_123456789012345678901234567890123456\",\n        \"Authorization: Bearer super-secret-token-value\",\n        \"Error: boom\",\n        \"    at run (C:\\\\\\\\Users\\\\\\\\alice\\\\\\\\secret.ts:12:3)\",\n      ].join(\"\\n\");\n",
+      "provenance": {
+        "source_path": "apps/api/src/workflow-runtime/triggers.test.ts",
+        "source_lines": [
+          321,
+          328
+        ],
+        "slice_transform": "verbatim",
+        "transform": "verbatim line slice (no edits)",
+        "file_sha256_at_pin": "f11d93f106e66b622ee8ba392e1aa40675bba772454da57baa9129e6c50e11da",
+        "slice_sha256": "8a3255245dd18a5fa22879869d9e6443c50145453fd44ce8c62d86dcaeaa5149"
+      },
+      "expected_rule_band": "critical",
+      "human_risk_label": "low",
+      "rationale": "apps/api/src/workflow-runtime/triggers.test.ts:321-328 的真实脱敏测试向量，ghp_ 形状是构造出来的假 token（同文件断言它不得出现在日志中）。规则必然判 critical；人工判定 low：不是活凭据。该样本用于量化凭据正则对测试 fixture 的误报。"
+    },
+    {
+      "id": "frag_private_key_fixture",
+      "path": "fixture_private_key.ts",
+      "kind": "real_fragment",
+      "language": "typescript",
+      "baseline": "empty",
+      "content": "const privateKey = \"-----BEGIN PRIVATE KEY-----\\nconfigured\\n-----END PRIVATE KEY-----\";\n",
+      "provenance": {
+        "source_path": "apps/api/src/config/doctor.test.ts",
+        "source_lines": [
+          4,
+          4
+        ],
+        "slice_transform": "verbatim",
+        "transform": "verbatim line slice (no edits)",
+        "file_sha256_at_pin": "8689bac957e7b167c1322bb8784992b6469f4dde76315b9448ce0765b6cee718",
+        "slice_sha256": "07a49224954a20e4da4a164f4440aae9ba28fe83e6be5452cb86f1d040af28e0"
+      },
+      "expected_rule_band": "critical",
+      "human_risk_label": "low",
+      "rationale": "apps/api/src/config/doctor.test.ts:4 的真实测试常量 '-----BEGIN PRIVATE KEY-----\\nconfigured\\n'，内容为占位串。规则必然判 critical；人工判定 low：不是真私钥。计入误报成本。"
+    },
+    {
+      "id": "frag_sql_fstring_fixture",
+      "path": "fixture_sql.py",
+      "kind": "real_fragment",
+      "language": "python",
+      "baseline": "empty",
+      "content": "def q(paths):\n    placeholders = \",\".join(\"?\" for _ in paths)\n    return cursor.execute(f\"SELECT * FROM t WHERE id IN ({placeholders})\", paths)\n",
+      "provenance": {
+        "source_path": "tests/test_security_evolution.py",
+        "source_lines": [
+          77,
+          79
+        ],
+        "slice_transform": "verbatim",
+        "transform": "verbatim line slice (no edits)",
+        "file_sha256_at_pin": "83f173fc0c078ba03c7c143f7ed34794360432af1740181de9eff5484b77dfd0",
+        "slice_sha256": "c7546672762cb2bf2b710429fe0370d52262f9598ae8edb8314a71385480b8f4"
+      },
+      "expected_rule_band": "medium",
+      "human_risk_label": "low",
+      "rationale": "tests/test_security_evolution.py:77-79 的真实 fixture：f\"... IN ({placeholders})\" 只插值自生成的 '?' 占位符，SQL 文本是常量，不可注入。规则按设计仍报 MEDIUM review lead（同文件测试要求保留该告警）；人工判定 low：发现级误报，档位未越级。"
+    },
+    {
+      "id": "derived_crlf_noise",
+      "path": "engine/retrieval/hybrid_retriever.py",
+      "kind": "derived_real",
+      "language": "python",
+      "baseline": "self",
+      "content": "\"\"\"Hybrid deterministic evidence retrieval without embeddings.\"\"\"\r\n\r\nfrom __future__ import annotations\r\n\r\nfrom .models import EvidenceCandidate, EvidenceQuery, EvidenceScore\r\nfrom .reranker import score_candidate\r\n\r\n\r\ndef retrieve_evidence(\r\n    query: EvidenceQuery,\r\n    candidates: list[EvidenceCandidate],\r\n    top_k: int = 8,\r\n) -> list[tuple[EvidenceCandidate, EvidenceScore]]:\r\n    \"\"\"Return stable top-k candidates scored by path/symbol/risk signals.\"\"\"\r\n    scored = [\r\n        (candidate, score_candidate(query, candidate))\r\n        for candidate in candidates\r\n        if candidate.content.strip()\r\n    ]\r\n    scored.sort(key=lambda item: (-item[1].total, item[0].id, item[0].source))\r\n    return scored[: max(top_k, 0)]\r\n",
+      "provenance": {
+        "source_path": "engine/retrieval/hybrid_retriever.py",
+        "source_lines": null,
+        "transform": "LF replaced by CRLF line endings",
+        "base_sha256_at_pin": "b7a7da3eb7c9c590c66ee01fbbd53e24512e15e2f561fbac3ea62b4fd99917a9",
+        "slice_sha256": "e98c449800756613020d68ed8520b38a5408e32b89858377be9fe84b2825180e"
+      },
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "真实文件仅换行符改为 CRLF，无代码改动；人工判定 low。"
+    },
+    {
+      "id": "derived_trailing_ws_noise",
+      "path": "engine/retrieval/hybrid_retriever.py",
+      "kind": "derived_real",
+      "language": "python",
+      "baseline": "self",
+      "content": "\"\"\"Hybrid deterministic evidence retrieval without embeddings.\"\"\"   \n   \nfrom __future__ import annotations   \n   \nfrom .models import EvidenceCandidate, EvidenceQuery, EvidenceScore   \nfrom .reranker import score_candidate   \n   \n   \ndef retrieve_evidence(   \n    query: EvidenceQuery,   \n    candidates: list[EvidenceCandidate],   \n    top_k: int = 8,   \n) -> list[tuple[EvidenceCandidate, EvidenceScore]]:   \n    \"\"\"Return stable top-k candidates scored by path/symbol/risk signals.\"\"\"   \n    scored = [   \n        (candidate, score_candidate(query, candidate))   \n        for candidate in candidates   \n        if candidate.content.strip()   \n    ]   \n    scored.sort(key=lambda item: (-item[1].total, item[0].id, item[0].source))   \n    return scored[: max(top_k, 0)]   \n   ",
+      "provenance": {
+        "source_path": "engine/retrieval/hybrid_retriever.py",
+        "source_lines": null,
+        "transform": "three spaces appended to every line",
+        "base_sha256_at_pin": "b7a7da3eb7c9c590c66ee01fbbd53e24512e15e2f561fbac3ea62b4fd99917a9",
+        "slice_sha256": "379e1e399861793e131cf649a4111519b7a5035907a07b4799b015b815cc2a7d"
+      },
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "真实文件仅每行行尾加三个空格，AST 不变；人工判定 low。"
+    },
+    {
+      "id": "derived_blank_padding_noise",
+      "path": "engine/retrieval/hybrid_retriever.py",
+      "kind": "derived_real",
+      "language": "python",
+      "baseline": "self",
+      "content": "\"\"\"Hybrid deterministic evidence retrieval without embeddings.\"\"\"\n\n\n\nfrom __future__ import annotations\n\n\n\nfrom .models import EvidenceCandidate, EvidenceQuery, EvidenceScore\n\nfrom .reranker import score_candidate\n\n\n\n\n\ndef retrieve_evidence(\n\n    query: EvidenceQuery,\n\n    candidates: list[EvidenceCandidate],\n\n    top_k: int = 8,\n\n) -> list[tuple[EvidenceCandidate, EvidenceScore]]:\n\n    \"\"\"Return stable top-k candidates scored by path/symbol/risk signals.\"\"\"\n\n    scored = [\n\n        (candidate, score_candidate(query, candidate))\n\n        for candidate in candidates\n\n        if candidate.content.strip()\n\n    ]\n\n    scored.sort(key=lambda item: (-item[1].total, item[0].id, item[0].source))\n\n    return scored[: max(top_k, 0)]\n\n",
+      "provenance": {
+        "source_path": "engine/retrieval/hybrid_retriever.py",
+        "source_lines": null,
+        "transform": "one blank line inserted after every line",
+        "base_sha256_at_pin": "b7a7da3eb7c9c590c66ee01fbbd53e24512e15e2f561fbac3ea62b4fd99917a9",
+        "slice_sha256": "c6c2a448933bf74c2747323959bd8641633bdd2003ea74769c511bc88a98c617"
+      },
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "真实文件仅插入空行，AST 不变；人工判定 low。"
+    },
+    {
+      "id": "flagged_indexer",
+      "path": "engine/knowledge/indexer.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": null,
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "engine/knowledge/indexer.py:419 的真实参数化查询（占位符由 '?' 生成）被 SQL 启发式判 MEDIUM；该文件是未改动的真实源码，人工判定 low：发现级误报，档位仍为 Consistent。",
+      "provenance": {
+        "source_path": "engine/knowledge/indexer.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "078aa93db6310f56b064d0d34dcadbbf194c63ad20951dca30c6b34f28839ca1"
+      }
+    },
+    {
+      "id": "flagged_builtins",
+      "path": "engine/workflow/builtins.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": null,
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "engine/workflow/builtins.py 两条真实 MEDIUM：:468 的英文报错文案含单词 'select' 被判 SQL 注入、:595 的语法检查 compile(content, path, 'exec') 被判代码注入。人工判定 low：发现级误报。",
+      "provenance": {
+        "source_path": "engine/workflow/builtins.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "df8944737f0d52cd8ed3fe37427fecf6fd606a9c121d865cf3c6cf8602a57629"
+      }
+    },
+    {
+      "id": "flagged_enums",
+      "path": "engine/models/enums.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": null,
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "engine/models/enums.py 的规则表被重复结构启发式判 dup_fraction≈0.39；人工判定 low：结构化相似（同构 RiskBand 构造）不等于复制粘贴，档位仍为 Consistent。",
+      "provenance": {
+        "source_path": "engine/models/enums.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "d6962814c0e1b2e03e4b9ef635012889d7ae8db610771a55f728e5b5582447dc"
+      }
+    },
+    {
+      "id": "flagged_protocol",
+      "path": "engine/protocol.py",
+      "kind": "real_file",
+      "language": "python",
+      "baseline": "self",
+      "pool": null,
+      "expected_rule_band": "low",
+      "human_risk_label": "low",
+      "rationale": "engine/protocol.py 被重复结构启发式判 dup_fraction≈1.0；人工判定 low：dataclass 样板结构相似，非复制粘贴缺陷，档位仍为 Consistent。",
+      "provenance": {
+        "source_path": "engine/protocol.py",
+        "source_lines": null,
+        "transform": null,
+        "file_sha256_at_pin": "c9ec72a975c0c7208a95753de3a65b046c1b8dace1342208d50f1d9831122500"
+      }
+    }
+  ],
+  "changesets": [
+    {
+      "id": "cs_clean_only",
+      "kind": "real",
+      "human_risk_label": "low",
+      "rationale": "整包未改动真实文件：无任何新增风险，人工判定 low。",
+      "members": [],
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "cs_real_orange_peak_diluted",
+      "kind": "real",
+      "human_risk_label": "high",
+      "rationale": "36 个未改动真实 engine 文件 + 1 个真实 shell=True 片段（单文件档 ORANGE）。真实命令注入面不因同变更集里的清洁文件而消失；人工判定 high。",
+      "members": [
+        "frag_pip_shell_true"
+      ],
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "cs_real_eval_peak_diluted",
+      "kind": "real",
+      "human_risk_label": "high",
+      "rationale": "36 个未改动真实文件 + 1 个真实 eval() 片段（单文件档 ORANGE，风险 0.500）。eval 作用于入参，人工判定 high。",
+      "members": [
+        "frag_js_eval_fixture"
+      ],
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "cs_credential_fixture_diluted",
+      "kind": "real",
+      "human_risk_label": "low",
+      "rationale": "36 个未改动真实文件 + 1 个真实凭据形状 fixture（单文件档 RED）。人工判定 low：fixture 不是活凭据；该变更集量化硬闸对齐后的误报严重度。",
+      "members": [
+        "frag_github_token_fixture"
+      ],
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "cs_private_key_fixture_diluted",
+      "kind": "real",
+      "human_risk_label": "low",
+      "rationale": "同上，替换为真实私钥头 fixture；人工判定 low。",
+      "members": [
+        "frag_private_key_fixture"
+      ],
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "cs_private_key_fixture_small",
+      "kind": "real",
+      "human_risk_label": "low",
+      "rationale": "5 个未改动真实文件 + 私钥头 fixture：验证小样本下闸门行为一致。",
+      "members": [
+        "frag_private_key_fixture"
+      ],
+      "clean_filler": {
+        "count": 5
+      }
+    },
+    {
+      "id": "cs_format_noise_only",
+      "kind": "real",
+      "human_risk_label": "low",
+      "rationale": "3 个真实文件的纯空白噪声派生（CRLF / 行尾空格 / 空行填充），baseline = 原始真实文件。无代码改动，人工判定 low；用于验证格式噪声不会把项目整体判 critical。",
+      "members": [
+        "derived_crlf_noise",
+        "derived_trailing_ws_noise",
+        "derived_blank_padding_noise"
+      ],
+      "clean_filler": {
+        "count": 0
+      }
+    },
+    {
+      "id": "cs_two_real_risky_files",
+      "kind": "real",
+      "human_risk_label": "high",
+      "rationale": "2 个真实高危片段组成的小变更集（shell=True + eval），人工判定 high。",
+      "members": [
+        "frag_pip_shell_true",
+        "frag_js_eval_fixture"
+      ],
+      "clean_filler": {
+        "count": 0
+      }
+    },
+    {
+      "id": "boundary_peak_7499",
+      "kind": "synthetic_boundary",
+      "human_risk_label": "high",
+      "rationale": "边界探针（不是真实文件）：峰值风险 0.7499 落在 canonical ORANGE 档 [0.50, 0.75)，人工判定 high。36 个真实清洁文件提供稀释压力。",
+      "synthetic_peak": 0.7499,
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "boundary_peak_7500",
+      "kind": "synthetic_boundary",
+      "human_risk_label": "critical",
+      "rationale": "边界探针：峰值风险 0.7500 恰好等于 canonical RED 下界，人工判定 critical。",
+      "synthetic_peak": 0.75,
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "boundary_peak_7501",
+      "kind": "synthetic_boundary",
+      "human_risk_label": "critical",
+      "rationale": "边界探针：峰值风险 0.7501 刚过 canonical RED 下界，人工判定 critical。",
+      "synthetic_peak": 0.7501,
+      "clean_filler": {
+        "count": 36
+      }
+    },
+    {
+      "id": "cs_deep_critical_peak",
+      "kind": "synthetic_boundary",
+      "human_risk_label": "critical",
+      "rationale": "回归钉住：峰值 0.95（明显高于旧闸 0.80）+ 36 个真实清洁文件，人工判定 critical；用于确认硬闸行为不退化。",
+      "synthetic_peak": 0.95,
+      "clean_filler": {
+        "count": 36
+      }
+    }
+  ]
+}

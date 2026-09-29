@@ -1,0 +1,36 @@
+# Structural erosion: circular imports, breaking API contracts, schema drift.
+version: 2
+name: architectural-drift
+description: Cross-module coupling, public API breakage, and schema divergence over time.
+
+nodes:
+  - id: structure
+    uses: engine.structural
+    timeoutMs: 60000
+
+  - id: semantics
+    uses: engine.semantic
+    timeoutMs: 60000
+
+  # Both graph passes depend on the structural snapshot but not on each other,
+  # so the executor runs them in the same level.
+  - id: circular-imports
+    uses: graph.dependency
+    needs: [structure]
+    continueOnError: true
+    timeoutMs: 90000
+
+  - id: duplication
+    uses: engine.duplication
+    continueOnError: true
+    timeoutMs: 60000
+
+verifiers:
+  - id: syntax-gate
+    uses: verify.syntax
+    needs: [structure]
+    timeoutMs: 30000
+
+synthesizer:
+  needs: [circular-imports, semantics, duplication, syntax-gate]
+  timeoutMs: 120000

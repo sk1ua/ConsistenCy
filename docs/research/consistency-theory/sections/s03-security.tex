@@ -1,0 +1,150 @@
+% 第 4 章：Capability Security 与 Kernel Authority
+\chapter{Capability Security 与 Kernel Authority}\label{ch:security}
+
+\section{理论谱系}
+
+ConsistenCy 的能力内核站在一条清晰的理论谱系上。Dennis 与 Van Horn 在 1966 年定义了\textbf{能力表（capability list）}：每个保护域持有一张不可伪造的引用表，每次访问都经内核检查~\cite{dennis1966}——这正是 CapabilityBroker 中“能力记录表 + 每次系统调用求值”的直接祖先。Anderson 报告（1972）提出\textbf{引用监视器（reference monitor）}的三条性质：总是被调用（完全中介）、防篡改、小到可以分析与测试~\cite{anderson1972}；Saltzer 与 Schroeder（1975）随后系统化了最小特权、完全中介、失败默认与机制经济性等设计原则~\cite{saltzer1975}。Hardy 的\textbf{混淆代理人}（1988）刻画了环境固有权限的危险：被诱导的特权代理人以委托人权限行事~\cite{hardy1988}——LLM Agent 的提示注入威胁正是该问题的现代实例~\cite{debenedetti2025}。Miller 等人拆除了能力系统的三个经典迷思（能力等价于 ACL、不可约束、不可撤销）~\cite{miller2003}，其博士论文进一步把对象能力模型与并发控制统一为“健壮组合”理论，其中 vat（事件循环受限的消息传递并发）模型与 ConsistenCy 的“事件循环串行化内核 + 响应式 Fiber”结构高度同构~\cite{miller2006}。撤销理论方面，Redell 与 Fabry 证明了\textbf{经中介间接引用}可实现选择性撤销~\cite{redell1974}；ConsistenCy 的内核记录表正是这个“中介点”，只是它选择了更强的语义——永久单调撤销。在现代系统一侧，seL4 给出了带完整函数正确性证明的能力内核~\cite{klein2009}，Capsicum 展示了能力模式可以在既有通用环境中落地~\cite{watson2010}；二者分别是 ConsistenCy “形似而未证”的金标准与实践先例。
+
+\paragraph{映射强度判定。}
+\begin{itemize}[itemsep=0.05em]
+  \item “每次受保护调用重新授权 + 默认拒绝 + 单一权威点”$\rightarrow$ 引用监视器/完全中介：\DIRECT{}（机制类的标准实例化）；
+  \item “不可猜测的 256 位句柄 + 指纹化审计”$\rightarrow$ 对象能力的不可伪造引用：\DIRECT{}（以熵而非硬件标签实现不可伪造性，弱于 CHERI 式架构保证，此处如实降格）；
+  \item “永久单调撤销 + 下一调用同步拒绝”$\rightarrow$ 撤销经中介：\DIRECT{}（Redell--Fabry 问题的退化情形——不需要选择性，因此更易）；
+  \item “LLM 作为不可信提议者”$\rightarrow$ 混淆代理人/POLA：\DIRECT{}（动机层）；CaMeL 式“能力即数据流控制”为平行现代工作（\STRONG，未经评审）~\cite{debenedetti2025}；
+  \item “两阶段预算预留（reserve/commit）”$\rightarrow$ \emph{无}已确立理论（诚实的理论空白；最接近的已发表平行工作是运行时特权策略层）。
+\end{itemize}
+
+\section{授权谓词}\label{sec:auth}
+
+\begin{definition}[授权谓词]\label{def:auth}
+固定主语 $a$（Agent 身份 $(a.id,a.runId)$）、动作 $\alpha$、资源 $r$（带类别 $\kappa(r)$）、请求作用域 $s=(sha?,paths?)$ 与能力句柄 $h$。系统调用请求为四元组 $q=(h,a,\alpha,r,s)$。定义九个检查：
+\begin{align}
+\chi_1&:\; h\in\operatorname{dom}(C_t) & &\text{（句柄存在）}\nonumber\\
+\chi_2&:\; \neg\, C_t(h).revoked & &\text{（未撤销）}\nonumber\\
+\chi_3&:\; C_t(h).expiresAt > t & &\text{（未过期）}\nonumber\\
+\chi_4&:\; C_t(h).subject = a.id & &\text{（主语匹配）}\nonumber\\
+\chi_5&:\; \kappa(r)\in\{\text{evidence},\text{workspace}\} \Rightarrow C_t(h).runId = a.runId & &\text{（运行匹配）}\nonumber\\
+\chi_6&:\; C_t(h).action = \alpha & &\text{（动作匹配）}\nonumber\\
+\chi_7&:\; \operatorname{matchResource}(C_t(h).resource, r) & &\text{（按类别资源匹配）}\nonumber\\
+\chi_8&:\; \operatorname{checkScope}(C_t(h).scope, s) & &\text{（作用域匹配）}\nonumber\\
+\chi_9&:\; \operatorname{Reserve}_{B_t}(C_t(h),\Delta(\alpha))=\mathsf{ok} & &\text{（预算预留）}\nonumber
+\end{align}
+其中 $\chi_7$ 按类别定义（repository 按 id；snapshot 按 repositoryId+sha；evidence/workspace 按 runId；github.publish 可选钉定 pullNumber；llm 按 provider；ast 按 snapshotId）；$\chi_8$ 中“作用域 sha 已设而请求未带同等 sha”是\emph{违规}而非豁免，路径经 glob 匹配。授权谓词为有序首败拒绝链
+\begin{equation}
+\Auth(a,\alpha,r,s,t) \;\equiv\; \bigwedge_{i=1}^{9}\chi_i,
+\end{equation}
+在首个失败处返回 $(0,reason_i)$；允许与拒绝\textbf{都}写入审计日志。
+\end{definition}
+
+受保护动作集合 $\Pi$ 共 12 个注册项，按效果类 $\times$ 分发策略划分：pure/direct $\{\tcode{ast.query}\}$；read/direct 六项；revertible/direct $\{\tcode{workspace.write},\tcode{evidence.write}\}$；commit/direct $\{\tcode{llm.invoke}\}$；commit/intent $\Pi_{\mathrm{intent}}=\{\tcode{repo.write},\tcode{github.publish}\}$——后者永不内联分发，只能经 CommitCoordinator 的幂等意图门。
+
+\begin{assumptioninner}[{完全中介（broker 层）}]\label{ass:a1}
+$\Pi$ 中每个效果都经 \tcode{gateway.invoke} 到达 \tcode{broker.authorise}。\textbf{边界条件}：网关对\emph{未注册}动作是穿透的（网关层无显式未知系统调用拒绝）；中介完备性依赖 broker 的 $\chi_1$ 与发放策略拒绝——发放校验 \tcode{CAPABILITY\_ISSUABLE\_RING}，未注册动作不存在记录，$\chi_1$ 或 $\chi_6$ 必然失败。复合系统仍为默认拒绝，但\textbf{完全中介者是 broker，不是网关}。
+\end{assumptioninner}
+
+\begin{assumptioninner}[{同步串行化中介}]\label{ass:a2}
+$\Auth$ 在系统调用边界内同步求值；\emph{内核中介循环内}的调用被宿主事件循环全序化；$\chi$ 求值与处理器调用之间不会交错撤销写（网关检查内部无 TOCTOU 窗口）。注意该全序声明只覆盖内核中介循环——执行域中的 worker 线程/子进程代码不受其约束。
+\end{assumptioninner}
+
+\begin{assumptioninner}[{无缓存}]\label{ass:a3}
+九个检查在每次调用上重新求值；任何决策不跨系统调用缓存。
+\end{assumptioninner}
+
+TOCTOU（time-of-check to time-of-use）正是 A2/A3 所防御的漏洞类：名字与对象的绑定可能在检查与使用之间改变~\cite{bishop1996}。ConsistenCy 的对策是三重的：逐调用重评（A3）、检查与执行的中介点串行化（A2）、以及作用域钉定\emph{内容}（sha）而非可变名字。
+
+\section{安全不变式 S1}
+
+记 $\Exec(\alpha,r,t)$ 为“请求 $(\alpha,r)$ 的处理器在步 $t$ 产生效果”；每次执行事件携带其中介点 $m(q)$——同一 \tcode{gateway.invoke} 内 $\Auth$ 被求值的串行化步，$m(q)\prec_{\mathrm{ser}}t$。
+
+\begin{proposition}[安全不变式 S1：边界授权]\label{prop:s1}
+在假设 A1--A3 下，
+\begin{equation}
+\mathbf{S1}\;:\quad \Box\bigl(\,\Exec(\alpha,r,t)\;\Rightarrow\;\Auth(q,m(q))=1\,\bigr).
+\end{equation}
+\end{proposition}
+\begin{proof}[证明梗概（构造性）]
+在 $\mathcal{M}_C$ 中，产生 $\Exec$ 事件的唯一迁移规则是“invoke 求值 $\Auth$；为 0 则抛出 \tcode{CapabilityError}（处理器不被调用）；为 1 才进入处理器”（\tcode{syscall/authorize.ts:46--102}；intent 类在授权\emph{之前}即抛出，内联处理器调用数为零）。若 A1--A3 任一失守，该规则就不再是执行事件的唯一生产者，S1 变为空洞。
+\end{proof}
+\tagm{ENGINEERING\_INVARIANT（代码可证调用路径；“不存在旁路”是对全部未来代码的全称否定，属假设）}
+
+\paragraph{失败条件。}
+(i) 绕过 \tcode{invoke} 的效果路径（A1 失守；注意 OS 级文件系统/网络围堵在当前实现中除子进程隔离外\emph{未强制}，S1 对模型外效果不做声明）；(ii) 跨边界缓存（A3）；(iii) 非串行化运行时中的检查--使用间隙（A2 失守时 S1 在中介点语义下仍成立，但更强的“$t_r$ 后无执行”（S2）需要 A2）；(iv) 网关穿透本身不是 S1 的违反（broker 拒绝），但把完备性负担集中在单一组件上。
+
+\section{撤销支配（S2）}\label{sec:revocation}
+
+\begin{assumptioninner}[{标志单调}]\label{ass:a4}
+$C_t$ 的迁移规则永不复位 $revoked$（撤销永久——代码可证，\tcode{broker.ts:195--218}）。
+\end{assumptioninner}
+\begin{assumptioninner}[{原子撤销写}]\label{ass:a5}
+对 $C_{t}(h^\ast).revoked$ 的写相对于中介求值是原子的（事件循环串行化，与 A2 同基础设施）。
+\end{assumptioninner}
+
+\begin{proposition}[撤销支配]\label{prop:revocation}
+设 $\mathrm{revoke}(h^\ast,t_r)$ 为 $revoked:\bot\to\top$ 的迁移（日志+事件总线；无级联；向 Cordis 的传播延迟到微任务队列）。则对每个引用 $h^\ast$ 且 $m(q)\succeq_{\mathrm{ser}}t_r$ 的请求 $q$：
+\begin{equation}
+\Auth(q,m(q))=0,\qquad\text{与 } K_{m(q)},V_{m(q)},P_{m(q)},\mathfrak{A}_{m(q)},Q_{m(q)}\text{ 无关}.
+\end{equation}
+\end{proposition}
+\begin{proof}
+$\Auth=\bigwedge_i\chi_i\le\chi_2$。由 A4，对一切 $t\succeq t_r$ 有 $revoked=\top$，故 $\chi_2=0$，$\Auth=0$（拒绝原因为 \tcode{revoked}，链上第 2 位）。无关性是\emph{语法性}的：$\Auth$ 的自由变元含于 $\{C_t,B_t,h,a,\alpha,r,s,t\}$；$K,V,P,\mathfrak{A},Q$ 不出现在公式中，而 $\Auth$ 是其声明输入的全函数，故排除分量的任何变动不改变裁决。结合 S1：不存在中介点 $\succeq t_r$ 的执行。
+\end{proof}
+\tagm{PROPOSITION（模型级；A4/A5 代码可证）}
+
+\paragraph{意图门 carve-out（如实声明）。}
+对 $\alpha\in\Pi_{\mathrm{intent}}$，授权发生在\textbf{意图接受时}：接受之后的撤销不抹除已接受意图；不可逆外部效果在幂等键去重与下游租约/退避/重试（租约 30\,s、超时 15\,s、最多 3 次尝试）之下继续执行。形式上 $\mathrm{Accept}(key)\Rightarrow\mathrm{Effect}$ 由接受器而非效果时刻的 $\Auth$ 支配。对称地，接受时刻同样“冻结”了 $\chi_3$（过期）与预算预留的判定。因此 S2 的正确读法是\textbf{作用于中介点}；若读作“撤销后不再发生任何来自撤销前已接受意图的不可逆效果”，则该命题对 intent 类为假。
+
+\paragraph{在飞操作。}
+中介点先于 $t_r$ 的操作会完成——撤销不是对在飞副作用的取消，只是对后续授权的取消。这是“Effect $\neq$ Rollback”公理（见第~\ref{ch:sep} 章）在时序上的体现。
+
+\section{撤销时间线}
+
+图~\ref{fig:timeline} 展示撤销支配与异步传播的并存：内核裁决（黑）在 $t_r$ 后立即转为拒绝；Fiber 生命周期（灰）要等到 $t_{\mathrm{unload}}$ 才完成卸载；两者之间的陈旧门面窗口 $W_{\mathrm{stale}}$ 内，任何经陈旧门面发起的系统调用都被拒绝（命题~\ref{prop:revocation}），窗口长度 $\delta_{\mathrm{prop}}\ge 0$ 甚至可以是 $\infty$ 而不影响安全性。
+
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth}
+\begin{tikzpicture}[x=1cm,y=1cm,>={Stealth[length=2mm]},
+  ev/.style={circle,fill=accentred!80,inner sep=1.6pt},
+  ok/.style={font=\scriptsize},
+  ln/.style={thick,inkgray}]
+% axis
+\draw[->,thick] (-0.2,0) -- (13.2,0) node[below right,font=\small] {$t$};
+% kernel verdict lane
+\draw[ln] (0,1.6) -- (13,1.6);
+\node[font=\scriptsize\bfseries,anchor=west] at (0,2.25) {内核裁决 $\Auth(\cdot\mid h^\ast)$};
+\node[ok,anchor=west] at (0.15,1.95) {\textcolor{accentblue!80}{ALLOW（$\chi_1..\chi_9$ 全过）}};
+\node[ev] (tr) at (4.2,1.6) {};
+\node[font=\scriptsize\bfseries,above=2pt of tr] {$t_r$：revoke};
+\node[ok,anchor=west,text=accentred] at (4.45,1.95) {DENY（reason=\tcode{revoked}）$\;\forall\,m(q)\succeq t_r$};
+% fiber lane
+\draw[ln] (0,0.0) -- (13,0.0);
+\node[font=\scriptsize\bfseries,anchor=west] at (0,0.62) {Fiber 生命周期};
+\node[ok,anchor=west] at (0.15,0.32) {ACTIVE（持有门面）};
+\node[ev,fill=inkgray] (tu) at (7.6,0) {};
+\node[font=\scriptsize,above=2pt of tu] {$t_{\mathrm{unload}}$：dispose$\to$UNLOADING$\to$PENDING};
+\node[ok,anchor=west,text=inkgray] at (7.85,0.32) {PENDING（资源回收完成）};
+% stale window
+\begin{scope}[on background layer]
+\fill[softrose] (4.2,-0.35) rectangle (7.6,0.9);
+\end{scope}
+\draw[decorate,decoration={brace,amplitude=4pt},inkgray] (4.2,-0.5) -- (7.6,-0.5) node[midway,below=5pt,font=\scriptsize\itshape] {$W_{\mathrm{stale}}$：陈旧门面窗口，$\delta_{\mathrm{prop}}\ge 0$（可为 $\infty$）};
+\node[font=\tiny\itshape\color{inkgray},align=center] at (5.9,0.14) {经陈旧门面的 syscall\\一律 DENY};
+% denied syscalls marks
+\foreach \x in {4.9,5.7,6.6,7.3} \node[ev,fill=inkgray!60] at (\x,-0.0) {};
+\foreach \x/\y in {4.9/-0.8,5.7/-0.8,6.6/-0.8} \node[font=\tiny,text=accentred] at (\x,\y) {$\times$};
+% accepted intent lane
+\draw[ln,dashed] (0,-1.6) -- (13,-1.6);
+\node[font=\scriptsize\bfseries,anchor=west] at (0,-2.25) {已接受意图（carve-out）};
+\node[ok,anchor=west] at (0.15,-1.9) {intent 于 $t_a<t_r$ 被接受（$\Auth$ 在 $t_a$ 判定）};
+\node[ev,fill=accentblue!80] (ta) at (2.4,-1.6) {};
+\node[font=\scriptsize,above=2pt of ta] {$t_a$};
+\node[ok,anchor=west,text=inkgray] at (6.5,-1.9) {效果经幂等键+租约继续执行（不受 $t_r$ 影响）};
+\end{tikzpicture}
+\end{adjustbox}
+\caption{能力授权时间线与撤销。上：内核裁决在 $t_r$ 后同步转为拒绝（命题~\ref{prop:revocation}）；中：Fiber 卸载异步完成，窗口 $W_{\mathrm{stale}}$ 内的调用全部被拒；下：撤销前已接受的意图不受影响（carve-out）。}
+\label{fig:timeline}
+\end{figure}
+
+\section{与经典理论的差异点}
+
+与 Redell--Fabry 的选择性撤销相比，ConsistenCy 选择了\emph{更简单}的语义：撤销是全局永久的，不需要“看守人（caretaker）”间接层来隔离单个持有者；这换来的是命题~\ref{prop:revocation} 的单调性证明极其简短。与 seL4 相比，ConsistenCy 没有任何机器检查的证明——S1/S2 是“模型级命题 + 源码核验的构造性论据”，其“不存在旁路”部分（A1 的全称否定）恰恰是形式化验证（如 Isabelle/HOL 之于 seL4~\cite{klein2009}）才能消除的假设负担；这构成本报告在第~\ref{ch:limits} 章中声明的核心局限之一，也是后续模型检验扩展（\S\ref{sec:modelcheck}）的动机。

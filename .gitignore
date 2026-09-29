@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Environment and local config
+.env
+config.local.py
+/apps/api/secrets/
+
+# Local scratch and probe files
+probe-*.tmp.mjs
+verify-*.tmp.mjs
+/ui-*.png
+/.codex-screenshot-doc.diff
+/.playwright-cli/
+# Ad-hoc browser QA captures at repo root (session evidence, never repo content)
+/*.png
+/.playwright-mcp/
+
+# Logs and local databases
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+.consistency_baseline.db
+.consistency/
+chroma_db/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+pytest-cache-files-*/
+# Playwright output (retained as scratch protection; no e2e runner in v4)
+test-results/
+playwright-report/
+
+/output/
+
+# Node / TypeScript workspace
+node_modules/
+*.tsbuildinfo
+
+# Evaluation working copies and generated reports
+evaluation/repos/
+evaluation/results/
+evaluation/sampled_prs.json
+evaluation/annotations/pilot_tasks.json
+evaluation/data/
+
+# Generated experiment caches
+data/experiments/
+data/cache/*.json
+
+
+# Private planning notes
+/ARCHITECTURE.md
+/ROADMAP.md
+
+# Others
+.claude
+.specify
+
+# WorkBuddy agent workspace
+.workbuddy/
+.omo/
+
+# ZCode session tool state (plans, local bundles) — never repository content
+.zcode/
+.zcodeignore
+
+# Mimosa security-scanner working artifacts (never repository content)
+.mimosa/
+apps/api/.mimosa/
+
+# Local capture artifacts (never review sources)
+/artifacts/
