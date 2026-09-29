@@ -39,6 +39,21 @@ export interface PiModelDescriptor {
 
 type PiModel = NonNullable<ReturnType<ModelRuntime["getModel"]>>;
 type PiMessage = Awaited<ReturnType<ModelRuntime["complete"]>>;
+type PiContentPart = PiMessage["content"][number];
+/**
+ * The tool-call fields this adapter actually reads.
+ *
+ * Declared from ConsistenCy's own needs rather than Pi's union: Pi 0.87.1 made
+ * the content members a discriminated union that no longer narrows far enough
+ * to reach `arguments` from a plain `find`, and a predicate naming Pi's own
+ * `ToolCall` went stale across the upgrade (TS2677). Naming the consumed shape
+ * keeps the next Pi change a compile error here instead of a runtime crash.
+ */
+interface PiToolCallPart {
+  type: "toolCall";
+  name: string;
+  arguments: Record<string, unknown>;
+}
 type PiStream = ReturnType<ModelRuntime["stream"]>;
 type PiEvent = PiStream extends AsyncIterable<infer Event> ? Event : never;
 
@@ -278,7 +293,10 @@ You must return the answer by calling the ${toolName} tool exactly once. Do not 
         // apart without leaking provider text.
         throw new LlmProviderError(errorText(message), classifyLlmText(message.errorMessage ?? ""));
       }
-      const toolCall = message.content.find((part): part is { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> } => part.type === "toolCall" && part.name === toolName);
+      const toolCall = message.content.find(
+        (part): part is PiContentPart & PiToolCallPart =>
+          part.type === "toolCall" && part.name === toolName
+      );
       const content = toolCall ? JSON.stringify(toolCall.arguments) : textContent(message);
       return { content, tokenUsage: usageFromMessage(message) };
     } catch (error) {

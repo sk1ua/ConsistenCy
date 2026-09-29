@@ -142,7 +142,11 @@ export const envSchema = z.object({
   CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET: optionalSecret,
   DEEPSEEK_API_KEY: optionalSecret,
   DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
-  DEEPSEEK_MODEL: z.string().trim().min(1).default("deepseek-v4-flash"),
+  // Must stay a model id Pi's built-in catalog actually carries: the managed
+  // runtime pins this default and fails closed when the pinned id is absent.
+  // Pi 0.87.1 renamed the old `deepseek-v4-flash` to `deepseek-flash`, which is
+  // why an upgraded runtime would have rejected the previous default.
+  DEEPSEEK_MODEL: z.string().trim().min(1).default("deepseek-flash"),
   OPENAI_API_KEY: optionalSecret,
   OPENAI_MODEL: z.string().trim().min(1).default("gpt-4.1-mini"),
   // H08: user-configured ordered LLM fallback chain (settings UI writes the

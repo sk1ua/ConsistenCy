@@ -334,7 +334,7 @@ export class SettingsStore {
         anthropicModel: effective.ANTHROPIC_MODEL ?? "",
         anthropicApiKeyConfigured: Boolean(effective.ANTHROPIC_API_KEY || effective.LLM_API_KEY),
         deepseekBaseUrl: effective.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
-        deepseekModel: effective.DEEPSEEK_MODEL ?? "deepseek-v4-flash",
+        deepseekModel: effective.DEEPSEEK_MODEL ?? "deepseek-flash",
         openaiModel: effective.OPENAI_MODEL ?? "gpt-4.1-mini",
         deepseekApiKeyConfigured: Boolean(effective.DEEPSEEK_API_KEY || effective.LLM_API_KEY),
         openaiApiKeyConfigured: Boolean(effective.OPENAI_API_KEY || effective.LLM_API_KEY),

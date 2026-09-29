@@ -266,7 +266,7 @@ export const STANDARD_SETTING_DEFINITIONS: SettingDefinition[] = [
     envVar: "DEEPSEEK_MODEL",
     aliases: ["llm.deepseekModel", "DEEPSEEK_MODEL"],
     type: "string",
-    defaultValue: "deepseek-v4-flash",
+    defaultValue: "deepseek-flash",
     isSecret: false,
     restartRequired: true,
     category: "llm",

@@ -117,7 +117,7 @@ describe("loadEnv", () => {
   it("selects DeepSeek or OpenAI when configured and leaves LLM_PROVIDER undefined otherwise without mock fallback", () => {
     expect(loadEnv({}).LLM_PROVIDER).toBeUndefined();
     expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).LLM_PROVIDER).toBe("deepseek");
-    expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).DEEPSEEK_MODEL).toBe("deepseek-v4-flash");
+    expect(loadEnv({ DEEPSEEK_API_KEY: "configured" }).DEEPSEEK_MODEL).toBe("deepseek-flash");
     expect(loadEnv({ OPENAI_API_KEY: "configured" }).LLM_PROVIDER).toBe("openai");
     // Provider ids are free-form Pi catalog ids; credential validation happens
     // at provider creation (fail-closed typed error), not in the env schema.

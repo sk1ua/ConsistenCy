@@ -106,18 +106,21 @@ describe("PiRuntimeProvider", () => {
         authPath,
         provider: "deepseek",
         apiKey: "managed-test-key-0001",
-        model: "deepseek-v4-flash"
+        // Pi 0.87.1 renamed this catalog id from `deepseek-v4-flash`; it is the
+        // same DeepSeek V4.1 Flash model, and a stale id makes createManaged
+        // fail closed because the pinned model is absent from the catalog.
+        model: "deepseek-flash"
       });
       await provider.ready();
 
       expect(provider.isConfigured).toBe(true);
       expect(provider.name).toBe("deepseek");
-      expect(provider.model).toBe("deepseek/deepseek-v4-flash");
+      expect(provider.model).toBe("deepseek/deepseek-flash");
 
       const descriptor = await provider.descriptor();
       expect(descriptor).toMatchObject({
         provider: "deepseek",
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
         configured: true
       });
 

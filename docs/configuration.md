@@ -14,7 +14,7 @@ ConsistenCy v4 is a **real-data, real-LLM runtime**. It requires a real, configu
 
 | Provider | Supported Models | Required Environment / Setting | Default Model |
 |---|---|---|---|
-| **DeepSeek** | `deepseek-v4-flash`, `deepseek-v4-pro`, etc. | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
+| **DeepSeek** | `deepseek-flash`, `deepseek-v4-pro`, etc. | `DEEPSEEK_API_KEY` | `deepseek-flash` |
 | **OpenAI** | `gpt-4.1-mini`, `gpt-5`, etc. | `OPENAI_API_KEY` | `gpt-4.1-mini` |
 | **Anthropic** | `claude-sonnet-4-5`, `claude-opus-4-5`, etc. | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
 | **Pi catalog (any listed id)** | Catalog from `GET /llm/catalog` | `LLM_PROVIDER` + `LLM_API_KEY` (optional `LLM_MODEL`) | Provider default |
@@ -95,7 +95,7 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `CONSISTENCY_WORKSPACE_ROOT` | `.consistency/workspaces` | Root directory for ephemeral review checkouts |
 | `CONSISTENCY_API_TOKEN` | *empty* | Bearer token required for API authentication in production (`apps/api/src/http.ts:613` writes the CORS/auth headers) |
 | `DEEPSEEK_API_KEY` | *empty* | API key for DeepSeek provider |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek model identifier |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | DeepSeek model identifier (Pi catalog id; `deepseek-flash` is DeepSeek V4.1 Flash) |
 | `OPENAI_API_KEY` | *empty* | API key for OpenAI provider |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model identifier |
 | `ANTHROPIC_API_KEY` | *empty* | API key for the Anthropic provider |
