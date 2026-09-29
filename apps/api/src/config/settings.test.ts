@@ -69,6 +69,19 @@ describe("SettingsStore", () => {
     expect(JSON.stringify(snapshot)).not.toContain("xiaomi-test-secret");
   });
 
+  it("does not credit LLM_API_KEY to other providers when LLM_PROVIDER is set", () => {
+    // LLM_PROVIDER=deepseek + LLM_API_KEY: only deepseekApiKeyConfigured should
+    // be true; openai and anthropic must stay false.
+    const settings = store();
+    const snapshot = settings.update({
+      llm: { provider: "deepseek", llmApiKey: "shared-key" }
+    });
+    expect(snapshot.llm.deepseekApiKeyConfigured).toBe(true);
+    expect(snapshot.llm.openaiApiKeyConfigured).toBe(false);
+    expect(snapshot.llm.anthropicApiKeyConfigured).toBe(false);
+    expect(snapshot.llm.llmApiKeyConfigured).toBe(true);
+  });
+
   it("lets environment variables override saved values without exposing secrets", () => {
     const settings = store();
     settings.update({ llm: { provider: "deepseek", deepseekApiKey: "saved-key" } });

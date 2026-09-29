@@ -4,8 +4,44 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { resolveEffectiveSettings, type EffectiveSettingsResult } from "./effectiveSettings";
 
+/**
+ * Canonical provider id validation: 2–64 characters, starts with a letter or
+ * digit, then letters/digits/dots/hyphens only, case-insensitive.
+ * Used by publicSettingsSchema, settingsPatchSchema, and cli.ts to guarantee a
+ * single source of truth for the format contract.
+ */
+export const PROVIDER_ID_REGEX = /^[a-z0-9][a-z0-9.-]{1,63}$/i;
+
+/**
+ * Returns true when `key` carries an API credential for `provider`.
+ * Single canonical function shared between SettingsStore.snapshot() and
+ * diagnoseConfiguration() so the two can never drift apart.
+ *
+ * Rules:
+ *  - deepseek/openai/anthropic: accept their own dedicated env key OR
+ *    LLM_API_KEY when LLM_PROVIDER is set to that same provider.
+ *  - Any other provider: LLM_API_KEY is the only accepted credential.
+ */
+export function isProviderCredentialConfigured(
+  provider: string,
+  env: {
+    LLM_API_KEY?: string;
+    DEEPSEEK_API_KEY?: string;
+    OPENAI_API_KEY?: string;
+    ANTHROPIC_API_KEY?: string;
+  }
+): boolean {
+  const llmKey = Boolean(env.LLM_API_KEY);
+  switch (provider) {
+    case "deepseek": return Boolean(env.DEEPSEEK_API_KEY) || llmKey;
+    case "openai": return Boolean(env.OPENAI_API_KEY) || llmKey;
+    case "anthropic": return Boolean(env.ANTHROPIC_API_KEY) || llmKey;
+    default: return llmKey;
+  }
+}
+
 const publicSettingsSchema = z.object({
-  LLM_PROVIDER: z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).optional(),
+  LLM_PROVIDER: z.string().trim().min(2).max(64).regex(PROVIDER_ID_REGEX).optional(),
   LLM_MODEL: z.string().trim().min(1).optional(),
   ANTHROPIC_MODEL: z.string().trim().min(1).optional(),
   DEEPSEEK_BASE_URL: z.string().url().optional(),
@@ -37,7 +73,7 @@ const secretSettingsSchema = z.object({
 export const settingsPatchSchema = z.object({
   llm: z.object({
     /** Any provider id from the bundled Pi catalog; validated at runtime. */
-    provider: z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).nullable().optional(),
+    provider: z.string().trim().min(2).max(64).regex(PROVIDER_ID_REGEX).nullable().optional(),
     llmApiKey: z.string().trim().min(1).nullable().optional(),
     llmModel: z.string().trim().min(1).nullable().optional(),
     anthropicModel: z.string().trim().min(1).nullable().optional(),
@@ -321,23 +357,19 @@ export class SettingsStore {
       : effective.LLM_PROVIDER
         ? effective.LLM_PROVIDER.toLowerCase()
         : effective.DEEPSEEK_API_KEY ? "deepseek" : effective.OPENAI_API_KEY ? "openai" : effective.ANTHROPIC_API_KEY ? "anthropic" : "none";
-    const providerKeyConfigured =
-      provider === "deepseek" ? Boolean(effective.DEEPSEEK_API_KEY || effective.LLM_API_KEY)
-      : provider === "openai" ? Boolean(effective.OPENAI_API_KEY || effective.LLM_API_KEY)
-      : provider === "anthropic" ? Boolean(effective.ANTHROPIC_API_KEY || effective.LLM_API_KEY)
-      : Boolean(effective.LLM_API_KEY);
+    const providerKeyConfigured = isProviderCredentialConfigured(provider, effective);
     return {
       llm: {
         provider,
         llmApiKeyConfigured: providerKeyConfigured,
         llmModel: effective.LLM_MODEL ?? "",
         anthropicModel: effective.ANTHROPIC_MODEL ?? "",
-        anthropicApiKeyConfigured: Boolean(effective.ANTHROPIC_API_KEY || (provider === "anthropic" && effective.LLM_API_KEY)),
+        anthropicApiKeyConfigured: isProviderCredentialConfigured("anthropic", { ...effective, LLM_API_KEY: provider === "anthropic" ? effective.LLM_API_KEY : undefined }),
         deepseekBaseUrl: effective.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
         deepseekModel: effective.DEEPSEEK_MODEL ?? "deepseek-flash",
         openaiModel: effective.OPENAI_MODEL ?? "gpt-4.1-mini",
-        deepseekApiKeyConfigured: Boolean(effective.DEEPSEEK_API_KEY || (provider === "deepseek" && effective.LLM_API_KEY)),
-        openaiApiKeyConfigured: Boolean(effective.OPENAI_API_KEY || (provider === "openai" && effective.LLM_API_KEY)),
+        deepseekApiKeyConfigured: isProviderCredentialConfigured("deepseek", { ...effective, LLM_API_KEY: provider === "deepseek" ? effective.LLM_API_KEY : undefined }),
+        openaiApiKeyConfigured: isProviderCredentialConfigured("openai", { ...effective, LLM_API_KEY: provider === "openai" ? effective.LLM_API_KEY : undefined }),
         fallbackChain: effective.LLM_FALLBACK_CHAIN ?? ""
       },
       github: {

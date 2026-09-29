@@ -3,7 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { diagnoseConfiguration } from "./doctor";
 import { loadNearestEnvFile } from "./runtime";
-import { SettingsStore, type SettingsPatch } from "./settings";
+import { SettingsStore, type SettingsPatch, PROVIDER_ID_REGEX } from "./settings";
 
 type ConfigAlias = {
   secret: boolean;
@@ -12,7 +12,7 @@ type ConfigAlias = {
 
 function providerIdPatch(value: string | null): SettingsPatch {
   const provider = value?.trim().toLowerCase() ?? null;
-  if (provider !== null && !/^[a-z0-9][a-z0-9.-]{1,63}$/.test(provider)) {
+  if (provider !== null && !PROVIDER_ID_REGEX.test(provider)) {
     throw new Error("Provider must be a valid Pi catalog id (2–64 letters, digits, dots, or hyphens)");
   }
   return { llm: { provider } };
@@ -105,7 +105,7 @@ async function setup(store: SettingsStore): Promise<void> {
   stdout.write("\nConsistenCy setup\nPress Enter to keep the value shown in brackets.\n\n");
   const providerInput = await rl.question(`LLM provider id from Pi catalog [${current.llm.provider}]: `);
   const providerValue = (providerInput.trim() || current.llm.provider).toLowerCase();
-  const provider = /^[a-z0-9][a-z0-9.-]{1,63}$/.test(providerValue) ? providerValue : undefined;
+  const provider = PROVIDER_ID_REGEX.test(providerValue) ? providerValue : undefined;
   const patch: SettingsPatch = { llm: { provider }, github: {}, runtime: {} };
   if (provider === "deepseek") {
     patch.llm!.deepseekBaseUrl = (await rl.question(`DeepSeek base URL [${current.llm.deepseekBaseUrl}]: `)).trim() || current.llm.deepseekBaseUrl;

@@ -32,6 +32,25 @@ describe("diagnoseConfiguration", () => {
     expect(result.checks.find(check => check.id === "llm")?.message).toContain("xiaomi credentials are configured");
   });
 
+  it("accepts a known provider that authenticates via LLM_API_KEY instead of its dedicated key", async () => {
+    const result = await diagnoseConfiguration({
+      LLM_PROVIDER: "deepseek",
+      LLM_API_KEY: "configured"
+    });
+    expect(result.checks.find(check => check.id === "llm")?.status).toBe("pass");
+  });
+
+  it("rejects a known provider when only a different provider's dedicated key is present", async () => {
+    // LLM_PROVIDER=openai but only DEEPSEEK_API_KEY exists — neither the
+    // dedicated key nor LLM_API_KEY is present, so the check must fail.
+    const result = await diagnoseConfiguration({
+      LLM_PROVIDER: "openai",
+      DEEPSEEK_API_KEY: "configured"
+    });
+    expect(result.ok).toBe(false);
+    expect(result.checks.find(check => check.id === "llm")?.status).toBe("fail");
+  });
+
   it("reports incomplete provider configuration as a fail on the llm check", async () => {
     const result = await diagnoseConfiguration({ LLM_PROVIDER: "deepseek" });
     expect(result.ok).toBe(false);
