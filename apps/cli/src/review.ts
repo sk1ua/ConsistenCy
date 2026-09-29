@@ -146,16 +146,21 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
   const artifacts = cliArtifactRoot(config, root);
   const workspaceRoot = join(artifacts, "workspaces");
 
+  // Held in a local so it can be shut down on every exit path: the engine is a
+  // child process, and leaving it idle keeps this one-shot host alive forever
+  // after the report has already been printed.
+  const analyzer = new DeterministicAnalyzer(
+    resolvePythonPath(config, root),
+    config.CONSISTENCY_ENGINE_MODULE,
+    [],
+    resolveEngineRoot(config, root)
+  );
+
   const runtime = createReviewRuntime({
     contextBuilder: createContextBuilder({ github: {} as never }),
     provider,
     jobStore,
-    deterministicAnalyzer: new DeterministicAnalyzer(
-      resolvePythonPath(config, root),
-      config.CONSISTENCY_ENGINE_MODULE,
-      [],
-      resolveEngineRoot(config, root)
-    ),
+    deterministicAnalyzer: analyzer,
     reportLanguage: options.reportLanguage ?? "zh-CN",
     workspaceRoot
   });
@@ -179,6 +184,15 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     action: "cli_review"
   });
 
+  // The store's report guard only accepts `running` or `awaiting_publish`
+  // (`apps/api/src/jobQueue.ts:271`), and the daemon reaches `running` through
+  // the worker's claim (`apps/api/src/jobs/worker.ts` -> `claimNextQueued()`).
+  // This one-shot host has no worker, so it transitions the job itself;
+  // without this the review runs to completion and then throws on persistence.
+  if (jobStore.markRunning(job.id) === undefined) {
+    throw new ReviewSetupError(`无法把审查任务置为 running（job ${job.id}）`);
+  }
+
   const startedAt = Date.now();
   if (io.progress) {
     const scope = range ? `${options.baseRef}..${options.headRef}` : "工作区改动";
@@ -188,31 +202,37 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
   // Field mapping copies `workflowInput()` (`apps/api/src/jobs/worker.ts:25-51`)
   // rather than spreading the job: the store calls the field `repository`, the
   // workflow calls it `repositoryFullName`, and spreading would silently pass
-  // neither.
-  const result = await runtime.run({
-    jobId: job.id,
-    repositoryFullName,
-    repoPath,
-    accessMode: "local_git",
-    baseSha,
-    headSha,
-    publicationPolicy: "disabled"
-  });
+  // neither. The engine must be torn down on every path, including a throwing
+  // review: it is a live child process, not a pooled resource.
+  try {
+    const result = await runtime.run({
+      jobId: job.id,
+      repositoryFullName,
+      repoPath,
+      accessMode: "local_git",
+      baseSha,
+      headSha,
+      publicationPolicy: "disabled"
+    });
 
-  if (io.progress) {
-    const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-    io.stderr(`${io.palette.dim(`完成 · ${seconds}s · ${result.report.llmProvider ?? "?"}/${result.report.llmModel ?? "?"}`)}\n`);
+    if (io.progress) {
+      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      io.stderr(`${io.palette.dim(`完成 · ${seconds}s · ${result.report.llmProvider ?? "?"}/${result.report.llmModel ?? "?"}`)}\n`);
+    }
+
+    if (options.json) {
+      io.stdout(`${JSON.stringify(result.report, null, 2)}\n`);
+    } else {
+      io.stdout(`${renderReport(result.report, {
+        palette: io.palette,
+        verbose: options.verbose,
+        limit: options.limit
+      })}\n`);
+    }
+
+    return reportExitCode(result.report, result, threshold);
+  } finally {
+    // Engine teardown must never mask the review's own outcome.
+    await analyzer.shutdown().catch(() => undefined);
   }
-
-  if (options.json) {
-    io.stdout(`${JSON.stringify(result.report, null, 2)}\n`);
-  } else {
-    io.stdout(`${renderReport(result.report, {
-      palette: io.palette,
-      verbose: options.verbose,
-      limit: options.limit
-    })}\n`);
-  }
-
-  return reportExitCode(result.report, result, threshold);
 }

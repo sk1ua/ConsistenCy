@@ -7,9 +7,25 @@ import {
   exitCodeFor,
   renderReport
 } from "./report";
-import { plainPalette } from "./terminal";
+import { plainPalette, plural } from "./terminal";
 
 const OPTIONS = { palette: plainPalette } as const;
+
+describe("plural — Chinese units must not take an English plural", () => {
+  it("keeps the unit unchanged for any count", () => {
+    // Regression: the default plural form used to append an `s`, so a degraded
+    // report rendered `0 个文件s` and `6 个专项审查 agents`.
+    expect(plural(0, "个文件")).toBe("0 个文件");
+    expect(plural(1, "个文件")).toBe("1 个文件");
+    expect(plural(999, "项约束")).toBe("999 项约束");
+    expect(plural(6, "个专项审查 agent")).toBe("6 个专项审查 agent");
+  });
+
+  it("still honours an explicit plural form when a unit needs one", () => {
+    expect(plural(1, "file", "files")).toBe("1 file");
+    expect(plural(2, "file", "files")).toBe("2 files");
+  });
+});
 
 function finding(overrides: Partial<ReviewFinding> = {}): ReviewFinding {
   return {

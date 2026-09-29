@@ -66,8 +66,15 @@ export function paletteFor(useColor: boolean): Palette {
   return useColor ? ansiPalette : plainPalette;
 }
 
-/** `1 file`, `3 files` — avoids `1 files` in machine-generated prose. */
-export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+/**
+ * `3 个文件` — a count plus its unit.
+ *
+ * The plural form defaults to the singular on purpose: every caller passes a
+ * Chinese unit, and Chinese does not inflect nouns, so appending an English
+ * `s` produced strings like `0 个文件s` and `6 个专项审查 agents`. Pass an
+ * explicit `pluralForm` only for a unit that genuinely needs one.
+ */
+export function plural(count: number, singular: string, pluralForm = singular): string {
   return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
