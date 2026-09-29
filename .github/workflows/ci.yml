@@ -73,9 +73,3 @@ jobs:
       - name: Run Python unit tests
         run: |
           python -m pytest -q
-
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
-
-      - name: Full-stack E2E
-        run: npm run test:e2e

@@ -39,7 +39,7 @@ import { paletteFor, shouldUseColor, type Palette } from "./terminal";
 export type CommandIO = {
   stdout: (text: string) => void;
   stderr: (text: string) => void;
-  /** Set false by `--quiet`, and by a non-TTY stderr. */
+  /** False when stderr is not a TTY, so piped runs stay quiet. */
   progress: boolean;
   palette: Palette;
   environment?: NodeJS.ProcessEnv;

@@ -38,8 +38,7 @@ export const REVIEW_USAGE = `consistency review — 在本地仓库上运行一�
   consistency review [选项]
 
 范围
-  --repo <路径>        要审查的仓库（默认：当前目录）
-  --working-tree       只审查未提交的工作区改动（默认行为）
+  --repo <路径>        要审查的仓库（默认：当前目录；不传区间参数即审查未提交的工作区改动）
   --base <ref>         提交区间的起点，必须与 --head 一起使用
   --head <ref>         提交区间的终点（使用 --base 时默认 HEAD）
 
@@ -126,7 +125,6 @@ export function parseReviewOptions(argv: readonly string[]): ReviewOptions {
       case "--all": options.limit = Number.POSITIVE_INFINITY; break;
       case "--no-color": options.color = false; break;
       case "--color": options.color = true; break;
-      case "--working-tree": break;
       case "--help":
       case "-h":
         throw new UsageError("");

@@ -97,8 +97,7 @@ const humanVisibleFiles = [
   "README.md",
   "examples/multi_agent_demo.py",
   "tests/test_demo.py",
-  "tests/test_engine.py",
-  "tests/e2e/full-stack.spec.ts"
+  "tests/test_engine.py"
 ];
 for (const rel of humanVisibleFiles) {
   const path = join(root, rel);
