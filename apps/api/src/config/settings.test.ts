@@ -43,9 +43,10 @@ describe("SettingsStore", () => {
 
   it("persists generic Pi provider credentials and model without exposing the key", () => {
     const settings = store();
-    const snapshot = settings.update({
+    settings.update({
       llm: { provider: "xiaomi", llmModel: "mimo-v2.6-flash", llmApiKey: "xiaomi-test-secret" }
     });
+    const snapshot = settings.snapshot({});
 
     const publicText = readFileSync(settings.publicPath, "utf8");
     const encryptedText = readFileSync(settings.secretsPath, "utf8");
@@ -73,9 +74,10 @@ describe("SettingsStore", () => {
     // LLM_PROVIDER=deepseek + LLM_API_KEY: only deepseekApiKeyConfigured should
     // be true; openai and anthropic must stay false.
     const settings = store();
-    const snapshot = settings.update({
+    settings.update({
       llm: { provider: "deepseek", llmApiKey: "shared-key" }
     });
+    const snapshot = settings.snapshot({});
     expect(snapshot.llm.deepseekApiKeyConfigured).toBe(true);
     expect(snapshot.llm.openaiApiKeyConfigured).toBe(false);
     expect(snapshot.llm.anthropicApiKeyConfigured).toBe(false);
