@@ -1,177 +1,250 @@
 # ConsistenCy
 
-**ConsistenCy is a repository-native Agent Harness for evidence-grounded code review.**
+**一个终端优先的、证据落地的代码审查 harness。**
 
-Instead of submitting raw diffs to an LLM and hoping for useful prose, ConsistenCy combines deterministic AST and security analyzers, capability-gated agent scheduling, structured Context VM paging, and real LLM reasoning into reproducible, evidence-backed Review Reports.
+ConsistenCy 不把原始 diff 直接丢给模型然后期待一段有用的散文。它先用 Python 确定性引擎把可核验的事实（AST 结构、安全模式、重复度、演化信号）抽成证据，再让六个专项审查 agent 在能力门控下带着这些证据研判，最后由 Supervisor 综合成一份可复现、逐条挂证据的审查报告。
+
+入口只有一个：`consistency review`。
 
 [![CI](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml/badge.svg)](https://github.com/sk1ua/ConsistenCy/actions/workflows/ci.yml)
 
 ---
 
-## What Problem Does ConsistenCy Solve?
+## 它解决什么问题
 
-Traditional LLM-based code review suffers from three structural flaws:
-1. **Hallucination & Lack of Evidence**: Models produce freeform text with no verifiable grounding in AST structure, symbol definitions, or security invariants.
-2. **Uncontrolled Agent Execution**: Multi-agent review systems often run arbitrary tools and shell commands without capability authorization or execution domain isolation.
-3. **Context Pollution**: Monolithic prompts concatenate entire diffs and files, blowing token budgets and degrading model reasoning.
+直接让 LLM 看 diff，有三种结构性缺陷：
 
-ConsistenCy solves this by dividing review into three collaborating subsystems:
+1. **没有证据锚点**：模型给出自由文本，无法回溯到 AST 结构、符号定义或安全不变量，人也无法核对。
+2. **agent 执行不受控**：多 agent 审查系统常常让模型随意跑工具和 shell，没有能力授权，也没有执行域隔离。
+3. **上下文污染**：把整份 diff 和整个文件塞进一个 prompt，撞爆 token 预算，同时让模型推理变差。
 
-$$\text{ConsistenCy v3} = \text{Kernel} + \text{Cordis Harness} + \text{Evidence Engine}$$
+ConsistenCy 的应对是把审查拆成两件事，并让它们各司其职：
 
-- **Repository-Aware Execution**: The Repository is the root object, linking local Git checkouts, branches, and diffs with remote GitHub Pull Request context.
-- **Capability-Secured Runtime**: The Kernel defaults to deny. Every agent operation (file read, AST query, LLM call, GitHub publish) requires an unrevoked capability handle mediated by the `SyscallGateway`.
-- **Semantic Context VM**: Immutable `ContextPage`s (SHA-256 hashed), Copy-On-Write (COW) page tables for subagents, and token-budgeted `WorkingSet` projections.
-- **Deterministic Evidence**: Grounding facts are extracted by Tree-sitter AST queries, secret detectors, and deterministic analyzers before LLM synthesis occurs.
+- **确定性引擎拿证据** —— `engine/` 是纯 Python，只把源码当数据读，**从不执行仓库代码**；它输出的每条事实都带 provenance（analyzer 名与版本）。
+- **模型做判断** —— 六个专项 agent（安全、正确性、结构、风格、测试、演化）在 `@consistency/kernel` 的能力门控下调度，每个 finding 必须挂 `evidenceIds`。
+
+还有一条贯穿全局的渲染纪律：**没能检查到什么，比检查到了什么更显眼**。一次降级运行的「无发现」，绝不能看起来像一次完整运行的「无发现」。
 
 ---
 
-## Architecture at a Glance
+## 架构一览
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            React / Vite Web UI                              │
-│         (Repository Workspace, Overview, Diff, Evidence, Runtime)          │
+│                        终端入口  apps/cli (@consistency/cli)                 │
+│   consistency review  ·  参数解析  ·  终端渲染  ·  退出码契约（0 / 1 / 2）    │
 └──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │ HTTP / SSE / Same-Origin /api
+                                       │ 复用同一套审查运行时（不重实现）
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           apps/api (Host Process)                           │
-│        (HTTP Router, SQLite Store, Workload Runtime, Electron Host)         │
+│                        apps/api (@consistency/api)                          │
+│        审查运行时装配 · SQLite 存储 · worker 与队列 · GitHub 集成            │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
      ┌─────────────────────────────────┼─────────────────────────────────┐
-     │ Kernel Tier (@consistency/kernel)                                 │
+     │ Kernel 层 (@consistency/kernel)                                   │
      ▼                                 ▼                                 ▼
 ┌──────────────┐             ┌──────────────────┐             ┌─────────────────────┐
-│ Run &        │             │ SyscallGateway & │             │ Context VM &        │
+│ Run 与       │             │ SyscallGateway   │             │ Context VM 与       │
 │ Scheduler    │             │ CapabilityBroker │             │ Evidence Store      │
 └──────┬───────┘             └────────┬─────────┘             └─────────────────────┘
        │                              │
        ▼                              ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                 Harness Tier (@consistency/harness-core)                     │
-│         (Cordis Fiber Lifecycle, CapabilityLifecycleAdapter, Bridges)       │
+│              Harness 层 (@consistency/harness-core)                         │
+│              Cordis fiber 生命周期 · CapabilityLifecycleAdapter              │
 └──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│              Workload Tier (@consistency/workload-review)                   │
-│        (ReviewWorkload: Supervisor Planner + Specialized Review Agents)     │
+│            Workload 层 (@consistency/workload-review)                       │
+│            ReviewWorkload：Supervisor Planner + 六个专项审查 agent           │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
                  ┌─────────────────────┴─────────────────────┐
                  ▼                                           ▼
-      In-Process Built-ins                         Child-Process Sandbox
-  (Supervisor / Review Agents)                  (Untrusted Plugins via RPC)
+    进程内 built-in（Supervisor / 审查 agent）      子进程沙箱（不可信插件，经 RPC）
+                 │
+                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              确定性证据引擎  engine/（Python 3.12，JSON-over-stdio）          │
+│     style · structural · semantic · duplication · security · evolution      │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Quick Start (Web & API)
+## 快速开始
 
-### Prerequisites
-- Node.js 22.x
-- Python 3.12.x
+### 前置条件
 
-### 1. Install Dependencies
+- **Node.js 22.x**（`engines` 要求 `>=22.19.0 <23`；装 Node 24/25 会不满足）
+- **Python 3.12**（`npm run verify:runtime` 会校验版本）
+
+### 1. 安装依赖
+
 ```bash
 npm ci
-python -m pip install -r requirements-lock.txt
 ```
 
-### 2. Configure Environment
+Python 侧需要一个 **3.12.x** 解释器的虚拟环境（`scripts/baseline-runtime.mjs:18` 只接受 `3.12.`，3.11 或 3.13 都会被 `verify:runtime` 拒掉）。用 uv 最快：
+
 ```bash
-cp .env.example .env
+uv venv --python 3.12 .venv
+uv sync --frozen --extra dev
 ```
 
-### 3. Start Development Services
+没有 uv 就用标准虚拟环境 + 锁文件：
+
 ```bash
-# Terminal 1 — Start the API (http://127.0.0.1:8787)
-npm run dev:api
-
-# Terminal 2 — Start the Web UI (http://127.0.0.1:5173)
-# Export vars from .env first if CONSISTENCY_API_TOKEN is set — Vite's /api
-# proxy injects Authorization (dev-server only; never use VITE_ for the token).
-npm run dev:web
+python3.12 -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements-lock.txt
+.venv/Scripts/python.exe -m pip install pytest pytest-cov jsonschema ruff
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
+CLI 会优先使用 `<install root>/.venv` 里的解释器；也可以用 `CONSISTENCY_PYTHON_PATH` 显式指定。
+
+### 2. 配置
+
+```bash
+npm run setup
+```
+
+或者逐项设置（适合脚本化）：
+
+```bash
+npm run config -- set llm.provider deepseek
+npm run config -- set llm.deepseekApiKey
+npm run config -- doctor
+```
+
+配置和密钥存在仓库的 `.consistency/` 下（`config.json` + 加密的 `secrets.enc.json`），该目录已被 gitignore。
+
+### 3. 跑一次审查
+
+在当前仓库上审查**未提交的工作区改动**：
+
+```bash
+npm run consistency -- review
+```
+
+审查一个提交区间：
+
+```bash
+npm run consistency -- review --repo D:/path/to/checkout --base main --head HEAD
+```
+
+审查别的仓库的工作区改动：
+
+```bash
+npm run consistency -- review --repo D:/path/to/checkout
+```
+
+看全部选项：
+
+```bash
+npm run consistency -- review --help
+```
 
 ---
 
-## Electron Desktop Mode
+## 退出码就是契约
 
-ConsistenCy provides a native Windows desktop host that packages the Web UI and API into a single local application with native folder selection:
+`consistency review` 的退出码可以直接当 CI 闸门用：
+
+| 退出码 | 含义 |
+|---|---|
+| `0` | 跑完，没有任何 finding 达到阈值 |
+| `1` | 跑完，且有 finding 达到阈值 |
+| `2` | **没跑成，或本次审查覆盖不完整** —— 不可当作闸门信任 |
+
+`2` 是这套设计里最重要的一档：它把「跑通了但没查到东西」和「压根没查全」分开。后者可能来自某个专项 agent 失败、Planner 失败、Synthesizer 失败，或确定性引擎有步骤没跑。这种运行时报告开头会带 `[!]` 标记，并在约束块里逐条列出没覆盖的部分。
+
+阈值默认 `low`（即 `info` 不拦构建），可用 `--threshold` 调整：
+
+```bash
+npm run consistency -- review --threshold high
+```
+
+放进 CI：
+
+```yaml
+- run: npm ci
+- run: npm run consistency -- review --threshold high
+```
+
+---
+
+## 两个风险度量，永不合并
+
+报告头同时给出两个**互相独立**的量，它们不是同一个东西的两种说法：
+
+- **静态分析评分 / 风险等级** —— 来自确定性静态分析（文件路径、signal 分解、confidence）。这是给 triage 用的信号。
+- **结论风险带** —— 来自最终 findings 的严重度分布。
+
+schema 明确要求把它们当作两个有名字的字段分别呈现，所以终端渲染也不发明一个合并后的数字。
+
+---
+
+## 用 JSON 接进你自己的流程
+
+```bash
+npm run consistency -- review --json > report.json
+```
+
+`--json` 输出完整的 `ReviewReport`，字段结构见 [docs/output_schema.md](docs/output_schema.md)。
+
+---
+
+## 这个版本里有什么，没有什么
+
+**有：** 终端审查入口、确定性证据引擎、能力门控的 agent 调度、不写入被审查仓库的产物目录（`.consistency/cli`）、HTTP daemon 与 SQLite 持久化、GitHub 公开 PR 分析与 webhook 集成、Python 与 TypeScript 的完整测试基线。
+
+**没有：** 图形界面、桌面应用、浏览器端到端测试。本版是终端优先的：`apps/api` 作为无界面的 HTTP 与持久化层保留，所有面向人的交互都走命令行。
+
+详见 [docs/capability-matrix.md](docs/capability-matrix.md) —— 那张表只陈述今天实际存在的行为，不写路线图。
+
+---
+
+## 文档
+
+- **[Getting Started](docs/getting-started.md)** — 从零到第一次审查，含环境排错。
+- **[How To Use（终端用法速查）](docs/how-to-use.md)** — 入口、两种审查范围、选项、报告阅读法与退出码。
+- **[Project Overview](docs/PROJECT_OVERVIEW.md)** — 产品定位与核心架构分层。
+- **[System Architecture](docs/architecture.md)** — Kernel 能力、Cordis harness、Context VM 与不变量。
+- **[Security Model](docs/security.md)** — 能力中介、逻辑环与执行域、子进程沙箱的真实边界。
+- **[Mode Capability Matrix](docs/capability-matrix.md)** — 今天实际强制执行了什么。
+- **[Repository Workspace Model](docs/repository-workspace.md)** — Repository-first 产品模型与权威来源规则。
+- **[Review Runtime & Context VM](docs/review-runtime.md)** — 审查执行管线与 Context VM 分页。
+- **[Configuration Reference](docs/configuration.md)** — provider、配置优先级与持久化路径。
+- **[HTTP API Reference](docs/api.md)** — 端点、鉴权与载荷 schema。
+- **[Output Schema](docs/output_schema.md)** — `ReviewReport` 与证据模型的结构。
+- **[Risk Scoring Rules](docs/risk-scoring-rules.md)** — 风险分的规则定义与评估口径。
+- **[Workflow Runtime](docs/workflow-runtime.md)** — 工作流运行时与节点模型。
+- **[GitHub App Setup](docs/GITHUB_APP_SETUP.md)** — webhook 与 App 凭据配置。
+- **[Evaluation Guidelines](docs/EVALUATION.md)** — 数据集 schema 与指标复现。
+- **[Codex Integration](docs/llm-codex-integration.md)** — 让 Codex 直接调用确定性分析。
+
+---
+
+## 验证
+
+```bash
+# 一次跑完全部基线检查
+npm run verify
+```
+
+它按顺序执行：`verify:runtime`（Node 22 + Python 3.12）→ `verify:docs`（Markdown 规则与链接）→ `audit:deps` → `typecheck`（全部 workspace）→ `test`（TypeScript 测试 + runtime gate）→ `build` → `test:python`（pytest）。
+
+也可以单独跑：
+
+```bash
+npm run typecheck
+npm test
+npm run test:python
+```
+
+Windows 上跑 pytest 建议显式指定解释器：
 
 ```powershell
-# Run desktop in development
-npm run desktop:dev
-
-# Package Windows desktop binaries (unpacked & NSIS installer)
-$env:CONSISTENCY_PYTHON_BUNDLE_ROOT = "C:\path\to\Python312"
-npm run desktop:pack
-```
-
-Packaged desktop builds store persistent SQLite databases and configuration under `app.getPath("userData")`, requiring zero writes to installation directories.
-
----
-
-## Configuring an LLM Provider
-
-ConsistenCy v3 is a **real-LLM-only runtime** (no demo/mock runtime modes). Review execution and Notebook reasoning require configuring a supported model provider:
-
-> CI and unit tests may still use an internal mock LLM double; that is not a user-facing runtime mode.
-
-- **DeepSeek**: Set `DEEPSEEK_API_KEY` (and optional `DEEPSEEK_MODEL`, default: `deepseek-v4-flash`).
-- **OpenAI**: Set `OPENAI_API_KEY` (and optional `OPENAI_MODEL`, default: `gpt-4.1-mini`).
-- **Anthropic**: Set `ANTHROPIC_API_KEY` (and optional `ANTHROPIC_MODEL`, default: `claude-sonnet-4-5`).
-
-All providers are executed by ConsistenCy's bundled official Pi model runtime (`@earendil-works/pi-ai`): model catalogs, request formatting, and streaming come from Pi's built-in catalog, while API keys are injected in-memory at runtime and stored only in ConsistenCy's encrypted settings. No local Pi installation and no Pi config files are required; provider keys never enter Web UI payloads or renderer state.
-
-You can configure DeepSeek/OpenAI/Anthropic keys directly in the Web/Desktop **Settings** page, via CLI (`npm run config -- set llm.deepseek-api-key`), or through `.env`. Pi credentials and model catalogs are owned by Pi and are read server-side; ConsistenCy does not ask the user to copy them into Settings. When running without an LLM configured, local repository and Git browsing remain fully accessible; review runs are disabled until credentials are provided.
-
----
-
-## Connecting a Repository
-
-1. **Local Git Checkout**: In Desktop mode, click **Connect Repository** and use the native folder picker to select any local Git worktree. In Web mode, configure `CONSISTENCY_LOCAL_REVIEW_ROOTS`.
-2. **Public GitHub Pull Request**: Paste any public PR URL (e.g. `https://github.com/owner/repo/pull/123`) into the Public PR input. The review runs in read-only mode without requiring GitHub App installation. For higher rate limits, use one-click **GitHub sign-in (OAuth Device Flow)** in Settings — zero scopes, no personal token — or fall back to a fine-grained public read PAT.
-3. **GitHub App Webhook Review**: Configure `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET` to receive webhooks and post review comments automatically.
-
----
-
-## Documentation Directory
-
-- **[System Architecture](docs/architecture.md)** — Kernel capabilities, Cordis harness, Context VM, and invariant matrix.
-- **[Security Model & Isolation Boundaries](docs/security.md)** — Capability broker, logical rings vs. execution domains, and child-process sandbox limits.
-- **[Mode Capability Matrix](docs/capability-matrix.md)** — What public-PR, local_git, and desktop actually enforce today.
-- **[Repository Workspace Model](docs/repository-workspace.md)** — Repository-first product model and authoritative source rules.
-- **[Review Runtime & Context VM](docs/review-runtime.md)** — Detailed review execution pipeline and Context VM paging.
-- **[Configuration Reference](docs/configuration.md)** — LLM providers, precedence rules, and persistence paths.
-- **[Electron Desktop Host](docs/desktop.md)** — Desktop host architecture, IPC boundary, and packaging.
-- **[HTTP API Reference](docs/api.md)** — Endpoints, authentication, and payload schemas.
-- **[Output Schema](docs/output_schema.md)** — Structure of ReviewReport and evidence models.
-- **[GitHub App Setup](docs/GITHUB_APP_SETUP.md)** — Setting up webhooks and App credentials.
-- **[Evaluation Guidelines](docs/EVALUATION.md)** — Dataset schemas and benchmark reproduction.
-
----
-
-## Verification & Testing
-
-```bash
-# Verify TypeScript types across all workspaces
-npm run typecheck
-
-# Run all TypeScript unit and integration tests (700+ tests)
-npm test
-
-# Run deterministic Python analyzer test suite (280 tests)
-python -m pytest -q
-
-# Run Playwright Electron desktop tests
-npm run test:desktop
-
-# Run full baseline verification suite
-npm run verify
+.\.venv\Scripts\python.exe -m pytest -q
 ```

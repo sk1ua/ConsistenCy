@@ -1,12 +1,14 @@
 # ConsistenCy Runtime Configuration & Precedence
 
-This document describes how runtime configuration, environment variables, LLM providers, and data persistence paths are resolved in ConsistenCy v3.
+This document describes how runtime configuration, environment variables, LLM providers, and data persistence paths are resolved in ConsistenCy v4 (terminal-only).
+
+> **Version note**: this document describes the current **v4 (terminal-only)** checkout. The product lineage name is still v3 (see the frozen [CONSISTENCY_V3_MASTER_SPEC.md](CONSISTENCY_V3_MASTER_SPEC.md)); v4 deleted the Web UI and the Electron desktop host, keeping the CLI and the headless HTTP daemon. Differences: [delivery-readiness.md](delivery-readiness.md).
 
 ---
 
 ## 1. LLM Provider Configuration
 
-ConsistenCy v3 is a **real-data, real-LLM runtime**. It requires a real, configured LLM provider to execute Review runs and Notebook reasoning. Local Git exploration and repository browsing remain fully functional when no LLM is configured.
+ConsistenCy v4 is a **real-data, real-LLM runtime**. It requires a real, configured LLM provider to execute Review runs and Notebook reasoning. Local Git exploration and repository browsing remain fully functional when no LLM is configured.
 
 ### 1.1 Supported Runtime Providers
 
@@ -36,7 +38,7 @@ If no supported provider is configured (DeepSeek, OpenAI, or Anthropic):
 - Repository browsing, Git status, diff views, and deterministic AST analysis function normally.
 - Review execution requests (`POST /reviews/local`, `POST /reviews/public-pr`) are rejected with HTTP 503 (`LLM_NOT_CONFIGURED`).
 - Workflow Copilot (`POST /workflow-runtime/copilot/proposal`, `/chat`) is rejected with HTTP 503 (`LLM_NOT_CONFIGURED`).
-- The Web UI displays an "LLM not configured" indicator linking to the Settings page.
+- The CLI stops before the run with a setup error that names `npm run setup` and `npm run config -- set llm.provider`.
 
 > **Note on Test Doubles**: Isolated test suites (`*.test.ts`, `tests/`) may instantiate internal mock doubles (`MockLLMProvider`) to verify orchestration behavior deterministically without paid network calls. These test doubles are not accessible as a user-facing runtime mode.
 
@@ -57,11 +59,10 @@ Settings are resolved in the following strict order of precedence:
 ```
 
 ### 2.1 Restart-Required Semantics
-When configuration changes are saved via the Web UI Settings page (`PUT /api/settings`):
-- Non-secret settings are written to disk (`config.json`), and secrets are encrypted via AES-256-GCM (`secrets.enc.json`) or Desktop `safeStorage`.
+When configuration changes are saved (`npm run config -- set <key> <value>`, or `PUT /api/settings` for the API layer):
+- Non-secret settings are written to disk (`config.json`), and secrets are encrypted via AES-256-GCM (`secrets.enc.json`). The Electron `safeStorage` path was deleted with the desktop host (v4).
 - The API runtime loads configuration once at process startup.
-- Saving new settings returns `restartRequired: true`.
-- In Electron Desktop mode, users can click **[Restart ConsistenCy Runtime]** to have the Desktop host automatically restart its owned API child process and apply the new configuration.
+- Saving new settings returns `restartRequired: true`; restart the process to apply them.
 
 ---
 
@@ -69,15 +70,17 @@ When configuration changes are saved via the Web UI Settings page (`PUT /api/set
 
 | Runtime Mode | Default Database Path | Workspaces Directory | Settings Directory |
 |---|---|---|---|
-| **Browser Development** | `<ProjectRoot>/.consistency/consistency.db` | `<ProjectRoot>/.consistency/workspaces` | `<ProjectRoot>/.consistency/` |
-| **Packaged Electron Desktop** | `<userData>/consistency.db` | `<userData>/workspaces` | `<userData>/settings/` |
+| **CLI (`consistency review`)** | 不写库：job store 是 `InMemoryJobQueue` | `<ProjectRoot>/.consistency/workspaces` | `<ProjectRoot>/.consistency/` |
+| **HTTP daemon (`npm run dev:api`)** | `<ProjectRoot>/.consistency/consistency.db` | `<ProjectRoot>/.consistency/workspaces` | `<ProjectRoot>/.consistency/` |
 | **Explicit Override** | `DATABASE_PATH` env var | `CONSISTENCY_WORKSPACE_ROOT` | `CONSISTENCY_SETTINGS_ROOT` |
+
+只有 daemon 会持久化 job、报告与快照；一次性 CLI 进程不写 SQLite（详见 [capability-matrix.md](capability-matrix.md) 的 cli 列）。
 
 ### Path Resolution Rules
 - If `DATABASE_PATH` is `:memory:`, in-memory SQLite storage is used.
 - If `DATABASE_PATH` is an absolute path (e.g. `C:\Users\...\consistency.db`), it is used exactly as provided.
 - If `DATABASE_PATH` is a relative path, it resolves strictly relative to the workspace project root.
-- Packaged desktop installations always anchor persistent data under `app.getPath("userData")`, ensuring immutable installation directories (such as `Program Files` or `app.asar`) are never written to.
+- `CONSISTENCY_SETTINGS_ROOT` relocates the settings store (`apps/api/src/config/runtime.ts:25`); tests use it to avoid touching the real `.consistency` directory.
 
 ---
 
@@ -87,92 +90,37 @@ When configuration changes are saved via the Web UI Settings page (`PUT /api/set
 |---|---|---|
 | `NODE_ENV` | `development` | Runtime environment (`development` or `production`) |
 | `HOST` | `127.0.0.1` | Host address to bind the API server |
-| `PORT` | `8787` | Port to bind the API server (dynamic in Desktop mode) |
-| `DATABASE_PATH` | `.consistency/consistency.db` | Path to SQLite database |
+| `PORT` | `8787` | Port to bind the API server |
+| `DATABASE_PATH` | `.consistency/consistency.db` | Path to SQLite database (HTTP daemon only) |
 | `CONSISTENCY_WORKSPACE_ROOT` | `.consistency/workspaces` | Root directory for ephemeral review checkouts |
-| `CONSISTENCY_API_TOKEN` | *empty* | Bearer token required for API authentication in production; for local `npm run dev:web` dogfood the Vite `/api` proxy injects it server-side when set (never expose via `VITE_`) |
+| `CONSISTENCY_API_TOKEN` | *empty* | Bearer token required for API authentication in production (`apps/api/src/http.ts:613` writes the CORS/auth headers) |
 | `DEEPSEEK_API_KEY` | *empty* | API key for DeepSeek provider |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek model identifier |
 | `OPENAI_API_KEY` | *empty* | API key for OpenAI provider |
 | `OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI model identifier |
 | `ANTHROPIC_API_KEY` | *empty* | API key for the Anthropic provider |
 | `ANTHROPIC_MODEL` | *empty* | Optional Anthropic model id; empty uses the catalog default (`claude-sonnet-4-5`) |
-| `CONSISTENCY_PI_CONFIG_DIR` | `<database-dir>/pi` | Server-side isolation directory for the bundled Pi runtime's auth storage; never returned to the renderer |
+| `CONSISTENCY_PI_CONFIG_DIR` | `<database-dir>/pi` | Server-side isolation directory for the bundled Pi runtime's auth storage |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
-| `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow path (browser deployments, and Desktop builds via pack-time `CONSISTENCY_GITHUB_OAUTH_CLIENT_ID`) |
-| `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the product-operated Desktop OAuth broker; configure on the API/broker service, not in user Settings |
+| `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow routes (API layer; the repo ships no login UI) |
+| `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the OAuth broker used by the API's `/oauth/desktop/*` routes (`apps/api/src/server.ts:160`) |
 | `CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID` | *empty* | Product-owned GitHub OAuth App client id used by the Desktop broker |
 | `CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET` | *empty* | Product-owned GitHub OAuth App secret used only server-side by the Desktop broker; never ship to Desktop |
 | `GITHUB_PRIVATE_KEY` | *empty* | PEM private key string or path for GitHub App |
 | `GITHUB_WEBHOOK_SECRET` | *empty* | HMAC secret for verifying incoming GitHub webhooks |
 | `GITHUB_PUBLIC_READ_TOKEN` | *empty* | Optional fine-grained PAT for elevated public GitHub API rate limits (fallback; OAuth sign-in is the recommended source of this credential) |
-| `CONSISTENCY_ALLOWED_ORIGINS` | `http://127.0.0.1:5173,http://localhost:5173` | Allowed CORS origins for browser clients |
+| `CONSISTENCY_ALLOWED_ORIGINS` | `http://127.0.0.1:5173,http://localhost:5173` | Allowed CORS origins; **残留默认值**——它是已删除的 Vite 开发端口，只在浏览器客户端存在时才有意义（`apps/api/src/config/env.ts:123`） |
+| `CONSISTENCY_WEB_URL` | `http://127.0.0.1:5173` | 同上（`apps/api/src/config/env.ts:124`；兜底见 `apps/api/src/config/settings.ts:357`） |
 | `CONSISTENCY_WORKFLOW_TRIGGERS_ENABLED` | `true` | CKPT5 kill-switch for automatic execution of `on_change` workflow bindings from repository change events (planning continues while off; pending plans drain when re-enabled) |
 | `CONSISTENCY_WORKFLOW_TRIGGER_POLL_INTERVAL_MS` | `5000` | Poll interval of the workflow trigger executor loop |
 
-### 4.0 Local web dogfood (`npm run dev:web`)
+### 4.0 GitHub sign-in 路由（API 层，仓库不含界面）
 
-When `CONSISTENCY_API_TOKEN` (and optionally `CONSISTENCY_DESKTOP_CONTROL_TOKEN`) is set in the environment that launches Vite, the **dev-server-only** `/api` proxy in `apps/web/vite.config.ts` injects `Authorization: Bearer …` / `x-consistency-desktop-control` on proxied requests if those headers are absent. The browser client never receives the token. Production and Electron must not rely on this proxy behavior.
+v4 仓库里没有登录界面：Web UI 与 Electron 宿主都已删除。为桌面构建保留的 broker 路由在 API 层仍然注册并可测试：
 
-### 4.1 GitHub Sign-In (Desktop browser OAuth)
-
-The packaged Electron Desktop uses the standard GitHub Authorization Code flow
-with PKCE through the product-operated OAuth broker. The Settings button opens
-the system browser; after authorization, GitHub redirects to a one-time local
-callback on `127.0.0.1` with a dynamic port. The user never copies a user code,
-authorization code, or access token.
-
-Product deployment (one time):
-
-1. Register one GitHub OAuth App for ConsistenCy and configure its callback as
-   `https://<broker-host>/oauth/github/callback`.
-2. Configure `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL`,
-   `CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID`, and
-   `CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET` together on the broker/API service.
-3. Build the Desktop with only `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL`; the packer
-   rejects non-HTTPS origins and never stages either client credential.
-
-Brokerless Desktop builds keep GitHub sign-in available: when no broker origin
-is baked in, the packer can instead embed the public Device Flow client id with
-`CONSISTENCY_GITHUB_OAUTH_CLIENT_ID` at pack time (a client id is public; the
-packer rejects anything that is not a plain id). In that mode the Desktop main
-process proxies the embedded API's Device Flow — the renderer shows the same
-verification URL and user code as the browser, while the access token is
-consumed inside main and written to `safeStorage`; it never crosses into the
-renderer. With neither a broker nor a baked client id, the sign-in button shows
-an honest not-configured status.
-
-End users only click **Sign in with GitHub** and **Authorize**. They do not
-register an OAuth App or enter any OAuth credential.
-
-- The main process owns state validation, S256 PKCE, callback handling, token
-  exchange, and the `/user` identity lookup. Only the sanitized GitHub login
-  and a fixed status cross into the renderer.
-- The access token is written to the existing `GITHUB_PUBLIC_READ_TOKEN` entry
-  in Electron `safeStorage` only after identity lookup succeeds. It is never
-  placed in the callback URL, API settings snapshot, renderer state, logs, or
-  documentation examples. Restarting the runtime makes the new credential
-  available to the API child process.
-- The callback listener accepts one local GET request at the exact callback
-  path and is closed on success, denial, failure, cancellation, timeout, or
-  application shutdown. The requested scope is `read:user`; repository
-  permissions are not granted.
-
-### 4.2 GitHub Sign-In (Browser Device Flow compatibility)
-
-A normal browser deployment does not expose a public OAuth callback and does
-not use the Desktop client secret. It retains the existing GitHub Device Flow
-compatibility path: enable **Enable Device Flow** on the OAuth App, configure the
-public Client ID, then the browser shows GitHub's verification URL and a
-one-time user code. The API keeps the device code server-side and the token is
-stored through the Web encrypted settings path. Desktop renderers stay blocked
-from these Device Flow routes: brokerless Desktop builds reach the same flow
-through the main process instead (see §4.1), which also keeps the token out of
-the renderer.
-
-`GITHUB_PUBLIC_READ_TOKEN` remains a fallback for self-hosted deployments that
-have not configured OAuth sign-in. It is optional and is not required for the
-Desktop broker flow.
+- `POST /oauth/desktop/start`、`/oauth/desktop/complete`、`/oauth/desktop/cancel`（`apps/api/src/http.ts:3492-3559`），受 `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` 门控；未配置 broker 时这些路由不可用。
+- 产品侧凭据 `CONSISTENCY_DESKTOP_OAUTH_CLIENT_ID` / `CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET` 只在服务端使用，绝不进入任何 DTO。
+- Device Flow 的兼容路径同样只剩 API 语义：API 在服务端持有 device code，token 经加密设置落盘。**当前没有任何 UI 消费这两条路径**，`GITHUB_PUBLIC_READ_TOKEN` 仍是自托管部署的凭据回退方案。
 
 ## Local WORKING_TREE path excludes
 
@@ -181,5 +129,5 @@ Local working-tree reviews (`buildLocalContext`, job diff for `WORKING_TREE`, an
 1. A repo-root **`.consistencyignore`** file (gitignore-style: one pattern per line, `#` comments).
 2. Optional env **`CONSISTENCY_LOCAL_REVIEW_EXCLUDE`**: comma- or newline-separated extra patterns.
 
-The ConsistenCy repository ships a sample `.consistencyignore` that ignores `artifacts/` and `apps/web/src/shell/dogfood*.ts` so dogfood scratch files do not enter reviews.
+The ConsistenCy repository ships a sample `.consistencyignore` that ignores `artifacts/` so review scratch files do not enter reviews.
 

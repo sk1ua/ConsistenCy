@@ -1,19 +1,23 @@
-# ConsistenCy v3 Architecture
+# ConsistenCy v4 Architecture
 
-ConsistenCy v3 is a **Repository-Native Agent Harness OS** for evidence-grounded code review. It organizes review execution into three distinct, cooperating tiers:
+ConsistenCy v4 is a **Repository-Native Agent Harness OS** for evidence-grounded code review. It organizes review execution into three distinct, cooperating tiers:
 
-$$\text{ConsistenCy v3} = \text{Kernel} + \text{Cordis Harness} + \text{Evidence Engine}$$
+> **版本口径**：本文描述当前检出 **v4（terminal-only）**。产品谱系名仍是 v3（冻结的 [CONSISTENCY_V3_MASTER_SPEC.md](CONSISTENCY_V3_MASTER_SPEC.md)）；v4 删除了 Web UI 与 Electron 桌面宿主，只保留 CLI 与无界面 HTTP daemon，差异见 [delivery-readiness.md](delivery-readiness.md)。
+
+$$\text{ConsistenCy v4} = \text{Kernel} + \text{Cordis Harness} + \text{Evidence Engine}$$
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            React / Vite Web UI                              │
-│         (Repository Workspace, Overview, Diff, Evidence, Runtime)          │
+│              Terminal Entry Point — `consistency review`                    │
+│       apps/cli (@consistency/cli): main.ts · args.ts · review.ts            │
+│              report.ts · config.ts · terminal.ts                           │
 └──────────────────────────────────────┬──────────────────────────────────────┘
-                                       │ HTTP / SSE / Same-Origin /api
+                                       │ review.ts assembles the same
+                                       │ createReviewRuntime as the daemon
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           apps/api (Host Process)                           │
-│        (HTTP Router, SQLite Store, Workload Runtime, Electron Host)         │
+│       (HTTP Router, SQLite Store, Workload Runtime, GitHub Integration)     │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
      ┌─────────────────────────────────┼─────────────────────────────────┐
@@ -22,9 +26,9 @@ $$\text{ConsistenCy v3} = \text{Kernel} + \text{Cordis Harness} + \text{Evidence
 ┌──────────────┐             ┌──────────────────┐             ┌─────────────────────┐
 │ Run &        │             │ SyscallGateway & │             │ Context VM &        │
 │ Scheduler    │             │ CapabilityBroker │             │ Evidence Store      │
-└──────┬───────┘             └────────┬─────────┘             └─────────────────────┘
-       │                              │
-       ▼                              ▼
+└──────┬───────┘             └────────┬─────────┘             └──────────┬──────────┘
+       │                              │                                  │
+       ▼                              ▼                                  │
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                 Harness Tier (@consistency/harness-core)                     │
 │         (Cordis Fiber Lifecycle, CapabilityLifecycleAdapter, Bridges)       │
@@ -40,6 +44,12 @@ $$\text{ConsistenCy v3} = \text{Kernel} + \text{Cordis Harness} + \text{Evidence
                  ▼                                           ▼
       In-Process Built-ins                         Child-Process Sandbox
   (Supervisor / Review Agents)                  (Untrusted Plugins via RPC)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│            Evidence Engine — engine/ (Python 3.12, JSON-over-stdio)         │
+│     Deterministic analyzers: style · structural · semantic · duplication    │
+│                    · security · evolution · parser · risk scoring           │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -107,7 +117,7 @@ ReviewJob (Persistent Database Object / Webhook / Local Trigger)
 ## 3. Review Lifecycle Flow
 
 ```text
-[Repository Workspace]
+[Terminal Entry: consistency review]
          │
          ▼
 [Trigger: Local / Webhook] ──▶ [ReviewJob Created]
@@ -168,5 +178,5 @@ ReviewJob (Persistent Database Object / Webhook / Local Trigger)
 - [Repository Workspace Model](repository-workspace.md)
 - [Review Runtime & Context VM](review-runtime.md)
 - [Runtime Configuration & Precedence](configuration.md)
-- [Electron Desktop Host](desktop.md)
+- [Repository Review Notebook](notebook.md)
 - [HTTP API Reference](api.md)

@@ -1,19 +1,21 @@
 # ConsistenCy Security Model & Isolation Boundaries
 
-This document defines the truthful security model, authorization mechanisms, and isolation boundaries of ConsistenCy v3.
+This document defines the truthful security model, authorization mechanisms, and isolation boundaries of ConsistenCy v4.
+
+> **Version note**: this document describes the current **v4 (terminal-only)** checkout. The product lineage name is still v3 (see the frozen [CONSISTENCY_V3_MASTER_SPEC.md](CONSISTENCY_V3_MASTER_SPEC.md)); v4 deleted the Web UI and the Electron desktop host, keeping the CLI and the headless HTTP daemon. Differences: [delivery-readiness.md](delivery-readiness.md).
 
 ---
 
 ## 1. Core Security Guarantees & Verification Matrix
 
-The v3 runtime enforces capability-based security at the Kernel tier and isolates untrusted plugin execution into dedicated child processes. The six core security dimensions are:
+The v4 runtime enforces capability-based security at the Kernel tier and isolates untrusted plugin execution into dedicated child processes. The six core security dimensions are:
 
 | Security Dimension | Enforcement Mechanism | Current Status |
 |---|---|---|
 | **Syscall Authorization** | `CapabilityBroker` & `SyscallGateway` default-deny, per-call evaluation | **ENFORCED** |
 | **External Commit Gating** | `CommitCoordinator` intercepts and gates `github.publish` & `repo.write` | **ENFORCED** |
-| **Process Memory Isolation** | Node `child-process` execution domain with independent PID and V8 heap | **ENFORCED for sandboxed plugin processes; NOT ENFORCED for in-process review agents** |
-| **Parent Environment Secret Isolation** | Explicit environment allowlist; parent `process.env` never inherited | **ENFORCED for sandboxed plugin processes; NOT ENFORCED for in-process review agents** |
+| **Process Memory Isolation** | Node `child-process` execution domain with independent PID and V8 heap | **ENFORCED only when every agent in the run is a `child-process`; review runs are in-process, so NOT ENFORCED** |
+| **Parent Environment Secret Isolation** | Explicit environment allowlist; parent `process.env` never inherited | **ENFORCED only for `child-process` agents that also have a sandbox session; NOT ENFORCED for in-process review agents** |
 | **Filesystem OS Containment** | OS-level filesystem chroot, sandbox, or driver container | **NOT ENFORCED** |
 | **Network OS Containment** | OS-level network socket filtering or namespace restriction | **NOT ENFORCED** |
 | **Subprocess OS Containment** | OS-level process spawning restrictions inside plugin processes | **NOT ENFORCED** |
@@ -62,27 +64,27 @@ Execution domains describe the operating-system boundary in which code executes:
 - **Public PR Analysis**: Analysis of public GitHub pull requests is strictly read-only (`accessMode=public_read`, `publicationPolicy=disabled`). It will never create GitHub comments, apply patches, or execute repository commands.
 - **Local finding patch apply**: Suggested patches may be previewed for any succeeded job that carries `suggestedPatch`. Applying is restricted to `accessMode=local_git` jobs against the registered checkout: policy inspection + `git apply --check` run first, then a non-committing `git apply` leaves the tree dirty. Public/GitHub App jobs never receive apply.
 
-- **Credential Storage**: Secret keys (DeepSeek API key, OpenAI API key, GitHub PAT, App private keys) remain server-side. In Electron desktop mode, credentials are encrypted via OS `safeStorage` and passed only to the API child process at startup. They are never returned to the Web UI or included in logs.
+- **Credential Storage**: Secret keys (LLM provider API keys, GitHub PAT, App private keys, API tokens) remain server-side. Saved settings secrets are written encrypted with AES-256-GCM to `<install root>/.consistency/secrets.enc.json` under a locally generated `.consistency/config.key`, and the settings surfaces report presence only, never plaintext (`apps/api/src/config/settings.ts:201-246`). Secrets are never returned in API responses, and log redaction drops `apiKey`, `token`, `authorization`, and the `config.*` secret paths (`apps/api/src/config/logger.ts:3-15`).
 - **Rate Limits**: Anonymous and authenticated requests strictly respect GitHub REST API rate limits and never attempt bypass via parallel rotation.
 
 ### Repository and Remote Data Boundaries
-- Renderer repository selection uses only the opaque registered `Repository.id`. The audit store must contain an exact matching registration. Display names, remote names, `local:` aliases, heartbeat roots, project-root shortcuts, relative paths, and absolute paths are not repository selectors.
+- Repository selection over the HTTP API uses only the opaque registered `Repository.id`. The audit store must contain an exact matching registration. Display names, remote names, `local:` aliases, heartbeat roots, project-root shortcuts, relative paths, and absolute paths are not repository selectors.
 - Local filesystem locators remain server-only and are resolved only for exact registered records with source `local_git`.
-- Renderer remote DTOs contain exactly `name` plus optional `githubFullName`. Raw fetch URLs, raw push URLs, and embedded credentials are omitted.
+- Git remote DTOs crossing the API boundary contain exactly `name` plus optional `githubFullName`. Raw fetch URLs, raw push URLs, and embedded credentials are omitted.
 
 ### Workspace Pull Request Credentials
 Workspace Pull Request listing tries candidates in this order: GitHub App installation token when available, configured server-side public-read token, then anonymous access. Candidates are deduplicated and attempted once each. A malformed provider payload is an invalid provider response, not a credential failure, so it is not retried with another candidate. This precedence applies to repository workspace listing, not standalone public PR URL ingestion. Public URL ingestion remains read-only and does not gain GitHub App access just because an App is configured.
 
 ---
 
-## 5. Electron Desktop Security Boundary
+## 5. Process Boundary: In-Process Review Agents vs. Child-Process Plugins
 
-Electron acts as a native desktop host and OS boundary:
-- **Renderer Sandboxing**: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`.
-- **Preload Isolation**: Exposes only narrow, explicit methods (`appVersion`, `selectRepository`, `credentialStatus`, `setCredential`, `restartRuntime`, `updates.*`). No raw Node modules, `require`, `fs`, `child_process`, or `ipcRenderer` objects cross into the renderer.
-- **Native Repository Picker**: Folder selection occurs in the main process via `dialog.showOpenDialog`. The main process registers the repository through `POST /internal/repositories/local` using an internal `CONSISTENCY_DESKTOP_CONTROL_TOKEN` and returns only the sanitized public `Repository` DTO. Absolute filesystem paths are never leaked to the renderer.
-- **Custom Protocol**: `consistency://app` serves static web assets and proxies `/api/*` to the loopback API with bearer token injection. Renderer requests to `/api/internal/*` are rejected with HTTP 404.
-- **Navigation & Windows**: `setWindowOpenHandler` denies all popups; `will-navigate` blocks navigation away from trusted local origins.
+There is no desktop host, renderer, or preload layer in the product today. The only execution-domain boundary is the plugin sandbox:
+
+- **Review agents run in-process.** The supervisor, the deterministic stage, and every specialized review agent are registered with `executionDomain: "in-process"` (`packages/workload-review/src/workload/review-workload.ts:797`, `packages/workload-review/src/workload/review-workload.ts:852`). They share the harness supervisor's Node.js process, PID, and V8 heap.
+- **Only plugins are forked into a child process.** `spawnSandboxChild` (`packages/kernel/src/sandbox/runner.ts:44`) forks `worker-bootstrap.mjs` with an explicit environment allowlist, empty `execArgv`, and stdio ignored except piped stderr used for diagnostics. That channel is the only real isolation path; plugin RPC is versioned protocol v1 over IPC with a 256KB message cap (`packages/kernel/src/sandbox/worker/worker-bootstrap.mjs:19-20`) and at most 64 pending requests (`packages/kernel/src/sandbox/protocol.ts:33`).
+- **Isolation flags are derived from the run, never assumed.** `processMemoryIsolation` is `enforced` only when every agent in the run executed in a child process; `parentEnvSecretIsolation` and `kernelRpcAuthorization` additionally require a sandbox session for each such agent, because a bare `child-process` label proves nothing (`packages/harness-core/src/runtime/observability.ts:294-311`). A review run is in-process, so all three are **not-enforced**.
+- **No OS-level containment is claimed.** Filesystem, network, and subprocess containment have no OS enforcement and are reported `not-enforced` unconditionally.
 
 ---
 

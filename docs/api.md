@@ -1,10 +1,26 @@
 # ConsistenCy HTTP API Reference
 
-The default development API address is `http://127.0.0.1:8787`. In Electron Desktop mode, the API binds to an ephemeral dynamic loopback port on `127.0.0.1`. Desktop GitHub authorization is owned by the Electron main process and uses a separate one-time loopback callback; it is not an API callback route.
+The default development API address is `http://127.0.0.1:8787` (`HOST` and `PORT` default to `127.0.0.1` and `8787`). The daemon is headless: no UI ships in this repository. The routes below are the HTTP control plane around the same review implementation the terminal entry point runs (§1).
 
 ---
 
-## 1. Authentication & Security
+## 1. Primary Entry Point: the CLI
+
+`consistency review` is the product entry point. The HTTP daemon exists to host the same review implementation for HTTP callers, persistent job history, workers, and GitHub integration.
+
+```bash
+npm run consistency -- review --repo ../my-checkout --base main --head feature
+```
+
+- The CLI is a *host* for the existing runtime, not a second implementation: `apps/cli/src/review.ts:149` calls the same `createReviewRuntime` (`apps/api/src/review/workloadRuntime.ts:142`) that the daemon's worker calls (`apps/api/src/jobs/worker.ts:89`). Analysis, agents, and the kernel are not re-implemented under `apps/cli`.
+- One run reviews the checkout at `--repo` in a single process: no HTTP call and no repository registration are involved. The run keeps its job state in memory (`InMemoryJobQueue`, `apps/cli/src/review.ts:145`) and writes its evidence workspace under a CLI-scoped artifact directory in the install root instead of the daemon's SQLite job/report tables.
+- A real LLM provider is required (DeepSeek, OpenAI, or Anthropic). Without one the command fails before the run with a setup error pointing at `npm run setup` or `npm run config -- set llm.provider <deepseek|openai|anthropic>`; there is no user-facing mock provider.
+- Exit codes are the contract for automation: `0` the review ran and nothing met `--threshold`; `1` the review ran and at least one finding met the threshold; `2` the review did not run, or its coverage was incomplete — exit `2` is not a result a gate can trust.
+- The commands are `consistency review [options]` (`--repo`, `--base`, `--head`, `--json`, `--verbose`, `--limit`, `--all`, `--threshold`, `--language`, `--provider`, `--model`, `--color` / `--no-color`, `--help` / `-h`) and `consistency help`. An unknown command prints usage and exits `2`. `npm run review` is the same review command without the extra `--`.
+
+---
+
+## 2. Authentication & Security
 
 When `CONSISTENCY_API_TOKEN` is configured, protected requests require:
 
@@ -12,17 +28,11 @@ When `CONSISTENCY_API_TOKEN` is configured, protected requests require:
 Authorization: Bearer <CONSISTENCY_API_TOKEN>
 ```
 
-In Electron Desktop mode, the main process injects this token automatically via the `consistency://app` protocol proxy. Internal administration endpoints (such as local repository registration) additionally require the desktop control header:
-
-```http
-x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
-```
-
-For local browser dogfood (`npm run dev:web`), the Vite `/api` proxy can inject the same headers from `process.env` when set — **dev-server only**; do not rely on this in production or Electron.
+`GET /health` and `POST /github/webhook` (HMAC-verified header) are the unauthenticated entries; every other route in §3 is authenticated. Provider credentials, GitHub private keys, and local filesystem locators are never returned by any route — see §7.
 
 ---
 
-## 2. API Routes Summary
+## 3. API Routes Summary
 
 | Method | Path | Description | Access / Auth |
 |---|---|---|---|
@@ -30,7 +40,6 @@ For local browser dogfood (`npm run dev:web`), the Vite `/api` proxy can inject 
 | `GET` | `/repositories` | List connected repositories | Authenticated |
 | `POST` | `/repositories/connect-public` | Resolve or verify and connect a public github.com repository | Authenticated |
 | `GET` | `/repositories/:id` | Get repository details, Git state, and recent reviews | Authenticated |
-| `POST` | `/internal/repositories/local` | Register a local Git repository path | Desktop Control Token |
 | `GET` | `/repositories/:id/git/status` | Read registered repository branch, working tree, and safe remote projection | Authenticated |
 | `GET` | `/repositories/:id/git/commits` | Read commit history for a registered local repository | Authenticated |
 | `GET` | `/repositories/:id/git/tree` | List one directory of a registered local repository (lazy Shell tree) | Authenticated |
@@ -69,19 +78,17 @@ For local browser dogfood (`npm run dev:web`), the Vite `/api` proxy can inject 
 | `POST` | `/workflow-runtime/copilot/proposal` | Generate a structured WorkflowPatch proposal from natural language (zero persistence, zero side effects; sanitized fail-closed errors) | Authenticated (Real LLM Required) |
 | `POST` | `/workflow-runtime/copilot/chat` | Conversational graph editing: client-held message history (≤24, last message `user`) + definition/definitionId → `{ reply, patch, basis.definitionFingerprint }`. Empty `patch` is a purely conversational reply. Full reducer vocabulary (`ADD_NODE`/`ADD_EDGE`/`REMOVE_NODE`/`REMOVE_EDGE`/`UPDATE_PARAMS`) validated in order server-side + compile precheck; zero session state server-side. Unknown `flow`/definition → 404; sanitized 400/502 otherwise | Authenticated (Real LLM Required) |
 | `GET` | `/settings` | Get sanitized runtime configuration snapshot | Authenticated |
-| `PUT` | `/settings` | Update editable runtime settings (dev / desktop mode) | Authenticated |
+| `PUT` | `/settings` | Update editable runtime settings | Authenticated |
 | `POST` | `/settings/github/test-connection` | Single bounded read-only GitHub connection probe: targets the ACTIVE runtime credential by default, or one unsaved draft PAT supplied as `{"publicReadToken": "..."}` (probe only; never persisted, logged, or echoed). Sanitized status enum + bounded retry metadata only (CKPT4 Slice 2, Phase 2C) | Authenticated |
-| `POST` | `/oauth/desktop/start` | Starts the product-operated Desktop OAuth broker handoff. Accepts a loopback callback URL plus state and S256 challenge; returns only a GitHub HTTPS authorization URL and opaque flow id. No bearer token is required; no Client Secret is accepted. | Public broker entry |
-| `GET` | `/oauth/github/callback` | Broker-only GitHub callback. Stores the authorization code server-side and redirects once to the registered loopback callback with desktop state plus a single-use handoff code; no code or token is placed in the redirect. | Public broker callback |
-| `POST` | `/oauth/desktop/complete` | Completes one Desktop handoff with flow id, handoff code, and PKCE verifier. The broker performs the server-side GitHub token exchange and identity lookup, then returns `{ status, login, accessToken }` only to the main process. Responses are `no-store`. | Public broker entry |
-| `POST` | `/oauth/desktop/cancel` | Invalidates one Desktop broker flow and returns the fixed `{ "status": "cancelled" }` response. | Public broker entry |
-| `POST` | `/settings/github/oauth/start` | Browser-only compatibility route for GitHub OAuth Device Flow: proxies github.com with the server-configured public client id and returns `{ flowId, userCode, verificationUri, expiresAt, intervalSeconds }`. The `device_code` never leaves the server process; 503 `GITHUB_OAUTH_NOT_CONFIGURED` when unset. Desktop renderer requests are blocked. | Authenticated |
-| `POST` | `/settings/github/oauth/poll` | Browser-only compatibility polling route: `{ "flowId": "..." }`. Server-enforced polling interval; returns `pending` / `expired` / `denied` / `unavailable`, or `connected` carrying the access token exactly once for Web's encrypted settings handoff. Desktop renderer requests are blocked; packaged Desktop uses the main-process OAuth capability instead. | Authenticated |
+| `POST` | `/settings/github/oauth/start` | Compatibility route for the GitHub OAuth Device Flow: proxies github.com with the server-configured public client id and returns `{ flowId, userCode, verificationUri, expiresAt, intervalSeconds }`. The `device_code` never leaves the server process; 503 `GITHUB_OAUTH_NOT_CONFIGURED` when unset. | Authenticated |
+| `POST` | `/settings/github/oauth/poll` | Compatibility polling route: `{ "flowId": "..." }`. Server-enforced polling interval; returns `pending` / `expired` / `denied` / `unavailable`, or `connected`, which carries the access token exactly once. | Authenticated |
 | `POST` | `/github/webhook` | Incoming HMAC-verified GitHub webhook event | GitHub HMAC Header |
+
+The Notebook routes are the model-visible question-answering surface (tool-calling Q&A over a pinned repository/PR snapshot). They require `CONSISTENCY_NOTEBOOK_ENABLED` plus a wired notebook store, and answer `404` with code `NOTEBOOK_DISABLED` otherwise. The API exists but this repository ships no interface for it — there is no bundled UI. See docs/notebook.md.
 
 ---
 
-## 3. Public Repository Connection
+## 4. Public Repository Connection
 
 ```http
 POST /repositories/connect-public
@@ -95,13 +102,13 @@ The input may be a strict `owner/repository` coordinate or an exact canonical `h
 
 Failures use typed codes for invalid input, unsupported hosts, unavailable/not-found repositories, authentication-required/private repositories, rate limits, and provider unavailability. Generic `POST /repositories` rejects `source: "github"`; GitHub records must pass through this verified endpoint.
 
-## 4. Bounded Pull Request History
+## 5. Bounded Pull Request History
 
 `GET /repositories/:id/pull-requests` performs a single fixed-host GitHub read for the newest Pull Requests first (`state=all`, created descending, page 1, 100 rows). An available response contains the server-resolved canonical `repositoryFullName`, `page: { "limit": 100, "truncated": boolean }`, and no more than 100 provider summaries. `truncated` means GitHub advertised a next page; it is not a total count. Every summary URL must equal the exact raw canonical reconstruction `https://github.com/{owner}/{repo}/pull/{number}`: dot segments, parent-segment normalization, backslashes, percent encoding, credentials, ports, query strings, fragments, and every other WHATWG normalization difference fail closed. The URL owner/repository match `repositoryFullName` case-insensitively while preserving legal mixed-case provider coordinates, and the positive safe-integer PR number matches its decimal URL segment exactly without leading or numeric-precision ambiguity. Repository coordinates use the same shared parser as Git remote discovery: owners are 1–39 alphanumeric/hyphen characters, begin and end alphanumerically, and repositories are 1–100 alphanumeric/dot/underscore/hyphen characters but cannot consist entirely of dots; whitespace, control characters, untrimmed input, and overlong components fail closed. The optional `latestReview` association is selected only by exact opaque `repositoryId`, PR-review kind, and one of the at-most-100 PR numbers in the provider response. Memory and SQLite stores return the exact latest job per requested number; the SQLite adapter uses one bounded query, and no fixed recent-history cutoff or repository-name inference is used. Unavailable responses contain an empty `pullRequests` array plus a stable `reasonCode` (`not_github`, `identity_unavailable`, `not_found`, `access_denied`, `rate_limited`, `provider_unavailable`, or `invalid_provider_data`) and a sanitized fixed reason. Before sending, the API validates the complete response schema and maps any invalid internal/provider response to the fixed `PULL_REQUEST_HISTORY_RESPONSE_INVALID` server error.
 
-The Web client requests this route only while the repository Pull Requests tab is active. It does not poll in the background, synchronize provider data, automatically load another page, or expose a load-more/infinite-query flow. Public GitHub access is read-only and publication remains disabled; this route cannot mutate, comment on, label, close, reopen, or merge a Pull Request.
+Each request is a single bounded provider read: the route does not poll in the background, synchronize provider data, automatically load another page, or expose a load-more/infinite-query flow. Public GitHub access is read-only and publication remains disabled; this route cannot mutate, comment on, label, close, reopen, or merge a Pull Request.
 
-## 5. Public PR Review Ingestion
+## 6. Public PR Review Ingestion
 
 ```http
 POST /reviews/public-pr
@@ -117,7 +124,7 @@ Content-Type: application/json
 
 Standalone public PR URL ingestion is separate from repository workspace listing. It is read-only and does not use a GitHub App installation token merely because an App is configured.
 
-## 6. Repository Authority and Safe Responses
+## 7. Repository Authority and Safe Responses
 
 The `:id` in repository routes is the opaque registered `Repository.id`. An exact audit-store registration is required. Display names, remote names, `local:` aliases, heartbeat roots, project-root shortcuts, relative paths, and absolute paths are not selectors. Local filesystem locators remain server-only and are resolved only for exact registered `local_git` records.
 
@@ -129,9 +136,9 @@ Git remote objects returned by repository routes have exactly this shape:
 
 `githubFullName` is optional. Raw fetch URLs, raw push URLs, and embedded credentials are never returned.
 
-`GET /repositories/:id/reviews` returns the strict bounded shape `{ repositoryId, reviews }`, with at most 200 `ReviewJob` DTOs. Every returned review must carry the exact same canonical opaque `repositoryId`; legacy rows without an association and rows associated with another repository fail the response contract. The API validates the final response before sending it, and the Web client parses the same shared schema and verifies that the response identity matches the requested opaque ID. Malformed responses fail closed with fixed errors rather than exposing provider, persistence, or row details.
+`GET /repositories/:id/reviews` returns the strict bounded shape `{ repositoryId, reviews }`, with at most 200 `ReviewJob` DTOs. Every returned review must carry the exact same canonical opaque `repositoryId`; legacy rows without an association and rows associated with another repository fail the response contract. The API validates the final response before sending it against the same shared schema any client parses. Malformed responses fail closed with fixed errors rather than exposing provider, persistence, or row details.
 
-## 7. Local Review Trigger
+## 8. Local Review Trigger
 
 ```http
 POST /reviews/local
@@ -146,46 +153,13 @@ Content-Type: application/json
 }
 ```
 
-The request requires `repositoryId`. `baseRef` and `headRef` are optional. A per-review model override may use `model` or `llm`; when both are present, `model` takes precedence. The body is strict and does not accept `repoPath`. The server resolves the local filesystem locator from the exact registered repository, and the locator does not cross the renderer/API response boundary.
+The request requires `repositoryId`. `baseRef` and `headRef` are optional. A per-review model override may use `model` or `llm`; when both are present, `model` takes precedence. The body is strict and does not accept `repoPath`. The server resolves the local filesystem locator from the exact registered repository, and the locator is never returned in an API response.
 
-## 8. Pull Request Lifecycle Fields
+## 9. Pull Request Lifecycle Fields
 
-Provider state remains `open` or `closed`. `closedAt` and `mergedAt` are required nullable metadata. Open rows require both timestamps to be null; closed rows require `closedAt`; merged rows are closed rows with non-null `mergedAt`. `updatedAt`, `closedAt`, and `mergedAt` cannot predate `createdAt`; `updatedAt` cannot predate either `closedAt` or `mergedAt`; and `mergedAt` cannot follow `closedAt`. Shared DTO validation and provider payload validation use the same lifecycle seam. The UI derives merged display from `closed` plus non-null `mergedAt`; it never infers merge state from Git history.
+Provider state remains `open` or `closed`. `closedAt` and `mergedAt` are required nullable metadata. Open rows require both timestamps to be null; closed rows require `closedAt`; merged rows are closed rows with non-null `mergedAt`. `updatedAt`, `closedAt`, and `mergedAt` cannot predate `createdAt`; `updatedAt` cannot predate either `closedAt` or `mergedAt`; and `mergedAt` cannot follow `closedAt`. Shared DTO validation and provider payload validation use the same lifecycle seam. Merged display is derived from `closed` plus non-null `mergedAt`; merge state is never inferred from Git history.
 
 ---
-
-## 9. Local Repository Registration (Desktop IPC)
-
-```http
-POST /internal/repositories/local
-Authorization: Bearer <CONSISTENCY_API_TOKEN>
-x-consistency-desktop-control: <CONSISTENCY_DESKTOP_CONTROL_TOKEN>
-Content-Type: application/json
-
-{
-  "path": "<server-only-local-path>",
-  "displayName": "my-repo",
-  "monitoringEnabled": true
-}
-```
-
-Response (`201 Created`):
-```json
-{
-  "repository": {
-    "id": "repo_...",
-    "displayName": "my-repo",
-    "source": "local_git",
-    "trustLevel": "untrusted_readonly",
-    "monitoringEnabled": true,
-    "createdAt": "2026-08-20T00:00:00.000Z",
-    "updatedAt": "2026-08-20T00:00:00.000Z"
-  }
-}
-```
-*(The local filesystem path is verified and retained internally; it is never echoed in the public Repository DTO).*
-
-Registration also inspects Git metadata without executing repository code. A recognized github.com `origin` fetch URL is preferred, followed by the first recognized non-origin fetch remote in deterministic name order. Push-only URLs never define canonical identity. `defaultBranch` is persisted only when the selected remote has a resolvable local symbolic `refs/remotes/<remote>/HEAD` whose target ref exists; registration performs no network fetch and never falls back to local `main`, `master`, or the current branch. Local branch discovery is fill-only: a non-null stored branch is preserved across repeated local registration, and provider metadata takes precedence when a provider row is converted to a local checkout. Re-registering the same path may enrich an empty remote identity or repeat the same case-insensitive identity while preserving the opaque ID. A changed same-path identity, a remote already assigned to another local checkout, or separate local and GitHub rows requiring a reference-preserving merge returns `REPOSITORY_RECONCILIATION_CONFLICT` without mutating either row. Missing, malformed, non-GitHub, or unreadable remotes do not prevent otherwise-valid local registration and do not produce a guessed identity. `git://` and GitHub Enterprise hosts are unsupported in this phase.
 
 ## 10. Audit Control Plane (runs, capabilities, events, export)
 
@@ -238,8 +212,8 @@ decision record.
 instruction into a structured `WorkflowPatch` proposal (SPEC §18.2/§18.3/§36).
 The endpoint is a pure advisor: it never persists anything, never triggers a
 run or dry-load, and never mutates a definition. The only path to a persisted
-change is a human Apply in the Workflow Studio, which translates the proposal
-into Studio reducer actions and then walks the canonical validate →
+change is an explicit definition save through
+`POST /workflow-runtime/definitions` (§3), which walks the canonical validate →
 save-revision gate chain; the Copilot can never bypass the compiler.
 
 Request (exactly one of `definition` / `definitionId` — sending both is a 400;

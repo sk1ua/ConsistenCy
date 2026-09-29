@@ -4,10 +4,12 @@
 **判定基线**：分支 `v3`，HEAD `0b20fa22388493c0616f9e032648743078be11aa` + 当日 dirty worktree（工作树含大量未提交改动；本文判定基于**工作树实际文件**，不基于提交内容）
 **上一版**：2026-09-23（本文取代之。上一版第 7 节机器账本中的 `local_paths` 未做存在性核验，经本次逐一核对 **36/36 全部不存在**，见 §0.4）
 **证据分层标注口径**：实现（源码存在）/ 接入（产品组合根或路由有真实调用点）/ 测试（存在并实际执行过的测试）/ 安装态实测（打包安装产物上的运行验证）
-**本次审计执行环境**：Windows，24 逻辑核；Node **v25.8.1**（`.node-version`/`.nvmrc` 声明 Node 22；`docs/delivery-readiness.md:191` 亦记录“系统 Node 25.8.1 不满足 engines”）；Python venv 未参与本次判定
+**本次审计执行环境**：Windows，24 逻辑核；Node **v25.8.1**（`.node-version`/`.nvmrc` 声明 Node 22；v3 时代的 `docs/delivery-readiness.md` 亦记录“系统 Node 25.8.1 不满足 engines”，该文件现为 v3 → v4 迁移记录）；Python venv 未参与本次判定
 **本次证据来源**：仓库内文件 + 仓库外的 Codex 研究目录 `C:\Users\15857\Documents\Codex\2026-09-19\glm-coding-plan-23\harness-research\`（下称 `harness-research/`），其中 `evidence-index.md` 研究日期 2026-09-23，其第 3 行自述“本次未安装或运行上游”。**本次同样未安装、未运行任何上游项目**，因此不存在任何“上游源码级兼容性已验证”的判定基础。
 
 > **一句话结论**：上一版账本把 14 条上游复用关系标成 `compatibility_verified: true` 并配上并不存在的本地路径；本次按仓库真实实现重判后，**没有任何条目达到“已验证”档**，最高档为“集成”，且多数“移植”声明实际是**本地原生实现（设计参考）**而非源码移植。
+
+> **性质说明（v4 追加）**：本文是**特定时点的历史审计记录**（判定日期与判定基线见上），不是当前状态描述。文中出现的 `apps/web`、`apps/desktop`、Electron、Vite、Playwright 路径属于**当时**判定基线上的文件；这些前端与桌面组件已在 v4 删除。阅读时请把这些路径当作审计当时的证据，而不是现存能力。当前状态以 [delivery-readiness.md](delivery-readiness.md)（v3 → v4 迁移记录）与代码本身为准。
 
 ---
 
@@ -452,7 +454,7 @@ flowchart LR
 
 ### 9.1 结论摘要（先给结论，证据在后）
 
-1. **原始失败有据可查**：HEAD 内注释与 `docs/delivery-readiness.md:183` 双向记载 2026-09-21 全量运行中 `localRegistration.http.test.ts` **两次**撞上默认 5s 墙超时（`Test timed out in 5000ms`，**无断言失败**），隔离耗时 1.1–1.3s；当时把个案预算提到 20s 后全量 794/794。
+1. **原始失败有据可查**：HEAD 内注释与 v3 时代交付审计文档（现为 `docs/delivery-readiness.md` 的迁移记录）双向记载 2026-09-21 全量运行中 `localRegistration.http.test.ts` **两次**撞上默认 5s 墙超时（`Test timed out in 5000ms`，**无断言失败**），隔离耗时 1.1–1.3s；当时把个案预算提到 20s 后全量 794/794。
 2. **加时的动机在高并发下仍有实测支持**：在 23 worker + 5s 预算的真实运行中，除带个案预算的用例外，最慢单测 4700ms，距 5s 仅余 300ms（6%）。
 3. **但配置注释里更强的主张未复现**：`apps/api/vitest.config.ts:21-28` 声称“23 并发下 30s 预算仍被超过（3/3 全量，localRegistration >30s）并出现 ECONNRESET”——本次 **3 次全量运行（R2/R3/R4，含 `--maxWorkers=23`）全部通过**，最慢单测 7865ms（占 30s 的 26%），**0 次 ECONNRESET**。
 4. **不存在“用 timeout/skip/缩小集合掩盖失败”**：diff 扫描显示**零新增** `.skip/.only`，10 行被移除的断言全部是**改写或增强**（§9.6）。
@@ -464,8 +466,8 @@ flowchart LR
 | 来源 | 内容 | 可复核位置 |
 |---|---|---|
 | 提交态注释（HEAD 已存在） | “Isolated duration ~1.1s (2026-09-21). **Two full-suite runs** (83 files imported in parallel) **hit the default 5s wall** with `Test timed out in 5000ms` **and no assertion failure** — Windows git spawn + ~10 sequential HTTP calls starve under that load. 20s is ~18× isolated, still fail-closed if the product hangs. Assertions unchanged.” 个案预算 `{ timeout: 20_000 }` | `git show HEAD:apps/api/src/audit/localRegistration.http.test.ts` |
-| 同期交付文档 | “`localRegistration.http.test.ts` 全量两次在默认 5s 墙超时（**无断言失败**）；隔离 1.1–1.3s。该用例含两套 git init + ~10 次串行 HTTP。超时改为 20s，断言未改；随后全量 794/794。”环境记为 Node v22.23.2 | `docs/delivery-readiness.md:167,169,183` |
-| 同期进度文档 | “`localRegistration` 全量超时余量 20s（隔离 ~1.2s，断言未改）” | `docs/remediation-progress.md:329` |
+| 同期交付文档 | “`localRegistration.http.test.ts` 全量两次在默认 5s 墙超时（**无断言失败**）；隔离 1.1–1.3s。该用例含两套 git init + ~10 次串行 HTTP。超时改为 20s，断言未改；随后全量 794/794。”环境记为 Node v22.23.2 | v3 时代交付审计文档（现为 `docs/delivery-readiness.md` 的迁移记录） |
+| 同期进度文档 | “`localRegistration` 全量超时余量 20s（隔离 ~1.2s，断言未改）” | v3 时代 `docs/remediation-progress.md`（现为历史缺陷清单） |
 | 当前工作树改动 | 个案预算 20s → 30s，注释改为对齐套件默认值；`vitest.setup.ts` 新增（非 keep-alive agent）；`apps/api/src/http.test.ts` 新增 `postOversizedJson` 重试（吞 `ECONNRESET`/`EPIPE`）——**HEAD 无此代码**，说明作者确实观测到过 loopback ECONNRESET | `git diff -- apps/api/vitest.config.ts apps/api/src/http.test.ts` |
 | 原始失败日志 | **未找到**。`.omo/evidence/**` 下仅有**通过后**的运行日志（batch1/2/3 中该文件分别为 3270ms/3013ms/3939ms，均通过） | 见下命令 |
 

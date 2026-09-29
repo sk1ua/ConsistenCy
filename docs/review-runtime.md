@@ -1,6 +1,8 @@
 # ConsistenCy Review Runtime & Context VM
 
-This document explains the execution lifecycle of a code review run in ConsistenCy v3, detailing how Context VM pages, deterministic evidence, and agent control blocks collaborate to produce evidence-grounded findings.
+This document explains the execution lifecycle of a code review run in ConsistenCy v4, detailing how Context VM pages, deterministic evidence, and agent control blocks collaborate to produce evidence-grounded findings.
+
+> **Version note**: this document describes the current **v4 (terminal-only)** checkout. The product lineage name is still v3 (see the frozen [CONSISTENCY_V3_MASTER_SPEC.md](CONSISTENCY_V3_MASTER_SPEC.md)); v4 deleted the Web UI and the Electron desktop host, keeping the CLI and the headless HTTP daemon. Differences: [delivery-readiness.md](delivery-readiness.md).
 
 ---
 
