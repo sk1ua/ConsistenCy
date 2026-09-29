@@ -55,11 +55,15 @@ export async function diagnoseConfiguration(environment: NodeJS.ProcessEnv): Pro
   if (!config.LLM_PROVIDER) {
     checks.push({ id: "llm", status: "warn", message: "LLM provider is not configured; review executions will be blocked until configured" });
   } else if (config.LLM_PROVIDER === "anthropic") {
-    checks.push(config.ANTHROPIC_API_KEY
+    checks.push(config.ANTHROPIC_API_KEY || config.LLM_API_KEY
       ? { id: "llm", status: "pass", message: `Anthropic is configured (model ${config.ANTHROPIC_MODEL || "catalog default"})` }
       : { id: "llm", status: "fail", message: "Anthropic API key is missing" });
   } else {
-    const configured = config.LLM_PROVIDER === "deepseek" ? Boolean(config.DEEPSEEK_API_KEY) : Boolean(config.OPENAI_API_KEY);
+    const configured = config.LLM_PROVIDER === "deepseek"
+      ? Boolean(config.DEEPSEEK_API_KEY || config.LLM_API_KEY)
+      : config.LLM_PROVIDER === "openai"
+        ? Boolean(config.OPENAI_API_KEY || config.LLM_API_KEY)
+        : Boolean(config.LLM_API_KEY);
     checks.push(configured
       ? { id: "llm", status: "pass", message: `${config.LLM_PROVIDER} credentials are configured` }
       : { id: "llm", status: "fail", message: `${config.LLM_PROVIDER} credentials are missing` });

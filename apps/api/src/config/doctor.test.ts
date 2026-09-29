@@ -21,6 +21,17 @@ describe("diagnoseConfiguration", () => {
     expect(result.checks.find(check => check.id === "llm")?.status).toBe("pass");
   });
 
+  it("accepts generic Pi providers with their provider-scoped credential", async () => {
+    const result = await diagnoseConfiguration({
+      LLM_PROVIDER: "xiaomi",
+      LLM_API_KEY: "configured",
+      LLM_MODEL: "mimo-v2.6-flash"
+    });
+    expect(result.ok).toBe(true);
+    expect(result.checks.find(check => check.id === "llm")?.status).toBe("pass");
+    expect(result.checks.find(check => check.id === "llm")?.message).toContain("xiaomi credentials are configured");
+  });
+
   it("reports incomplete provider configuration as a fail on the llm check", async () => {
     const result = await diagnoseConfiguration({ LLM_PROVIDER: "deepseek" });
     expect(result.ok).toBe(false);

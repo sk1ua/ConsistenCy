@@ -41,6 +41,34 @@ describe("SettingsStore", () => {
     });
   });
 
+  it("persists generic Pi provider credentials and model without exposing the key", () => {
+    const settings = store();
+    const snapshot = settings.update({
+      llm: { provider: "xiaomi", llmModel: "mimo-v2.6-flash", llmApiKey: "xiaomi-test-secret" }
+    });
+
+    const publicText = readFileSync(settings.publicPath, "utf8");
+    const encryptedText = readFileSync(settings.secretsPath, "utf8");
+    expect(publicText).toContain('"LLM_PROVIDER": "xiaomi"');
+    expect(publicText).toContain('"LLM_MODEL": "mimo-v2.6-flash"');
+    expect(publicText).not.toContain("xiaomi-test-secret");
+    expect(encryptedText).not.toContain("xiaomi-test-secret");
+    expect(settings.savedEnvironment()).toMatchObject({
+      LLM_PROVIDER: "xiaomi",
+      LLM_MODEL: "mimo-v2.6-flash",
+      LLM_API_KEY: "xiaomi-test-secret"
+    });
+    expect(snapshot.llm).toMatchObject({
+      provider: "xiaomi",
+      llmModel: "mimo-v2.6-flash",
+      llmApiKeyConfigured: true,
+      deepseekApiKeyConfigured: false,
+      openaiApiKeyConfigured: false,
+      anthropicApiKeyConfigured: false
+    });
+    expect(JSON.stringify(snapshot)).not.toContain("xiaomi-test-secret");
+  });
+
   it("lets environment variables override saved values without exposing secrets", () => {
     const settings = store();
     settings.update({ llm: { provider: "deepseek", deepseekApiKey: "saved-key" } });

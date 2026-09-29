@@ -69,14 +69,15 @@ npm run config -- doctor
 
 | 分类 | 键 |
 |---|---|
-| provider | `llm.provider`（只接受 `deepseek` / `openai` / `anthropic`） |
+| provider | `llm.provider`（Pi catalog provider id，例如 `xiaomi`、`deepseek`、`openai`、`anthropic`） |
+| Generic Pi provider | `llm.api-key`、`llm.model`（密钥加密保存，适用于 Xiaomi 等 Pi catalog provider） |
 | DeepSeek | `llm.deepseek-api-key`、`llm.deepseek-model`、`llm.deepseek-base-url` |
 | OpenAI | `llm.openai-api-key`、`llm.openai-model` |
 | Anthropic | `llm.anthropic-api-key`、`llm.anthropic-model` |
 | GitHub | `github.app-id`、`github.private-key`、`github.webhook-secret`、`github.public-read-token` |
 | runtime | `runtime.database-path`、`runtime.workspace-root`、`runtime.worker-concurrency`、`runtime.worker-poll-ms`、`runtime.web-url`、`runtime.api-token` |
 
-带 `-api-key`、`-private-key`、`-webhook-secret`、`-public-read-token`、`-api-token` 的键是 secret：不传第三个参数时会交互式隐藏输入。全部配置不写在仓库里，而是落在 `.consistency/`（已 gitignore）：
+带 `-api-key`、`-private-key`、`-webhook-secret`、`-public-read-token`、`-api-token` 的键是 secret：不传第三个参数时会交互式隐藏输入。也可省略 `llm.api-key` 的值，进行隐藏式交互输入。全部配置不写在仓库里，而是落在 `.consistency/`（已 gitignore）：
 
 - `config.json` —— 非敏感设置
 - `secrets.enc.json` + `config.key` —— 加密后的密钥

@@ -243,6 +243,7 @@ describe("effectiveSettings", () => {
       expect(isSecretSetting("OPENAI_API_KEY")).toBe(true);
       expect(isSecretSetting("ANTHROPIC_API_KEY")).toBe(true);
       expect(isSecretSetting("LLM_API_KEY")).toBe(true);
+      expect(isSecretSetting("llmApiKey")).toBe(true);
       expect(isSecretSetting("GITHUB_PRIVATE_KEY")).toBe(true);
       expect(isSecretSetting("GITHUB_WEBHOOK_SECRET")).toBe(true);
       expect(isSecretSetting("GITHUB_PUBLIC_READ_TOKEN")).toBe(true);

@@ -89,6 +89,7 @@ export interface ResolveEffectiveSettingsOptions {
 /** Set of known sensitive keys (both env var and canonical property names) */
 const SECRET_KEY_NAMES = new Set<string>([
   "LLM_API_KEY",
+  "llmApiKey",
   "ANTHROPIC_API_KEY",
   "DEEPSEEK_API_KEY",
   "OPENAI_API_KEY",
@@ -98,7 +99,6 @@ const SECRET_KEY_NAMES = new Set<string>([
   "CONSISTENCY_API_TOKEN",
   "CONSISTENCY_DESKTOP_CONTROL_TOKEN",
   "CONSISTENCY_DESKTOP_OAUTH_CLIENT_SECRET",
-  "llmApiKey",
   "anthropicApiKey",
   "deepseekApiKey",
   "openaiApiKey",
