@@ -29,8 +29,9 @@ describe("profileEnabled", () => {
     expect(profileEnabled(configWith({ DEEPSEEK_API_KEY: "" }), "deepseek")).toBe(false);
     expect(profileEnabled(configWith({ DEEPSEEK_API_KEY: "" }), "openai")).toBe(false);
     expect(profileEnabled(configWith({ OPENAI_API_KEY: "" }), "anthropic")).toBe(false);
-    // The generic LLM_API_KEY counts for any managed provider.
+    // The generic LLM_API_KEY is scoped to the selected provider.
     expect(profileEnabled(configWith({ DEEPSEEK_API_KEY: "", LLM_API_KEY: SECRET_MARKER }), "deepseek")).toBe(true);
+    expect(profileEnabled(configWith({ LLM_PROVIDER: "xiaomi", DEEPSEEK_API_KEY: "", LLM_API_KEY: SECRET_MARKER }), "deepseek")).toBe(false);
   });
 
   it("keeps Pi-managed providers enabled — their auth cannot be verified statically", () => {

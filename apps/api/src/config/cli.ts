@@ -104,8 +104,16 @@ async function setup(store: SettingsStore): Promise<void> {
   const rl = createInterface({ input: stdin, output: stdout });
   stdout.write("\nConsistenCy setup\nPress Enter to keep the value shown in brackets.\n\n");
   const providerInput = await rl.question(`LLM provider id from Pi catalog [${current.llm.provider}]: `);
-  const providerValue = (providerInput.trim() || current.llm.provider).toLowerCase();
-  const provider = PROVIDER_ID_REGEX.test(providerValue) ? providerValue : undefined;
+  let provider: string | undefined;
+  try {
+    const providerValue = providerInput.trim() || current.llm.provider;
+    provider = providerValue === "none" && !providerInput.trim()
+      ? undefined
+      : providerIdPatch(providerValue).llm!.provider ?? undefined;
+  } catch (error) {
+    rl.close();
+    throw error;
+  }
   const patch: SettingsPatch = { llm: { provider }, github: {}, runtime: {} };
   if (provider === "deepseek") {
     patch.llm!.deepseekBaseUrl = (await rl.question(`DeepSeek base URL [${current.llm.deepseekBaseUrl}]: `)).trim() || current.llm.deepseekBaseUrl;

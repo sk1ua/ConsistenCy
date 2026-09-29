@@ -4,6 +4,7 @@ import {
   type LlmConnectionProfile
 } from "@consistency/schema";
 import type { AppConfig } from "../../config/env";
+import { isProviderCredentialConfigured } from "../../config/settings";
 
 /**
  * H08 — connection profiles (连接档) resolved from the EXISTING settings.
@@ -47,13 +48,14 @@ export type LlmProfileChain = {
 
 /**
  * Enabled = a credential is present for ConsistenCy-managed providers.
- * Mirrors the settings snapshot's key-configured logic (LLM_API_KEY counts
- * for any provider); other providers stay enabled for Pi to authenticate.
+ * Uses the same credential scope as settings and doctor. Other providers stay
+ * enabled for Pi to authenticate through its own environment convention.
  */
 export function profileEnabled(config: AppConfig, provider: string): boolean {
-  if (provider === "deepseek") return Boolean(config.DEEPSEEK_API_KEY || config.LLM_API_KEY);
-  if (provider === "openai") return Boolean(config.OPENAI_API_KEY || config.LLM_API_KEY);
-  if (provider === "anthropic") return Boolean(config.ANTHROPIC_API_KEY || config.LLM_API_KEY);
+  const normalizedProvider = provider.trim().toLowerCase();
+  if (["deepseek", "openai", "anthropic"].includes(normalizedProvider)) {
+    return isProviderCredentialConfigured(normalizedProvider, config);
+  }
   return true;
 }
 

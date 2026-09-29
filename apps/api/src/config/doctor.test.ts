@@ -40,6 +40,11 @@ describe("diagnoseConfiguration", () => {
     expect(result.checks.find(check => check.id === "llm")?.status).toBe("pass");
   });
 
+  it("accepts an uppercase provider id with its scoped generic key", async () => {
+    const result = await diagnoseConfiguration({ LLM_PROVIDER: "ANTHROPIC", LLM_API_KEY: "configured" });
+    expect(result.checks.find(check => check.id === "llm")?.status).toBe("pass");
+  });
+
   it("rejects a known provider when only a different provider's dedicated key is present", async () => {
     // LLM_PROVIDER=openai but only DEEPSEEK_API_KEY exists — neither the
     // dedicated key nor LLM_API_KEY is present, so the check must fail.

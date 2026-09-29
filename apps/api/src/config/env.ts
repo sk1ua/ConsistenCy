@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
-import { findProjectRoot } from "./settings";
+import { findProjectRoot, PROVIDER_ID_REGEX } from "./settings";
 
 export function resolveDatabasePath(inputPath: string, root = findProjectRoot()): string {
   if (inputPath === ":memory:") return ":memory:";
@@ -59,7 +59,7 @@ export const envSchema = z.object({
    * The catalog is the source of truth; an unknown id fails closed at
    * provider creation with a typed error.
    */
-  LLM_PROVIDER: emptyAsUnset(z.string().trim().min(2).max(64).regex(/^[a-z0-9][a-z0-9.-]*$/i).optional()),
+  LLM_PROVIDER: emptyAsUnset(z.string().trim().min(2).max(64).regex(PROVIDER_ID_REGEX).optional()),
   // The LLM engine is the bundled Pi runtime (@earendil-works/pi-*). Keys are
   // injected in-memory via setRuntimeApiKey at provider creation; nothing is
   // written to Pi config files and no local Pi installation is required.

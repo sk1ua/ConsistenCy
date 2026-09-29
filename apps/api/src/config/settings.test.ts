@@ -82,6 +82,22 @@ describe("SettingsStore", () => {
     expect(snapshot.llm.llmApiKeyConfigured).toBe(true);
   });
 
+  it("scopes a generic key to the selected provider without hiding dedicated keys", () => {
+    const settings = store();
+    const snapshot = settings.snapshot({
+      LLM_PROVIDER: "XIAOMI",
+      LLM_API_KEY: "generic-key",
+      DEEPSEEK_API_KEY: "deepseek-key"
+    });
+    expect(snapshot.llm).toMatchObject({
+      provider: "xiaomi",
+      llmApiKeyConfigured: true,
+      deepseekApiKeyConfigured: true,
+      openaiApiKeyConfigured: false,
+      anthropicApiKeyConfigured: false
+    });
+  });
+
   it("lets environment variables override saved values without exposing secrets", () => {
     const settings = store();
     settings.update({ llm: { provider: "deepseek", deepseekApiKey: "saved-key" } });

@@ -13,7 +13,8 @@ import { resolveEffectiveSettings, type EffectiveSettingsResult } from "./effect
 export const PROVIDER_ID_REGEX = /^[a-z0-9][a-z0-9.-]{1,63}$/i;
 
 /**
- * Returns true when `key` carries an API credential for `provider`.
+ * Returns true when the effective configuration carries an API credential for
+ * `provider`.
  * Single canonical function shared between SettingsStore.snapshot() and
  * diagnoseConfiguration() so the two can never drift apart.
  *
@@ -25,14 +26,17 @@ export const PROVIDER_ID_REGEX = /^[a-z0-9][a-z0-9.-]{1,63}$/i;
 export function isProviderCredentialConfigured(
   provider: string,
   env: {
+    LLM_PROVIDER?: string;
     LLM_API_KEY?: string;
     DEEPSEEK_API_KEY?: string;
     OPENAI_API_KEY?: string;
     ANTHROPIC_API_KEY?: string;
   }
 ): boolean {
-  const llmKey = Boolean(env.LLM_API_KEY);
-  switch (provider) {
+  const selectedProvider = env.LLM_PROVIDER?.trim().toLowerCase();
+  const normalizedProvider = provider.trim().toLowerCase();
+  const llmKey = selectedProvider === normalizedProvider && Boolean(env.LLM_API_KEY);
+  switch (normalizedProvider) {
     case "deepseek": return Boolean(env.DEEPSEEK_API_KEY) || llmKey;
     case "openai": return Boolean(env.OPENAI_API_KEY) || llmKey;
     case "anthropic": return Boolean(env.ANTHROPIC_API_KEY) || llmKey;
@@ -352,11 +356,9 @@ export class SettingsStore {
     const overriddenByEnvironment = Object.keys(saved)
       .filter(key => environment[key] !== undefined && environment[key] !== saved[key])
       .sort();
-    const provider = effective.LLM_PROVIDER === "deepseek" || effective.LLM_PROVIDER === "openai" || effective.LLM_PROVIDER === "anthropic"
-      ? effective.LLM_PROVIDER
-      : effective.LLM_PROVIDER
-        ? effective.LLM_PROVIDER.toLowerCase()
-        : effective.DEEPSEEK_API_KEY ? "deepseek" : effective.OPENAI_API_KEY ? "openai" : effective.ANTHROPIC_API_KEY ? "anthropic" : "none";
+    const selectedProvider = effective.LLM_PROVIDER?.trim().toLowerCase();
+    const provider = selectedProvider
+      || (effective.DEEPSEEK_API_KEY ? "deepseek" : effective.OPENAI_API_KEY ? "openai" : effective.ANTHROPIC_API_KEY ? "anthropic" : "none");
     const providerKeyConfigured = isProviderCredentialConfigured(provider, effective);
     return {
       llm: {
@@ -364,12 +366,12 @@ export class SettingsStore {
         llmApiKeyConfigured: providerKeyConfigured,
         llmModel: effective.LLM_MODEL ?? "",
         anthropicModel: effective.ANTHROPIC_MODEL ?? "",
-        anthropicApiKeyConfigured: isProviderCredentialConfigured("anthropic", { ...effective, LLM_API_KEY: provider === "anthropic" ? effective.LLM_API_KEY : undefined }),
+        anthropicApiKeyConfigured: isProviderCredentialConfigured("anthropic", effective),
         deepseekBaseUrl: effective.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
         deepseekModel: effective.DEEPSEEK_MODEL ?? "deepseek-flash",
         openaiModel: effective.OPENAI_MODEL ?? "gpt-4.1-mini",
-        deepseekApiKeyConfigured: isProviderCredentialConfigured("deepseek", { ...effective, LLM_API_KEY: provider === "deepseek" ? effective.LLM_API_KEY : undefined }),
-        openaiApiKeyConfigured: isProviderCredentialConfigured("openai", { ...effective, LLM_API_KEY: provider === "openai" ? effective.LLM_API_KEY : undefined }),
+        deepseekApiKeyConfigured: isProviderCredentialConfigured("deepseek", effective),
+        openaiApiKeyConfigured: isProviderCredentialConfigured("openai", effective),
         fallbackChain: effective.LLM_FALLBACK_CHAIN ?? ""
       },
       github: {

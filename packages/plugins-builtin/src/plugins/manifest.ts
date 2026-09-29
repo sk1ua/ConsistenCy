@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { SYSCALL_DEFINITIONS, type PluginDescriptor, type PrivilegeRing } from "@consistency/kernel";
 import { isUsableRange, parseSemver, satisfiesRange } from "./version.js";
@@ -177,20 +177,24 @@ export function resolvePluginEntry(root: string, entry: string): string {
   if (lexicalRelative.startsWith("..") || isAbsolute(lexicalRelative)) {
     throw new PluginManifestError("PLUGIN_ENTRY_ESCAPES_ROOT", `entry '${entry}' resolves outside the plugin root`, { entry });
   }
-  let stats;
   try {
-    stats = lstatSync(lexical);
+    lstatSync(lexical);
   } catch {
     throw new PluginManifestError("PLUGIN_ENTRY_MISSING", `entry '${entry}' does not exist in the plugin root`, { entry });
   }
-  if (!stats.isFile()) {
-    throw new PluginManifestError("PLUGIN_ENTRY_MISSING", `entry '${entry}' is not a regular file`, { entry });
-  }
   // Symlinks resolve on the REAL path; a link out of the root is an escape.
-  const real = realpathSync(lexical);
+  let real: string;
+  try {
+    real = realpathSync(lexical);
+  } catch {
+    throw new PluginManifestError("PLUGIN_ENTRY_MISSING", `entry '${entry}' does not resolve to a file`, { entry });
+  }
   const realRelative = relative(realRoot, real);
   if (realRelative.startsWith("..") || isAbsolute(realRelative)) {
     throw new PluginManifestError("PLUGIN_ENTRY_ESCAPES_ROOT", `entry '${entry}' resolves outside the plugin root through a link`, { entry });
+  }
+  if (!statSync(real).isFile()) {
+    throw new PluginManifestError("PLUGIN_ENTRY_MISSING", `entry '${entry}' is not a regular file`, { entry });
   }
   return real;
 }
