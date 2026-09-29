@@ -115,6 +115,36 @@ describe("@consistency/schema", () => {
     expect(() => reviewFindingSchema.parse({ ...findingBase, confidence: "hypothesis" })).toThrow();
   });
 
+  it("keeps uncertainty written on a likely or confirmed finding", () => {
+    // Regression: `uncertainty` was declared only on the hypothesis member, so a
+    // model that labelled a finding `likely` while stating its doubt lost the
+    // whole agent run to a Zod unrecognized_keys error. Observed in production
+    // with mimo-v2.6-flash (`findings[2].uncertainty`), degrading coverage.
+    const likely = reviewFindingSchema.parse({
+      ...findingBase,
+      confidence: "likely",
+      uncertainty: "Only the direct call site was visible."
+    });
+    expect(likely.uncertainty).toBe("Only the direct call site was visible.");
+
+    const confirmed = reviewFindingSchema.parse({
+      ...findingBase,
+      confidence: "confirmed",
+      startLine: 10,
+      endLine: 12,
+      uncertainty: "Confirmed from the supplied diff only."
+    });
+    expect(confirmed.uncertainty).toBe("Confirmed from the supplied diff only.");
+  });
+
+  it("still rejects keys the finding schema does not declare", () => {
+    expect(() => reviewFindingSchema.parse({
+      ...findingBase,
+      confidence: "likely",
+      bogusField: 1
+    })).toThrow();
+  });
+
   it("parses plans, agent runs, reports, and API errors", () => {
     expect(reviewPlanSchema.parse({
       enabledAgents: ["Security", "Correctness"],

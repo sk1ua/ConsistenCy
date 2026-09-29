@@ -33,7 +33,19 @@ const findingBase = z.object({
    * run. OPTIONAL and additive — legacy findings without evidenceIds remain
    * valid during migration; the Review workload attaches and validates them.
    */
-  evidenceIds: z.array(nonEmpty).optional()
+  evidenceIds: z.array(nonEmpty).optional(),
+  /**
+   * Why the finding is not certain.
+   *
+   * REQUIRED at `hypothesis`, where the prompt asks the model to explain its
+   * doubt, and OPTIONAL elsewhere. Allowing it on every member is deliberate:
+   * a model that labels a finding `likely` while also stating its uncertainty
+   * was expressing doubt and mislabelling one field — discarding its whole
+   * agent run over that is a worse trade than keeping the note. Observed with
+   * `mimo-v2.6-flash`, which lost Maintainability (and degraded coverage) to
+   * `findings[2].uncertainty` while five sibling agents passed.
+   */
+  uncertainty: nonEmpty.optional()
 });
 
 const confirmedFindingSchema = findingBase.extend({

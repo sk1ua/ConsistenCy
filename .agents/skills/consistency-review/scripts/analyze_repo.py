@@ -69,9 +69,38 @@ def is_secret_path(relative: Path) -> bool:
         name in SECRET_BASENAMES
         or name.startswith(".env.")
         or name.endswith((".pem", ".p12", ".pfx"))
-        or name.startswith("secret.")
-        or name.startswith("secrets.")
+        or matches_credential_name(name)
     )
+
+
+#: Credential-material file names, as `(stem)(.enc)?<suffix>`.
+#:
+#: The suffix list is closed on purpose. An earlier form,
+#: `name.startswith(("secret.", "secrets."))`, ignored the extension entirely, so
+#: a source module named `secrets.py` was classified as credential material and
+#: silently excluded from analysis. Keep this in step with the canonical
+#: TypeScript gate in ``packages/schema/src/content.ts``.
+CREDENTIAL_STEMS = ("secret", "secrets", "credentials")
+CREDENTIAL_SUFFIXES = (
+    ".json", ".yaml", ".yml", ".toml", ".env", ".ini", ".cfg", ".conf",
+    ".properties", ".txt", ".backup", ".bak", ".sql", ".sqlite", ".db", ".dump",
+)
+
+
+def matches_credential_name(name: str) -> bool:
+    """Whether a lower-cased basename is credential material, not source code."""
+
+    for stem in CREDENTIAL_STEMS:
+        if not name.startswith(stem):
+            continue
+        remainder = name[len(stem) :]
+        for marker in ("", ".enc", ".encrypted"):
+            if not remainder.startswith(marker):
+                continue
+            suffix = remainder[len(marker) :]
+            if suffix in CREDENTIAL_SUFFIXES:
+                return True
+    return False
 
 
 def resolve_input(root: Path, raw_path: str) -> Path:

@@ -62,6 +62,29 @@ describe("isSecretPath (canonical gate)", () => {
     expect(isSecretPath("src/index.ts")).toBe(false);
     expect(isSecretPath("docs/credentials-guide.md")).toBe(false);
   });
+
+  it("excludes credential-material names across the credential extensions", () => {
+    expect(isSecretPath("secrets.json")).toBe(true);
+    expect(isSecretPath("config/service-secrets.toml")).toBe(false); // stem must lead
+    expect(isSecretPath("secret.yaml")).toBe(true);
+    expect(isSecretPath("deploy/credentials.yml")).toBe(true);
+    expect(isSecretPath("credentials.ini")).toBe(true);
+    expect(isSecretPath(".env.local")).toBe(true);
+    expect(isSecretPath("vault/app.key")).toBe(true);
+  });
+
+  it("keeps SOURCE files whose stem merely looks secret reviewable", () => {
+    // Regression: the gate used to key on `/^(?:secret|secrets)\./`, which
+    // silently dropped whole source files out of the review context. A module
+    // named `secrets.ts` never reached the model, and no constraint reported it
+    // because the file was filtered before the run started.
+    expect(isSecretPath("src/secrets.ts")).toBe(false);
+    expect(isSecretPath("src/secret.ts")).toBe(false);
+    expect(isSecretPath("app/Secrets.tsx")).toBe(false);
+    expect(isSecretPath("lib/secret.js")).toBe(false);
+    expect(isSecretPath("src/credentials.ts")).toBe(false);
+    expect(isSecretPath("src/my-secrets.ts")).toBe(false);
+  });
 });
 
 describe("redactModelVisibleText", () => {

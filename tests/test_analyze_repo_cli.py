@@ -49,3 +49,41 @@ def test_rejects_paths_outside_the_repository():
     completed = _run_cli("..")
     assert completed.returncode == 2
     assert "escapes the repository" in completed.stderr
+
+
+def _write_repo_source(relative: str) -> Path:
+    """Create one repository-local file and return its path."""
+    path = REPO_ROOT / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("def placeholder():\n    return 1\n", encoding="utf-8")
+    return path
+
+
+def test_source_files_with_secret_like_stems_are_reviewable():
+    """A module named `secret*.py` is source code, not credential material.
+
+    Regression: the gate keyed on `name.startswith(("secret.", "secrets."))`,
+    which ignored the extension and silently excluded these files from analysis.
+    """
+    for relative in ("engine/secrets.py", "engine/secret.py"):
+        path = _write_repo_source(relative)
+        try:
+            completed = _run_cli(relative)
+        finally:
+            path.unlink(missing_ok=True)
+        assert completed.returncode == 0, f"{relative}: {completed.stderr[-500:]}"
+        assert "Input is excluded" not in completed.stderr
+        assert _entry(json.loads(completed.stdout), relative)
+
+
+def test_credential_material_names_stay_excluded():
+    """Credential-shaped files remain excluded, in their documented shapes."""
+    for relative in ("secrets.json", "secrets.enc.json", "secrets.backup", "credentials.yml"):
+        path = _write_repo_source(relative)
+        path.write_text('{"key": "placeholder"}\n', encoding="utf-8")
+        try:
+            completed = _run_cli(relative)
+        finally:
+            path.unlink(missing_ok=True)
+        assert completed.returncode == 2, relative
+        assert "excluded secret or generated path" in completed.stderr, relative

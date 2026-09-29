@@ -22,11 +22,36 @@ const SECRET_BASENAMES = new Set([
   "service-account.json"
 ]);
 
+/**
+ * The suffix on credential-material file names.
+ *
+ * Two shapes are accepted, and nothing else:
+ *   1. `<stem>.<suffix>`      | suffix ∈ credential, backup, sql, db, dump
+ *   2. `<stem>.enc.<suffix>`  | e.g. `secrets.enc.json`, an encrypted store
+ *
+ * The list is deliberately closed. An earlier form, `/^(?:secret|secrets)\./`,
+ * ignored the extension entirely, so a program module named `secrets.ts` was
+ * classified as credential material and silently dropped out of every review
+ * context — the file never reached the model and no constraint ever said so.
+ */
+const CREDENTIAL_NAME_PATTERN = new RegExp(
+  [
+    "^",
+    "(?:secret|secrets|credentials|custom-secrets)", // the credential-looking stem
+    "(?:\\.enc(?:\\.encrypted)?)?",                   // optional encryption marker
+    "(?:\\.(?:json|ya?ml|toml|env|ini|cfg|conf|properties|txt",   // config formats
+    "|backup|bak|sql|sqlite|db|dump))",               // exfiltrated/dumped copies
+    "$"
+  ].join(""),
+  "i"
+);
+
 export function isSecretPath(relativePath: string): boolean {
   const name = relativePath.split(/[\\/]/).pop() ?? "";
   const lower = name.toLowerCase();
   return SECRET_BASENAMES.has(lower)
-    || lower.startsWith(".env.")
+    || /^\.env(?:\.|$)/i.test(lower)
+    // Extension-only rule: any `<name>.key` / `.pem` / `.p12` file is key material.
     || /\.(?:key|pem|p12|pfx|jks|keystore)$/i.test(lower)
-    || /^(?:secret|secrets)\./i.test(lower);
+    || CREDENTIAL_NAME_PATTERN.test(lower);
 }
