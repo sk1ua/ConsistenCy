@@ -8,6 +8,7 @@ import type { EvidenceSnapshot } from "@consistency/kernel";
 import { REVIEW_DIFF_MAX_CHARS } from "../context/review-context.js";
 import { redactModelVisibleText } from "../context/content-policy.js";
 import type { ReviewAgentName } from "../workload/types.js";
+import { buildBaselineSnippets } from "./baseline-snippets.js";
 
 /** Max Kernel evidence lines rendered into the additive evidence section. */
 export const REVIEW_KERNEL_EVIDENCE_MAX_ENTRIES = 40;
@@ -171,7 +172,7 @@ export function buildAgentPrompt(
     `DIFF\n${context.diff.slice(0, REVIEW_DIFF_MAX_CHARS)}`,
     files,
     metadata,
-    Object.entries(context.baseFileContents ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([path, content]) => `BASE FILE ${path}\n${numbered(content)}`).join("\n\n").slice(0, REVIEW_PROJECT_METADATA_MAX_CHARS),
+    buildBaselineSnippets(context),
     `SPECIALIST ROLE: ${agent}. Focus only on ${AGENT_FOCUS[agent]}. ${AGENT_EXCLUSIONS[agent]} Return at most ${maxFindingsPerSpecialist} findings. Set the \"trigger\" field of every finding to the specific input or scenario that fails, and the \"agent\" field to exactly \"${agent}\".`
   ].filter(Boolean);
 
