@@ -57,5 +57,13 @@ export {
   REVIEW_PROJECT_METADATA_MAX_CHARS,
 } from "./agents/prompts.js";
 export { deduplicateAndSortFindings, buildReviewReport } from "./synthesis/report.js";
+export {
+  applyFindingScoreFilter,
+  FINDING_SCORE_INSTRUCTION,
+  DEFAULT_MIN_FINDING_SCORE,
+  DEFAULT_MAX_REPORTED_FINDINGS,
+  DEFAULT_MAX_FINDINGS_PER_FILE,
+} from "./synthesis/finding-score.js";
+export type { FindingScoreFilterOptions, FindingScoreFilterResult } from "./synthesis/finding-score.js";
 export { riskBandForFindings } from "@consistency/schema";
 export { buildComposeReviewFileResults } from "./synthesis/compose.js";

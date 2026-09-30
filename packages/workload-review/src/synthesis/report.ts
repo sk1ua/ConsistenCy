@@ -199,13 +199,23 @@ export function buildReviewReport(input: {
   agentRuns: AgentRun[];
   findings: ReviewFinding[];
   preExistingIssues?: ReviewFinding[];
+  /**
+   * Already-computed merge disclosure. A caller that ran the dedup pass itself
+   * (the synthesizer, which scores and filters afterwards) passes its
+   * `duplicates` here so the disclosure survives this second pass.
+   */
+  duplicates?: ReviewFinding[];
+  /** Findings withheld from the main list after scoring; count only. */
+  filteredFindingCount?: number;
   score: number;
   riskLevel: RiskLevel;
   coverage?: ReviewCoverage;
   retrieval?: RetrievalTrace;
   createdAt?: string;
 }): ReviewReport {
-  const { findings, duplicates } = deduplicateAndSortFindings(input.findings);
+  const deduplicated = deduplicateAndSortFindings(input.findings);
+  const findings = deduplicated.findings;
+  const duplicates = input.duplicates ?? deduplicated.duplicates;
 
   return reviewReportSchema.parse({
     jobId: input.jobId,
@@ -222,6 +232,7 @@ export function buildReviewReport(input: {
     agentRuns: input.agentRuns,
     findings,
     ...(input.preExistingIssues?.length ? { preExistingIssues: input.preExistingIssues } : {}),
+    ...(input.filteredFindingCount ? { filteredFindingCount: input.filteredFindingCount } : {}),
     ruleVersion: "v2",
     ...(duplicates.length > 0 ? { duplicates } : {}),
     ...(input.coverage ? { coverage: input.coverage } : {}),

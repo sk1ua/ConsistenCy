@@ -59,7 +59,14 @@ const findingBase = z.object({
    * and additive: a finding that was never merged omits it, and merges that
    * only repeated the same wording stay disclosed through `duplicates`.
    */
-  alsoReportedBy: z.array(reviewAgentNameSchema).optional()
+  alsoReportedBy: z.array(reviewAgentNameSchema).optional(),
+  /**
+   * Synthesizer-assigned relevance score, 0–10, and its one-sentence reason.
+   * OPTIONAL and additive: a provider that ignores the scoring instruction
+   * leaves them unset, and an unscored finding is never dropped on score.
+   */
+  score: z.number().int().min(0).max(10).optional(),
+  scoreReason: nonEmpty.optional()
 });
 
 const confirmedFindingSchema = findingBase.extend({
@@ -105,6 +112,18 @@ export const reviewFindingSchema = z
       });
     }
   });
+
+/**
+ * One synthesizer-assigned relevance score. The synthesizer already makes one
+ * summary call per review; scoring rides on that call rather than adding a
+ * second one.
+ */
+export const findingScoreSchema = z.object({
+  id: nonEmpty,
+  score: z.number().int().min(0).max(10),
+  reason: nonEmpty
+}).strict();
+export type FindingScore = z.infer<typeof findingScoreSchema>;
 
 export const tokenUsageSchema = z.object({
   inputTokens: z.number().int().nonnegative().optional(),

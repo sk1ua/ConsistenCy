@@ -170,6 +170,13 @@ export const reviewReportSchema = z.object({
   /** Findings outside the changed-line scope; excluded from the main verdict and score. */
   preExistingIssues: z.array(reviewFindingSchema).optional(),
   /**
+   * How many grounded findings were withheld from the main list after scoring
+   * (below the score floor, past the per-file cap, or past the total cap).
+   * Only the COUNT is persisted: the withheld findings are not re-published in
+   * the report they were filtered out of.
+   */
+  filteredFindingCount: z.number().int().nonnegative().optional(),
+  /**
    * Findings merged away by deterministic cross-agent deduplication
    * (same file, near-identical title). Kept for honesty instead of being
    * silently dropped. Optional for backward compatibility.

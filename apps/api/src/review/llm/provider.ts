@@ -1,4 +1,5 @@
 import {
+  findingScoreSchema,
   reviewFindingSchema,
   reviewAgentNameSchema,
   tokenUsageSchema,
@@ -16,7 +17,14 @@ import type {
   StructuredResult
 } from "./types";
 
-const summarySchema = z.object({ summary: z.string().trim().min(1) }).strict();
+/**
+ * The synthesizer's single call returns BOTH the prose summary and the
+ * per-finding relevance scores, so scoring never costs a second request.
+ */
+const summarySchema = z.object({
+  summary: z.string().trim().min(1),
+  scores: z.array(findingScoreSchema).optional()
+}).strict();
 
 function findingsSchemaForAgent(agent: z.infer<typeof reviewAgentNameSchema>) {
   return z.object({

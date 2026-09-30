@@ -584,6 +584,9 @@ export class ReviewWorkload {
         reportLanguage: options.reportLanguage,
         providerName: options.modelDriver.provider,
         model: options.modelDriver.model,
+        minFindingScore: options.minFindingScore,
+        maxReportedFindings: options.maxReportedFindings,
+        maxFindingsPerFile: options.maxFindingsPerFile,
         // Coverage facts as of synthesis start (audit P1-05): the
         // synthesizer adds its own status and derives the final outcome.
         coverage: {
@@ -710,7 +713,7 @@ export class ReviewWorkload {
           userPrompt: request.userPrompt,
           signal,
         });
-        return { text: result.data.summary, tokenUsage: result.tokenUsage };
+        return { text: result.data.summary, tokenUsage: result.tokenUsage, scores: result.data.scores };
       },
     };
   }

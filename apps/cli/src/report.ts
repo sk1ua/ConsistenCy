@@ -413,6 +413,11 @@ export function renderReport(report: ReviewReport, options: RenderOptions): stri
   }
 
   lines.push(...renderFindings(report, options));
+  if (report.filteredFindingCount) {
+    lines.push(palette.dim(
+      `  （另有 ${report.filteredFindingCount} 条发现评分不足或超出条数上限，已过滤，不在此展示）`
+    ));
+  }
   if (options.verbose) lines.push(...renderEvidence(report, palette));
   lines.push(...renderConstraints(report, constraints, palette));
   lines.push(...renderAgents(report, palette));

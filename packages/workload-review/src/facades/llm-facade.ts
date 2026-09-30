@@ -17,7 +17,7 @@ import {
   type SyscallGateway,
 } from "@consistency/kernel";
 import type { z } from "zod";
-import type { ReviewAgentName, ReviewFinding, TokenUsage } from "@consistency/schema";
+import type { FindingScore, ReviewAgentName, ReviewFinding, TokenUsage } from "@consistency/schema";
 
 /** Trusted Ring-1 backend surface (implemented by the workload runtime). */
 export interface TrustedLLMBackend {
@@ -44,7 +44,7 @@ export interface TrustedLLMBackend {
     userPrompt: string;
     schemaName: string;
     signal?: AbortSignal;
-  }): Promise<{ text: string; tokenUsage?: TokenUsage }>;
+  }): Promise<{ text: string; tokenUsage?: TokenUsage; scores?: readonly FindingScore[] }>;
 }
 
 export interface CapabilityBoundLLMFacadeOptions {
@@ -129,7 +129,7 @@ export class CapabilityBoundLLMFacade {
     systemPrompt: string;
     userPrompt: string;
     schemaName: string;
-  }): Promise<{ text: string; tokenUsage?: TokenUsage }> {
+  }): Promise<{ text: string; tokenUsage?: TokenUsage; scores?: readonly FindingScore[] }> {
     return this.#gateway.invoke(
       {
         principal: this.#principal,
@@ -140,7 +140,7 @@ export class CapabilityBoundLLMFacade {
       async () => {
         const outcome = await this.#backend.invokeText(request);
         return {
-          value: { text: outcome.text, tokenUsage: outcome.tokenUsage },
+          value: { text: outcome.text, tokenUsage: outcome.tokenUsage, scores: outcome.scores },
           usage: { tokens: outcome.tokenUsage?.totalTokens ?? 0 },
         };
       },

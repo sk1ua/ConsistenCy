@@ -13,6 +13,7 @@ import type {
   AgentRun,
   DomainAnalyzeSuccess,
   DomainComposeReviewSuccess,
+  FindingScore,
   ReviewCoverage,
   ReviewFinding,
   ReviewReport,
@@ -21,6 +22,7 @@ import type {
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildComposeReviewFileResults } from "./compose.js";
 import { buildReviewReport, deduplicateAndSortFindings } from "./report.js";
+import { applyFindingScoreFilter, FINDING_SCORE_INSTRUCTION } from "./finding-score.js";
 import { reportLanguageInstruction } from "../agents/prompts.js";
 import { redactModelVisibleText } from "../context/content-policy.js";
 import type {
@@ -48,6 +50,12 @@ export interface SynthesizerBodyOptions {
   readonly reportLanguage: "zh-CN" | "en-US";
   readonly providerName: string;
   readonly model?: string;
+  /** Score floor for the main list; see synthesis/finding-score.ts. */
+  readonly minFindingScore?: number;
+  /** Main-list cap, applied after scoring. */
+  readonly maxReportedFindings?: number;
+  /** Per-file cap on the main list, applied after scoring. */
+  readonly maxFindingsPerFile?: number;
   /**
    * Coverage facts known before synthesis (planner + specialist outcomes).
    * The synthesizer adds its own status and derives the final outcome.
@@ -120,7 +128,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         throw new Error("synthesizer lost Scheduler admission after compose");
       }
 
-      const { findings } = deduplicateAndSortFindings(options.findings);
+      const { findings: dedupedFindings, duplicates } = deduplicateAndSortFindings(options.findings);
       const {
         overallScore: score,
         riskLevel,
@@ -136,16 +144,20 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       let summary: string | undefined;
       let tokenUsage: TokenUsage | undefined;
       let error: string | undefined;
+      let scores: readonly FindingScore[] = [];
 
       try {
         // WAIT_LLM around the protected summary invocation.
         scheduler.wait(agentId, { kind: "llm", provider: providerName });
-        let summaryResult: { text: string; tokenUsage?: typeof tokenUsage };
+        let summaryResult: { text: string; tokenUsage?: typeof tokenUsage; scores?: readonly FindingScore[] };
         try {
+          // ONE call carries both the prose summary and the per-finding
+          // scores: scoring never adds a second request.
           summaryResult = await options.facades.llm.invokeText({
             schemaName: "review-summary",
             systemPrompt: [
               "Summarize a multi-agent pull request review in two concise sentences. Incorporate the canonical summary and recommendations into the overview without omitting critical recommendations. Do not add findings or claims that are absent from the supplied data.",
+              FINDING_SCORE_INSTRUCTION,
               reportLanguageInstruction(options.reportLanguage)
             ].join(" "),
             userPrompt: redactModelVisibleText(JSON.stringify({
@@ -153,7 +165,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
               canonicalRiskLevel: riskLevel,
               canonicalSummary,
               recommendations,
-              findings
+              findings: dedupedFindings
             }))
           });
         } finally {
@@ -167,9 +179,19 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
           ? summaryResult.text.trim()
           : canonicalOverview;
         tokenUsage = summaryResult.tokenUsage;
+        scores = summaryResult.scores ?? [];
       } catch (caught) {
         error = caught instanceof Error ? caught.message : "Unknown synthesizer failure";
       }
+
+      // Step 4 runs whether or not the model call succeeded: with no scores
+      // nothing is dropped on score, but the per-file and total caps still
+      // bound the main list. A withheld finding is counted, never re-shown.
+      const { findings, filteredCount } = applyFindingScoreFilter(dedupedFindings, scores, {
+        minScore: options.minFindingScore,
+        maxReported: options.maxReportedFindings,
+        maxPerFile: options.maxFindingsPerFile
+      });
 
       // Final coverage (audit P1-05): degraded coverage must be visible in
       // the durable report, never masked by a success-shaped summary.
@@ -208,7 +230,9 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         status: error ? "failed" : "succeeded",
         startedAt,
         finishedAt: new Date().toISOString(),
-        inputSummary: `Synthesized ${options.findings.length} raw findings`,
+        inputSummary: filteredCount > 0
+          ? `Synthesized ${options.findings.length} raw findings; ${filteredCount} withheld after scoring`
+          : `Synthesized ${options.findings.length} raw findings`,
         findings,
         error,
         tokenUsage,
@@ -231,7 +255,9 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         llmProvider: providerName,
         llmModel: model,
         agentRuns: agentRunsForReport,
-        findings: options.findings,
+        findings,
+        duplicates,
+        filteredFindingCount: filteredCount,
         preExistingIssues: options.preExistingIssues,
         score,
         riskLevel,

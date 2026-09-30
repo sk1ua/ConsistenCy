@@ -9,7 +9,17 @@
  */
 
 import type { z } from "zod";
-import type { ReviewAgentName, ReviewFinding, TokenUsage } from "@consistency/schema";
+import type { FindingScore, ReviewAgentName, ReviewFinding, TokenUsage } from "@consistency/schema";
+
+/**
+ * The summary call carries the per-finding relevance scores as well: the
+ * synthesizer scores findings through the call it already makes instead of
+ * issuing a second one.
+ */
+export interface SummaryResult {
+  readonly summary: string;
+  readonly scores?: readonly FindingScore[];
+}
 
 export interface ModelStructuredRequest<T> {
   readonly systemPrompt: string;
@@ -48,7 +58,7 @@ export interface ModelDriver {
   readonly model?: string;
   invokeStructured<T>(request: ModelStructuredRequest<T>): Promise<ModelResult<T>>;
   invokeAgentFindings(request: ModelAgentFindingsRequest): Promise<ModelResult<ReviewFinding[]>>;
-  invokeSummary(request: ModelTextRequest): Promise<ModelResult<{ summary: string }>>;
+  invokeSummary(request: ModelTextRequest): Promise<ModelResult<SummaryResult>>;
 }
 
 /**
@@ -75,7 +85,7 @@ export interface LegacyProviderLike {
     systemPrompt: string;
     userPrompt: string;
     signal?: AbortSignal;
-  }): Promise<{ data: { summary: string }; tokenUsage?: TokenUsage }>;
+  }): Promise<{ data: SummaryResult; tokenUsage?: TokenUsage }>;
 }
 
 /**

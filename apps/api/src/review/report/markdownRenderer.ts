@@ -41,6 +41,9 @@ export function renderReviewComment(report: ReviewReport, options: {
     report.duplicates && report.duplicates.length > 0
       ? `_${report.duplicates.length} duplicate finding(s) were merged deterministically; the finding count excludes merged duplicates._`
       : "",
+    report.filteredFindingCount
+      ? `_${report.filteredFindingCount} finding(s) were withheld after scoring (below the score floor or past the report caps); they are not shown._`
+      : "",
     "",
     report.summary,
     "",

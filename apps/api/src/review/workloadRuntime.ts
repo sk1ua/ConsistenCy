@@ -80,6 +80,9 @@ export type ReviewWorkflowDependencies = {
   deterministicAnalyzer: DeterministicAnalyzer;
   reportLanguage?: "zh-CN" | "en-US";
   maxFindingsPerSpecialist?: number;
+  minFindingScore?: number;
+  maxReportedFindings?: number;
+  maxFindingsPerFile?: number;
   reviewWorkflow?: string | null;
   reviewWorkflowSpec?: (name: string) => WorkflowSpec | undefined;
   workspaceRoot?: string;
@@ -322,6 +325,9 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         },
         reportLanguage: dependencies.reportLanguage ?? "zh-CN",
         maxFindingsPerSpecialist: dependencies.maxFindingsPerSpecialist ?? 3,
+        minFindingScore: dependencies.minFindingScore,
+        maxReportedFindings: dependencies.maxReportedFindings,
+        maxFindingsPerFile: dependencies.maxFindingsPerFile,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: knowledgeIndexPathFor(input.repositoryFullName, workspaceRoot),

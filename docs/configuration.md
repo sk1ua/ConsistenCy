@@ -107,6 +107,9 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `CONSISTENCY_PI_MODELS_PATH` | *empty* | Explicit Pi `models.json` path for custom model endpoints; restart after changing the file |
 | `CONSISTENCY_LLM_TEMPERATURE` | *empty* | Request temperature from 0 to 2; empty uses the provider default |
 | `CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST` | `3` | Maximum grounded main-list findings kept from each specialist (1–20); findings more than three lines from changed code go to `preExistingIssues` instead |
+| `CONSISTENCY_MIN_FINDING_SCORE` | `5` | Minimum synthesizer score (0–10) for a finding to reach the main list. The score and its one-line reason ride the synthesizer's existing summary call, so scoring adds no extra request. A finding the provider leaves unscored is never dropped on score |
+| `CONSISTENCY_MAX_REPORTED_FINDINGS` | `8` | Maximum findings in the main list after scoring (1–50) |
+| `CONSISTENCY_MAX_FINDINGS_PER_FILE` | `3` | Maximum main-list findings from any single file after scoring (1–20) |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
 | `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow routes (API layer; the repo ships no login UI) |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the OAuth broker used by the API's `/oauth/desktop/*` routes (`apps/api/src/server.ts:160`) |

@@ -163,6 +163,9 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     deterministicAnalyzer: analyzer,
     reportLanguage: options.reportLanguage ?? "zh-CN",
     maxFindingsPerSpecialist: config.CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST,
+    minFindingScore: config.CONSISTENCY_MIN_FINDING_SCORE,
+    maxReportedFindings: config.CONSISTENCY_MAX_REPORTED_FINDINGS,
+    maxFindingsPerFile: config.CONSISTENCY_MAX_FINDINGS_PER_FILE,
     workspaceRoot
   });
 

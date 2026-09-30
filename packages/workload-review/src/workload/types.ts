@@ -146,6 +146,12 @@ export interface ReviewWorkloadOptions {
   readonly reportLanguage: "zh-CN" | "en-US";
   /** Per-specialist finding cap, applied after grounding; default 3. */
   readonly maxFindingsPerSpecialist?: number;
+  /** Score floor for the main list after synthesis; default 5. */
+  readonly minFindingScore?: number;
+  /** Main-list cap applied after scoring; default 8. */
+  readonly maxReportedFindings?: number;
+  /** Per-file cap on the main list applied after scoring; default 3. */
+  readonly maxFindingsPerFile?: number;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;
