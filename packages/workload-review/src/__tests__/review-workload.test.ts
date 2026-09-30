@@ -21,6 +21,7 @@ import {
 } from "@consistency/kernel";
 import { parseReviewReport, reviewReportSchema } from "@consistency/schema";
 import { RepositorySnapshot } from "@consistency/repository";
+import { buildAgentPrompt } from "../agents/prompts.js";
 import {
   ReviewCancelledError,
   ReviewWorkload,
@@ -41,6 +42,16 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const KERNEL_ROOT = path.resolve(HERE, "../../../kernel");
 
 afterEach(cleanupTmpDirs);
+
+it("gives specialists identical prompt prefixes before their role suffix", () => {
+  const { context } = makeFixtureRepo();
+  const security = buildAgentPrompt("Security", context, undefined, [], "en-US");
+  const test = buildAgentPrompt("Test", context, undefined, [], "en-US");
+  expect(security.systemPrompt).toBe(test.systemPrompt);
+  const prefix = (prompt: string) => prompt.split("SPECIALIST ROLE:")[0];
+  expect(prefix(security.userPrompt)).toBe(prefix(test.userPrompt));
+  expect(security.userPrompt).not.toBe(test.userPrompt);
+});
 
 const acb = (name: string) => asAgentId(`${name}:job_workload`);
 

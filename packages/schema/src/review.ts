@@ -95,7 +95,9 @@ export const reviewFindingSchema = z
 export const tokenUsageSchema = z.object({
   inputTokens: z.number().int().nonnegative().optional(),
   outputTokens: z.number().int().nonnegative().optional(),
-  totalTokens: z.number().int().nonnegative().optional()
+  totalTokens: z.number().int().nonnegative().optional(),
+  cachedTokens: z.number().int().nonnegative().optional(),
+  cacheReadStatus: z.enum(["reported", "unavailable_or_zero"]).optional()
 }).strict();
 
 export const agentRunSchema = z.object({

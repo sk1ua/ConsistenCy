@@ -357,6 +357,10 @@ function renderAgents(report: ReviewReport, palette: Palette): string[] {
           : palette.dim("–");
     const facts: string[] = [`${run.findings.length} 项`];
     if (run.tokenUsage?.totalTokens !== undefined) facts.push(`${run.tokenUsage.totalTokens} tokens`);
+    if (run.status === "succeeded" || run.status === "failed") {
+      const cached = run.tokenUsage?.cachedTokens ?? 0;
+      facts.push(cached > 0 ? `${cached} cached tokens` : "0 cached tokens (未报告或未命中)");
+    }
     if (run.provider) facts.push(run.model ? `${run.provider}/${run.model}` : run.provider);
     lines.push(`  ${token} ${run.agentName}${palette.dim(`  ${facts.join(" · ")}`)}`);
     if (run.status === "failed" && run.error) {

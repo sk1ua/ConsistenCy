@@ -85,7 +85,9 @@ function usageFromMessage(message: PiMessage) {
   return parseTokenUsage({
     inputTokens: message.usage.input,
     outputTokens: message.usage.output,
-    totalTokens: message.usage.totalTokens
+    totalTokens: message.usage.totalTokens,
+    cachedTokens: message.usage.cacheRead ?? 0,
+    cacheReadStatus: message.usage.cacheRead ? "reported" : "unavailable_or_zero"
   });
 }
 

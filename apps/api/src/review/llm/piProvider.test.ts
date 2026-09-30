@@ -240,7 +240,7 @@ describe("PiRuntimeProvider", () => {
         });
 
         expect(result.data).toEqual({ answer: "from-pi" });
-        expect(result.tokenUsage).toEqual({ inputTokens: 7, outputTokens: 3, totalTokens: 10 });
+        expect(result.tokenUsage).toEqual({ inputTokens: 7, outputTokens: 3, totalTokens: 10, cachedTokens: 0, cacheReadStatus: "unavailable_or_zero" });
         expect(requests).toHaveLength(1);
         expect(requests[0]?.url).toBe("/v1/chat/completions");
         expect(requests[0]?.headers.authorization).toMatch(/^Bearer /);

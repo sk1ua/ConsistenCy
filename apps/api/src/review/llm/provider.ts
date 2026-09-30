@@ -110,7 +110,7 @@ export abstract class BaseLLMProvider implements LLMProvider {
   async generateStructuredFinding(request: FindingGenerationRequest): Promise<StructuredResult<ReviewFinding[]>> {
     const result = await this.invokeWithSchema({
       schema: findingsSchemaForAgent(request.agent),
-      schemaName: `${request.agent.toLowerCase()}-findings`,
+      schemaName: "review-findings",
       systemPrompt: request.systemPrompt,
       userPrompt: request.userPrompt,
       signal: request.signal

@@ -25,6 +25,8 @@ ConsistenCy v4 is a **real-data, real-LLM runtime**. It requires a real, configu
 
 All providers are executed by the bundled official Pi runtime (`@earendil-works/pi-ai` / `@earendil-works/pi-coding-agent`). ConsistenCy delegates model catalogs, request formatting, and streaming to Pi instead of reimplementing them, and `models.json`/`auth.json` parsing stays inside Pi.
 
+The six specialists use the same system prompt and repository-context prefix, with each role appended at the end of its user message. The agent execution log and CLI report record cached input tokens for every call. Pi exposes cache reads as a number; `0 (未报告或未命中)` means the provider either reported no hit or did not supply cache usage, which Pi cannot distinguish.
+
 ConsistenCy does not read a user-level `~/.pi` directory and does not require a local Pi installation:
 
 - Pi's built-in model catalog is the default model source. Set `CONSISTENCY_PI_MODELS_PATH` to an explicit `models.json` to add custom endpoints; user-level Pi config is never read implicitly.
