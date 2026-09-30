@@ -75,7 +75,7 @@ describe("resolveReviewModel", () => {
     const p2 = createLLMProvider(c2);
     expect(p1).not.toBe(p2);
     // catch unhandled promise rejections on mock objects
-    p1?.ready().catch(() => {});
-    p2?.ready().catch(() => {});
+    (p1 as { ready?: () => Promise<unknown> })?.ready?.().catch(() => {});
+    (p2 as { ready?: () => Promise<unknown> })?.ready?.().catch(() => {});
   });
 });
