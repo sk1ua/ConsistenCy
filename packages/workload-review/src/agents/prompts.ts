@@ -26,7 +26,7 @@ const AGENT_FOCUS: Record<ReviewAgentName, string> = {
 };
 
 const AGENT_EXCLUSIONS: Record<ReviewAgentName, string> = {
-  Security: "Do not report naming, formatting, comments, or test coverage; leave those to their specialists.",
+  Security: "Report any security vulnerability introduced or exposed by this PR that has a concrete triggering scenario (such as command/SQL/code injection, insecure deserialization, credential/secret leaks, path traversal, missing authorization or permission checks). Do not report naming, formatting, comments, or test coverage; leave those to their specialists.",
   Correctness: "Do not report style, comments, or missing tests as standalone findings; describe the actual failing behavior.",
   Maintainability: "Do not report cosmetic refactors, comments, or speculative future complexity without a concrete change-induced cost.",
   Test: "Report only a new branch or behavior introduced by this change that lacks a corresponding test. Do not duplicate another specialist's finding with a generic 'add a test' comment.",
