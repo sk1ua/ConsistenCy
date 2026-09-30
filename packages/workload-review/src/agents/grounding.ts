@@ -21,6 +21,8 @@ export type GroundedFileFacts = {
   changedRanges: LineRange[];
   lineCount?: number;
   hasDeterministicSignal: boolean;
+  baseContent?: string;
+  headContent?: string;
 };
 
 export type GroundingContext = {
@@ -95,9 +97,12 @@ export function buildGroundingContext(
   const files = new Map<string, GroundedFileFacts>();
   for (const changed of context.changedFiles) {
     const content = context.fileContents[changed.path];
+    const baseContent = context.baseFileContents?.[changed.path];
     const facts: GroundedFileFacts = {
       changedRanges: changedLineRanges(changed.patch),
-      hasDeterministicSignal: signalFiles.has(changed.path)
+      hasDeterministicSignal: signalFiles.has(changed.path),
+      baseContent,
+      headContent: content
     };
     if (content !== undefined) facts.lineCount = content.split("\n").length;
     files.set(changed.path, facts);
@@ -203,13 +208,36 @@ export function groundReviewFindings(
     }
 
     const { startLine, endLine } = finding;
-    if (startLine === undefined || endLine === undefined || !intersects(facts.changedRanges, startLine, endLine, 3)) {
-      decisions.push({
-        finding,
-        outcome: "pre_existing",
-        reason: `Lines of '${finding.file}' are not anchored within three lines of added or modified code`
-      });
-      continue;
+    const isNearby = startLine !== undefined && endLine !== undefined && intersects(facts.changedRanges, startLine, endLine, 3);
+
+    // If not within ±3 lines of changed hunks: check whether it's truly pre-existing.
+    // If the PR modified other parts of this file or repository, but the code at these lines existed in base
+    // and was completely unchanged in behavior/content, it is pre-existing.
+    // However, if the text mentions that the change broke or altered this, or if the code at these lines was NOT in base,
+    // it was introduced by this PR.
+    if (!isNearby) {
+      let isUnchangedInBase = true;
+      if (facts.baseContent !== undefined && facts.headContent !== undefined && startLine !== undefined && endLine !== undefined) {
+        const baseLines = facts.baseContent.split("\n");
+        const headLines = facts.headContent.split("\n");
+        const citedHead = headLines.slice(startLine - 1, endLine).join("\n").trim();
+        // Check if the cited code existed in base
+        if (citedHead.length > 0 && !facts.baseContent.includes(citedHead)) {
+          isUnchangedInBase = false;
+        }
+      }
+      // Check if finding description/evidence explicitly says the defect was caused/introduced by this change/PR
+      const text = `${finding.title} ${finding.evidence} ${finding.reasoning}`.toLowerCase();
+      const mentionsIntroducedByChange = text.includes("introduced") || text.includes("caused by") || text.includes("breaks") || text.includes("broken by") || text.includes("due to the new") || text.includes("due to this change");
+
+      if (isUnchangedInBase && !mentionsIntroducedByChange) {
+        decisions.push({
+          finding,
+          outcome: "pre_existing",
+          reason: `Lines of '${finding.file}' existed in base and were not modified by this change`
+        });
+        continue;
+      }
     }
 
     if (finding.confidence !== "confirmed") {

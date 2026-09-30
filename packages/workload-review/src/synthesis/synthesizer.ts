@@ -193,6 +193,26 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         maxPerFile: options.maxFindingsPerFile
       });
 
+      // Filter and deduplicate preExistingIssues:
+      // Drop "No change needed" / informational noise, deduplicate, and score-filter
+      let preExistingIssues = options.preExistingIssues ?? [];
+      preExistingIssues = preExistingIssues.filter(f => {
+        const text = `${f.title} ${f.evidence} ${f.recommendation}`.toLowerCase();
+        if (text.includes("no change needed") || text.includes("no changes needed") || text.includes("no action needed")) {
+          return false;
+        }
+        return true;
+      });
+      if (preExistingIssues.length > 0) {
+        const dedupedPre = deduplicateAndSortFindings(preExistingIssues).findings;
+        const scoredPre = applyFindingScoreFilter(dedupedPre, scores, {
+          minScore: options.minFindingScore,
+          maxReported: options.maxReportedFindings,
+          maxPerFile: options.maxFindingsPerFile
+        }).findings;
+        preExistingIssues = scoredPre;
+      }
+
       // Final coverage (audit P1-05): degraded coverage must be visible in
       // the durable report, never masked by a success-shaped summary.
       const coverage: ReviewCoverage = {
@@ -258,7 +278,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         findings,
         duplicates,
         filteredFindingCount: filteredCount,
-        preExistingIssues: options.preExistingIssues,
+        preExistingIssues,
         score,
         riskLevel,
         coverage,
