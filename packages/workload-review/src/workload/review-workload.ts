@@ -60,7 +60,7 @@ import { CapabilityBoundRepoFacade } from "../facades/repo-facade.js";
 import { DeterministicEvidenceRunner } from "../context/evidence-runner.js";
 import { applyModelContentPolicy } from "../context/content-policy.js";
 import { buildReviewBaseContext } from "../context/review-context.js";
-import { scopeDeterministicFindings } from "../context/deterministic-scope.js";
+import { scopeDeterministicFindings, scopeEvidenceInputs } from "../context/deterministic-scope.js";
 import { changedLineRanges, type LineRange } from "../agents/grounding.js";
 import { runSupervisorBody } from "../supervisor/supervisor.js";
 import { runReviewAgentBody } from "../agents/review-agent.js";
@@ -315,12 +315,17 @@ export class ReviewWorkload {
       // -------------------------------------------------------------------
       // 3. Deterministic PR-4 evidence over the snapshot.
       // -------------------------------------------------------------------
+      const scope = options.deterministicScope ?? "diff";
+      const changedRangesByFile = new Map<string, readonly LineRange[]>(
+        options.context.changedFiles.map((cf) => [cf.path, changedLineRanges(cf.patch)]),
+      );
       const evidenceRunner = new DeterministicEvidenceRunner();
-      const evidenceInputs = await evidenceRunner.run({
+      const rawEvidenceInputs = await evidenceRunner.run({
         repository: options.context.repositoryFullName,
         headSha: options.context.headSha,
         files: [...snapshotContents.entries()].map(([path, content]) => ({ path, content })),
       });
+      const evidenceInputs = scopeEvidenceInputs(rawEvidenceInputs, changedRangesByFile, scope);
       const evidence = evidenceInputs.map((input) => evidenceStore.add(input));
 
       // -------------------------------------------------------------------

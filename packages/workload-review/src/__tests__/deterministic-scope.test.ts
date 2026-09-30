@@ -7,7 +7,8 @@ import type { DomainAnalyzeSuccess } from "@consistency/schema";
 import {
   DETERMINISTIC_SCOPE_PADDING,
   findingLineReference,
-  scopeDeterministicFindings
+  scopeDeterministicFindings,
+  scopeEvidenceInputs,
 } from "../index.js";
 
 function result(findings: string[], path = "mycli/commands/run.py"): DomainAnalyzeSuccess {
@@ -46,25 +47,48 @@ describe("scopeDeterministicFindings", () => {
   });
 
   it("keeps an unanchored finding only for a file that is part of the change", () => {
-    const anchored = scopeDeterministicFindings(result(["[ORANGE] Significant Drift (score=0.702)"]), changed);
+    const anchored = scopeDeterministicFindings(result(["Unanchored security signal on module"]), changed);
     expect(anchored.files[0]!.findings).toHaveLength(1);
 
     const untouchedFile = scopeDeterministicFindings(
-      result(["[ORANGE] Significant Drift (score=0.702)"], "mycli/untouched.py"),
+      result(["Unanchored security signal on module"], "mycli/untouched.py"),
       changed
     );
     expect(untouchedFile.files[0]!.findings).toEqual([]);
   });
 
-  it("scope=all restores the unscoped engine output", () => {
+  it("scope=all restores the unscoped engine output, but still drops status boilerplate", () => {
     const findings = ["[rule] (line 121) inside the hunk", "[rule] (line 326) far away"];
     const scoped = scopeDeterministicFindings(result(findings), changed, "all");
     expect(scoped.files[0]!.findings).toEqual(findings);
+
+    const withBoilerplate = scopeDeterministicFindings(
+      result([...findings, "[GREEN] Consistent (score=0.000)", "Too few functions to detect duplication"]),
+      changed,
+      "all"
+    );
+    expect(withBoilerplate.files[0]!.findings).toEqual(findings);
   });
 
-  it("extracts the first line reference only when one is present", () => {
+  it("extracts the line reference supporting line N, @LNN, and LNN formats", () => {
     expect(findingLineReference("[rule] (line 42) excerpt")).toBe(42);
     expect(findingLineReference("Line 7: something")).toBe(7);
+    expect(findingLineReference("func@L336")).toBe(336);
+    expect(findingLineReference("issue at L125 in helper")).toBe(125);
     expect(findingLineReference("[ORANGE] Significant Drift (score=0.702)")).toBeUndefined();
+  });
+
+  it("scopes EvidenceInputs (PR-4 style/secret evidence)", () => {
+    const inputs = [
+      { location: { path: "mycli/commands/run.py", startLine: 122 } },
+      { location: { path: "mycli/commands/run.py", startLine: 180 } },
+      { location: { path: "mycli/untouched.py", startLine: 10 } },
+    ];
+    const scoped = scopeEvidenceInputs(inputs, changed, "diff");
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0]!.location.startLine).toBe(122);
+
+    const all = scopeEvidenceInputs(inputs, changed, "all");
+    expect(all).toHaveLength(3);
   });
 });

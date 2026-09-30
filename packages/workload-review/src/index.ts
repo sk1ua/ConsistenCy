@@ -51,7 +51,10 @@ export { groundReviewFindings, buildGroundingContext, changedLineRanges } from "
 export type { GroundingContext, GroundingResult } from "./agents/grounding.js";
 export {
   scopeDeterministicFindings,
+  scopeEvidenceInputs,
   findingLineReference,
+  findingLineReferences,
+  isDeterministicStatusLine,
   DETERMINISTIC_SCOPE_PADDING,
 } from "./context/deterministic-scope.js";
 export type { DeterministicScope } from "./context/deterministic-scope.js";
