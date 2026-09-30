@@ -84,23 +84,47 @@ function isLineNeighbor(left: ReviewFinding, right: ReviewFinding): boolean {
   return a.start <= b.end + FINDING_CLUSTER_DISTANCE && b.start <= a.end + FINDING_CLUSTER_DISTANCE;
 }
 
-/**
- * True when the pair is joined ONLY by line proximity — wording is different
- * enough that the title rule would have left them apart.
- *
- * Grouping precedence is deliberate: an exact or near-identical title on the
- * same file still collapses exactly as it always did (and `duplicates` still
- * discloses it), while the line-range rule catches the case the title rule
- * cannot — one defect described in different words by different specialists.
- * `alsoReportedBy` is recorded on the survivor of a line-range grouping, where
- * the merge is otherwise invisible from the surviving text.
- */
-function joinsByLineProximity(left: ReviewFinding, right: ReviewFinding): boolean {
-  return !isNearDuplicate(left, right) && isLineNeighbor(left, right);
+const STOP_WORDS = new Set([
+  "a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "by", "from",
+  "and", "or", "not", "is", "are", "was", "were", "be", "been", "being",
+  "this", "that", "these", "those", "it", "its", "as", "if"
+]);
+
+/** Check if two texts share topic-specific word tokens or share rule/evidence categories. */
+function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding): boolean {
+  const wordsA = titleWords(`${left.title} ${left.evidence} ${(left.tags ?? []).join(" ")}`);
+  const wordsB = titleWords(`${right.title} ${right.evidence} ${(right.tags ?? []).join(" ")}`);
+  for (const word of wordsA) {
+    if (!STOP_WORDS.has(word) && word.length > 1 && wordsB.has(word)) return true;
+  }
+  // Check shared evidenceIds (e.g. same rule or analyzer corroboration)
+  if (left.evidenceIds && right.evidenceIds) {
+    for (const id of left.evidenceIds) {
+      if (right.evidenceIds.includes(id)) return true;
+    }
+  }
+  return false;
 }
 
-function belongsTogether(left: ReviewFinding, right: ReviewFinding): boolean {
-  return isNearDuplicate(left, right) || isLineNeighbor(left, right);
+/**
+ * Same file with overlapping line ranges, or ranges at most
+ * `FINDING_CLUSTER_DISTANCE` lines apart, AND topic similarity.
+ */
+function isLineAndTopicNeighbor(left: ReviewFinding, right: ReviewFinding): boolean {
+  if (!isLineNeighbor(left, right)) return false;
+  return hasTopicOverlap(left, right);
+}
+
+/**
+ * True when the pair is joined by line proximity and topic similarity,
+ * while wording is different enough that the title rule alone would not merge them.
+ */
+function joinsByLineProximity(left: ReviewFinding, right: ReviewFinding): boolean {
+  return !isNearDuplicate(left, right) && isLineAndTopicNeighbor(left, right);
+}
+
+function belongsTogether(seed: ReviewFinding, finding: ReviewFinding): boolean {
+  return isNearDuplicate(seed, finding) || isLineAndTopicNeighbor(seed, finding);
 }
 
 /**
@@ -140,6 +164,7 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[]): {
   duplicates: ReviewFinding[];
 } {
   const clusters: Array<{
+    seed: ReviewFinding;
     survivor: ReviewFinding;
     merged: ReviewFinding[];
     members: ReviewFinding[];
@@ -148,15 +173,13 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[]): {
   }> = [];
 
   for (const finding of findings) {
-    // Compare against every member of a cluster, not only its current
-    // survivor. This keeps near-duplicate grouping transitive when the
-    // strongest finding has different wording from an earlier duplicate.
-    const host = clusters.find(entry => entry.members.some(member => belongsTogether(member, finding)));
+    // Non-transitive clustering centered on the cluster's seed finding.
+    const host = clusters.find(entry => belongsTogether(entry.seed, finding));
     if (!host) {
-      clusters.push({ survivor: finding, merged: [], members: [finding], lineGrouped: false });
+      clusters.push({ seed: finding, survivor: finding, merged: [], members: [finding], lineGrouped: false });
       continue;
     }
-    if (host.members.some(member => joinsByLineProximity(member, finding))) host.lineGrouped = true;
+    if (joinsByLineProximity(host.seed, finding)) host.lineGrouped = true;
     host.members.push(finding);
     if (prefer(finding, host.survivor) === finding) {
       host.merged.push(host.survivor);
@@ -167,11 +190,24 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[]): {
   }
 
   const survivorOf = (entry: (typeof clusters)[number]): ReviewFinding => {
-    if (!entry.lineGrouped) return entry.survivor;
-    const alsoReportedBy = [...new Set(entry.members.map(member => member.agent))]
-      .filter(agent => agent !== entry.survivor.agent)
-      .sort();
-    return alsoReportedBy.length > 0 ? { ...entry.survivor, alsoReportedBy } : entry.survivor;
+    let result = entry.survivor;
+    if (entry.lineGrouped) {
+      const alsoReportedBy = [...new Set(entry.members.map(member => member.agent))]
+        .filter(agent => agent !== entry.survivor.agent)
+        .sort();
+      if (alsoReportedBy.length > 0) {
+        result = { ...result, alsoReportedBy };
+      }
+      if (entry.merged.length > 0) {
+        const mergedFindings = entry.merged.map(m => ({
+          agent: m.agent,
+          title: m.title,
+          summary: m.evidence || m.reasoning || m.recommendation || m.title
+        }));
+        result = { ...result, mergedFindings };
+      }
+    }
+    return result;
   };
 
   const kept = clusters.map(survivorOf).sort((left, right) =>

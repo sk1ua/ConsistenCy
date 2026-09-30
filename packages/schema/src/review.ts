@@ -61,6 +61,14 @@ const findingBase = z.object({
    */
   alsoReportedBy: z.array(reviewAgentNameSchema).optional(),
   /**
+   * Items merged into this finding by deduplication, keeping their title and a summary point.
+   */
+  mergedFindings: z.array(z.object({
+    agent: reviewAgentNameSchema.optional(),
+    title: nonEmpty,
+    summary: nonEmpty
+  }).strict()).optional(),
+  /**
    * Synthesizer-assigned relevance score, 0–10, and its one-sentence reason.
    * OPTIONAL and additive: a provider that ignores the scoring instruction
    * leaves them unset, and an unscored finding is never dropped on score.

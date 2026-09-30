@@ -231,4 +231,43 @@ describe("reportBuilder", () => {
     expect(separate.findings.every(finding => finding.alsoReportedBy === undefined)).toBe(true);
     expect(separate.duplicates).toEqual([]);
   });
+
+  it("step 3: does not merge findings on adjacent lines if their topic/rule does not match, and preserves mergedFindings", () => {
+    const f1: ReviewFinding = {
+      ...confirmedHigh,
+      id: "f-sql",
+      title: "SQL injection in query builder",
+      evidence: "Raw string concatenation in SQL statement",
+      startLine: 10,
+      endLine: 12
+    };
+    const f2: ReviewFinding = {
+      ...confirmedHigh,
+      id: "f-style",
+      title: "Variable naming convention violated",
+      evidence: "CamelCase variable naming in python code",
+      startLine: 11,
+      endLine: 11
+    };
+    const f3: ReviewFinding = {
+      ...confirmedHigh,
+      id: "f-sql-duplicate",
+      agent: "Correctness",
+      title: "Unescaped user parameter in database query",
+      evidence: "User parameter passed directly to database without sanitization",
+      startLine: 11,
+      endLine: 13
+    };
+
+    // f1 and f2 are on line 10-12 and 11, but f2 is style while f1 is SQL injection -> no topic overlap, should NOT merge
+    const resDifferent = deduplicateAndSortFindings([f1, f2]);
+    expect(resDifferent.findings).toHaveLength(2);
+    expect(resDifferent.findings.map(f => f.id)).toEqual(["f-sql", "f-style"]);
+
+    // f1 and f3 have topic overlap (database, query, sql) -> should merge into 1 finding
+    const resSameTopic = deduplicateAndSortFindings([f1, f3]);
+    expect(resSameTopic.findings).toHaveLength(1);
+    expect(resSameTopic.findings[0]!.mergedFindings).toBeDefined();
+    expect(resSameTopic.findings[0]!.mergedFindings).toHaveLength(1);
+  });
 });
