@@ -182,8 +182,10 @@ describe("reportBuilder", () => {
         file: "mycli/commands/run.py",
         startLine,
         endLine,
-        evidence: `${agent} evidence for lines ${startLine}-${endLine}.`,
-        reasoning: `${agent} reasoning about the changed hunk.`,
+        evidence: `${agent} observes the same unescaped argument reaching shell execution at lines ${startLine}-${endLine}.`,
+        reasoning: `${agent} describes the same shell command injection.`,
+        tags: ["rule:shell-command-injection"],
+        trigger: "A user supplies a shell metacharacter in the new flag argument",
         recommendation: `${agent} recommendation.`
       };
       if (confidence === "confirmed") return { ...common, confidence };
@@ -196,8 +198,8 @@ describe("reportBuilder", () => {
     const merged = deduplicateAndSortFindings([
       specialist("Security", "f-security", "Shell injection in the new flag handler", "high", "confirmed", 120, 124),
       specialist("Correctness", "f-correctness", "Unquoted argument reaches subprocess", "medium", "likely", 126, 128),
-      specialist("Maintainability", "f-maintainability", "The new helper mixes parsing with execution", "low", "likely", 122, 122),
-      specialist("Test", "f-test", "The new branch has no coverage", "medium", "hypothesis", 127, 127)
+      specialist("Maintainability", "f-maintainability", "Shell argument boundary does not enforce escaping", "low", "likely", 122, 122),
+      specialist("Test", "f-test", "Unchecked shell argument permits injected execution", "medium", "hypothesis", 127, 127)
     ]);
 
     expect(merged.findings).toHaveLength(1);
@@ -249,6 +251,7 @@ describe("reportBuilder", () => {
       id: "f-sql",
       title: "SQL injection in query builder",
       evidence: "Raw string concatenation in SQL statement",
+      tags: ["rule:sql-injection"],
       startLine: 10,
       endLine: 12
     };
@@ -266,6 +269,7 @@ describe("reportBuilder", () => {
       agent: "Correctness",
       title: "Unescaped user parameter in database query",
       evidence: "User parameter passed directly to database without sanitization",
+      tags: ["rule:sql-injection"],
       startLine: 11,
       endLine: 13
     };

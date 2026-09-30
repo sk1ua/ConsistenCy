@@ -87,19 +87,39 @@ function isLineNeighbor(left: ReviewFinding, right: ReviewFinding): boolean {
 const STOP_WORDS = new Set([
   "a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "by", "from",
   "and", "or", "not", "is", "are", "was", "were", "be", "been", "being",
-  "this", "that", "these", "those", "it", "its", "as", "if"
+  "this", "that", "these", "those", "it", "its", "as", "if",
+  "when", "then", "will", "can", "could", "may", "should", "must", "does", "do",
+  "new", "changed", "change", "file", "files", "line", "lines", "code", "hunk",
+  "security", "correctness", "maintainability", "test", "style", "evidence"
 ]);
 
-/** Check if two texts share topic-specific word tokens or share rule/evidence categories. */
+/** Strip source artifacts before comparing prose; shared paths are not a topic. */
+function topicWords(text: string): Set<string> {
+  const prose = text
+    .replace(/```[\s\S]*?```|`[^`]*`/g, " ")
+    .replace(/(?:[\w.-]+[\\/])+[\w.-]+|\b[\w.-]+\.(?:py|ts|tsx|js|json|yml|yaml|sh)\b/gi, " ")
+    .replace(/\b\w*[a-z][A-Z]\w*\b|\b\w+_\w+\b|\b\w+(?:\.\w+)+\b/g, " ");
+  return new Set([...titleWords(prose)].filter(word => !STOP_WORDS.has(word) && !/^\d+$/.test(word) && word.length > 1));
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  const intersection = [...a].filter(word => b.has(word)).length;
+  return intersection / (a.size + b.size - intersection);
+}
+
+function differentTriggers(left: ReviewFinding, right: ReviewFinding): boolean {
+  if (!left.trigger || !right.trigger) return false;
+  const a = topicWords(left.trigger);
+  const b = topicWords(right.trigger);
+  return a.size >= 3 && b.size >= 3 && jaccard(a, b) < 0.2;
+}
+
+/** Explicit rule/category tags or at least 50% overlap of title/description keywords. */
 function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding): boolean {
-  const wordsA = titleWords(`${left.title} ${left.evidence} ${(left.tags ?? []).join(" ")}`);
-  const wordsB = titleWords(`${right.title} ${right.evidence} ${(right.tags ?? []).join(" ")}`);
-  for (const word of wordsA) {
-    if (!STOP_WORDS.has(word) && word.length > 1 && wordsB.has(word)) return true;
-  }
-  // A source evidence record can corroborate multiple independent defects;
-  // sharing its id is not evidence of a shared rule or topic.
-  return false;
+  const categories = new Set((left.tags ?? []).filter(tag => /^(?:rule(?:id)?|category):\S+/i.test(tag)).map(tag => tag.toLowerCase()));
+  if ((right.tags ?? []).some(tag => categories.has(tag.toLowerCase()))) return true;
+  return jaccard(topicWords(`${left.title} ${left.evidence}`), topicWords(`${right.title} ${right.evidence}`)) >= 0.5;
 }
 
 /**
@@ -120,7 +140,8 @@ function joinsByLineProximity(left: ReviewFinding, right: ReviewFinding): boolea
 }
 
 function belongsTogether(seed: ReviewFinding, finding: ReviewFinding): boolean {
-  return isNearDuplicate(seed, finding) || isLineAndTopicNeighbor(seed, finding);
+  if (differentTriggers(seed, finding) || !hasTopicOverlap(seed, finding)) return false;
+  return isNearDuplicate(seed, finding) || isLineNeighbor(seed, finding);
 }
 
 /**
