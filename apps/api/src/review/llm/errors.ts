@@ -1,4 +1,4 @@
-import type { LlmErrorKind } from "@consistency/schema";
+import { tokenUsageFromError, type LlmErrorKind, type TokenUsage } from "@consistency/schema";
 
 /**
  * H08 — bounded LLM error classification.
@@ -27,13 +27,15 @@ export class LlmProviderError extends Error {
   readonly kind: LlmErrorKind;
   readonly httpStatus?: number;
   readonly retryAfterMs?: number;
+  readonly tokenUsage?: TokenUsage;
 
-  constructor(message: string, classification: LlmErrorClassification, options?: { cause?: unknown }) {
+  constructor(message: string, classification: LlmErrorClassification, options?: { cause?: unknown; tokenUsage?: TokenUsage }) {
     super(message);
     this.kind = classification.kind;
     if (classification.httpStatus !== undefined) this.httpStatus = classification.httpStatus;
     if (classification.retryAfterMs !== undefined) this.retryAfterMs = classification.retryAfterMs;
     if (options?.cause !== undefined) (this as { cause?: unknown }).cause = options.cause;
+    this.tokenUsage = options?.tokenUsage ?? tokenUsageFromError(options?.cause);
   }
 }
 

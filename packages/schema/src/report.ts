@@ -169,6 +169,8 @@ export const reviewReportSchema = z.object({
   llmProvider: z.string().trim().min(1).optional(),
   llmModel: z.string().trim().min(1).optional(),
   agentRuns: z.array(agentRunSchema),
+  /** Known prompt input + cached input across all runs, including failed calls. */
+  promptTokens: z.number().int().nonnegative().optional(),
   findings: z.array(reviewFindingSchema),
   /** Findings outside the changed-line scope; excluded from the main verdict and score. */
   preExistingIssues: z.array(reviewFindingSchema).optional(),

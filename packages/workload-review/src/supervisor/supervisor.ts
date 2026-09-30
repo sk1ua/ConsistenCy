@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { reviewPlanSchema, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type ReviewPlan, type TokenUsage } from "@consistency/schema";
+import { reviewPlanSchema, tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type ReviewPlan, type TokenUsage } from "@consistency/schema";
 import {
   KernelScheduler,
   type AgentId,
@@ -96,6 +96,7 @@ function failAgentSafely(scheduler: KernelScheduler, agentId: AgentId): void {
 export async function runSupervisorBody(options: SupervisorBodyOptions): Promise<SupervisorBodyResult> {
   const { scheduler, agentId, jobId, context, persistence, providerName, model } = options;
   const startedAt = new Date().toISOString();
+  let paidUsage: TokenUsage | undefined;
 
   const staticSummary = options.deterministicResult?.files
     ? `Static Analysis Summary: High-risk files: ${options.deterministicResult.files.filter(f => f.riskScore >= 0.5).map(f => `${f.path} (score: ${f.riskScore})`).join(", ") || "none"}`
@@ -122,6 +123,7 @@ export async function runSupervisorBody(options: SupervisorBodyOptions): Promise
             `Diff excerpt:\n${context.diff.slice(0, 30_000)}`
           ].filter(Boolean).join("\n\n"))
         });
+        paidUsage = rawResult.tokenUsage;
       } finally {
         scheduler.wake(agentId);
       }
@@ -161,6 +163,7 @@ export async function runSupervisorBody(options: SupervisorBodyOptions): Promise
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown planner failure";
+    const tokenUsage = paidUsage ?? tokenUsageFromError(error);
     failAgentSafely(scheduler, agentId);
     const run: AgentRun = {
       id: `agent_${randomUUID()}`,
@@ -172,6 +175,7 @@ export async function runSupervisorBody(options: SupervisorBodyOptions): Promise
       inputSummary: `Planned review for ${context.changedFiles.length} changed files`,
       findings: [],
       error: message,
+      tokenUsage,
       provider: providerName as AgentRun["provider"],
       model,
     };

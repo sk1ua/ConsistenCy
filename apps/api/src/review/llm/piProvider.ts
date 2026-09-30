@@ -1,4 +1,5 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { tokenUsageFromError, recordTokenUsageOnError } from "@consistency/schema";
 import { BaseLLMProvider, parseTokenUsage } from "./provider";
 import { classifyLlmError, classifyLlmText, LlmProviderError } from "./errors";
 import { piRuntime } from "./piCatalog";
@@ -312,7 +313,7 @@ You must return the answer by calling the ${toolName} tool exactly once. Do not 
         // embedded); the bounded classification rides as structured fields so
         // the router can tell rate limits, auth failures, and missing models
         // apart without leaking provider text.
-        throw new LlmProviderError(errorText(message), classifyLlmText(message.errorMessage ?? ""));
+        throw new LlmProviderError(errorText(message), classifyLlmText(message.errorMessage ?? ""), { tokenUsage: usageFromMessage(message) });
       }
       const toolCall = message.content.find(
         (part): part is PiContentPart & PiToolCallPart =>
@@ -324,7 +325,9 @@ You must return the answer by calling the ${toolName} tool exactly once. Do not 
       // Cancellation must surface as cancellation, not as a generic provider
       // failure — the worker distinguishes cancelled jobs by it.
       if (input.signal?.aborted) {
-        throw input.signal.reason ?? new Error("LLM request was cancelled");
+        const reason = input.signal.reason ?? new Error("LLM request was cancelled");
+        recordTokenUsageOnError(reason, tokenUsageFromError(error));
+        throw reason;
       }
       if (process.env.CONSISTENCY_LLM_SMOKE_DEBUG === "true") {
         const message = error instanceof Error ? error.message : "unknown";
@@ -333,7 +336,7 @@ You must return the answer by calling the ${toolName} tool exactly once. Do not 
       }
       // H08: same fixed public message; the raw error's bounded classification
       // (HTTP status family, bounded message patterns) is attached as fields.
-      throw new LlmProviderError("Pi LLM request failed", classifyLlmError(error));
+      throw new LlmProviderError("Pi LLM request failed", classifyLlmError(error), { cause: error });
     }
   }
 

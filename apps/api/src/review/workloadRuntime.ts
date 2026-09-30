@@ -52,6 +52,8 @@ import type {
 import type { ReviewJobStore } from "../jobQueue";
 import type { DeterministicAnalyzer } from "./deterministic";
 import { logger } from "../config/logger";
+import { tokenUsageFromError } from "@consistency/schema";
+import { sanitizeExecutionError } from "../security/redact";
 import { knowledgeIndexPathFor } from "./knowledgeIndex";
 import type { LLMProvider } from "./llm/types";
 import type { RuntimeRegistry } from "./runtimeRegistry";
@@ -164,7 +166,7 @@ export type ReviewRuntime = {
 function logModelCall(operation: string, detail: Record<string, string>, usage?: TokenUsage): void {
   const input = usage?.inputTokens ?? null;
   const cached = usage?.cachedTokens ?? 0;
-  const promptTokens = usage?.promptTokens ?? (input !== null ? input + cached : null);
+  const promptTokens = input !== null ? input + cached : (usage?.promptTokens ?? null);
   logger.info(
     {
       operation,
@@ -180,23 +182,46 @@ function logModelCall(operation: string, detail: Record<string, string>, usage?:
 }
 
 /** Records aggregate call results; transport attempts emit llm.invoke in the provider. */
-function withModelCallLogging(driver: ModelDriver): ModelDriver {
+export function withModelCallLogging(driver: ModelDriver): ModelDriver {
+  const failed = (operation: string, detail: Record<string, string>, error: unknown) => {
+    logModelCall(operation, {
+      ...detail, status: "failed",
+      reason: sanitizeExecutionError(error instanceof Error ? error.message : String(error))
+    }, tokenUsageFromError(error));
+  };
   return {
     ...driver,
     invokeStructured: async (request) => {
-      const result = await driver.invokeStructured(request);
-      logModelCall("structured", { schemaName: request.schemaName }, result.tokenUsage);
-      return result;
+      const detail = { schemaName: request.schemaName, agent: request.schemaName === "review-plan" ? "Planner" : request.schemaName === "review-summary" ? "Synthesizer" : request.schemaName };
+      try {
+        const result = await driver.invokeStructured(request);
+        logModelCall("structured", { ...detail, status: "completed" }, result.tokenUsage);
+        return result;
+      } catch (error) {
+        failed("structured", detail, error);
+        throw error;
+      }
     },
     invokeAgentFindings: async (request) => {
-      const result = await driver.invokeAgentFindings(request);
-      logModelCall("findings", { agent: request.agent }, result.tokenUsage);
-      return result;
+      try {
+        const result = await driver.invokeAgentFindings(request);
+        logModelCall("findings", { agent: request.agent, status: "completed" }, result.tokenUsage);
+        return result;
+      } catch (error) {
+        failed("findings", { agent: request.agent }, error);
+        throw error;
+      }
     },
     invokeSummary: async (request) => {
-      const result = await driver.invokeSummary(request);
-      logModelCall("summary", { schemaName: "review-summary" }, result.tokenUsage);
-      return result;
+      const detail = { schemaName: "review-summary", agent: "Synthesizer" };
+      try {
+        const result = await driver.invokeSummary(request);
+        logModelCall("summary", { ...detail, status: "completed" }, result.tokenUsage);
+        return result;
+      } catch (error) {
+        failed("summary", detail, error);
+        throw error;
+      }
     }
   };
 }

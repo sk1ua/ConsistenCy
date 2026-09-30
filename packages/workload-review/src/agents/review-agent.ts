@@ -19,7 +19,7 @@ import {
   type AgentSnapshot,
   type EvidenceSnapshot,
 } from "@consistency/kernel";
-import type { AgentRun, DomainAnalyzeSuccess, PRReviewContext, RelevantContext, ReviewFinding, TokenUsage } from "@consistency/schema";
+import { tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type RelevantContext, type ReviewFinding, type TokenUsage } from "@consistency/schema";
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
@@ -89,6 +89,7 @@ function failAgentSafely(scheduler: KernelScheduler, agentId: AgentId): void {
 export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promise<ReviewAgentBodyResult> {
   const { scheduler, agentId, agentName, jobId, persistence, providerName, model } = options;
   const startedAt = new Date().toISOString();
+  let paidUsage: TokenUsage | undefined;
 
   try {
     return await options.fiber.execute(async () => {
@@ -109,6 +110,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       let modelResult: { findings: ReviewFinding[]; tokenUsage?: TokenUsage };
       try {
         modelResult = await options.facades.llm.invokeAgentFindings({ agent: agentName, ...prompt });
+        paidUsage = modelResult.tokenUsage;
       } finally {
         scheduler.wake(agentId);
       }
@@ -169,6 +171,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
     });
   } catch (error) {
     const message = errorMessage(error);
+    const tokenUsage = paidUsage ?? tokenUsageFromError(error);
     failAgentSafely(scheduler, agentId);
     const run: AgentRun = {
       id: `agent_${randomUUID()}`,
@@ -180,10 +183,11 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       inputSummary: `Reviewed ${options.context.changedFiles.length} changed files`,
       findings: [],
       error: message,
+      tokenUsage,
       provider: providerName as AgentRun["provider"],
       model,
     };
     persistence.saveAgentRun(run);
-    return { findings: [], preExistingIssues: [], cappedFindingsCount: 0, rejectedCount: 0, downgradedCount: 0, error: message };
+    return { findings: [], preExistingIssues: [], cappedFindingsCount: 0, rejectedCount: 0, downgradedCount: 0, tokenUsage, error: message };
   }
 }

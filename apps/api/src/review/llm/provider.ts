@@ -3,6 +3,8 @@ import {
   reviewFindingSchema,
   reviewAgentNameSchema,
   tokenUsageSchema,
+  tokenUsageFromError,
+  recordTokenUsageOnError,
   type LLMStreamEvent,
   type ReviewFinding,
   type TokenUsage
@@ -10,6 +12,7 @@ import {
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { logger } from "../../config/logger";
+import { sanitizeExecutionError } from "../../security/redact";
 import type {
   FindingGenerationRequest,
   LLMProvider,
@@ -44,7 +47,7 @@ function findingsSchemaForAgent(agent: z.infer<typeof reviewAgentNameSchema>) {
 }
 
 export class StructuredOutputError extends Error {
-  constructor(message: string, public override readonly cause?: unknown) {
+  constructor(message: string, public override readonly cause?: unknown, public readonly tokenUsage?: TokenUsage) {
     super(message);
     this.name = "StructuredOutputError";
   }
@@ -86,11 +89,13 @@ export abstract class BaseLLMProvider implements LLMProvider {
     let previousContent = "";
     let lastError: unknown;
     let accumulatedUsage: TokenUsage | undefined;
+    const agent = request.agent ?? (request.schemaName === "review-plan" ? "Planner" : request.schemaName === "review-summary" ? "Synthesizer" : request.schemaName);
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      // A cancelled run must not spend its repair attempt on a doomed call:
-      // abort checks happen before dispatch and after every failure.
+      // A cancelled run must not spend its repair attempt on a doomed call.
       if (request.signal?.aborted) {
-        throw request.signal.reason ?? new Error("LLM request was cancelled before dispatch");
+        const reason = request.signal.reason ?? new Error("LLM request was cancelled before dispatch");
+        recordTokenUsageOnError(reason, accumulatedUsage);
+        throw reason;
       }
       let attemptUsage: TokenUsage | undefined;
       let attemptError: unknown;
@@ -105,18 +110,22 @@ export abstract class BaseLLMProvider implements LLMProvider {
           throw request.signal.reason ?? new Error("LLM request was cancelled during dispatch");
         }
         previousContent = completion.content;
-        return {
-          data: request.schema.parse(extractJson(completion.content)),
-          tokenUsage: accumulatedUsage
-        };
+        return { data: request.schema.parse(extractJson(completion.content)), tokenUsage: accumulatedUsage };
       } catch (error) {
         attemptError = error;
         lastError = error;
+        // Transport failures may carry paid usage even without a completion.
+        // JSON/schema failures already counted the returned completion above.
+        if (!attemptUsage) {
+          attemptUsage = tokenUsageFromError(error);
+          if (attemptUsage) accumulatedUsage = sumTokenUsage(accumulatedUsage, attemptUsage);
+        }
         if (request.signal?.aborted) break;
       } finally {
         logger.info({
-          operation: "structured", schemaName: request.schemaName, attempt: attempt + 1,
+          operation: "structured", schemaName: request.schemaName, agent, attempt: attempt + 1,
           status: attemptError === undefined ? "completed" : "failed",
+          ...(attemptError === undefined ? {} : { reason: sanitizeExecutionError(attemptError instanceof Error ? attemptError.message : String(attemptError)) }),
           inputTokens: attemptUsage?.inputTokens ?? null,
           outputTokens: attemptUsage?.outputTokens ?? null,
           cachedTokens: attemptUsage?.cachedTokens ?? 0,
@@ -125,10 +134,16 @@ export abstract class BaseLLMProvider implements LLMProvider {
         }, "llm.invoke");
       }
     }
-    const detail = lastError instanceof Error ? lastError.message : String(lastError);
+    if (request.signal?.aborted) {
+      const reason = request.signal.reason ?? lastError ?? new Error("LLM request was cancelled");
+      recordTokenUsageOnError(reason, accumulatedUsage);
+      throw reason;
+    }
+    const detail = sanitizeExecutionError(lastError instanceof Error ? lastError.message : String(lastError));
     throw new StructuredOutputError(
       `Provider ${this.name} failed schema ${request.schemaName} after one repair attempt: ${detail.slice(0, 800)}`,
-      lastError
+      lastError,
+      accumulatedUsage
     );
   }
 
@@ -136,6 +151,7 @@ export abstract class BaseLLMProvider implements LLMProvider {
     const result = await this.invokeWithSchema({
       schema: findingsSchemaForAgent(request.agent),
       schemaName: "review-findings",
+      agent: request.agent,
       systemPrompt: request.systemPrompt,
       userPrompt: request.userPrompt,
       signal: request.signal

@@ -1,6 +1,7 @@
 import { deduplicateAndSortFindings, riskBandForFindings, summaryForFinalFindings } from "@consistency/workload-review";
 import {
   reviewReportSchema,
+  promptTokensForAgentRuns,
   type AgentRun,
   type RetrievalTrace,
   type ReviewFinding,
@@ -26,6 +27,7 @@ export function buildReviewReport(input: {
   createdAt?: string;
 }): ReviewReport {
   const { findings, duplicates } = deduplicateAndSortFindings(input.findings, true);
+  const promptTokens = promptTokensForAgentRuns(input.agentRuns);
 
   return reviewReportSchema.parse({
     jobId: input.jobId,
@@ -38,6 +40,7 @@ export function buildReviewReport(input: {
     riskLevel: input.riskLevel,
     riskBand: riskBandForFindings(findings),
     agentRuns: input.agentRuns,
+    ...(promptTokens === undefined ? {} : { promptTokens }),
     findings,
     ...(duplicates.length > 0 ? { duplicates } : {}),
     retrieval: input.retrieval,

@@ -20,6 +20,7 @@ import type {
   ReviewReport,
   TokenUsage,
 } from "@consistency/schema";
+import { tokenUsageFromError, recordTokenUsageOnError } from "@consistency/schema";
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildComposeReviewFileResults } from "./compose.js";
 import { buildReviewReport, deduplicateAndSortFindings } from "./report.js";
@@ -105,6 +106,7 @@ function coverageWarning(coverage: ReviewCoverage, language: "zh-CN" | "en-US"):
 export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promise<SynthesizerBodyResult> {
   const { scheduler, agentId, jobId, persistence, providerName, model } = options;
   const startedAt = new Date().toISOString();
+  let paidUsage: TokenUsage | undefined;
 
   try {
     return await options.fiber.execute(async () => {
@@ -176,15 +178,18 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
               preExistingIssues: appendixCandidates
             }))
           });
+          tokenUsage = summaryResult.tokenUsage;
+          paidUsage = tokenUsage;
         } finally {
           scheduler.wake(agentId);
         }
         summary = summaryResult.text.trim()
           ? summaryResult.text.trim()
           : canonicalOverview;
-        tokenUsage = summaryResult.tokenUsage;
         scores = summaryResult.scores ?? [];
       } catch (caught) {
+        tokenUsage ??= tokenUsageFromError(caught);
+        paidUsage = tokenUsage;
         error = caught instanceof Error ? caught.message : "Unknown synthesizer failure";
       }
       // wake() runs for both success and failure. Re-admit before producing
@@ -302,6 +307,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
     });
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "Unknown synthesizer failure";
+    const tokenUsage = paidUsage ?? tokenUsageFromError(caught);
     failAgentSafely(scheduler, agentId);
     const run: AgentRun = {
       id: `agent_${randomUUID()}`,

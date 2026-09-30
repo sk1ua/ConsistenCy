@@ -2,8 +2,9 @@ import type { AgentRun, LLMStreamEvent, LlmRouteRecord, ReviewAgentName, ReviewF
 import type { z } from "zod";
 
 export type StructuredInvocation<T> = {
-  schema: z.ZodType<T>;
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>;
   schemaName: string;
+  agent?: ReviewAgentName;
   systemPrompt: string;
   userPrompt: string;
   /** Audit P1-07①: run-scoped cancellation — aborts the provider transport. */

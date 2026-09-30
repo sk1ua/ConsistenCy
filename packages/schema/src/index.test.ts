@@ -105,14 +105,21 @@ describe("@consistency/schema", () => {
     })).toThrow();
   });
 
-  it("requires explicit uncertainty for hypotheses", () => {
+  it("rejects blank explicit uncertainty for hypotheses", () => {
     const hypothesis = reviewFindingSchema.parse({
       ...findingBase,
       confidence: "hypothesis",
       uncertainty: "Deployment-level authentication was not visible."
     });
     expect(hypothesis.startLine).toBeUndefined();
-    expect(() => reviewFindingSchema.parse({ ...findingBase, confidence: "hypothesis" })).toThrow();
+    expect(() => reviewFindingSchema.parse({ ...findingBase, confidence: "hypothesis", uncertainty: "" })).toThrow();
+  });
+
+  it("defaults missing hypothesis uncertainty without promoting confidence", () => {
+    const hypothesis = reviewFindingSchema.parse({ ...findingBase, confidence: "hypothesis" });
+    expect(hypothesis.confidence).toBe("hypothesis");
+    expect(hypothesis.uncertainty).toBe("Hypothesis; the triggering scenario has not been verified.");
+    expect(hypothesis.startLine).toBeUndefined();
   });
 
   it("keeps uncertainty written on a likely or confirmed finding", () => {

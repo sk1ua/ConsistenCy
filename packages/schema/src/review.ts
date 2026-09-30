@@ -111,7 +111,7 @@ const hypothesisFindingSchema = findingBase.extend({
   file: nonEmpty,
   startLine: positiveLine.optional(),
   endLine: positiveLine.optional(),
-  uncertainty: nonEmpty
+  uncertainty: nonEmpty.default("Hypothesis; the triggering scenario has not been verified.")
 }).strict();
 
 export const reviewFindingSchema = z

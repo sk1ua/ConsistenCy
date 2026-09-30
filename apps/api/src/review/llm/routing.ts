@@ -1,5 +1,9 @@
 import {
   LLM_ROUTE_MAX_FALLBACKS,
+  mergeTokenUsage,
+  tokenUsageFromError,
+  recordTokenUsageOnError,
+  type TokenUsage,
   type AgentRun,
   type LLMStreamEvent,
   type LlmConnectionProfile,
@@ -205,27 +209,37 @@ export class RoutedLLMProvider implements LLMProvider {
   }
 
   private async dispatch<T>(
-    call: (provider: LLMProvider) => Promise<T>,
+    call: (provider: LLMProvider) => Promise<StructuredResult<T>>,
     signal?: AbortSignal
-  ): Promise<T> {
-    if (signal?.aborted) {
-      throw abortReason(signal);
-    }
-    if (this.chain.length === 0) {
-      throw this.noAvailableProfileError();
-    }
-    if (this.pinnedIndex === undefined) {
-      const release = await this.acquireResolution();
+  ): Promise<StructuredResult<T>> {
+    let failedUsage: TokenUsage | undefined;
+    const trackedCall = async (provider: LLMProvider): Promise<StructuredResult<T>> => {
       try {
-        // A concurrent call may have resolved the chain while we waited.
-        if (this.pinnedIndex === undefined) {
-          return await this.walkChain(call, signal);
-        }
-      } finally {
-        release();
+        const result = await call(provider);
+        return failedUsage ? { ...result, tokenUsage: mergeTokenUsage(failedUsage, result.tokenUsage) } : result;
+      } catch (error) {
+        failedUsage = mergeTokenUsage(failedUsage, tokenUsageFromError(error));
+        throw error;
       }
+    };
+    try {
+      if (signal?.aborted) throw abortReason(signal);
+      if (this.chain.length === 0) throw this.noAvailableProfileError();
+      if (this.pinnedIndex === undefined) {
+        const release = await this.acquireResolution();
+        try {
+          // A concurrent call may have resolved the chain while we waited.
+          if (this.pinnedIndex === undefined) return await this.walkChain(trackedCall, signal);
+        } finally {
+          release();
+        }
+      }
+      return await this.callPinned(trackedCall, signal);
+    } catch (error) {
+      // Preserve canonical routing/cancellation error identity and semantics.
+      recordTokenUsageOnError(error, failedUsage);
+      throw error;
     }
-    return this.callPinned(call, signal);
   }
 
   /**

@@ -14,8 +14,12 @@ TypeScript 业务对象在 Schema 边界使用显式 `camelCase` ↔ `snake_case
 - `jobId`、仓库、PR、commit 和分析时间。
 - 证据检索统计与 Evidence Pack 摘要。
 - `findings`：风险等级、置信度、文件位置、证据和说明。
-- `agentRuns`：每个阶段的状态、耗时、输入/输出摘要和错误。
+- `agentRuns`：每个阶段的状态、耗时、输入/输出摘要和错误；`tokenUsage` 包含已知的重试、路由回退及失败调用消耗，Planner 和 Synthesizer 也计入。
+- `promptTokens`：汇总所有阶段已知的 `inputTokens + cachedTokens`，包括失败阶段。没有可用的输入统计时省略，不伪造为零；仅提供汇总 prompt 统计的供应商使用其已知值。
+- `confidence: hypothesis` 的 finding 缺少 `uncertainty` 时使用明确的未验证说明，不提升置信度；显式空白值仍拒绝。
 - 发布状态与可追溯 metadata。
+
+模型调用日志写入 stderr：传输尝试为 `llm.invoke`，聚合结果为 `llm.result`；失败日志包含 `agent`、`status`、净化后的 `reason` 和已知 token 消耗，不记录原始 prompt、凭据或错误 stack。
 
 Risk score 用于审查注意力排序，不是自动化安全结论；UI 会把事实证据、模型推导和弱标签边界分开呈现。
 
