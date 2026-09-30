@@ -106,6 +106,7 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `CONSISTENCY_PI_CONFIG_DIR` | `<database-dir>/pi` | Server-side isolation directory for the bundled Pi runtime's auth storage |
 | `CONSISTENCY_PI_MODELS_PATH` | *empty* | Explicit Pi `models.json` path for custom model endpoints; restart after changing the file |
 | `CONSISTENCY_LLM_TEMPERATURE` | *empty* | Request temperature from 0 to 2; empty uses the provider default |
+| `CONSISTENCY_LLM_BASE_URL` | *empty* | Endpoint override for the selected provider (proxy, gateway, or any OpenAI-compatible base URL). Applied to the real completion path through Pi's provider registration; `DEEPSEEK_BASE_URL` retargets DeepSeek specifically and takes effect only when the generic override is empty. Neither is ever hardcoded |
 | `CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST` | `3` | Maximum grounded main-list findings kept from each specialist (1–20); findings more than three lines from changed code go to `preExistingIssues` instead |
 | `CONSISTENCY_MIN_FINDING_SCORE` | `5` | Minimum synthesizer score (0–10) for a finding to reach the main list. The score and its one-line reason ride the synthesizer's existing summary call, so scoring adds no extra request. A finding the provider leaves unscored is never dropped on score |
 | `CONSISTENCY_MAX_REPORTED_FINDINGS` | `8` | Maximum findings in the main list after scoring (1–50) |

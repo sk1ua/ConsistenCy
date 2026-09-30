@@ -33,9 +33,53 @@ export function managedKeyInjections(config: AppConfig): PiKeyInjection[] {
   return injections;
 }
 
+export interface PiBaseUrlOverride {
+  providerId: string;
+  baseUrl: string;
+}
+
+/**
+ * The provider the process would use when no explicit id is set (mirrors the
+ * settings resolution order: deepseek → openai → anthropic).
+ */
+export function selectedProviderId(config: AppConfig): string | undefined {
+  if (config.LLM_PROVIDER) return config.LLM_PROVIDER.toLowerCase();
+  if (config.DEEPSEEK_API_KEY) return "deepseek";
+  if (config.OPENAI_API_KEY) return "openai";
+  if (config.ANTHROPIC_API_KEY) return "anthropic";
+  return undefined;
+}
+
+/**
+ * Endpoint override for the model calls that actually run reviews.
+ *
+ * `CONSISTENCY_LLM_BASE_URL` retargets whatever provider is selected (a proxy,
+ * a self-hosted gateway, or an OpenAI-compatible endpoint); `DEEPSEEK_BASE_URL`
+ * retargets DeepSeek specifically and has always been recorded in a connection
+ * profile — this is what makes it reach the request.
+ */
+export function resolveBaseUrlOverride(config: AppConfig): PiBaseUrlOverride | undefined {
+  const providerId = selectedProviderId(config);
+  if (!providerId) return undefined;
+  if (config.CONSISTENCY_LLM_BASE_URL) {
+    return { providerId, baseUrl: config.CONSISTENCY_LLM_BASE_URL };
+  }
+  if (providerId === "deepseek" && config.DEEPSEEK_BASE_URL) {
+    return { providerId, baseUrl: config.DEEPSEEK_BASE_URL };
+  }
+  return undefined;
+}
+
 function keysFingerprint(config: AppConfig): string {
+  const override = resolveBaseUrlOverride(config);
   return createHash("sha256")
-    .update(JSON.stringify({ keys: managedKeyInjections(config).map(({ providerId, apiKey }) => [providerId, createHash("sha256").update(apiKey).digest("hex")]), provider: config.LLM_PROVIDER ?? "", modelsPath: config.piModelsPath ?? "", authDir: config.piConfigDir }))
+    .update(JSON.stringify({
+      keys: managedKeyInjections(config).map(({ providerId, apiKey }) => [providerId, createHash("sha256").update(apiKey).digest("hex")]),
+      provider: config.LLM_PROVIDER ?? "",
+      modelsPath: config.piModelsPath ?? "",
+      authDir: config.piConfigDir,
+      baseUrlOverride: override ? [override.providerId, override.baseUrl] : null
+    }))
     .digest("hex");
 }
 
@@ -53,6 +97,13 @@ export function piRuntime(config: AppConfig): Promise<ModelRuntime> {
   }).then(async runtime => {
     for (const { providerId, apiKey } of managedKeyInjections(config)) {
       await runtime.setRuntimeApiKey(providerId, apiKey);
+    }
+    const override = resolveBaseUrlOverride(config);
+    if (override) {
+      // Pi's own contract: with only `baseUrl` supplied this retargets every
+      // existing model of that provider, so the review request goes to the
+      // configured endpoint instead of the catalog default.
+      runtime.registerProvider(override.providerId, { baseUrl: override.baseUrl });
     }
     return runtime;
   });

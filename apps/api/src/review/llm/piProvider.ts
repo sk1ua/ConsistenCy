@@ -25,6 +25,12 @@ export interface PiRuntimeOptions {
   providerId?: string;
   model?: string;
   temperature?: number;
+  /**
+   * Endpoint override for this provider's models: a proxy, a self-hosted
+   * gateway, or any OpenAI-compatible base URL. Applied through Pi's own
+   * provider registration, and never hardcoded here.
+   */
+  baseUrl?: string;
   refreshOnStart?: boolean;
 }
 
@@ -174,14 +180,22 @@ export class PiRuntimeProvider extends BaseLLMProvider {
   }
 
   static fromOptions(options: PiRuntimeOptions = {}): PiRuntimeProvider {
+    const runtimePromise = ModelRuntime.create({
+      authPath: options.authPath,
+      modelsPath: options.modelsPath,
+      modelsStorePath: options.modelsStorePath,
+      refreshOnCreate: options.refreshOnStart === true,
+      allowModelNetwork: false
+    }).then(runtime => {
+      // With only `baseUrl` supplied, Pi retargets every existing model of the
+      // provider: the configured endpoint replaces the catalog default.
+      if (options.baseUrl && options.providerId) {
+        runtime.registerProvider(options.providerId, { baseUrl: options.baseUrl });
+      }
+      return runtime;
+    });
     return new PiRuntimeProvider(
-      ModelRuntime.create({
-        authPath: options.authPath,
-        modelsPath: options.modelsPath,
-        modelsStorePath: options.modelsStorePath,
-        refreshOnCreate: options.refreshOnStart === true,
-        allowModelNetwork: false
-      }),
+      runtimePromise,
       options.providerId,
       options.model,
       options.temperature
