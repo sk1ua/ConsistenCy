@@ -319,7 +319,11 @@ export async function buildLocalContext(
         baseFileContents[file.previousPath] = stdout;
       }
       budget.used += outputSize;
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/git output exceeded \d+ bytes/.test(message)) {
+        skippedBaselinePaths.push(file.path);
+      }
       // A path absent at the base revision simply has no baseline.
     }
   }

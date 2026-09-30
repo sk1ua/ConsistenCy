@@ -56,6 +56,12 @@ describe("buildLocalContext", { timeout: 30_000 }, () => {
     expect(context.baseFileContents["gone.ts"]).toBe("export const gone = 1;\n");
   });
 
+  it("marks oversized baselines skipped instead of missing", async () => {
+    const { context } = await buildLocalContext({ jobId: "job_local_oversized", repoPath: root }, { maxFileBytes: 8 });
+    expect(context.baseFileContents["keep.ts"]).toBeUndefined();
+    expect(context.skippedBaselinePaths).toContain("keep.ts");
+  });
+
   it("loads current content and baseline for a modified file", async () => {
     const { context } = await buildLocalContext({ jobId: "job_local_3", repoPath: root });
     const modified = context.changedFiles.find((file) => file.path === "keep.ts");

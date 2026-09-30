@@ -153,9 +153,13 @@ export async function buildPRContext(
   });
 
   const baseFileContents: Record<string, string> = {};
+  const skippedBaselinePaths: string[] = [];
   for (const file of changedFiles) {
     if (file.status === "added") continue;
-    if (isSecretPath(file.path)) continue;
+    if (isSecretPath(file.path)) {
+      skippedBaselinePaths.push(file.path);
+      continue;
+    }
 
     try {
       let stdout: Buffer;
@@ -172,18 +176,28 @@ export async function buildPRContext(
       }
 
       const rawSize = stdout.length;
-      if (rawSize > maxBuffer) continue;
-      if (stdout.includes(0)) continue;
+      if (rawSize > maxBuffer || stdout.includes(0)) {
+        skippedBaselinePaths.push(file.path);
+        continue;
+      }
 
       const content = stdout.toString("utf8");
       const outputSize = Buffer.byteLength(content, "utf8");
 
-      if (budget.used + outputSize > budget.limit) continue;
+      if (budget.used + outputSize > budget.limit) {
+        skippedBaselinePaths.push(file.path);
+        continue;
+      }
 
       baseFileContents[file.path] = content;
       budget.used += outputSize;
-    } catch {
-      // Ignore errors if git show fails
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+      if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || /maxBuffer|output exceeded/i.test(message)) {
+        skippedBaselinePaths.push(file.path);
+      }
+      // A missing path in the base revision has no baseline, not a skipped one.
     }
   }
 
@@ -197,6 +211,7 @@ export async function buildPRContext(
     diff,
     fileContents,
     baseFileContents,
+    ...(skippedBaselinePaths.length > 0 ? { skippedBaselinePaths } : {}),
     projectMetadata,
     workspacePath
   });

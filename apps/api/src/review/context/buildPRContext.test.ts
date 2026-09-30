@@ -14,6 +14,24 @@ afterEach(() => {
 });
 
 describe("buildPRContext", () => {
+  it("marks a baseline skipped when git exceeds its output buffer", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "consistency-context-overflow-"));
+    directories.push(workspace);
+    const context = await buildPRContext({
+      jobId: "job_overflow", repositoryFullName: "test/repo", pullRequestNumber: 1,
+      accessMode: "public_read", baseSha: "base", headSha: "head"
+    }, {
+      clientFactory: () => ({
+        getPullRequest: async () => ({ baseSha: "base", headSha: "head" }),
+        listChangedFiles: async () => [{ path: "large.ts", status: "modified", additions: 1, deletions: 1, changes: 2 }],
+        getDiff: async () => ""
+      }),
+      cloneWorkspace: async () => workspace,
+      runGitFile: async () => { throw Object.assign(new Error("stdout maxBuffer length exceeded"), { code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" }); }
+    });
+    expect(context.baseFileContents).toEqual({});
+    expect(context.skippedBaselinePaths).toEqual(["large.ts"]);
+  });
   it("builds a bounded context from a GitHub PR and cloned workspace", async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), "consistency-context-"));
     directories.push(workspaceRoot);
