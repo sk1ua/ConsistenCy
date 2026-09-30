@@ -36,6 +36,7 @@ import {
   legacyProviderModelDriver,
   type DeterministicStage,
   type DeterministicFileInput,
+  type ModelDriver,
   type ReviewWorkloadOptions,
   type ReviewWorkloadResult,
 } from "@consistency/workload-review";
@@ -45,10 +46,12 @@ import type {
   PublicationPolicy,
   ReviewAccessMode,
   ReviewReport,
+  TokenUsage,
   WorkflowSpec,
 } from "@consistency/schema";
 import type { ReviewJobStore } from "../jobQueue";
 import type { DeterministicAnalyzer } from "./deterministic";
+import { logger } from "../config/logger";
 import { knowledgeIndexPathFor } from "./knowledgeIndex";
 import type { LLMProvider } from "./llm/types";
 import type { RuntimeRegistry } from "./runtimeRegistry";
@@ -140,12 +143,57 @@ export type ReviewRuntime = {
   run(input: ReviewWorkflowInput & { publicationPolicy: PublicationPolicy }): Promise<ReviewRuntimeResult>;
 };
 
+/**
+ * Per-call cache telemetry. Every model invocation a review run makes —
+ * planner, the six specialists, the synthesizer — passes through this log, so
+ * the cached-token count is observable per call and not only as a run total.
+ *
+ * Pi reports cache reads as a number; when a provider supplies no cache usage
+ * the two cases are indistinguishable, so the recorded value is 0 and
+ * `cacheReadStatus` says the number is missing rather than a real miss.
+ */
+function logModelCall(operation: string, detail: Record<string, string>, usage?: TokenUsage): void {
+  logger.info(
+    {
+      operation,
+      ...detail,
+      inputTokens: usage?.inputTokens ?? null,
+      outputTokens: usage?.outputTokens ?? null,
+      cachedTokens: usage?.cachedTokens ?? 0,
+      cacheReadStatus: usage?.cacheReadStatus ?? "unavailable_or_zero"
+    },
+    "llm.invoke"
+  );
+}
+
+/** Wraps the trusted backend with the per-call cache-usage log line. */
+function withModelCallLogging(driver: ModelDriver): ModelDriver {
+  return {
+    ...driver,
+    invokeStructured: async (request) => {
+      const result = await driver.invokeStructured(request);
+      logModelCall("structured", { schemaName: request.schemaName }, result.tokenUsage);
+      return result;
+    },
+    invokeAgentFindings: async (request) => {
+      const result = await driver.invokeAgentFindings(request);
+      logModelCall("findings", { agent: request.agent }, result.tokenUsage);
+      return result;
+    },
+    invokeSummary: async (request) => {
+      const result = await driver.invokeSummary(request);
+      logModelCall("summary", { schemaName: "review-summary" }, result.tokenUsage);
+      return result;
+    }
+  };
+}
+
 export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): ReviewRuntime {
   const workspaceRoot = dependencies.workspaceRoot ?? ".consistency/workspaces";
   if (!dependencies.provider) {
     throw new Error("LLM provider is not configured. Configure DeepSeek, OpenAI, or Pi in settings before running reviews.");
   }
-  const modelDriver = legacyProviderModelDriver(dependencies.provider);
+  const modelDriver = withModelCallLogging(legacyProviderModelDriver(dependencies.provider));
 
   return {
     async run(input) {
