@@ -85,57 +85,44 @@ export abstract class BaseLLMProvider implements LLMProvider {
 
     let previousContent = "";
     let lastError: unknown;
+    let accumulatedUsage: TokenUsage | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       // A cancelled run must not spend its repair attempt on a doomed call:
       // abort checks happen before dispatch and after every failure.
       if (request.signal?.aborted) {
         throw request.signal.reason ?? new Error("LLM request was cancelled before dispatch");
       }
+      let attemptUsage: TokenUsage | undefined;
+      let attemptError: unknown;
       try {
         const repairPrompt = attempt === 0
           ? undefined
           : `${request.userPrompt}\n\nThe previous JSON failed schema validation. Produce a corrected JSON object only. Previous output:\n${previousContent.slice(0, 12_000)}`;
         const completion = await completeCall(repairPrompt);
-        if (attempt > 0) {
-          const input = completion.tokenUsage?.inputTokens ?? null;
-          const cached = completion.tokenUsage?.cachedTokens ?? 0;
-          const promptTokens = completion.tokenUsage?.promptTokens ?? (input !== null ? input + cached : null);
-          logger.info(
-            {
-              operation: "structured_retry",
-              schemaName: request.schemaName,
-              attempt: attempt + 1,
-              inputTokens: input,
-              outputTokens: completion.tokenUsage?.outputTokens ?? null,
-              cachedTokens: cached,
-              promptTokens,
-              cacheReadStatus: completion.tokenUsage?.cacheReadStatus ?? "unavailable_or_zero"
-            },
-            "llm.invoke"
-          );
-        }
+        attemptUsage = parseTokenUsage(completion.tokenUsage);
+        if (attemptUsage) accumulatedUsage = sumTokenUsage(accumulatedUsage, attemptUsage);
         if (request.signal?.aborted) {
           throw request.signal.reason ?? new Error("LLM request was cancelled during dispatch");
         }
         previousContent = completion.content;
         return {
           data: request.schema.parse(extractJson(completion.content)),
-          tokenUsage: completion.tokenUsage
+          tokenUsage: accumulatedUsage
         };
       } catch (error) {
-        if (attempt === 0) {
-          logger.info(
-            {
-              operation: "structured_attempt_failed",
-              schemaName: request.schemaName,
-              attempt: 1,
-              error: error instanceof Error ? error.message : String(error)
-            },
-            "llm.invoke"
-          );
-        }
+        attemptError = error;
         lastError = error;
         if (request.signal?.aborted) break;
+      } finally {
+        logger.info({
+          operation: "structured", schemaName: request.schemaName, attempt: attempt + 1,
+          status: attemptError === undefined ? "completed" : "failed",
+          inputTokens: attemptUsage?.inputTokens ?? null,
+          outputTokens: attemptUsage?.outputTokens ?? null,
+          cachedTokens: attemptUsage?.cachedTokens ?? 0,
+          promptTokens: attemptUsage?.inputTokens !== undefined ? attemptUsage.inputTokens + (attemptUsage.cachedTokens ?? 0) : null,
+          cacheReadStatus: attemptUsage?.cacheReadStatus ?? "unavailable_or_zero"
+        }, "llm.invoke");
       }
     }
     const detail = lastError instanceof Error ? lastError.message : String(lastError);
@@ -186,8 +173,17 @@ export abstract class BaseLLMProvider implements LLMProvider {
   }
 }
 
+function sumTokenUsage(left: TokenUsage | undefined, right: TokenUsage): TokenUsage {
+  const result: TokenUsage = {};
+  for (const key of ["inputTokens", "outputTokens", "totalTokens", "cachedTokens", "promptTokens"] as const) {
+    if (left?.[key] !== undefined || right[key] !== undefined) result[key] = (left?.[key] ?? 0) + (right[key] ?? 0);
+  }
+  result.cacheReadStatus = left?.cacheReadStatus === "reported" || right.cacheReadStatus === "reported" ? "reported" : "unavailable_or_zero";
+  return result;
+}
+
 export function parseTokenUsage(input: unknown): TokenUsage | undefined {
   const parsed = tokenUsageSchema.safeParse(input);
-  if (!parsed.success) return undefined;
-  return Object.values(parsed.data).some(value => value !== undefined) ? parsed.data : undefined;
+  if (!parsed.success || !Object.values(parsed.data).some(value => value !== undefined)) return undefined;
+  return parsed.data;
 }

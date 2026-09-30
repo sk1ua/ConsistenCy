@@ -170,11 +170,11 @@ function logModelCall(operation: string, detail: Record<string, string>, usage?:
       promptTokens,
       cacheReadStatus: usage?.cacheReadStatus ?? "unavailable_or_zero"
     },
-    "llm.invoke"
+    "llm.result"
   );
 }
 
-/** Wraps the trusted backend with the per-call cache-usage log line. */
+/** Records aggregate call results; transport attempts emit llm.invoke in the provider. */
 function withModelCallLogging(driver: ModelDriver): ModelDriver {
   return {
     ...driver,
