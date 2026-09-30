@@ -142,6 +142,11 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         ...recommendations.map(item => `Recommendation: ${item}`)
       ].filter(Boolean).join(" ").trim();
 
+      const appendixCandidates = deduplicateAndSortFindings((options.preExistingIssues ?? []).filter(f => {
+        const text = `${f.title} ${f.evidence} ${f.recommendation}`;
+        return !/no (?:changes?|action) needed/i.test(text);
+      }), true).findings;
+
       let summary: string | undefined;
       let tokenUsage: TokenUsage | undefined;
       let error: string | undefined;
@@ -166,7 +171,8 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
               canonicalRiskLevel: riskLevel,
               canonicalSummary,
               recommendations,
-              findings: dedupedFindings
+              findings: dedupedFindings,
+              preExistingIssues: appendixCandidates
             }))
           });
         } finally {
@@ -194,33 +200,22 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         maxPerFile: options.maxFindingsPerFile
       });
 
-      const totalFiltered = filteredCount + (options.totalCappedBySpecialists ?? 0);
+      const appendixFilter = applyFindingScoreFilter(appendixCandidates, scores, {
+        minScore: options.minFindingScore,
+        maxReported: options.maxReportedFindings,
+        maxPerFile: options.maxFindingsPerFile
+      });
+      const totalFiltered = filteredCount + appendixFilter.filteredCount + (options.totalCappedBySpecialists ?? 0);
       const filteredBreakdown = {
         capPerSpecialist: options.totalCappedBySpecialists ?? 0,
-        lowScore: breakdown?.lowScore ?? 0,
-        capPerFile: breakdown?.capPerFile ?? 0,
-        capTotal: breakdown?.capTotal ?? 0
+        lowScore: (breakdown?.lowScore ?? 0) + (appendixFilter.breakdown?.lowScore ?? 0),
+        capPerFile: (breakdown?.capPerFile ?? 0) + (appendixFilter.breakdown?.capPerFile ?? 0),
+        capTotal: (breakdown?.capTotal ?? 0) + (appendixFilter.breakdown?.capTotal ?? 0)
       };
 
-      // Filter and deduplicate preExistingIssues:
-      // Drop "No change needed" / informational noise, deduplicate, and score-filter
-      let preExistingIssues = options.preExistingIssues ?? [];
-      preExistingIssues = preExistingIssues.filter(f => {
-        const text = `${f.title} ${f.evidence} ${f.recommendation}`.toLowerCase();
-        if (text.includes("no change needed") || text.includes("no changes needed") || text.includes("no action needed")) {
-          return false;
-        }
-        return true;
-      });
-      if (preExistingIssues.length > 0) {
-        const dedupedPre = deduplicateAndSortFindings(preExistingIssues, true).findings;
-        const scoredPre = applyFindingScoreFilter(dedupedPre, scores, {
-          minScore: options.minFindingScore,
-          maxReported: options.maxReportedFindings,
-          maxPerFile: options.maxFindingsPerFile
-        }).findings;
-        preExistingIssues = scoredPre;
-      }
+      // Appendix candidates share the same scoring call, but their caps do
+      // not consume slots in the actionable list.
+      const preExistingIssues = appendixFilter.findings;
 
       // Final coverage (audit P1-05): degraded coverage must be visible in
       // the durable report, never masked by a success-shaped summary.

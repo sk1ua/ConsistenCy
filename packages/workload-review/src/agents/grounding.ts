@@ -208,34 +208,18 @@ export function groundReviewFindings(
     }
 
     const { startLine, endLine } = finding;
-    const isNearby = startLine !== undefined && endLine !== undefined && intersects(facts.changedRanges, startLine, endLine, 3);
-
-    // If not within ±3 lines of changed hunks: check whether it's truly pre-existing.
-    // If the PR modified other parts of this file or repository, but the code at these lines existed in base
-    // and was completely unchanged in behavior/content, it is pre-existing.
-    // However, if the text mentions that the change broke or altered this, or if the code at these lines was NOT in base,
-    // it was introduced by this PR.
-    if (!isNearby) {
-      let isUnchangedInBase = true;
-      if (facts.baseContent !== undefined && facts.headContent !== undefined && startLine !== undefined && endLine !== undefined) {
-        const baseLines = facts.baseContent.split("\n");
-        const headLines = facts.headContent.split("\n");
-        const citedHead = headLines.slice(startLine - 1, endLine).join("\n").trim();
-        // Check if the cited code existed in base
-        if (citedHead.length > 0 && !facts.baseContent.includes(citedHead)) {
-          isUnchangedInBase = false;
-        }
-      }
-      // Check if finding description/evidence explicitly says the defect was caused/introduced by this change/PR
-      const text = `${finding.title} ${finding.evidence} ${finding.reasoning}`.toLowerCase();
-      const mentionsIntroducedByChange = text.includes("introduced") || text.includes("caused by") || text.includes("breaks") || text.includes("broken by") || text.includes("due to the new") || text.includes("due to this change");
-
-      if (isUnchangedInBase && !mentionsIntroducedByChange) {
-        decisions.push({
-          finding,
-          outcome: "pre_existing",
-          reason: `Lines of '${finding.file}' existed in base and were not modified by this change`
-        });
+    const baseline = finding.baselineAssessment;
+    // Source identity alone cannot establish unchanged behavior: a changed
+    // caller, configuration, or guard can expose a defect on an untouched line.
+    // Require both an explicit behavioral assessment and exact baseline code.
+    if (baseline?.behaviorUnchanged && facts.baseContent !== undefined && facts.headContent !== undefined && startLine !== undefined && endLine !== undefined) {
+      const baseLines = facts.baseContent.split(/\r?\n/);
+      const headLines = facts.headContent.split(/\r?\n/);
+      const validRange = baseline.baseStartLine <= baseline.baseEndLine && baseline.baseEndLine <= baseLines.length && endLine <= headLines.length && startLine <= endLine;
+      const baseCode = baseLines.slice(baseline.baseStartLine - 1, baseline.baseEndLine).join("\n");
+      const headCode = headLines.slice(startLine - 1, endLine).join("\n");
+      if (validRange && headCode.trim().length > 0 && baseCode === headCode && !intersects(facts.changedRanges, startLine, endLine)) {
+        decisions.push({ finding, outcome: "pre_existing", reason: baseline.reason });
         continue;
       }
     }

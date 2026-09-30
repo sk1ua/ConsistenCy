@@ -53,6 +53,13 @@ const findingBase = z.object({
    * findings whose trigger is already spelled out in `evidence` stay valid.
    */
   trigger: nonEmpty.optional(),
+  /** Baseline proof for appendix classification; absent/uncertain remains actionable. */
+  baselineAssessment: z.object({
+    baseStartLine: positiveLine,
+    baseEndLine: positiveLine,
+    behaviorUnchanged: z.boolean(),
+    reason: nonEmpty
+  }).strict().optional(),
   /**
    * Specialists that reported the same location in different words and were
    * merged into this finding by deterministic line-range clustering. OPTIONAL

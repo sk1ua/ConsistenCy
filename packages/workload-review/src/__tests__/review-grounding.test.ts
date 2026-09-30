@@ -29,14 +29,16 @@ import {
 
 afterEach(cleanupTmpDirs);
 
-it("tracks added lines exactly and moves all off-diff confidence levels to the appendix", () => {
+it("tracks added lines exactly and moves proven unchanged baseline defects to the appendix", () => {
   expect(changedLineRanges("@@ -8,4 +8,5 @@\n context\n-old\n+new\n context\n+another\n context")).toEqual([
     { start: 9, end: 9 }, { start: 11, end: 11 }
   ]);
   const grounding: GroundingContext = { files: new Map([["src/index.ts", {
-    changedRanges: [{ start: 10, end: 10 }], lineCount: 30, hasDeterministicSignal: true
+    changedRanges: [{ start: 10, end: 10 }], lineCount: 30, hasDeterministicSignal: true,
+    baseContent: Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`).join("\n"),
+    headContent: Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`).join("\n")
   }]]) };
-  const base = { ...securityFinding(), startLine: 14, endLine: 14 };
+  const base = { ...securityFinding(), startLine: 14, endLine: 14, baselineAssessment: { baseStartLine: 14, baseEndLine: 14, behaviorUnchanged: true, reason: "The defective initializer and all its callers and inputs are unchanged" } };
   const findings: ReviewFinding[] = [
     { ...base, id: "confirmed", confidence: "confirmed" },
     { ...base, id: "likely", confidence: "likely" },
@@ -45,6 +47,32 @@ it("tracks added lines exactly and moves all off-diff confidence levels to the a
   const result = groundReviewFindings(findings, grounding, new EvidenceStore(), "a".repeat(40));
   expect(result.findings).toHaveLength(0);
   expect(result.preExisting).toHaveLength(3);
+});
+
+it("keeps off-diff findings actionable when baseline or unchanged-behavior proof is missing", () => {
+  const content = Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`).join("\n");
+  const finding = { ...securityFinding(), startLine: 14, endLine: 14, confidence: "likely" as const };
+  for (const facts of [
+    { changedRanges: [{ start: 10, end: 10 }], hasDeterministicSignal: true },
+    { changedRanges: [{ start: 10, end: 10 }], hasDeterministicSignal: true, baseContent: content, headContent: content }
+  ]) {
+    const result = groundReviewFindings([finding], { files: new Map([[finding.file, facts]]) }, new EvidenceStore(), "a".repeat(40));
+    expect(result.findings).toHaveLength(1);
+    expect(result.preExisting).toHaveLength(0);
+  }
+});
+
+it("retains indirect regressions and rejects incorrect baseline line references", () => {
+  const content = Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`).join("\n");
+  const grounding: GroundingContext = { files: new Map([["src/index.ts", { changedRanges: [{ start: 10, end: 10 }], hasDeterministicSignal: true, baseContent: content, headContent: content }]]) };
+  for (const assessment of [
+    { baseStartLine: 14, baseEndLine: 14, behaviorUnchanged: false, reason: "Changed caller exposes the unchanged sink" },
+    { baseStartLine: 15, baseEndLine: 15, behaviorUnchanged: true, reason: "Claimed unchanged code" }
+  ]) {
+    const result = groundReviewFindings([{ ...securityFinding(), startLine: 14, endLine: 14, confidence: "likely", baselineAssessment: assessment }], grounding, new EvidenceStore(), "a".repeat(40));
+    expect(result.findings).toHaveLength(1);
+    expect(result.preExisting).toHaveLength(0);
+  }
 });
 
 function rigWithDriver(driver: ModelDriver, hook?: ReviewWorkloadOptions["onAgentAdmitted"], maxFindingsPerSpecialist?: number) {
