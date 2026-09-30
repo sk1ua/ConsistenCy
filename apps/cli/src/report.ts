@@ -237,6 +237,12 @@ function renderFinding(
     ? `${finding.file}:${finding.startLine}-${finding.endLine}`
     : finding.file;
   const facts = [CONFIDENCE_LABEL[finding.confidence], finding.agent];
+  if (finding.score !== undefined) {
+    facts.push(`评分 ${finding.score}/10`);
+  }
+  if (finding.alsoReportedBy && finding.alsoReportedBy.length > 0) {
+    facts.push(`同报: ${finding.alsoReportedBy.join(", ")}`);
+  }
   if (finding.evidenceIds && finding.evidenceIds.length > 0) {
     facts.push(`${finding.evidenceIds.length} 条证据`);
   }
@@ -249,6 +255,9 @@ function renderFinding(
   const lines: string[] = [];
   lines.push(`${token} ${finding.title}`);
   lines.push(palette.dim(`    └ ${location} · ${facts.join(" · ")}`));
+  if (finding.trigger) {
+    lines.push(palette.dim(`      触发场景: ${oneLine(finding.trigger)}`));
+  }
   if (verbose) {
     lines.push("");
     lines.push(indent(palette.dim("证据  ") + oneLine(finding.evidence), "    "));

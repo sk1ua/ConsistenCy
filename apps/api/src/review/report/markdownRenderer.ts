@@ -8,14 +8,29 @@ function location(finding: ReviewFinding): string {
 }
 
 function findingMarkdown(finding: ReviewFinding): string {
-  return [
+  const meta: string[] = [
+    finding.severity.toUpperCase(),
+    finding.confidence,
+    `\`${location(finding)}\``
+  ];
+  if (finding.score !== undefined) {
+    meta.push(`Score: ${finding.score}/10`);
+  }
+  if (finding.alsoReportedBy && finding.alsoReportedBy.length > 0) {
+    meta.push(`Also: ${finding.alsoReportedBy.join(", ")}`);
+  }
+
+  const lines = [
     `### [${finding.severity.toUpperCase()}] ${finding.title}`,
-    `**${finding.severity.toUpperCase()} · ${finding.confidence} · \`${location(finding)}\`**`,
+    `**${meta.join(" · ")}**`,
     "",
     `**Evidence:** ${finding.evidence}`,
-    "",
-    `**Recommendation:** ${finding.recommendation}`
-  ].join("\n");
+  ];
+  if (finding.trigger) {
+    lines.push("", `**Trigger scenario:** ${finding.trigger}`);
+  }
+  lines.push("", `**Recommendation:** ${finding.recommendation}`);
+  return lines.join("\n");
 }
 
 export function renderReviewComment(report: ReviewReport, options: {

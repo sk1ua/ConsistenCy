@@ -83,6 +83,12 @@ const DEGRADED_COVERAGE: ReviewCoverage = {
 };
 
 describe("renderReport — the promise this module exists to keep", () => {
+  it("shows score, trigger, and corroborating specialists in default text output", () => {
+    const output = renderReport(report({ findings: [finding({ score: 8, trigger: "An expired token is submitted", alsoReportedBy: ["Correctness", "Test"] })] }), OPTIONS);
+    expect(output).toContain("评分 8/10");
+    expect(output).toContain("An expired token is submitted");
+    expect(output).toContain("同报: Correctness, Test");
+  });
   it("renders a complete clean run as an unqualified success", () => {
     const output = renderReport(report({ coverage: { ...COMPLETE_COVERAGE } }), OPTIONS);
     expect(output).toContain("✓");

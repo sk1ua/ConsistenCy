@@ -32,6 +32,13 @@ const fixtureReport: ReviewReport = {
 };
 
 describe("renderReviewComment", () => {
+  it("shows score, trigger, and corroborating specialists", () => {
+    const report: ReviewReport = { ...fixtureReport, findings: [{ ...fixtureReport.findings[0]!, score: 9, trigger: "An expired token is submitted", alsoReportedBy: ["Correctness", "Test"] }] };
+    const markdown = renderReviewComment(report, { providerName: "mock" });
+    expect(markdown).toContain("Score: 9/10");
+    expect(markdown).toContain("Trigger scenario:** An expired token is submitted");
+    expect(markdown).toContain("Also: Correctness, Test");
+  });
   it("renders a bounded GitHub review comment with a full report link", () => {
     const markdown = renderReviewComment(fixtureReport, {
       providerName: "deepseek",
