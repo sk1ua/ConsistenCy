@@ -123,7 +123,8 @@ function evidencePackFromRun(run: WorkflowRun): RetrievalTrace | undefined {
  */
 export function workflowRunToAnalyzeResult(
   requestId: string,
-  run: WorkflowRun
+  run: WorkflowRun,
+  baselineFiles?: readonly { path: string; baseline?: string; baselineSkipped?: boolean }[]
 ): DomainAnalyzeSuccess {
   const byFile = new Map<string, { findings: string[]; score: number; steps: Set<string> }>();
 
@@ -140,16 +141,27 @@ export function workflowRunToAnalyzeResult(
     }
   }
 
+  // Empty evidence does not establish a baseline. Keep additions and omitted
+  // baselines visible even when no workflow step emitted a finding for them.
+  const baselineWarnings = new Map<string, string>();
+  for (const file of baselineFiles ?? []) {
+    if (file.baseline !== undefined && !file.baselineSkipped) continue;
+    baselineWarnings.set(file.path, file.baselineSkipped ? "No Baseline / skipped" : "No Baseline");
+    if (!byFile.has(file.path)) byFile.set(file.path, { findings: [], score: 0, steps: new Set<string>() });
+  }
+
   const files: DomainFileResult[] = [...byFile.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([path, entry]) => ({
       path,
       riskScore: Number(entry.score.toFixed(4)),
-      riskLabel: riskLabelFor(entry.score),
+      riskLabel: baselineWarnings.has(path)
+        ? [entry.findings.length > 0 ? riskLabelFor(entry.score) : "", baselineWarnings.get(path)].filter(Boolean).join(" / ")
+        : riskLabelFor(entry.score),
       riskColor: riskColourFor(entry.score),
       signals: { steps: [...entry.steps].sort() },
       findings: entry.findings,
-      confidence: 1
+      confidence: baselineWarnings.has(path) && entry.findings.length === 0 ? 0 : 1
     }));
 
   return {

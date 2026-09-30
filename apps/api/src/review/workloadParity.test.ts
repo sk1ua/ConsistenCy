@@ -202,6 +202,25 @@ function enqueueJob(store: InMemoryJobQueue, accessMode: "github_app" | "public_
 }
 
 describe("Authoritative workload-review execution and publication safety", () => {
+  it.each(["added", "modified"] as const)("default workflow discloses No Baseline for a %s file with no base content", async status => {
+    const fixture = makeFixture("job-no-baseline");
+    const store = new InMemoryJobQueue();
+    const job = enqueueJob(store, "local_git", fixture);
+    store.markRunning(job.id);
+    const deps = buildDeps(store, createMockAnalyzer(), fixture);
+    await createReviewRuntime({
+      ...deps,
+      contextBuilder: async input => ({
+        ...fixture.context, jobId: input.jobId, baseFileContents: {},
+        changedFiles: fixture.context.changedFiles.map(file => ({ ...file, status })),
+      }),
+    }).run({
+      jobId: job.id, repositoryFullName: "test/example", pullRequestNumber: 34,
+      installationId: 123, accessMode: "local_git", baseSha: fixture.baseSha,
+      headSha: fixture.headSha, publicationPolicy: "disabled",
+    });
+    expect(store.get(job.id)!.result!.staticRiskLabel).toBe("No Baseline");
+  });
   it("workload-review runtime produces deterministic review report and agent telemetry", async () => {
     const fixture = makeFixture("job-review-runtime");
     const store = new InMemoryJobQueue();

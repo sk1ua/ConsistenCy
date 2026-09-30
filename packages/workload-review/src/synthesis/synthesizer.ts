@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { staticRiskLabelForFiles } from "@consistency/schema";
 import {
   KernelScheduler,
   type AgentId,
@@ -269,13 +270,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const agentRunsForReport = [...options.agentRuns, run];
       persistence.saveAgentRun(run);
 
-      const fileLabels = options.deterministicResult.files?.map(f => f.riskLabel) ?? [];
-      const hasSkipped = fileLabels.includes("skipped");
-      const hasNoBaseline = fileLabels.includes("No Baseline");
-      const baselineLabels = [hasSkipped ? "skipped" : undefined, hasNoBaseline ? "No Baseline" : undefined].filter(Boolean);
-      const staticRiskLabel = baselineLabels.length > 0
-        ? baselineLabels.join(" / ")
-        : (options.deterministicResult.files?.[0]?.riskLabel ?? undefined);
+      const staticRiskLabel = staticRiskLabelForFiles(options.deterministicResult.files);
 
       const report = buildReviewReport({
         jobId,

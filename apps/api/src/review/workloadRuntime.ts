@@ -95,6 +95,7 @@ async function runWorkflowStage(
   workflow: string,
   files: DeterministicFileInput[],
   resolveSpec?: (name: string) => WorkflowSpec | undefined,
+  skippedBaselinePaths: readonly string[] = [],
 ): Promise<DomainAnalyzeResponse> {
   const spec = resolveSpec?.(workflow);
   const response = spec
@@ -105,7 +106,11 @@ async function runWorkflowStage(
   // yield an analyze success carrying the succeeded steps' evidence. Only a
   // protocol/engine failure (ok:false) aborts the review job. Partial step
   // failure is recorded on consensus so coverage can mark deterministicFailed.
-  return workflowRunToAnalyzeResult(response.id, response.run);
+  return workflowRunToAnalyzeResult(response.id, response.run, files.map(file => ({
+    path: file.path,
+    baseline: file.baseline,
+    baselineSkipped: skippedBaselinePaths.includes(file.path),
+  })));
 }
 
 /**
@@ -228,6 +233,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
                 dependencies.reviewWorkflow ?? DEFAULT_REVIEW_WORKFLOW,
                 files,
                 dependencies.reviewWorkflowSpec,
+                context.skippedBaselinePaths,
               ),
         composeReview: (files) => dependencies.deterministicAnalyzer.composeReview(files),
         relevantContext: async (files, targets, indexPath) =>

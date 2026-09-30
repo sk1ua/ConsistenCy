@@ -16,7 +16,7 @@
  * apart instead of inventing a combined number.
  */
 
-import type { ReviewReport, Severity } from "@consistency/schema";
+import { staticRiskDisplayLabel, type ReviewReport, type Severity } from "@consistency/schema";
 import { indent, oneLine, plural, type Palette } from "./terminal";
 
 export type ConstraintCode =
@@ -97,8 +97,9 @@ export function riskBandLabel(band: string | undefined): string {
 }
 
 export function riskLevelLabel(level: string, staticLabel?: string): string {
-  const noBaseline = staticLabel?.includes("No Baseline") || level === "no_baseline";
-  const skipped = staticLabel?.includes("skipped") || level === "skipped";
+  if (staticLabel) return staticRiskDisplayLabel(level, staticLabel);
+  const noBaseline = level === "no_baseline";
+  const skipped = level === "skipped";
   if (noBaseline && skipped) return "无基线 (No Baseline) / 已跳过基线比对 (Skipped)";
   if (noBaseline) return "无基线 (No Baseline)";
   if (skipped) return "已跳过基线比对 (Skipped)";

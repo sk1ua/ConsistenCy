@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { agentRunSchema, reviewAgentNameSchema, reviewFindingSchema, type Severity } from "./review";
+import type { DomainFileResult } from "./protocol";
 
 export const riskLevelSchema = z.enum(["critical", "high", "medium", "low"]);
 
@@ -222,6 +223,25 @@ export function riskBandForFindings(findings: Array<{ severity: Severity }>): "h
   if (findings.some(finding => finding.severity === "medium")) return "medium";
   if (findings.length > 0) return "low";
   return "none";
+}
+
+/** Select the peak file risk without losing any baseline-coverage warnings. */
+export function staticRiskLabelForFiles(files: readonly DomainFileResult[]): string | undefined {
+  const highest = [...files].sort((left, right) => right.riskScore - left.riskScore || left.path.localeCompare(right.path))[0];
+  if (!highest) return undefined;
+  const labels = [highest.riskLabel];
+  if (files.some(file => file.riskLabel.includes("No Baseline")) && !highest.riskLabel.includes("No Baseline")) {
+    labels.push("No Baseline");
+  }
+  if (files.some(file => /\bskipped\b/i.test(file.riskLabel)) && !/\bskipped\b/i.test(highest.riskLabel)) {
+    labels.push("skipped");
+  }
+  return labels.filter(Boolean).join(" / ") || undefined;
+}
+
+/** Both terminal and Markdown render the same static label, not a different band. */
+export function staticRiskDisplayLabel(level: string, staticLabel?: string): string {
+  return staticLabel ? staticLabel.replace(/\bskipped\b/gi, "Skipped") : level.toUpperCase();
 }
 
 export type RiskLevel = z.infer<typeof riskLevelSchema>;
