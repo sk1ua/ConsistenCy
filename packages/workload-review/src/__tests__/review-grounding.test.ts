@@ -74,8 +74,14 @@ describe("ReviewWorkload — evidence grounding", () => {
     const driver = new TestModelDriver({ findingsByAgent: { Security: findings } });
     const { workload } = rigWithDriver(driver, undefined, 2);
     const result = await workload.run();
-    expect(result.report.findings).toHaveLength(2);
-    expect(result.report.findings.map(finding => finding.severity).sort()).toEqual(["high", "medium"]);
+    // The cap runs after grounding and before synthesis, so it is asserted on
+    // the aggregated specialist findings. These four fixtures deliberately
+    // share one location, and step 3 then groups whichever two survive into a
+    // single reported issue — the report can therefore never hold more than
+    // the capped count.
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.map(finding => finding.severity).sort()).toEqual(["high", "medium"]);
+    expect(result.report.findings.length).toBeLessThanOrEqual(2);
   });
 
   it("AC-REV-9: actionable findings reference valid evidenceIds (§41 grounding trace)", async () => {

@@ -163,4 +163,72 @@ describe("reportBuilder", () => {
     expect(report.riskLevel).toBe("high");
     expect(report.findings).toEqual([confirmedHigh]);
   });
+
+  it("step 3: four specialists describing one hunk in different words collapse to a single finding", () => {
+    const specialist = (
+      agent: ReviewFinding["agent"],
+      id: string,
+      title: string,
+      severity: ReviewFinding["severity"],
+      confidence: ReviewFinding["confidence"],
+      startLine: number,
+      endLine: number
+    ): ReviewFinding => {
+      const common = {
+        id,
+        agent,
+        title,
+        severity,
+        file: "mycli/commands/run.py",
+        startLine,
+        endLine,
+        evidence: `${agent} evidence for lines ${startLine}-${endLine}.`,
+        reasoning: `${agent} reasoning about the changed hunk.`,
+        recommendation: `${agent} recommendation.`
+      };
+      if (confidence === "confirmed") return { ...common, confidence };
+      if (confidence === "likely") return { ...common, confidence };
+      return { ...common, confidence, uncertainty: "The call site was not supplied." };
+    };
+
+    // The mycli shape: one six-line change, four specialists, four wordings,
+    // and one Test finding that merely restates somebody else's problem.
+    const merged = deduplicateAndSortFindings([
+      specialist("Security", "f-security", "Shell injection in the new flag handler", "high", "confirmed", 120, 124),
+      specialist("Correctness", "f-correctness", "Unquoted argument reaches subprocess", "medium", "likely", 126, 128),
+      specialist("Maintainability", "f-maintainability", "The new helper mixes parsing with execution", "low", "likely", 122, 122),
+      specialist("Test", "f-test", "The new branch has no coverage", "medium", "hypothesis", 127, 127)
+    ]);
+
+    expect(merged.findings).toHaveLength(1);
+    expect(merged.findings[0]!.id).toBe("f-security");
+    expect(merged.findings[0]!.alsoReportedBy).toEqual(["Correctness", "Maintainability", "Test"]);
+    expect(merged.duplicates.map(finding => finding.id).sort())
+      .toEqual(["f-correctness", "f-maintainability", "f-test"]);
+  });
+
+  it("step 3: only line ranges within three lines of each other, on the same file, are grouped", () => {
+    const base: ReviewFinding = { ...confirmedHigh, id: "f-a", title: "First defect", startLine: 10, endLine: 12 };
+    const exactlyThree: ReviewFinding = {
+      ...base, id: "f-within", agent: "Test", title: "Defect three lines past the hunk", startLine: 15, endLine: 15
+    };
+    const fourLinesAway: ReviewFinding = {
+      ...base, id: "f-beyond", agent: "Correctness", title: "Defect four lines past the hunk", startLine: 16, endLine: 16
+    };
+    const otherFile: ReviewFinding = {
+      ...base, id: "f-other", agent: "Style", title: "Defect on another file", file: "mycli/other.py"
+    };
+
+    // The boundary is inclusive: a range exactly three lines past the hunk merges.
+    const boundary = deduplicateAndSortFindings([base, exactlyThree]);
+    expect(boundary.findings.map(finding => finding.id)).toEqual(["f-a"]);
+    expect(boundary.findings[0]!.alsoReportedBy).toEqual(["Test"]);
+    expect(boundary.duplicates.map(finding => finding.id)).toEqual(["f-within"]);
+
+    // Four lines away, and another file at the same lines, stay separate.
+    const separate = deduplicateAndSortFindings([base, fourLinesAway, otherFile]);
+    expect(separate.findings.map(finding => finding.id)).toEqual(["f-a", "f-beyond", "f-other"]);
+    expect(separate.findings.every(finding => finding.alsoReportedBy === undefined)).toBe(true);
+    expect(separate.duplicates).toEqual([]);
+  });
 });

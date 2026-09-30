@@ -52,7 +52,14 @@ const findingBase = z.object({
    * "please verify" suggestion. OPTIONAL and additive: legacy findings and
    * findings whose trigger is already spelled out in `evidence` stay valid.
    */
-  trigger: nonEmpty.optional()
+  trigger: nonEmpty.optional(),
+  /**
+   * Specialists that reported the same location in different words and were
+   * merged into this finding by deterministic line-range clustering. OPTIONAL
+   * and additive: a finding that was never merged omits it, and merges that
+   * only repeated the same wording stay disclosed through `duplicates`.
+   */
+  alsoReportedBy: z.array(reviewAgentNameSchema).optional()
 });
 
 const confirmedFindingSchema = findingBase.extend({
