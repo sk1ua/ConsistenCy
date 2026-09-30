@@ -49,9 +49,10 @@ it("tracks added lines exactly and moves proven unchanged baseline defects to th
   expect(result.preExisting).toHaveLength(3);
 });
 
-it("keeps off-diff findings actionable when baseline or unchanged-behavior proof is missing", () => {
+it("keeps off-diff regressions actionable with an explicit causal reason even when baseline code is missing", () => {
   const content = Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`).join("\n");
-  const finding = { ...securityFinding(), startLine: 14, endLine: 14, confidence: "likely" as const };
+  const finding = { ...securityFinding(), startLine: 14, endLine: 14, confidence: "likely" as const,
+    baselineAssessment: { behaviorUnchanged: false as const, reason: "This PR removes the caller's validation guard, exposing the unchanged shell sink to user input" } };
   for (const facts of [
     { changedRanges: [{ start: 10, end: 10 }], hasDeterministicSignal: true },
     { changedRanges: [{ start: 10, end: 10 }], hasDeterministicSignal: true, baseContent: content, headContent: content }
@@ -62,9 +63,9 @@ it("keeps off-diff findings actionable when baseline or unchanged-behavior proof
   }
 });
 
-it("retains indirect regressions and rejects incorrect baseline line references", () => {
+it("retains regressions and rejects incorrect baseline proof within the three-line scope boundary", () => {
   const content = Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`).join("\n");
-  const grounding: GroundingContext = { files: new Map([["src/index.ts", { changedRanges: [{ start: 10, end: 10 }], hasDeterministicSignal: true, baseContent: content, headContent: content }]]) };
+  const grounding: GroundingContext = { files: new Map([["src/index.ts", { changedRanges: [{ start: 11, end: 11 }], hasDeterministicSignal: true, baseContent: content, headContent: content }]]) };
   for (const assessment of [
     { baseStartLine: 14, baseEndLine: 14, behaviorUnchanged: false, reason: "Changed caller exposes the unchanged sink" },
     { baseStartLine: 15, baseEndLine: 15, behaviorUnchanged: true, reason: "Claimed unchanged code" }
@@ -73,6 +74,27 @@ it("retains indirect regressions and rejects incorrect baseline line references"
     expect(result.findings).toHaveLength(1);
     expect(result.preExisting).toHaveLength(0);
   }
+});
+
+it("defaults findings beyond the three-line boundary to the appendix unless changed behavior is explained", () => {
+  const grounding: GroundingContext = { files: new Map([["src/index.ts", {
+    changedRanges: [{ start: 10, end: 10 }], hasDeterministicSignal: true
+  }]]) };
+  const near = { ...securityFinding(), id: "near", startLine: 13, endLine: 13, confidence: "likely" as const };
+  const far = { ...near, id: "far", startLine: 14, endLine: 14 };
+  const explained = { ...far, id: "explained", baselineAssessment: {
+    behaviorUnchanged: false as const, reason: "This PR removes the caller guard, allowing unchecked input into this unchanged sink"
+  } };
+  const result = groundReviewFindings([near, far, explained], grounding, new EvidenceStore(), "a".repeat(40));
+  expect(result.findings.map(finding => finding.id)).toEqual(["near", "explained"]);
+  expect(result.preExisting.map(decision => decision.finding.id)).toEqual(["far"]);
+  expect(result.preExisting[0]!.reason).toContain("not baseline proof");
+});
+
+it("does not invent a distance classification when added-line ranges are unavailable", () => {
+  const finding = { ...securityFinding(), startLine: 14, endLine: 14, confidence: "likely" as const };
+  const grounding: GroundingContext = { files: new Map([[finding.file, { changedRanges: [], hasDeterministicSignal: true }]]) };
+  expect(groundReviewFindings([finding], grounding, new EvidenceStore(), "a".repeat(40)).findings).toHaveLength(1);
 });
 
 function rigWithDriver(driver: ModelDriver, hook?: ReviewWorkloadOptions["onAgentAdmitted"], maxFindingsPerSpecialist?: number) {

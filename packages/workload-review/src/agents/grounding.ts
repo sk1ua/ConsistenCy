@@ -224,6 +224,16 @@ export function groundReviewFindings(
       }
     }
 
+    // A distant allegation is withheld by default, not asserted to be proven
+    // baseline-equivalent. Keep an indirect regression actionable only when the
+    // model explicitly assesses changed behavior and explains the causal link.
+    const explainedRegression = baseline?.behaviorUnchanged === false && baseline.reason.trim().length > 0;
+    if (startLine !== undefined && endLine !== undefined && facts.changedRanges.length > 0
+      && !intersects(facts.changedRanges, startLine, endLine, 3) && !explainedRegression) {
+      decisions.push({ finding, outcome: "pre_existing", reason: "Outside changed lines ±3; no explicit explanation that this PR changes the cited behavior (distance fallback, not baseline proof)" });
+      continue;
+    }
+
     if (finding.confidence !== "confirmed") {
       decisions.push({ finding: attachEvidence(finding, evidenceStore, headSha), outcome: "accepted" });
       continue;

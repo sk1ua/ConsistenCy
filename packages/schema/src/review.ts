@@ -53,13 +53,21 @@ const findingBase = z.object({
    * findings whose trigger is already spelled out in `evidence` stay valid.
    */
   trigger: nonEmpty.optional(),
-  /** Baseline proof for appendix classification; absent/uncertain remains actionable. */
-  baselineAssessment: z.object({
-    baseStartLine: positiveLine,
-    baseEndLine: positiveLine,
-    behaviorUnchanged: z.boolean(),
-    reason: nonEmpty
-  }).strict().optional(),
+  /** Exact baseline proof, or an explicit causal explanation of an indirect regression. */
+  baselineAssessment: z.discriminatedUnion("behaviorUnchanged", [
+    z.object({
+      baseStartLine: positiveLine,
+      baseEndLine: positiveLine,
+      behaviorUnchanged: z.literal(true),
+      reason: nonEmpty
+    }).strict(),
+    z.object({
+      baseStartLine: positiveLine.optional(),
+      baseEndLine: positiveLine.optional(),
+      behaviorUnchanged: z.literal(false),
+      reason: nonEmpty
+    }).strict()
+  ]).optional(),
   /**
    * Specialists that reported the same location in different words and were
    * merged into this finding by deterministic line-range clustering. OPTIONAL
