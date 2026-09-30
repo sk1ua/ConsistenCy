@@ -171,7 +171,7 @@ export function buildAgentPrompt(
     `DIFF\n${context.diff.slice(0, REVIEW_DIFF_MAX_CHARS)}`,
     files,
     metadata,
-    `SPECIALIST ROLE: ${agent}. Focus only on ${AGENT_FOCUS[agent]}. ${AGENT_EXCLUSIONS[agent]} Return at most ${maxFindingsPerSpecialist} findings. Each finding must name the input or scenario that fails. Set the \"agent\" field of every finding to exactly \"${agent}\".`
+    `SPECIALIST ROLE: ${agent}. Focus only on ${AGENT_FOCUS[agent]}. ${AGENT_EXCLUSIONS[agent]} Return at most ${maxFindingsPerSpecialist} findings. Set the \"trigger\" field of every finding to the specific input or scenario that fails, and the \"agent\" field to exactly \"${agent}\".`
   ].filter(Boolean);
 
   return {

@@ -45,7 +45,14 @@ const findingBase = z.object({
    * `mimo-v2.6-flash`, which lost Maintainability (and degraded coverage) to
    * `findings[2].uncertainty` while five sibling agents passed.
    */
-  uncertainty: nonEmpty.optional()
+  uncertainty: nonEmpty.optional(),
+  /**
+   * The concrete input or scenario that fails — the prompt requires every
+   * finding to name one, which is what separates a demonstrated defect from a
+   * "please verify" suggestion. OPTIONAL and additive: legacy findings and
+   * findings whose trigger is already spelled out in `evidence` stay valid.
+   */
+  trigger: nonEmpty.optional()
 });
 
 const confirmedFindingSchema = findingBase.extend({
