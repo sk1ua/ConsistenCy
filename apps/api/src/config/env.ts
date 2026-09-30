@@ -67,9 +67,11 @@ export const envSchema = z.object({
   // away from any user-level ~/.pi directory.
   LLM_API_KEY: optionalSecret,
   LLM_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
+  CONSISTENCY_LLM_TEMPERATURE: emptyAsUnset(z.coerce.number().min(0).max(2).optional()),
   ANTHROPIC_API_KEY: optionalSecret,
   ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),
+  CONSISTENCY_PI_MODELS_PATH: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_WORKERS_ENABLED: z
     .enum(["true", "false"])
     .transform(value => value === "true")
@@ -188,12 +190,14 @@ export const envSchema = z.object({
 
 export type RawEnvironment = z.input<typeof envSchema>;
 
-export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_WORKSPACE_ROOT" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER" | "CONSISTENCY_ENGINE_ROOT" | "CONSISTENCY_LOCAL_REVIEW_ROOTS"> & {
+export type AppConfig = Omit<z.output<typeof envSchema>, "DATABASE_PATH" | "CONSISTENCY_WORKSPACE_ROOT" | "CONSISTENCY_ALLOWED_ORIGINS" | "LLM_PROVIDER" | "CONSISTENCY_ENGINE_ROOT" | "CONSISTENCY_LOCAL_REVIEW_ROOTS" | "CONSISTENCY_PI_MODELS_PATH"> & {
   databasePath: string;
   workspaceRoot: string;
   engineRoot?: string;
   /** Directory where ConsistenCy writes its managed Pi auth/models files. */
   piConfigDir: string;
+  /** Optional operator-supplied Pi model definitions; built-in catalog otherwise. */
+  piModelsPath?: string;
   /** Explicit review roots; empty when unset, which disables POST /reviews/local. */
   localReviewRoots: string[];
   /** True when CONSISTENCY_LOCAL_REVIEW_ROOTS was not configured (reviews disabled). */
@@ -298,6 +302,7 @@ export function loadEnv(input: NodeJS.ProcessEnv = process.env): AppConfig {
     piConfigDir: parsed.CONSISTENCY_PI_CONFIG_DIR
       ? resolve(parsed.CONSISTENCY_PI_CONFIG_DIR)
       : resolve(dirname(resolveDatabasePath(parsed.DATABASE_PATH)), "pi"),
+    piModelsPath: parsed.CONSISTENCY_PI_MODELS_PATH ? resolve(parsed.CONSISTENCY_PI_MODELS_PATH) : undefined,
     engineRoot: parsed.CONSISTENCY_ENGINE_ROOT ? resolve(parsed.CONSISTENCY_ENGINE_ROOT) : undefined,
     localReviewRoots,
     localReviewRootsAreDefaulted,

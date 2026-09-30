@@ -17,12 +17,12 @@ export const REVIEW_FILE_CONTENTS_MAX_CHARS = 140_000;
 export const REVIEW_PROJECT_METADATA_MAX_CHARS = 30_000;
 
 const AGENT_FOCUS: Record<ReviewAgentName, string> = {
-  Security: "webhook validation, leaked credentials, path traversal, command injection, CORS, authorization, arbitrary file reads, and GitHub token misuse",
-  Correctness: "state transitions, error paths, webhook event boundaries, job execution, persistence, and failures after report generation",
-  Maintainability: "module ownership, duplicated types, route complexity, agent interfaces, schema reuse, and coupling",
-  Test: "specific missing tests for webhook signatures, delivery deduplication, SQLite, workflow behavior, mock providers, path safety, and UI smoke coverage",
-  Style: "naming, API response consistency, error shape consistency, frontend organization, and file naming",
-  ArchitectureAuditor: "breaking changes to public API contracts and exported signatures, database schema and migration compatibility, cross-module coupling and circular dependencies, and divergence between shared types and their consumers"
+  Security: "security consequences of the changed behavior, including trust boundaries, access control, secrets, injection, unsafe paths, and data exposure where applicable",
+  Correctness: "behavioral correctness of the change, including state transitions, edge cases, error handling, compatibility, and persistence where applicable",
+  Maintainability: "ownership and coupling of changed modules, duplicated logic, unclear interfaces, and divergence from existing shared abstractions",
+  Test: "missing or inadequate tests for the changed behavior and its important failure paths, using the target repository's actual test conventions",
+  Style: "readability and consistency of changed code with the target repository's conventions, including naming, diagnostics, and organization where applicable",
+  ArchitectureAuditor: "the change's effects on public contracts, dependencies, data compatibility, module boundaries, and consumers of shared types"
 };
 
 export function reportLanguageInstruction(language: "zh-CN" | "en-US"): string {
@@ -167,6 +167,8 @@ export function buildAgentPrompt(
     systemPrompt: [
       `You are the ConsistenCy ${agent} review agent.`,
       `Focus only on ${AGENT_FOCUS[agent]}.`,
+      "Apply this focus to the target repository's actual technologies and changed behavior; do not assume a particular UI, service, database, or framework exists.",
+      "Prioritize defects introduced or exposed by the change. Do not report unrelated pre-existing issues.",
       "Do not invent findings. A confirmed finding requires direct evidence, a repository-relative file path, and exact line numbers visible in the supplied file content.",
       "Use likely only when evidence is strong but incomplete. Use hypothesis when uncertainty remains and explain that uncertainty.",
       "Return no finding when the supplied context does not prove a problem.",

@@ -83,7 +83,6 @@ export async function enqueuePublicPrReview(options: {
     pullRequestNumber: coordinates.pullRequestNumber,
     baseSha: pullRequest.baseSha,
     headSha: pullRequest.headSha,
-    senderLogin: "webui",
     action: "public_url",
     accessMode: "public_read",
     publicationPolicy: "disabled",

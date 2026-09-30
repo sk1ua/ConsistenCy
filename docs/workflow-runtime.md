@@ -1,5 +1,7 @@
 # Workflow Runtime（CKPT3 — Verified Workflow Runtime）
 
+> **Version note:** This document records the v3 workflow platform and its checkpoint history. The Web UI, Runtime Studio, and Workflow Copilot sections below are historical; those interfaces were removed in v4. Backend workflow-runtime code remains in the headless API, while `consistency review` is the v4 product entry point.
+
 Status: Phase 1 vertical slice + Phase 1.1 canonical snapshot remediation
 ACCEPTED (2026-08-23); CKPT6 Phase 1 runtime-native built-in library
 (2026-08-27); Phase 2 productization increment (persisted

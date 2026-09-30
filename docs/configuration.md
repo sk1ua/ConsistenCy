@@ -19,7 +19,7 @@ ConsistenCy v4 is a **real-data, real-LLM runtime**. It requires a real, configu
 | **Anthropic** | `claude-sonnet-4-5`, `claude-opus-4-5`, etc. | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
 | **Pi catalog (any listed id)** | Catalog from `GET /llm/catalog` | `LLM_PROVIDER` + `LLM_API_KEY` (optional `LLM_MODEL`) | Provider default |
 
-`LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` are first-class. When `LLM_PROVIDER` is unset, the process infers deepseek → openai → anthropic from which vendor key is present. Settings UI lists the full Pi catalog, not only the three rows above.
+`LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` are first-class. When `LLM_PROVIDER` is unset, the process infers deepseek → openai → anthropic from which vendor key is present. The headless `GET /llm/catalog` endpoint lists the full Pi catalog, not only the three rows above.
 
 ### 1.3 Bundled Pi runtime engine
 
@@ -27,9 +27,10 @@ All providers are executed by the bundled official Pi runtime (`@earendil-works/
 
 ConsistenCy does not read a user-level `~/.pi` directory and does not require a local Pi installation:
 
-- Pi's built-in model catalog is the single model source; the runtime is created with `modelsPath: null` so any user-level Pi `models.json` is ignored.
+- Pi's built-in model catalog is the default model source. Set `CONSISTENCY_PI_MODELS_PATH` to an explicit `models.json` to add custom endpoints; user-level Pi config is never read implicitly.
+- `CONSISTENCY_LLM_TEMPERATURE` optionally pins the temperature for both structured review requests and streaming requests. With it unset, Pi and the provider use their defaults.
 - Provider API keys configured through Settings (or `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` server-side) are injected in-memory via Pi's `setRuntimeApiKey` and are never written to Pi config files.
-- `CONSISTENCY_PI_CONFIG_DIR` only relocates the runtime's isolated auth-storage path inside the ConsistenCy data directory. It is server-side process configuration: never editable through Web Settings and never included in settings snapshots, health payloads, logs, renderer state, or Desktop preload capabilities.
+- `CONSISTENCY_PI_CONFIG_DIR` only relocates the runtime's isolated auth-storage path inside the ConsistenCy data directory. It is server-side process configuration and is not included in settings snapshots or health payloads.
 - Model catalog network refresh stays disabled; requests go only to the selected provider's API endpoint.
 
 ConsistenCy only receives the final model response and normalized usage; provider headers, API keys, OAuth tokens, and raw provider errors remain inside the API process and fail closed to sanitized fixed errors.
@@ -51,7 +52,7 @@ Settings are resolved in the following strict order of precedence:
 ```
 1. Process Environment Variables (Highest Precedence)
         ↓
-2. Local Encrypted Secrets (.consistency/secrets.enc.json or Desktop safeStorage)
+2. Local Encrypted Secrets (.consistency/secrets.enc.json)
         ↓
 3. Local Configuration File (.consistency/config.json)
         ↓
@@ -60,7 +61,7 @@ Settings are resolved in the following strict order of precedence:
 
 ### 2.1 Restart-Required Semantics
 When configuration changes are saved (`npm run config -- set <key> <value>`, or `PUT /api/settings` for the API layer):
-- Non-secret settings are written to disk (`config.json`), and secrets are encrypted via AES-256-GCM (`secrets.enc.json`). The Electron `safeStorage` path was deleted with the desktop host (v4).
+- Non-secret settings are written to disk (`config.json`), and secrets are encrypted via AES-256-GCM (`secrets.enc.json`).
 - The API runtime loads configuration once at process startup.
 - Saving new settings returns `restartRequired: true`; restart the process to apply them.
 
@@ -101,6 +102,8 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `ANTHROPIC_API_KEY` | *empty* | API key for the Anthropic provider |
 | `ANTHROPIC_MODEL` | *empty* | Optional Anthropic model id; empty uses the catalog default (`claude-sonnet-4-5`) |
 | `CONSISTENCY_PI_CONFIG_DIR` | `<database-dir>/pi` | Server-side isolation directory for the bundled Pi runtime's auth storage |
+| `CONSISTENCY_PI_MODELS_PATH` | *empty* | Explicit Pi `models.json` path for custom model endpoints; restart after changing the file |
+| `CONSISTENCY_LLM_TEMPERATURE` | *empty* | Request temperature from 0 to 2; empty uses the provider default |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
 | `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow routes (API layer; the repo ships no login UI) |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the OAuth broker used by the API's `/oauth/desktop/*` routes (`apps/api/src/server.ts:160`) |

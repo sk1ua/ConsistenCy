@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveDatabasePath, resolveWorkspaceRoot, loadEnv, defaultPythonPath } from "./env";
 import { findProjectRoot } from "./settings";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 describe("loadEnv", () => {
   it("ignores unknown operating-system environment keys by design", () => {
@@ -101,7 +101,17 @@ describe("loadEnv", () => {
     expect(loadEnv({ LLM_MODEL: "" }).LLM_MODEL).toBeUndefined();
     expect(loadEnv({ ANTHROPIC_MODEL: "  " }).ANTHROPIC_MODEL).toBeUndefined();
     expect(loadEnv({ CONSISTENCY_PI_CONFIG_DIR: "" }).CONSISTENCY_PI_CONFIG_DIR).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_PI_MODELS_PATH: "" }).piModelsPath).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_LLM_TEMPERATURE: "" }).CONSISTENCY_LLM_TEMPERATURE).toBeUndefined();
     expect(loadEnv({ CONSISTENCY_DESKTOP_OAUTH_BROKER_URL: "" }).CONSISTENCY_DESKTOP_OAUTH_BROKER_URL).toBeUndefined();
+  });
+
+  it("resolves an explicit Pi catalog and validates a reproducible temperature", () => {
+    const config = loadEnv({ CONSISTENCY_PI_MODELS_PATH: "./fixtures/models.json", CONSISTENCY_LLM_TEMPERATURE: "0" });
+    expect(config.piModelsPath).toBe(resolve("./fixtures/models.json"));
+    expect(config.CONSISTENCY_LLM_TEMPERATURE).toBe(0);
+    expect(() => loadEnv({ CONSISTENCY_LLM_TEMPERATURE: "NaN" })).toThrow();
+    expect(() => loadEnv({ CONSISTENCY_LLM_TEMPERATURE: "3" })).toThrow();
   });
 
   it("defaults CONSISTENCY_PYTHON_PATH to python3 off Windows and accepts blank as default", () => {

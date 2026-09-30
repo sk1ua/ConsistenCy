@@ -191,4 +191,11 @@ describe("computeLlmConfigRevision", () => {
     expect(revision).toMatch(/^cfgrev-[0-9a-f]{16}$/);
     expect(revision).not.toContain(SECRET_MARKER);
   });
+
+  it("changes when the explicit catalog or request temperature changes", () => {
+    const chain = buildLlmProfileChain({ config: baseConfig, selected: { provider: "deepseek", model: "deepseek-v4-flash" } });
+    const baseline = computeLlmConfigRevision(baseConfig, chain.candidates);
+    expect(computeLlmConfigRevision(configWith({ CONSISTENCY_LLM_TEMPERATURE: 0 }), chain.candidates)).not.toBe(baseline);
+    expect(computeLlmConfigRevision({ ...baseConfig, piModelsPath: "/tmp/custom-models.json" }, chain.candidates)).not.toBe(baseline);
+  });
 });

@@ -2,11 +2,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { PiRuntimeProvider } from "./piProvider";
+import { resetPiRuntime } from "./piCatalog";
+import { loadEnv } from "../../config/env";
 import { classifyLlmError } from "./errors";
 
 const fixtureAuth = "local-fixture";
@@ -242,6 +244,38 @@ describe("PiRuntimeProvider", () => {
         expect(requests).toHaveLength(1);
         expect(requests[0]?.url).toBe("/v1/chat/completions");
         expect(requests[0]?.headers.authorization).toMatch(/^Bearer /);
+      }
+    );
+  });
+
+  it("uses an explicit models path and forwards temperature zero through the shared runtime", async () => {
+    let requestBody = "";
+    await withFixture(
+      (request, response) => {
+        request.on("data", chunk => { requestBody += String(chunk); });
+        request.on("end", () => sendSse(response, JSON.stringify({ answer: "configured" })));
+      },
+      async ({ authPath, modelsPath }) => {
+        const config = loadEnv({
+          LLM_PROVIDER: "probe",
+          LLM_API_KEY: fixtureAuth,
+          CONSISTENCY_PI_CONFIG_DIR: dirname(authPath),
+          CONSISTENCY_PI_MODELS_PATH: modelsPath,
+          CONSISTENCY_LLM_TEMPERATURE: "0"
+        });
+        try {
+          const provider = PiRuntimeProvider.fromShared(config, "probe", "probe-model");
+          const result = await provider.invokeWithSchema({
+            schema: z.object({ answer: z.string() }).strict(),
+            schemaName: "pi-configured",
+            systemPrompt: "Return JSON",
+            userPrompt: "Provide an answer"
+          });
+          expect(result.data).toEqual({ answer: "configured" });
+          expect(JSON.parse(requestBody)).toMatchObject({ model: "probe-model", temperature: 0 });
+        } finally {
+          resetPiRuntime();
+        }
       }
     );
   });

@@ -67,6 +67,7 @@ describe("public PR intake", () => {
     });
     expect(result.job.baseSha).toBe("a".repeat(40));
     expect(result.job.headSha).toBe("b".repeat(40));
+    expect(result.job.senderLogin).toBeUndefined();
     expect(jobs.getPublishOutbox(result.job.id)).toHaveLength(0);
     expect(seenToken).toBeUndefined();
   });

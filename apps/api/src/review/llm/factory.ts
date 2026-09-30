@@ -67,6 +67,9 @@ function piProvider(config: AppConfig, provider: string, model: string): PiRunti
   const key = [
     provider,
     model,
+    config.piModelsPath ?? "",
+    config.piConfigDir,
+    config.CONSISTENCY_LLM_TEMPERATURE ?? "",
     createHash("sha256").update(JSON.stringify([config.LLM_PROVIDER ?? "", config.LLM_API_KEY ?? "", config.DEEPSEEK_API_KEY ?? "", config.OPENAI_API_KEY ?? "", config.ANTHROPIC_API_KEY ?? ""])).digest("hex").slice(0, 16)
   ].join("|");
   const existing = piProviders.get(key);

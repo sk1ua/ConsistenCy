@@ -165,7 +165,9 @@ export function buildLlmProfileChain(options: {
  */
 export function computeLlmConfigRevision(config: AppConfig, candidates: readonly LlmConnectionProfile[]): string {
   const fingerprint = {
-    v: 1,
+    v: 2,
+    piModelsPath: config.piModelsPath ?? "",
+    temperature: config.CONSISTENCY_LLM_TEMPERATURE ?? null,
     profiles: candidates.map(profile => ({
       id: profile.id,
       provider: profile.provider,

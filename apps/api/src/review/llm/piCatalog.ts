@@ -4,16 +4,17 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AppConfig } from "../../config/env";
 
 /**
- * Single shared Pi runtime for the whole API process. Pi's built-in catalog is
- * the only model source (modelsPath: null detaches from any user-level
- * ~/.pi/models.json), catalog network refresh stays disabled, and provider API
+ * Single shared Pi runtime for the whole API process. By default Pi's built-in
+ * catalog is the only model source; an explicit operator-supplied models path
+ * can add local definitions without reading user-level ~/.pi/models.json.
+ * Catalog network refresh stays disabled, and provider API
  * keys configured through ConsistenCy settings are injected in-memory via
  * setRuntimeApiKey (non-persistent overlay; never written to disk). Providers
  * without an injected key still resolve auth through Pi's own environment
  * convention at request time.
  *
- * The same runtime answers catalog queries (providers/models for the Web UI)
- * and executes review/Notebook/Copilot completions, matching Pi's intended
+ * The same runtime answers catalog queries and executes review completions,
+ * matching Pi's intended
  * "one Models collection, many providers" usage.
  */
 export interface PiKeyInjection {
@@ -34,7 +35,7 @@ export function managedKeyInjections(config: AppConfig): PiKeyInjection[] {
 
 function keysFingerprint(config: AppConfig): string {
   return createHash("sha256")
-    .update(JSON.stringify(managedKeyInjections(config).map(({ providerId, apiKey }) => [providerId, createHash("sha256").update(apiKey).digest("hex")])) + `|${config.LLM_PROVIDER ?? ""}`)
+    .update(JSON.stringify({ keys: managedKeyInjections(config).map(({ providerId, apiKey }) => [providerId, createHash("sha256").update(apiKey).digest("hex")]), provider: config.LLM_PROVIDER ?? "", modelsPath: config.piModelsPath ?? "", authDir: config.piConfigDir }))
     .digest("hex");
 }
 
@@ -46,7 +47,7 @@ export function piRuntime(config: AppConfig): Promise<ModelRuntime> {
   if (sharedRuntime && sharedFingerprint === fingerprint) return sharedRuntime;
   sharedRuntime = ModelRuntime.create({
     authPath: join(config.piConfigDir, "runtime-auth.json"),
-    modelsPath: null,
+    modelsPath: config.piModelsPath ?? null,
     allowModelNetwork: false,
     refreshOnCreate: false
   }).then(async runtime => {
