@@ -97,12 +97,8 @@ function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding): boolean {
   for (const word of wordsA) {
     if (!STOP_WORDS.has(word) && word.length > 1 && wordsB.has(word)) return true;
   }
-  // Check shared evidenceIds (e.g. same rule or analyzer corroboration)
-  if (left.evidenceIds && right.evidenceIds) {
-    for (const id of left.evidenceIds) {
-      if (right.evidenceIds.includes(id)) return true;
-    }
-  }
+  // A source evidence record can corroborate multiple independent defects;
+  // sharing its id is not evidence of a shared rule or topic.
   return false;
 }
 
@@ -159,7 +155,7 @@ function prefer(left: ReviewFinding, right: ReviewFinding): ReviewFinding {
  * `alsoReportedBy`, and every merged finding is still returned in `duplicates`
  * so the report can disclose the merge instead of silently dropping it.
  */
-export function deduplicateAndSortFindings(findings: ReviewFinding[]): {
+export function deduplicateAndSortFindings(findings: ReviewFinding[], discloseAllMerges = false): {
   findings: ReviewFinding[];
   duplicates: ReviewFinding[];
 } {
@@ -191,19 +187,22 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[]): {
 
   const survivorOf = (entry: (typeof clusters)[number]): ReviewFinding => {
     let result = entry.survivor;
-    if (entry.lineGrouped) {
-      const alsoReportedBy = [...new Set(entry.members.map(member => member.agent))]
+    if (entry.lineGrouped || (discloseAllMerges && entry.merged.length > 0)) {
+      const alsoReportedBy = [...new Set(entry.members.flatMap(member => [member.agent, ...(member.alsoReportedBy ?? [])]))]
         .filter(agent => agent !== entry.survivor.agent)
         .sort();
       if (alsoReportedBy.length > 0) {
         result = { ...result, alsoReportedBy };
       }
       if (entry.merged.length > 0) {
-        const mergedFindings = entry.merged.map(m => ({
-          agent: m.agent,
-          title: m.title,
-          summary: m.evidence || m.reasoning || m.recommendation || m.title
-        }));
+        const mergedFindings = [
+          ...(result.mergedFindings ?? []),
+          ...entry.merged.flatMap(m => [{
+            agent: m.agent,
+            title: m.title,
+            summary: (m.evidence || m.reasoning || m.recommendation || m.title).replace(/\s+/g, " ").trim().slice(0, 300)
+          }, ...(m.mergedFindings ?? [])])
+        ];
         result = { ...result, mergedFindings };
       }
     }
@@ -256,7 +255,7 @@ export function buildReviewReport(input: {
   retrieval?: RetrievalTrace;
   createdAt?: string;
 }): ReviewReport {
-  const deduplicated = deduplicateAndSortFindings(input.findings);
+  const deduplicated = deduplicateAndSortFindings(input.findings, true);
   const findings = deduplicated.findings;
   const duplicates = input.duplicates ?? deduplicated.duplicates;
 

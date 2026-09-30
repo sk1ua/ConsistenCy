@@ -232,6 +232,17 @@ describe("reportBuilder", () => {
     expect(separate.duplicates).toEqual([]);
   });
 
+  it("preserves disclosure for exact-title merges and does not equate shared source evidence with a topic", () => {
+    const first: ReviewFinding = { ...confirmedHigh, id: "exact-one", title: "SQL injection", evidence: "Unescaped database query", evidenceIds: ["shared-source"] };
+    const same: ReviewFinding = { ...first, id: "exact-two", agent: "Correctness" };
+    const merged = deduplicateAndSortFindings([first, same], true);
+    expect(merged.findings).toHaveLength(1);
+    expect(merged.findings[0]!.mergedFindings).toHaveLength(1);
+    expect(merged.findings[0]!.mergedFindings![0]!.title).toBe("SQL injection");
+    const different: ReviewFinding = { ...first, id: "independent", title: "Expired credentials", evidence: "Authentication rejects valid sessions" };
+    expect(deduplicateAndSortFindings([first, different]).findings).toHaveLength(2);
+  });
+
   it("step 3: does not merge findings on adjacent lines if their topic/rule does not match, and preserves mergedFindings", () => {
     const f1: ReviewFinding = {
       ...confirmedHigh,

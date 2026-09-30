@@ -25,7 +25,7 @@ export function buildReviewReport(input: {
   retrieval?: RetrievalTrace;
   createdAt?: string;
 }): ReviewReport {
-  const { findings, duplicates } = deduplicateAndSortFindings(input.findings);
+  const { findings, duplicates } = deduplicateAndSortFindings(input.findings, true);
 
   return reviewReportSchema.parse({
     jobId: input.jobId,

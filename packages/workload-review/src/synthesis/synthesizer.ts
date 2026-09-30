@@ -129,7 +129,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         throw new Error("synthesizer lost Scheduler admission after compose");
       }
 
-      const { findings: dedupedFindings, duplicates } = deduplicateAndSortFindings(options.findings);
+      const { findings: dedupedFindings, duplicates } = deduplicateAndSortFindings(options.findings, true);
       const {
         overallScore: score,
         riskLevel,
@@ -213,7 +213,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         return true;
       });
       if (preExistingIssues.length > 0) {
-        const dedupedPre = deduplicateAndSortFindings(preExistingIssues).findings;
+        const dedupedPre = deduplicateAndSortFindings(preExistingIssues, true).findings;
         const scoredPre = applyFindingScoreFilter(dedupedPre, scores, {
           minScore: options.minFindingScore,
           maxReported: options.maxReportedFindings,
