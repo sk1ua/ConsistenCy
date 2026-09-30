@@ -30,6 +30,22 @@ function result(findings: string[], path = "mycli/commands/run.py"): DomainAnaly
 const changed = new Map([["mycli/commands/run.py", [{ start: 120, end: 126 }]]]);
 
 describe("scopeDeterministicFindings", () => {
+  it("keeps file-scoped signals for changed files without added-line ranges", () => {
+    const changedWithoutLines = new Map<string, { start: number; end: number }[]>([
+      ["mycli/commands/run.py", []]
+    ]);
+    const scoped = scopeDeterministicFindings(result([
+      "Unanchored security signal on module",
+      "[rule] (line 12) outside known changed ranges"
+    ]), changedWithoutLines);
+    expect(scoped.files[0]!.findings).toEqual(["Unanchored security signal on module"]);
+    const inputs = [
+      { location: { path: "mycli/commands/run.py" } },
+      { location: { path: "mycli/commands/run.py", startLine: 12 } },
+      { location: { path: "mycli/untouched.py" } }
+    ];
+    expect(scopeEvidenceInputs(inputs, changedWithoutLines)).toEqual([inputs[0]]);
+  });
   it("keeps findings anchored within five lines of the change and drops the rest", () => {
     const scoped = scopeDeterministicFindings(result([
       "[rule] (line 121) inside the hunk",

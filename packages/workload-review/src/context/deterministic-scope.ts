@@ -76,13 +76,14 @@ function withinChangedRange(ranges: readonly LineRange[], line: number): boolean
 function keepFinding(
   finding: string,
   ranges: readonly LineRange[],
-  scope: DeterministicScope
+  scope: DeterministicScope,
+  changedFile: boolean
 ): boolean {
   // Status text is not a finding in either scope.
   if (isDeterministicStatusLine(finding)) return false;
   if (scope === "all") return true;
   const lines = findingLineReferences(finding);
-  if (lines.length === 0) return ranges.length > 0;
+  if (lines.length === 0) return changedFile;
   return lines.some(line => withinChangedRange(ranges, line));
 }
 
@@ -95,7 +96,7 @@ function scopeEvidencePack(
       const ranges = changedRangesByFile.get(entry.file) ?? [];
       const selected = entry.selected_evidence.filter(item => {
         const line = item.candidate.start_line ?? undefined;
-        if (line === undefined) return ranges.length > 0;
+        if (line === undefined) return changedRangesByFile.has(entry.file);
         return withinChangedRange(ranges, line);
       });
       return selected.length === entry.selected_evidence.length
@@ -129,7 +130,7 @@ export function scopeDeterministicFindings(
 ): DomainAnalyzeSuccess {
   const files: DomainFileResult[] = result.files.map(file => {
     const ranges = changedRangesByFile.get(file.path) ?? [];
-    const findings = file.findings.filter(finding => keepFinding(finding, ranges, scope));
+    const findings = file.findings.filter(finding => keepFinding(finding, ranges, scope, changedRangesByFile.has(file.path)));
     return findings.length === file.findings.length ? file : { ...file, findings };
   });
 
@@ -152,9 +153,8 @@ export function scopeEvidenceInputs<T extends { location: { path: string; startL
   if (scope === "all") return [...inputs];
   return inputs.filter(input => {
     const ranges = changedRangesByFile.get(input.location.path) ?? [];
-    if (ranges.length === 0) return false;
     const line = input.location.startLine;
-    if (line === undefined) return true;
+    if (line === undefined) return changedRangesByFile.has(input.location.path);
     return withinChangedRange(ranges, line);
   });
 }
