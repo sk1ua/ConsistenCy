@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "../../config/env";
-import { ReviewModelResolutionError, resolveReviewModel } from "./factory";
+import { ReviewModelResolutionError, createLLMProvider, resolveReviewModel } from "./factory";
 
 // The resolver only checks credential presence; a non-empty marker stands in
 // for a configured key without embedding anything secret-shaped in tests.
@@ -66,5 +66,16 @@ describe("resolveReviewModel", () => {
       config: baseConfig,
       override: { provider: "deepseek", name: "legacy-name" }
     })).toEqual({ provider: "deepseek", model: "legacy-name" });
+  });
+
+  it("differentiates cached providers when baseUrl differs", () => {
+    const c1 = configWith({ DEEPSEEK_MODEL: "deepseek-chat", CONSISTENCY_LLM_BASE_URL: "https://proxy1.example.com" });
+    const c2 = configWith({ DEEPSEEK_MODEL: "deepseek-chat", CONSISTENCY_LLM_BASE_URL: "https://proxy2.example.com" });
+    const p1 = createLLMProvider(c1);
+    const p2 = createLLMProvider(c2);
+    expect(p1).not.toBe(p2);
+    // catch unhandled promise rejections on mock objects
+    p1?.ready().catch(() => {});
+    p2?.ready().catch(() => {});
   });
 });
