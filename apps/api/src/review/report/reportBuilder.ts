@@ -1,4 +1,4 @@
-import { deduplicateAndSortFindings, riskBandForFindings } from "@consistency/workload-review";
+import { deduplicateAndSortFindings, riskBandForFindings, summaryForFinalFindings } from "@consistency/workload-review";
 import {
   reviewReportSchema,
   type AgentRun,
@@ -33,7 +33,7 @@ export function buildReviewReport(input: {
     pullRequestNumber: input.pullRequestNumber,
     baseSha: input.baseSha,
     headSha: input.headSha,
-    summary: input.summary,
+    summary: summaryForFinalFindings(input.summary, findings),
     score: input.score,
     riskLevel: input.riskLevel,
     riskBand: riskBandForFindings(findings),

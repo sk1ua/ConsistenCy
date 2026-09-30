@@ -66,6 +66,7 @@ export {
   REVIEW_PROJECT_METADATA_MAX_CHARS,
 } from "./agents/prompts.js";
 export { deduplicateAndSortFindings, buildReviewReport } from "./synthesis/report.js";
+export { summaryForFinalFindings } from "./synthesis/summary.js";
 export {
   applyFindingScoreFilter,
   FINDING_SCORE_INSTRUCTION,

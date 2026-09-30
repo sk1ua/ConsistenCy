@@ -14,6 +14,7 @@ import {
   type ReviewReport,
   type RiskLevel
 } from "@consistency/schema";
+import { summaryForFinalFindings } from "./summary.js";
 
 const severityRank = { critical: 5, high: 4, medium: 3, low: 2, info: 1 } as const;
 const confidenceRank = { confirmed: 3, likely: 2, hypothesis: 1 } as const;
@@ -250,6 +251,7 @@ export function buildReviewReport(input: {
   baseSha: string;
   headSha: string;
   summary: string;
+  reportLanguage?: "zh-CN" | "en-US";
   llmProvider?: string;
   llmModel?: string;
   agentRuns: AgentRun[];
@@ -286,7 +288,7 @@ export function buildReviewReport(input: {
     pullRequestNumber: input.pullRequestNumber,
     baseSha: input.baseSha,
     headSha: input.headSha,
-    summary: input.summary,
+    summary: summaryForFinalFindings(input.summary, findings, input.preExistingIssues, input.reportLanguage),
     score: input.score,
     riskLevel: input.riskLevel,
     ...(input.staticRiskLabel ? { staticRiskLabel: input.staticRiskLabel } : {}),

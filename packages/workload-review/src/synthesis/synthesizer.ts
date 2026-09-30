@@ -163,7 +163,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
           summaryResult = await options.facades.llm.invokeText({
             schemaName: "review-summary",
             systemPrompt: [
-              "Summarize a multi-agent pull request review in two concise sentences. Incorporate the canonical summary and recommendations into the overview without omitting critical recommendations. Do not add findings or claims that are absent from the supplied data.",
+              "Summarize a multi-agent pull request review in two concise sentences. Incorporate the canonical summary and recommendations into the overview without omitting critical recommendations. Do not add findings or claims that are absent from the supplied data. Do not state finding counts or severity totals: supplied findings are candidates before score filtering and caps, and final counts will be added deterministically after filtering.",
               FINDING_SCORE_INSTRUCTION,
               reportLanguageInstruction(options.reportLanguage)
             ].join(" "),
@@ -179,10 +179,6 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         } finally {
           scheduler.wake(agentId);
         }
-        const readmittedAfterSummary = scheduler.admit();
-        if (!readmittedAfterSummary || readmittedAfterSummary.id !== agentId) {
-          throw new Error("synthesizer lost Scheduler admission after summary");
-        }
         summary = summaryResult.text.trim()
           ? summaryResult.text.trim()
           : canonicalOverview;
@@ -190,6 +186,12 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         scores = summaryResult.scores ?? [];
       } catch (caught) {
         error = caught instanceof Error ? caught.message : "Unknown synthesizer failure";
+      }
+      // wake() runs for both success and failure. Re-admit before producing
+      // either the model summary or the canonical fallback report.
+      const readmittedAfterSummary = scheduler.admit();
+      if (!readmittedAfterSummary || readmittedAfterSummary.id !== agentId) {
+        throw new Error("synthesizer lost Scheduler admission after summary");
       }
 
       // Step 4 runs whether or not the model call succeeded: with no scores
@@ -279,6 +281,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         baseSha: options.baseSha,
         headSha: options.headSha,
         summary: finalSummary,
+        reportLanguage: options.reportLanguage,
         llmProvider: providerName,
         llmModel: model,
         agentRuns: agentRunsForReport,
