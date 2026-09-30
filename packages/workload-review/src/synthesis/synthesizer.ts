@@ -43,6 +43,7 @@ export interface SynthesizerBodyOptions {
   readonly deterministicResult: DomainAnalyzeSuccess;
   readonly findings: ReviewFinding[];
   readonly preExistingIssues?: ReviewFinding[];
+  readonly totalCappedBySpecialists?: number;
   readonly agentRuns: AgentRun[];
   readonly deterministic: DeterministicStage;
   readonly facades: AgentFacadeSet;
@@ -187,11 +188,19 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       // Step 4 runs whether or not the model call succeeded: with no scores
       // nothing is dropped on score, but the per-file and total caps still
       // bound the main list. A withheld finding is counted, never re-shown.
-      const { findings, filteredCount } = applyFindingScoreFilter(dedupedFindings, scores, {
+      const { findings, filteredCount, breakdown } = applyFindingScoreFilter(dedupedFindings, scores, {
         minScore: options.minFindingScore,
         maxReported: options.maxReportedFindings,
         maxPerFile: options.maxFindingsPerFile
       });
+
+      const totalFiltered = filteredCount + (options.totalCappedBySpecialists ?? 0);
+      const filteredBreakdown = {
+        capPerSpecialist: options.totalCappedBySpecialists ?? 0,
+        lowScore: breakdown?.lowScore ?? 0,
+        capPerFile: breakdown?.capPerFile ?? 0,
+        capTotal: breakdown?.capTotal ?? 0
+      };
 
       // Filter and deduplicate preExistingIssues:
       // Drop "No change needed" / informational noise, deduplicate, and score-filter
@@ -250,8 +259,8 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         status: error ? "failed" : "succeeded",
         startedAt,
         finishedAt: new Date().toISOString(),
-        inputSummary: filteredCount > 0
-          ? `Synthesized ${options.findings.length} raw findings; ${filteredCount} withheld after scoring`
+        inputSummary: totalFiltered > 0
+          ? `Synthesized ${options.findings.length} raw findings; ${totalFiltered} withheld after scoring/capping`
           : `Synthesized ${options.findings.length} raw findings`,
         findings,
         error,
@@ -277,7 +286,8 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         agentRuns: agentRunsForReport,
         findings,
         duplicates,
-        filteredFindingCount: filteredCount,
+        filteredFindingCount: totalFiltered,
+        filteredBreakdown,
         preExistingIssues,
         score,
         riskLevel,

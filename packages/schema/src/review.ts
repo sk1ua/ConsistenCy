@@ -138,7 +138,8 @@ export const tokenUsageSchema = z.object({
   outputTokens: z.number().int().nonnegative().optional(),
   totalTokens: z.number().int().nonnegative().optional(),
   cachedTokens: z.number().int().nonnegative().optional(),
-  cacheReadStatus: z.enum(["reported", "unavailable_or_zero"]).optional()
+  cacheReadStatus: z.enum(["reported", "unavailable_or_zero"]).optional(),
+  promptTokens: z.number().int().nonnegative().optional()
 }).strict();
 
 export const agentRunSchema = z.object({

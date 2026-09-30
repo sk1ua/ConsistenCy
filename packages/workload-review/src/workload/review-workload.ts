@@ -435,6 +435,7 @@ export class ReviewWorkload {
       // -------------------------------------------------------------------
       const findings: ReviewFinding[] = [];
       const preExistingIssues: ReviewFinding[] = [];
+      let totalCappedBySpecialists = 0;
       const failedAgents: ReviewAgentName[] = [];
       const agentContextImages = new Map<string, ContextImageId>();
       const agentFacades = new Map<string, AgentFacadeSet>();
@@ -523,6 +524,7 @@ export class ReviewWorkload {
         });
         findings.push(...result.findings);
         preExistingIssues.push(...result.preExistingIssues);
+        totalCappedBySpecialists += result.cappedFindingsCount;
         if (result.error) {
           errors.push(`${agentName}: ${result.error}`);
           failedAgents.push(agentName);
@@ -584,6 +586,7 @@ export class ReviewWorkload {
         deterministicResult,
         findings,
         preExistingIssues,
+        totalCappedBySpecialists,
         agentRuns,
         deterministic: options.deterministic,
         facades: synthesizerRuntime.facades,

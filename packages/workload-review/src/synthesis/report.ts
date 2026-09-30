@@ -243,6 +243,12 @@ export function buildReviewReport(input: {
   duplicates?: ReviewFinding[];
   /** Findings withheld from the main list after scoring; count only. */
   filteredFindingCount?: number;
+  filteredBreakdown?: {
+    capPerSpecialist?: number;
+    lowScore?: number;
+    capTotal?: number;
+    capPerFile?: number;
+  };
   score: number;
   riskLevel: RiskLevel;
   coverage?: ReviewCoverage;
@@ -269,6 +275,7 @@ export function buildReviewReport(input: {
     findings,
     ...(input.preExistingIssues?.length ? { preExistingIssues: input.preExistingIssues } : {}),
     ...(input.filteredFindingCount ? { filteredFindingCount: input.filteredFindingCount } : {}),
+    ...(input.filteredBreakdown ? { filteredBreakdown: input.filteredBreakdown } : {}),
     ruleVersion: "v2",
     ...(duplicates.length > 0 ? { duplicates } : {}),
     ...(input.coverage ? { coverage: input.coverage } : {}),

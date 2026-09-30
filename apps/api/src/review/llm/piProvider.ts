@@ -88,11 +88,13 @@ function textContent(message: PiMessage): string {
 }
 
 function usageFromMessage(message: PiMessage) {
+  const input = message.usage.input;
+  const cached = message.usage.cacheRead ?? 0;
   return parseTokenUsage({
-    inputTokens: message.usage.input,
+    inputTokens: input,
     outputTokens: message.usage.output,
     totalTokens: message.usage.totalTokens,
-    cachedTokens: message.usage.cacheRead ?? 0,
+    cachedTokens: cached,
     cacheReadStatus: message.usage.cacheRead ? "reported" : "unavailable_or_zero"
   });
 }

@@ -68,6 +68,7 @@ export interface ReviewAgentBodyOptions {
 export interface ReviewAgentBodyResult {
   readonly findings: ReviewFinding[];
   readonly preExistingIssues: ReviewFinding[];
+  readonly cappedFindingsCount: number;
   readonly tokenUsage?: TokenUsage;
   readonly rejectedCount: number;
   readonly downgradedCount: number;
@@ -128,6 +129,18 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.headSha,
       );
       const capped = capFindings(grounded.findings, options.maxFindingsPerSpecialist ?? 3);
+      const cappedCount = grounded.findings.length - capped.length;
+
+      const summaryParts = [
+        summariseGrounding(
+          options.context.changedFiles.length,
+          grounded.rejected.length,
+          grounded.downgraded.length,
+        )
+      ];
+      if (cappedCount > 0) {
+        summaryParts.push(`${cappedCount} finding(s) capped by specialist limit`);
+      }
 
       const run: AgentRun = {
         id: `agent_${randomUUID()}`,
@@ -136,11 +149,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         status: "succeeded",
         startedAt,
         finishedAt: new Date().toISOString(),
-        inputSummary: summariseGrounding(
-          options.context.changedFiles.length,
-          grounded.rejected.length,
-          grounded.downgraded.length,
-        ),
+        inputSummary: summaryParts.join("; "),
         findings: capped,
         tokenUsage: modelResult.tokenUsage,
         provider: providerName as AgentRun["provider"],
@@ -152,6 +161,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       return {
         findings: capped,
         preExistingIssues: grounded.preExisting.map(decision => decision.finding),
+        cappedFindingsCount: cappedCount,
         tokenUsage: modelResult.tokenUsage,
         rejectedCount: grounded.rejected.length,
         downgradedCount: grounded.downgraded.length,
@@ -174,6 +184,6 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       model,
     };
     persistence.saveAgentRun(run);
-    return { findings: [], preExistingIssues: [], rejectedCount: 0, downgradedCount: 0, error: message };
+    return { findings: [], preExistingIssues: [], cappedFindingsCount: 0, rejectedCount: 0, downgradedCount: 0, error: message };
   }
 }

@@ -157,13 +157,17 @@ export type ReviewRuntime = {
  * `cacheReadStatus` says the number is missing rather than a real miss.
  */
 function logModelCall(operation: string, detail: Record<string, string>, usage?: TokenUsage): void {
+  const input = usage?.inputTokens ?? null;
+  const cached = usage?.cachedTokens ?? 0;
+  const promptTokens = usage?.promptTokens ?? (input !== null ? input + cached : null);
   logger.info(
     {
       operation,
       ...detail,
-      inputTokens: usage?.inputTokens ?? null,
+      inputTokens: input,
       outputTokens: usage?.outputTokens ?? null,
-      cachedTokens: usage?.cachedTokens ?? 0,
+      cachedTokens: cached,
+      promptTokens,
       cacheReadStatus: usage?.cacheReadStatus ?? "unavailable_or_zero"
     },
     "llm.invoke"

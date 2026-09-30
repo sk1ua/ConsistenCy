@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { reviewPlanSchema, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type ReviewPlan } from "@consistency/schema";
+import { reviewPlanSchema, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type ReviewPlan, type TokenUsage } from "@consistency/schema";
 import {
   KernelScheduler,
   type AgentId,
@@ -108,7 +108,7 @@ export async function runSupervisorBody(options: SupervisorBodyOptions): Promise
     return await options.fiber.execute(async () => {
       // WAIT_LLM around the protected planning invocation.
       scheduler.wait(agentId, { kind: "llm", provider: providerName });
-      let rawResult: { data: unknown };
+      let rawResult: { data: unknown; tokenUsage?: TokenUsage };
       try {
         rawResult = await options.facades.llm.invokeStructured({
           schema: reviewPlanSchema,
@@ -150,6 +150,7 @@ export async function runSupervisorBody(options: SupervisorBodyOptions): Promise
         finishedAt: new Date().toISOString(),
         inputSummary: `Planned review for ${context.changedFiles.length} changed files`,
         findings: [],
+        tokenUsage: rawResult.tokenUsage,
         provider: providerName as AgentRun["provider"],
         model,
       };

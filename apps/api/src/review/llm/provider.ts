@@ -9,6 +9,7 @@ import {
 } from "@consistency/schema";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { logger } from "../../config/logger";
 import type {
   FindingGenerationRequest,
   LLMProvider,
@@ -95,6 +96,24 @@ export abstract class BaseLLMProvider implements LLMProvider {
           ? undefined
           : `${request.userPrompt}\n\nThe previous JSON failed schema validation. Produce a corrected JSON object only. Previous output:\n${previousContent.slice(0, 12_000)}`;
         const completion = await completeCall(repairPrompt);
+        if (attempt > 0) {
+          const input = completion.tokenUsage?.inputTokens ?? null;
+          const cached = completion.tokenUsage?.cachedTokens ?? 0;
+          const promptTokens = completion.tokenUsage?.promptTokens ?? (input !== null ? input + cached : null);
+          logger.info(
+            {
+              operation: "structured_retry",
+              schemaName: request.schemaName,
+              attempt: attempt + 1,
+              inputTokens: input,
+              outputTokens: completion.tokenUsage?.outputTokens ?? null,
+              cachedTokens: cached,
+              promptTokens,
+              cacheReadStatus: completion.tokenUsage?.cacheReadStatus ?? "unavailable_or_zero"
+            },
+            "llm.invoke"
+          );
+        }
         if (request.signal?.aborted) {
           throw request.signal.reason ?? new Error("LLM request was cancelled during dispatch");
         }
@@ -104,6 +123,17 @@ export abstract class BaseLLMProvider implements LLMProvider {
           tokenUsage: completion.tokenUsage
         };
       } catch (error) {
+        if (attempt === 0) {
+          logger.info(
+            {
+              operation: "structured_attempt_failed",
+              schemaName: request.schemaName,
+              attempt: 1,
+              error: error instanceof Error ? error.message : String(error)
+            },
+            "llm.invoke"
+          );
+        }
         lastError = error;
         if (request.signal?.aborted) break;
       }

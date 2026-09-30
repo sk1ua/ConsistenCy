@@ -176,6 +176,13 @@ export const reviewReportSchema = z.object({
    * the report they were filtered out of.
    */
   filteredFindingCount: z.number().int().nonnegative().optional(),
+  /** Breakdown of filtered findings by reason. */
+  filteredBreakdown: z.object({
+    capPerSpecialist: z.number().int().nonnegative().optional(),
+    lowScore: z.number().int().nonnegative().optional(),
+    capTotal: z.number().int().nonnegative().optional(),
+    capPerFile: z.number().int().nonnegative().optional(),
+  }).partial().optional(),
   /**
    * Findings merged away by deterministic cross-agent deduplication
    * (same file, near-identical title). Kept for honesty instead of being

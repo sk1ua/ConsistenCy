@@ -40,11 +40,18 @@ export interface FindingScoreFilterOptions {
   readonly maxPerFile?: number;
 }
 
+export interface FindingScoreFilterBreakdown {
+  lowScore: number;
+  capPerFile: number;
+  capTotal: number;
+}
+
 export interface FindingScoreFilterResult {
   /** Main-list findings: scored, above the floor, and within both caps. */
   readonly findings: ReviewFinding[];
   /** How many findings were withheld. Their content is never re-published. */
   readonly filteredCount: number;
+  readonly breakdown?: FindingScoreFilterBreakdown;
 }
 
 const severityRank = { critical: 5, high: 4, medium: 3, low: 2, info: 1 } as const;
@@ -81,6 +88,7 @@ export function applyFindingScoreFilter(
   // A provider that ignored the scoring instruction must not empty the report:
   // only a finding carrying a real score below the floor is withheld.
   const aboveFloor = scored.filter(finding => finding.score === undefined || finding.score >= minScore);
+  const lowScoreCount = scored.length - aboveFloor.length;
   const ranked = aboveFloor
     .map((finding, index) => ({ finding, index }))
     .sort((left, right) => rankScore(right.finding) - rankScore(left.finding) || left.index - right.index)
@@ -88,11 +96,19 @@ export function applyFindingScoreFilter(
 
   const perFileCounts = new Map<string, number>();
   const kept: ReviewFinding[] = [];
+  let capPerFileCount = 0;
+  let capTotalCount = 0;
   for (const finding of ranked) {
     const fileKey = finding.file.toLowerCase();
     const fileCount = perFileCounts.get(fileKey) ?? 0;
-    if (fileCount >= maxPerFile) continue;
-    if (kept.length >= maxReported) continue;
+    if (fileCount >= maxPerFile) {
+      capPerFileCount += 1;
+      continue;
+    }
+    if (kept.length >= maxReported) {
+      capTotalCount += 1;
+      continue;
+    }
     perFileCounts.set(fileKey, fileCount + 1);
     kept.push(finding);
   }
@@ -105,5 +121,13 @@ export function applyFindingScoreFilter(
     || left.file.localeCompare(right.file)
     || (left.startLine ?? 0) - (right.startLine ?? 0));
 
-  return { findings: kept, filteredCount: scored.length - kept.length };
+  return {
+    findings: kept,
+    filteredCount: scored.length - kept.length,
+    breakdown: {
+      lowScore: lowScoreCount,
+      capPerFile: capPerFileCount,
+      capTotal: capTotalCount
+    }
+  };
 }
