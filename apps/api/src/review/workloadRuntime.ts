@@ -83,6 +83,7 @@ export type ReviewWorkflowDependencies = {
   minFindingScore?: number;
   maxReportedFindings?: number;
   maxFindingsPerFile?: number;
+  deterministicScope?: "diff" | "all";
   reviewWorkflow?: string | null;
   reviewWorkflowSpec?: (name: string) => WorkflowSpec | undefined;
   workspaceRoot?: string;
@@ -328,6 +329,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         minFindingScore: dependencies.minFindingScore,
         maxReportedFindings: dependencies.maxReportedFindings,
         maxFindingsPerFile: dependencies.maxFindingsPerFile,
+        deterministicScope: dependencies.deterministicScope,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: knowledgeIndexPathFor(input.repositoryFullName, workspaceRoot),

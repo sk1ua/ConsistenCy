@@ -538,7 +538,10 @@ export class DeterministicAnalyzer {
       files: files.map(f => ({
         path: f.path,
         content: f.content,
-        baseline: f.baseline ?? "",
+        // Omitted (not "") when the file has no baseline: the engine must be
+        // able to tell "no baseline" from "empty file", because a drift score
+        // against a missing baseline is meaningless.
+        ...(f.baseline === undefined ? {} : { baseline: f.baseline }),
         language: f.language ?? "",
         diff_hunks: f.diffHunks ?? [],
       })),
@@ -658,7 +661,8 @@ export class DeterministicAnalyzer {
       files: files.map(file => ({
         path: file.path,
         content: file.content,
-        baseline: file.baseline ?? "",
+        // Omitted (not "") when the file has no baseline; see the analyze path.
+        ...(file.baseline === undefined ? {} : { baseline: file.baseline }),
         language: file.language ?? "",
         diff_hunks: file.diffHunks ?? []
       })),
@@ -711,7 +715,8 @@ export class DeterministicAnalyzer {
       files: files.map(file => ({
         path: file.path,
         content: file.content,
-        baseline: file.baseline ?? "",
+        // Omitted (not "") when the file has no baseline; see the analyze path.
+        ...(file.baseline === undefined ? {} : { baseline: file.baseline }),
         language: file.language ?? ""
       })),
       targets,

@@ -76,8 +76,15 @@ class RiskScoringAnalyzer(AnalyzerBase):
     def aggregate(
         self,
         analyzer_results: dict[str, "AnalyzerResult"],  # noqa: F821
+        has_baseline: bool = True,
     ) -> AnalyzerResult:
-        """Compute the final risk score from pre-run analyzer results."""
+        """Compute the final risk score from pre-run analyzer results.
+
+        ``has_baseline=False`` means the file has no baseline snapshot at all.
+        The drift analyzers still return a score (they compared the current
+        state against an empty document), but that score does not describe the
+        change, so the drift band name is withheld and the label says why.
+        """
 
         def _find(prefix: str) -> float:
             for key, res in analyzer_results.items():
@@ -100,6 +107,11 @@ class RiskScoringAnalyzer(AnalyzerBase):
 
         colour = score_to_risk_colour(final_score)
         label = score_to_risk_label(final_score)
+        if not has_baseline:
+            # A missing baseline is not an empty baseline. Never name a drift
+            # band for a comparison that had nothing to compare against.
+            colour = "GREY"
+            label = "No Baseline"
 
         # Collect all evidence strings in priority order
         all_evidence: list[str] = []
@@ -124,6 +136,7 @@ class RiskScoringAnalyzer(AnalyzerBase):
             # denominator semantics of the file-level calculus.
             "rule_version": RULE_VERSION,
             "rule_spec": "docs/risk-scoring-rules.md",
+            "baseline_comparable": has_baseline,
             "denominator": {"file_risk": 1.0, "security_score": 1.0, "signals": "per-signal [0,1]"},
         }
 

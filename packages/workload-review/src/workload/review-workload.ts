@@ -60,6 +60,8 @@ import { CapabilityBoundRepoFacade } from "../facades/repo-facade.js";
 import { DeterministicEvidenceRunner } from "../context/evidence-runner.js";
 import { applyModelContentPolicy } from "../context/content-policy.js";
 import { buildReviewBaseContext } from "../context/review-context.js";
+import { scopeDeterministicFindings } from "../context/deterministic-scope.js";
+import { changedLineRanges, type LineRange } from "../agents/grounding.js";
 import { runSupervisorBody } from "../supervisor/supervisor.js";
 import { runReviewAgentBody } from "../agents/review-agent.js";
 import { runSynthesizerBody } from "../synthesis/synthesizer.js";
@@ -871,9 +873,16 @@ export class ReviewWorkload {
     const files = agentContext.changedFiles.map((cf) => ({
       path: cf.path,
       content: agentContext.fileContents[cf.path] || "",
-      baseline: agentContext.baseFileContents[cf.path] ?? "",
+      // Absent base content means "no baseline", which is NOT the same as an
+      // empty file: the engine must be able to tell the two apart, because a
+      // drift score against a missing baseline is meaningless.
+      baseline: agentContext.baseFileContents[cf.path],
       diffHunks: cf.patch ? cf.patch.split("\n@@").map((h, i) => (i === 0 ? h : "@@" + h)) : [],
     }));
+    const scope = options.deterministicScope ?? "diff";
+    const changedRangesByFile = new Map<string, readonly LineRange[]>(
+      agentContext.changedFiles.map(cf => [cf.path, changedLineRanges(cf.patch)])
+    );
 
     try {
       return await fiber.execute(async () => {
@@ -891,6 +900,8 @@ export class ReviewWorkload {
         if (!response.ok) {
           throw new Error(`Deterministic analysis failed: ${response.error}`);
         }
+        // Step 5: only the findings that land on the change reach the review.
+        const scoped = scopeDeterministicFindings(response, changedRangesByFile, scope);
         const run: AgentRun = {
           id: `agent_${randomUUID()}`,
           jobId,
@@ -904,7 +915,7 @@ export class ReviewWorkload {
         };
         persistence.saveAgentRun(run);
         scheduler.succeedAgent(acbId);
-        return response;
+        return scoped;
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown deterministic failure";

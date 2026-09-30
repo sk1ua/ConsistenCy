@@ -346,7 +346,7 @@
         "source_path": "engine/analyzers/risk_scoring_analyzer.py",
         "source_lines": null,
         "transform": null,
-        "file_sha256_at_pin": "b4de194575d5c911891c49792416be7623adc36a5f23ee12f8d86c4b9d9b36df"
+        "file_sha256_at_pin": "c0da7891c37bfe72b11c9ea1bdb11cb190afbac4e2a67fb898f5443aba8b06db"
       }
     },
     {

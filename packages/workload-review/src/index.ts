@@ -50,6 +50,12 @@ export { applyModelContentPolicy, redactModelVisibleText } from "./context/conte
 export { groundReviewFindings, buildGroundingContext, changedLineRanges } from "./agents/grounding.js";
 export type { GroundingContext, GroundingResult } from "./agents/grounding.js";
 export {
+  scopeDeterministicFindings,
+  findingLineReference,
+  DETERMINISTIC_SCOPE_PADDING,
+} from "./context/deterministic-scope.js";
+export type { DeterministicScope } from "./context/deterministic-scope.js";
+export {
   buildAgentPrompt,
   reportLanguageInstruction,
   REVIEW_KERNEL_EVIDENCE_MAX_ENTRIES,

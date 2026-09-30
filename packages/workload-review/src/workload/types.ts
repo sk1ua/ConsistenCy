@@ -26,6 +26,7 @@ import type {
 } from "@consistency/kernel";
 import type { RepositorySnapshot } from "@consistency/repository";
 import type { ModelDriver } from "../model/types.js";
+import type { DeterministicScope } from "../context/deterministic-scope.js";
 import type { CapabilityBoundEvidenceFacade } from "../facades/evidence-facade.js";
 import type { CapabilityBoundLLMFacade } from "../facades/llm-facade.js";
 import type { CapabilityBoundRepoFacade } from "../facades/repo-facade.js";
@@ -152,6 +153,11 @@ export interface ReviewWorkloadOptions {
   readonly maxReportedFindings?: number;
   /** Per-file cap on the main list applied after scoring; default 3. */
   readonly maxFindingsPerFile?: number;
+  /**
+   * Step 5: "diff" (default) keeps only deterministic findings anchored within
+   * five lines of the change; "all" keeps the engine's unscoped output.
+   */
+  readonly deterministicScope?: DeterministicScope;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;

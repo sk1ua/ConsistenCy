@@ -166,6 +166,7 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     minFindingScore: config.CONSISTENCY_MIN_FINDING_SCORE,
     maxReportedFindings: config.CONSISTENCY_MAX_REPORTED_FINDINGS,
     maxFindingsPerFile: config.CONSISTENCY_MAX_FINDINGS_PER_FILE,
+    deterministicScope: config.CONSISTENCY_DETERMINISTIC_SCOPE,
     workspaceRoot
   });
 

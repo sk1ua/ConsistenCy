@@ -302,6 +302,7 @@ export const worker = new ReviewWorker({
     minFindingScore: config.CONSISTENCY_MIN_FINDING_SCORE,
     maxReportedFindings: config.CONSISTENCY_MAX_REPORTED_FINDINGS,
     maxFindingsPerFile: config.CONSISTENCY_MAX_FINDINGS_PER_FILE,
+    deterministicScope: config.CONSISTENCY_DETERMINISTIC_SCOPE,
     reviewWorkflow: config.reviewWorkflow,
     runtimeRegistry,
     reviewWorkflowSpec: () => {

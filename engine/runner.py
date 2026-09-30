@@ -138,7 +138,14 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
                     ) from e
 
             # 1e. Aggregate with RiskScoringAnalyzer
-            aggregated = risk_scorer.aggregate(analyzer_results)
+            # A file with no baseline at all was compared against an empty
+            # document by the drift analyzers. That is not evidence of drift, so
+            # the drift band label must not be reported for it. An EMPTY string
+            # baseline is a real (empty) baseline document, not a missing one.
+            aggregated = risk_scorer.aggregate(
+                analyzer_results,
+                has_baseline=file_input.baseline is not None,
+            )
 
             # 1f. Compute signal_results via normalize_signal_results
             details_map = {k: v.details for k, v in analyzer_results.items()}
