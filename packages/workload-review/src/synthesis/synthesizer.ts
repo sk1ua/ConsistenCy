@@ -272,11 +272,10 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const fileLabels = options.deterministicResult.files?.map(f => f.riskLabel) ?? [];
       const hasSkipped = fileLabels.includes("skipped");
       const hasNoBaseline = fileLabels.includes("No Baseline");
-      const staticRiskLabel = hasSkipped
-        ? "skipped"
-        : hasNoBaseline
-          ? "No Baseline"
-          : (options.deterministicResult.files?.[0]?.riskLabel ?? undefined);
+      const baselineLabels = [hasSkipped ? "skipped" : undefined, hasNoBaseline ? "No Baseline" : undefined].filter(Boolean);
+      const staticRiskLabel = baselineLabels.length > 0
+        ? baselineLabels.join(" / ")
+        : (options.deterministicResult.files?.[0]?.riskLabel ?? undefined);
 
       const report = buildReviewReport({
         jobId,

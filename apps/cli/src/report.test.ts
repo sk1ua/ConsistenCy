@@ -83,6 +83,11 @@ const DEGRADED_COVERAGE: ReviewCoverage = {
 };
 
 describe("renderReport — the promise this module exists to keep", () => {
+  it("discloses mixed missing and skipped baselines without hiding either", () => {
+    const output = renderReport(report({ staticRiskLabel: "skipped / No Baseline" }), OPTIONS);
+    expect(output).toContain("No Baseline");
+    expect(output).toContain("Skipped");
+  });
   it("shows score, trigger, and corroborating specialists in default text output", () => {
     const output = renderReport(report({ findings: [finding({ score: 8, trigger: "An expired token is submitted", alsoReportedBy: ["Correctness", "Test"] })] }), OPTIONS);
     expect(output).toContain("评分 8/10");

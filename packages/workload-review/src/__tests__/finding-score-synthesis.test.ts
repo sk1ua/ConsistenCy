@@ -69,6 +69,17 @@ function driverWithScore(score: number): { driver: ModelDriver; summaryCalls: ()
 }
 
 describe("synthesis scoring (step 4)", () => {
+  it("preserves both missing and skipped baseline labels in the report", async () => {
+    const { workload } = rig(new TestModelDriver(), {
+      deterministic: makeDeterministicStage({ analyzeFiles: [
+        { path: "src/index.ts", riskScore: 0, riskLabel: "skipped", riskColor: "GREY", signals: {}, findings: [], confidence: 0 },
+        { path: "other.ts", riskScore: 0, riskLabel: "No Baseline", riskColor: "GREY", signals: {}, findings: [], confidence: 0 }
+      ] })
+    });
+    const result = await workload.run();
+    expect(result.report.staticRiskLabel).toContain("skipped");
+    expect(result.report.staticRiskLabel).toContain("No Baseline");
+  });
   it("sends deduplicated appendix issues for scoring and filters their low scores", async () => {
     const repo = makeFixtureRepo();
     const content = repo.context.fileContents["src/index.ts"]!;
