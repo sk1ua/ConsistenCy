@@ -27,7 +27,7 @@ export const FINDING_SCORE_INSTRUCTION = [
   "8-10: the finding names a concrete input or scenario that fails in code this change introduced.",
   "3-7: the failure is plausible but its trigger or its connection to a changed line is not demonstrated; a \"please confirm\" or speculative comment scores at most 6.",
   "0-2: pure style, naming, comment, docstring, or type-annotation preference.",
-  "0: the finding is about deleted code or recommends reverting to an older implementation.",
+  "0: a deleted-code-only claim or a pure preference for an older implementation without a demonstrated defect in the current head. Do not penalize a real introduced vulnerability solely because its remediation restores a previous safe API or guard.",
   "Score every preExistingIssues entry too, using the same trigger and impact criteria without penalizing its baseline age; 8-10 means a concrete demonstrated failure. These entries are appendix-only and must not be described as introduced by this PR.",
   "Score only the findings supplied, using their exact ids; do not invent findings or ids."
 ].join(" ");
