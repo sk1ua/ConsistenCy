@@ -36,6 +36,14 @@ function summariseGrounding(changedFileCount: number, rejected: number, downgrad
   return parts.join("; ");
 }
 
+const severityRank = { critical: 5, high: 4, medium: 3, low: 2, info: 1 } as const;
+
+function capFindings(findings: ReviewFinding[], limit: number): ReviewFinding[] {
+  return [...findings].sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
+    || (right.evidence.length + right.reasoning.length) - (left.evidence.length + left.reasoning.length)
+    || left.id.localeCompare(right.id)).slice(0, limit);
+}
+
 export interface ReviewAgentBodyOptions {
   readonly fiber: AgentFiberHandle;
   readonly scheduler: KernelScheduler;
@@ -54,10 +62,12 @@ export interface ReviewAgentBodyOptions {
   readonly persistence: ReviewPersistence;
   readonly providerName: string;
   readonly model?: string;
+  readonly maxFindingsPerSpecialist?: number;
 }
 
 export interface ReviewAgentBodyResult {
   readonly findings: ReviewFinding[];
+  readonly preExistingIssues: ReviewFinding[];
   readonly tokenUsage?: TokenUsage;
   readonly rejectedCount: number;
   readonly downgradedCount: number;
@@ -89,6 +99,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.reportLanguage,
         options.relevantContext,
         options.focusAreas,
+        options.maxFindingsPerSpecialist ?? 3,
       );
 
       // WAIT_LLM: a remote inference operation is being submitted. This
@@ -116,6 +127,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.evidenceStore,
         options.headSha,
       );
+      const capped = capFindings(grounded.findings, options.maxFindingsPerSpecialist ?? 3);
 
       const run: AgentRun = {
         id: `agent_${randomUUID()}`,
@@ -129,7 +141,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
           grounded.rejected.length,
           grounded.downgraded.length,
         ),
-        findings: grounded.findings,
+        findings: capped,
         tokenUsage: modelResult.tokenUsage,
         provider: providerName as AgentRun["provider"],
         model,
@@ -138,7 +150,8 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       scheduler.succeedAgent(agentId);
 
       return {
-        findings: grounded.findings,
+        findings: capped,
+        preExistingIssues: grounded.preExisting.map(decision => decision.finding),
         tokenUsage: modelResult.tokenUsage,
         rejectedCount: grounded.rejected.length,
         downgradedCount: grounded.downgraded.length,
@@ -161,6 +174,6 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       model,
     };
     persistence.saveAgentRun(run);
-    return { findings: [], rejectedCount: 0, downgradedCount: 0, error: message };
+    return { findings: [], preExistingIssues: [], rejectedCount: 0, downgradedCount: 0, error: message };
   }
 }

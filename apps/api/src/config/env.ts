@@ -68,6 +68,7 @@ export const envSchema = z.object({
   LLM_API_KEY: optionalSecret,
   LLM_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_LLM_TEMPERATURE: emptyAsUnset(z.coerce.number().min(0).max(2).optional()),
+  CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST: z.coerce.number().int().min(1).max(20).default(3),
   ANTHROPIC_API_KEY: optionalSecret,
   ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),

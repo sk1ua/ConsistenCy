@@ -40,6 +40,7 @@ export interface SynthesizerBodyOptions {
   readonly headSha: string;
   readonly deterministicResult: DomainAnalyzeSuccess;
   readonly findings: ReviewFinding[];
+  readonly preExistingIssues?: ReviewFinding[];
   readonly agentRuns: AgentRun[];
   readonly deterministic: DeterministicStage;
   readonly facades: AgentFacadeSet;
@@ -231,6 +232,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         llmModel: model,
         agentRuns: agentRunsForReport,
         findings: options.findings,
+        preExistingIssues: options.preExistingIssues,
         score,
         riskLevel,
         coverage,

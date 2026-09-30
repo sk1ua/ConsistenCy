@@ -106,6 +106,7 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `CONSISTENCY_PI_CONFIG_DIR` | `<database-dir>/pi` | Server-side isolation directory for the bundled Pi runtime's auth storage |
 | `CONSISTENCY_PI_MODELS_PATH` | *empty* | Explicit Pi `models.json` path for custom model endpoints; restart after changing the file |
 | `CONSISTENCY_LLM_TEMPERATURE` | *empty* | Request temperature from 0 to 2; empty uses the provider default |
+| `CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST` | `3` | Maximum grounded main-list findings kept from each specialist (1–20); findings more than three lines from changed code go to `preExistingIssues` instead |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
 | `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow routes (API layer; the repo ships no login UI) |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the OAuth broker used by the API's `/oauth/desktop/*` routes (`apps/api/src/server.ts:160`) |

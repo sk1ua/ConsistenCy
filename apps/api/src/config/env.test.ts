@@ -110,6 +110,9 @@ describe("loadEnv", () => {
     const config = loadEnv({ CONSISTENCY_PI_MODELS_PATH: "./fixtures/models.json", CONSISTENCY_LLM_TEMPERATURE: "0" });
     expect(config.piModelsPath).toBe(resolve("./fixtures/models.json"));
     expect(config.CONSISTENCY_LLM_TEMPERATURE).toBe(0);
+    expect(config.CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST).toBe(3);
+    expect(loadEnv({ CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST: "5" }).CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST).toBe(5);
+    expect(() => loadEnv({ CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST: "0" })).toThrow();
     expect(() => loadEnv({ CONSISTENCY_LLM_TEMPERATURE: "NaN" })).toThrow();
     expect(() => loadEnv({ CONSISTENCY_LLM_TEMPERATURE: "3" })).toThrow();
   });

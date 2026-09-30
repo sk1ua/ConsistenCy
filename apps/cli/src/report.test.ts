@@ -124,6 +124,13 @@ describe("renderReport — the promise this module exists to keep", () => {
     expect(output).toContain("发现 1 项");
   });
 
+  it("puts off-diff findings only in a trailing pre-existing appendix", () => {
+    const output = renderReport(report({ findings: [], preExistingIssues: [finding({ id: "old" })], coverage: { ...COMPLETE_COVERAGE } }), OPTIONS);
+    expect(output).toContain("Pre-existing issues (1)");
+    expect(output).toContain("（无 findings）");
+    expect(output.indexOf("Pre-existing issues")).toBeGreaterThan(output.indexOf("agent 执行"));
+  });
+
   it("hides reasoning behind verbose and truncates behind limit", () => {
     const findings = [finding({ id: "f1" }), finding({ id: "f2" }), finding({ id: "f3" })];
     const quiet = renderReport(report({ findings, coverage: { ...COMPLETE_COVERAGE } }), { ...OPTIONS, limit: 1 });

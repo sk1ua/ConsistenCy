@@ -417,6 +417,12 @@ export function renderReport(report: ReviewReport, options: RenderOptions): stri
   lines.push(...renderConstraints(report, constraints, palette));
   lines.push(...renderAgents(report, palette));
   lines.push(...renderFooter(report, palette));
+  if (report.preExistingIssues?.length) {
+    lines.push("", palette.bold(`Pre-existing issues (${report.preExistingIssues.length})`));
+    for (const finding of report.preExistingIssues) {
+      lines.push(palette.dim(`  ${finding.file}:${finding.startLine ?? "?"} ${oneLine(finding.title)}`));
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
 

@@ -124,6 +124,7 @@ export function buildReviewReport(input: {
   llmModel?: string;
   agentRuns: AgentRun[];
   findings: ReviewFinding[];
+  preExistingIssues?: ReviewFinding[];
   score: number;
   riskLevel: RiskLevel;
   coverage?: ReviewCoverage;
@@ -146,6 +147,7 @@ export function buildReviewReport(input: {
     llmModel: input.llmModel,
     agentRuns: input.agentRuns,
     findings,
+    ...(input.preExistingIssues?.length ? { preExistingIssues: input.preExistingIssues } : {}),
     ruleVersion: "v2",
     ...(duplicates.length > 0 ? { duplicates } : {}),
     ...(input.coverage ? { coverage: input.coverage } : {}),

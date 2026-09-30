@@ -27,7 +27,7 @@ export type GroundingContext = {
   files: Map<string, GroundedFileFacts>;
 };
 
-export type GroundingOutcome = "accepted" | "downgraded" | "rejected";
+export type GroundingOutcome = "accepted" | "downgraded" | "rejected" | "pre_existing";
 
 export type GroundingDecision = {
   finding: ReviewFinding;
@@ -40,6 +40,7 @@ export type GroundingResult = {
   decisions: GroundingDecision[];
   rejected: GroundingDecision[];
   downgraded: GroundingDecision[];
+  preExisting: GroundingDecision[];
 };
 
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
@@ -47,19 +48,39 @@ const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 export function changedLineRanges(patch: string | undefined): LineRange[] {
   if (!patch) return [];
   const ranges: LineRange[] = [];
+  const hunkRanges: LineRange[] = [];
+  let lineNumber: number | undefined;
+  let sawBodyLine = false;
   for (const line of patch.split("\n")) {
     const match = HUNK_HEADER.exec(line);
-    if (match === null) continue;
-    const start = Number(match[1]);
-    const length = match[2] === undefined ? 1 : Number(match[2]);
-    if (!Number.isFinite(start)) continue;
-    ranges.push({ start, end: start + Math.max(length, 1) - 1 });
+    if (match !== null) {
+      const start = Number(match[1]);
+      const length = match[2] === undefined ? 1 : Number(match[2]);
+      if (!Number.isFinite(start)) continue;
+      lineNumber = start;
+      hunkRanges.push({ start, end: start + Math.max(length, 1) - 1 });
+      continue;
+    }
+    if (lineNumber === undefined) continue;
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      sawBodyLine = true;
+      const previous = ranges.at(-1);
+      if (previous && previous.end + 1 === lineNumber) previous.end = lineNumber;
+      else ranges.push({ start: lineNumber, end: lineNumber });
+      lineNumber += 1;
+    } else if (line.startsWith("-")) {
+      sawBodyLine = true;
+    } else if (line.startsWith(" ")) {
+      sawBodyLine = true;
+      lineNumber += 1;
+    }
   }
-  return ranges;
+  // Older context fixtures contain only hunk headers; preserve their range.
+  return sawBodyLine ? ranges : hunkRanges;
 }
 
-function intersects(ranges: LineRange[], start: number, end: number): boolean {
-  return ranges.some(range => start <= range.end && end >= range.start);
+function intersects(ranges: LineRange[], start: number, end: number, padding = 0): boolean {
+  return ranges.some(range => start <= range.end + padding && end >= range.start - padding);
 }
 
 export function buildGroundingContext(
@@ -181,19 +202,18 @@ export function groundReviewFindings(
       continue;
     }
 
-    if (finding.confidence !== "confirmed") {
-      decisions.push({ finding: attachEvidence(finding, evidenceStore, headSha), outcome: "accepted" });
+    const { startLine, endLine } = finding;
+    if (startLine === undefined || endLine === undefined || !intersects(facts.changedRanges, startLine, endLine, 3)) {
+      decisions.push({
+        finding,
+        outcome: "pre_existing",
+        reason: `Lines of '${finding.file}' are not anchored within three lines of added or modified code`
+      });
       continue;
     }
 
-    const { startLine, endLine } = finding;
-
-    if (!intersects(facts.changedRanges, startLine, endLine)) {
-      decisions.push({
-        finding: downgradeToLikely(finding),
-        outcome: "downgraded",
-        reason: `Lines ${startLine}-${endLine} of '${finding.file}' are outside the changed hunks`
-      });
+    if (finding.confidence !== "confirmed") {
+      decisions.push({ finding: attachEvidence(finding, evidenceStore, headSha), outcome: "accepted" });
       continue;
     }
 
@@ -227,10 +247,11 @@ export function groundReviewFindings(
 
   return {
     findings: decisions
-      .filter(decision => decision.outcome !== "rejected")
+      .filter(decision => decision.outcome === "accepted" || decision.outcome === "downgraded")
       .map(decision => decision.finding),
     decisions,
     rejected: decisions.filter(decision => decision.outcome === "rejected"),
-    downgraded: decisions.filter(decision => decision.outcome === "downgraded")
+    downgraded: decisions.filter(decision => decision.outcome === "downgraded"),
+    preExisting: decisions.filter(decision => decision.outcome === "pre_existing")
   };
 }

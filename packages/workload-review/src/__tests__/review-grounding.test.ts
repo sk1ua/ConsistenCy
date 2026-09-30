@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import type { ReviewFinding, TokenUsage } from "@consistency/schema";
 import { parseReviewReport } from "@consistency/schema";
 import { EvidenceStore } from "@consistency/kernel";
+import { changedLineRanges } from "../agents/grounding.js";
 import {
   ReviewWorkload,
   buildGroundingContext,
@@ -28,7 +29,25 @@ import {
 
 afterEach(cleanupTmpDirs);
 
-function rigWithDriver(driver: ModelDriver, hook?: ReviewWorkloadOptions["onAgentAdmitted"]) {
+it("tracks added lines exactly and moves all off-diff confidence levels to the appendix", () => {
+  expect(changedLineRanges("@@ -8,4 +8,5 @@\n context\n-old\n+new\n context\n+another\n context")).toEqual([
+    { start: 9, end: 9 }, { start: 11, end: 11 }
+  ]);
+  const grounding: GroundingContext = { files: new Map([["src/index.ts", {
+    changedRanges: [{ start: 10, end: 10 }], lineCount: 30, hasDeterministicSignal: true
+  }]]) };
+  const base = { ...securityFinding(), startLine: 14, endLine: 14 };
+  const findings: ReviewFinding[] = [
+    { ...base, id: "confirmed", confidence: "confirmed" },
+    { ...base, id: "likely", confidence: "likely" },
+    { ...base, id: "hypothesis", confidence: "hypothesis", uncertainty: "Needs runtime confirmation" },
+  ];
+  const result = groundReviewFindings(findings, grounding, new EvidenceStore(), "a".repeat(40));
+  expect(result.findings).toHaveLength(0);
+  expect(result.preExisting).toHaveLength(3);
+});
+
+function rigWithDriver(driver: ModelDriver, hook?: ReviewWorkloadOptions["onAgentAdmitted"], maxFindingsPerSpecialist?: number) {
   const repo = makeFixtureRepo();
   const persistence = new TestPersistence();
   const options: ReviewWorkloadOptions = {
@@ -41,11 +60,24 @@ function rigWithDriver(driver: ModelDriver, hook?: ReviewWorkloadOptions["onAgen
     publicationPolicy: "github_comment",
     accessMode: "github_app",
     onAgentAdmitted: hook,
+    maxFindingsPerSpecialist,
   };
   return { repo, persistence, workload: new ReviewWorkload(options) };
 }
 
 describe("ReviewWorkload — evidence grounding", () => {
+  it("caps grounded findings per specialist after ranking severity", async () => {
+    const findings = (["low", "medium", "high", "info"] as const).map((severity, index) => ({
+      ...securityFinding(), id: `cap-${index}`, title: ["Alpha", "Beta", "Gamma", "Delta"][index]!,
+      severity, confidence: "likely" as const
+    }));
+    const driver = new TestModelDriver({ findingsByAgent: { Security: findings } });
+    const { workload } = rigWithDriver(driver, undefined, 2);
+    const result = await workload.run();
+    expect(result.report.findings).toHaveLength(2);
+    expect(result.report.findings.map(finding => finding.severity).sort()).toEqual(["high", "medium"]);
+  });
+
   it("AC-REV-9: actionable findings reference valid evidenceIds (§41 grounding trace)", async () => {
     const driver = new TestModelDriver({ findingsByAgent: { Security: [securityFinding()] } });
     const { repo, workload } = rigWithDriver(driver);

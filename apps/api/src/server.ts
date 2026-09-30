@@ -298,6 +298,7 @@ export const worker = new ReviewWorker({
     }),
     deterministicAnalyzer,
     reportLanguage: config.reportLanguage,
+    maxFindingsPerSpecialist: config.CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST,
     reviewWorkflow: config.reviewWorkflow,
     runtimeRegistry,
     reviewWorkflowSpec: () => {

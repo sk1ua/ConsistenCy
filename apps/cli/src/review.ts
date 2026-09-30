@@ -162,6 +162,7 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     jobStore,
     deterministicAnalyzer: analyzer,
     reportLanguage: options.reportLanguage ?? "zh-CN",
+    maxFindingsPerSpecialist: config.CONSISTENCY_MAX_FINDINGS_PER_SPECIALIST,
     workspaceRoot
   });
 

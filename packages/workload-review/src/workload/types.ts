@@ -144,6 +144,8 @@ export interface ReviewWorkloadOptions {
   readonly deterministic: DeterministicStage;
   readonly persistence: ReviewPersistence;
   readonly reportLanguage: "zh-CN" | "en-US";
+  /** Per-specialist finding cap, applied after grounding; default 3. */
+  readonly maxFindingsPerSpecialist?: number;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;

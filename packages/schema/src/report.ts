@@ -167,6 +167,8 @@ export const reviewReportSchema = z.object({
   llmModel: z.string().trim().min(1).optional(),
   agentRuns: z.array(agentRunSchema),
   findings: z.array(reviewFindingSchema),
+  /** Findings outside the changed-line scope; excluded from the main verdict and score. */
+  preExistingIssues: z.array(reviewFindingSchema).optional(),
   /**
    * Findings merged away by deterministic cross-agent deduplication
    * (same file, near-identical title). Kept for honesty instead of being

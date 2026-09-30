@@ -427,6 +427,7 @@ export class ReviewWorkload {
       // 8. Specialized agents (ACBs + COW forks + capability profiles).
       // -------------------------------------------------------------------
       const findings: ReviewFinding[] = [];
+      const preExistingIssues: ReviewFinding[] = [];
       const failedAgents: ReviewAgentName[] = [];
       const agentContextImages = new Map<string, ContextImageId>();
       const agentFacades = new Map<string, AgentFacadeSet>();
@@ -507,12 +508,14 @@ export class ReviewWorkload {
           reportLanguage: options.reportLanguage,
           relevantContext,
           focusAreas: plan.focusAreas,
+          maxFindingsPerSpecialist: options.maxFindingsPerSpecialist ?? 3,
           facades: runtime.facades,
           persistence,
           providerName: options.modelDriver.provider,
           model: options.modelDriver.model,
         });
         findings.push(...result.findings);
+        preExistingIssues.push(...result.preExistingIssues);
         if (result.error) {
           errors.push(`${agentName}: ${result.error}`);
           failedAgents.push(agentName);
@@ -573,6 +576,7 @@ export class ReviewWorkload {
         headSha: options.context.headSha,
         deterministicResult,
         findings,
+        preExistingIssues,
         agentRuns,
         deterministic: options.deterministic,
         facades: synthesizerRuntime.facades,
