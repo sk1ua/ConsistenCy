@@ -97,7 +97,9 @@ async function withFixture<T>(
       requests
     });
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    // The Pi runtime may still be flushing its auth-file writes when the test
+    // finishes; retry the tree removal instead of racing it.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 }

@@ -14,15 +14,26 @@ const secretPaths = [
   "config.OPENAI_API_KEY"
 ];
 
+/**
+ * Structured logs always go to STDERR.
+ *
+ * stdout is a data channel, not a log sink: `consistency review --json` prints
+ * its report there and must stay directly parseable (`... --json | jq`). A
+ * stderr destination also keeps the API daemon's stdout free for callers that
+ * pipe it.
+ */
 export function createLogger(options: LoggerOptions = {}): Logger {
-  return pino({
-    level: process.env.LOG_LEVEL ?? "info",
-    redact: {
-      paths: secretPaths,
-      censor: "[REDACTED]"
+  return pino(
+    {
+      level: process.env.LOG_LEVEL ?? "info",
+      redact: {
+        paths: secretPaths,
+        censor: "[REDACTED]"
+      },
+      ...options
     },
-    ...options
-  });
+    pino.destination({ dest: 2, sync: true })
+  );
 }
 
 export const logger = createLogger();
