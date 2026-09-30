@@ -289,9 +289,13 @@ export async function buildLocalContext(
 
   const maxFileBytes = dependencies.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const baseFileContents: Record<string, string> = {};
+  const skippedBaselinePaths: string[] = [];
   for (const file of changed) {
     if (toGitHubStatus(file.status) === "added") continue;
-    if (isSecretPath(file.path) || (file.previousPath !== undefined && isSecretPath(file.previousPath))) continue;
+    if (isSecretPath(file.path) || (file.previousPath !== undefined && isSecretPath(file.previousPath))) {
+      skippedBaselinePaths.push(file.path);
+      continue;
+    }
     const baselinePath = file.previousPath ?? file.path;
 
     try {
@@ -299,11 +303,16 @@ export async function buildLocalContext(
         cwd: repoPath,
         maxBytes: maxFileBytes
       });
-      if (stdout.includes("\0")) continue;
+      if (stdout.includes("\0")) {
+        skippedBaselinePaths.push(file.path);
+        continue;
+      }
 
       const outputSize = Buffer.byteLength(stdout, "utf8");
-      if (outputSize > maxFileBytes) continue;
-      if (budget.used + outputSize > budget.limit) continue;
+      if (outputSize > maxFileBytes || budget.used + outputSize > budget.limit) {
+        skippedBaselinePaths.push(file.path);
+        continue;
+      }
 
       baseFileContents[file.path] = stdout;
       if (file.previousPath && file.previousPath !== file.path && !isSecretPath(file.previousPath)) {
@@ -326,6 +335,7 @@ export async function buildLocalContext(
       diff,
       fileContents,
       baseFileContents,
+      ...(skippedBaselinePaths.length > 0 ? { skippedBaselinePaths } : {}),
       projectMetadata,
       workspacePath: repoPath
     }),

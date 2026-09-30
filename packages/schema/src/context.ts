@@ -27,6 +27,8 @@ export const prReviewContextSchema = z.object({
   diff: z.string(),
   fileContents: z.record(z.string()),
   baseFileContents: z.record(z.string()),
+  /** Paths where baseline was skipped due to size, budget, binary, or secret policy */
+  skippedBaselinePaths: z.array(z.string()).optional(),
   projectMetadata: z.record(z.string()),
   workspacePath: nonEmpty
 }).strict().superRefine((context, issues) => {

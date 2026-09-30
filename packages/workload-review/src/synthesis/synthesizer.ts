@@ -274,6 +274,15 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const agentRunsForReport = [...options.agentRuns, run];
       persistence.saveAgentRun(run);
 
+      const fileLabels = options.deterministicResult.files?.map(f => f.riskLabel) ?? [];
+      const hasSkipped = fileLabels.includes("skipped");
+      const hasNoBaseline = fileLabels.includes("No Baseline");
+      const staticRiskLabel = hasSkipped
+        ? "skipped"
+        : hasNoBaseline
+          ? "No Baseline"
+          : (options.deterministicResult.files?.[0]?.riskLabel ?? undefined);
+
       const report = buildReviewReport({
         jobId,
         repositoryFullName: options.repositoryFullName,
@@ -291,6 +300,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         preExistingIssues,
         score,
         riskLevel,
+        staticRiskLabel,
         coverage,
         retrieval: options.deterministicResult.evidencePack
       });

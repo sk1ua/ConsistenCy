@@ -251,6 +251,7 @@ export function buildReviewReport(input: {
   };
   score: number;
   riskLevel: RiskLevel;
+  staticRiskLabel?: string;
   coverage?: ReviewCoverage;
   retrieval?: RetrievalTrace;
   createdAt?: string;
@@ -268,6 +269,7 @@ export function buildReviewReport(input: {
     summary: input.summary,
     score: input.score,
     riskLevel: input.riskLevel,
+    ...(input.staticRiskLabel ? { staticRiskLabel: input.staticRiskLabel } : {}),
     riskBand: riskBandForFindings(findings),
     llmProvider: input.llmProvider,
     llmModel: input.llmModel,

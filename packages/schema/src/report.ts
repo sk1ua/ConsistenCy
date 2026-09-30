@@ -154,6 +154,8 @@ export const reviewReportSchema = z.object({
   summary: z.string().trim().min(1),
   score: z.number().int().min(0).max(100),
   riskLevel: riskLevelSchema,
+  /** Deterministic static analysis label (e.g. "No Baseline", "Moderate Drift", "skipped") */
+  staticRiskLabel: z.string().optional(),
   /**
    * Verdict band derived from the FINAL LLM findings' severity distribution
    * (any high → high; else any medium → medium; else low; no findings →

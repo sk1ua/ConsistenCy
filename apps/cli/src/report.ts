@@ -87,14 +87,18 @@ const RISK_LABEL: Record<string, string> = {
   high: "高",
   medium: "中",
   low: "低",
-  none: "无"
+  none: "无",
+  no_baseline: "无基线 (No Baseline)",
+  skipped: "已跳过 (Skipped)"
 };
 
 export function riskBandLabel(band: string | undefined): string {
   return band === undefined ? "未记录" : RISK_LABEL[band] ?? band;
 }
 
-export function riskLevelLabel(level: string): string {
+export function riskLevelLabel(level: string, staticLabel?: string): string {
+  if (staticLabel === "No Baseline" || level === "no_baseline") return "无基线 (No Baseline)";
+  if (staticLabel === "skipped" || level === "skipped") return "已跳过基线比对 (Skipped)";
   return RISK_LABEL[level] ?? level;
 }
 
@@ -402,7 +406,7 @@ export function renderReport(report: ReviewReport, options: RenderOptions): stri
     lines.push(palette.dim("─".repeat(width)));
     lines.push("");
     lines.push(
-      `  ${palette.bold(String(report.score).padStart(3, " "))} 静态分析评分 · 风险 ${riskLevelLabel(report.riskLevel)}` +
+      `  ${palette.bold(String(report.score).padStart(3, " "))} 静态分析评分 · 风险 ${riskLevelLabel(report.riskLevel, report.staticRiskLabel)}` +
       `    结论风险带 ${riskBandLabel(report.riskBand)}`
     );
     lines.push(palette.dim("      （两者独立：评分来自确定性静态分析，风险带来自最终 findings 的严重度分布）"));

@@ -878,13 +878,14 @@ export class ReviewWorkload {
     await bridge.flush();
 
     const startedAt = new Date().toISOString();
+    const skippedSet = new Set(agentContext.skippedBaselinePaths ?? []);
     const files = agentContext.changedFiles.map((cf) => ({
       path: cf.path,
       content: agentContext.fileContents[cf.path] || "",
       // Absent base content means "no baseline", which is NOT the same as an
       // empty file: the engine must be able to tell the two apart, because a
       // drift score against a missing baseline is meaningless.
-      baseline: agentContext.baseFileContents[cf.path],
+      baseline: skippedSet.has(cf.path) ? undefined : agentContext.baseFileContents[cf.path],
       diffHunks: cf.patch ? cf.patch.split("\n@@").map((h, i) => (i === 0 ? h : "@@" + h)) : [],
     }));
     const scope = options.deterministicScope ?? "diff";
@@ -910,6 +911,13 @@ export class ReviewWorkload {
         }
         // Step 5: only the findings that land on the change reach the review.
         const scoped = scopeDeterministicFindings(response, changedRangesByFile, scope);
+        if (scoped.ok) {
+          for (const file of scoped.files) {
+            if (skippedSet.has(file.path)) {
+              file.riskLabel = "skipped";
+            }
+          }
+        }
         const run: AgentRun = {
           id: `agent_${randomUUID()}`,
           jobId,

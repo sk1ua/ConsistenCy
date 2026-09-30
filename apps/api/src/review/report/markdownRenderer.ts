@@ -37,7 +37,7 @@ export function renderReviewComment(report: ReviewReport, options: {
     "",
     mode,
     "",
-    `**Score:** ${report.score}/100 · **Static risk:** ${report.riskLevel.toUpperCase()} · **Finding risk:** ${(report.riskBand ?? riskBandForFindings(report.findings)).toUpperCase()} · **Findings:** ${report.findings.length}`,
+    `**Score:** ${report.score}/100 · **Static risk:** ${(report.staticRiskLabel ?? report.riskLevel).toUpperCase()} · **Finding risk:** ${(report.riskBand ?? riskBandForFindings(report.findings)).toUpperCase()} · **Findings:** ${report.findings.length}`,
     report.duplicates && report.duplicates.length > 0
       ? `_${report.duplicates.length} duplicate finding(s) were merged deterministically; the finding count excludes merged duplicates._`
       : "",
