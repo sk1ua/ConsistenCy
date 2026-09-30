@@ -3,6 +3,9 @@ import {
   mergeTokenUsage,
   tokenUsageFromError,
   recordTokenUsageOnError,
+  findingScoresFromError,
+  recordFindingScoresOnError,
+  type FindingScore,
   type TokenUsage,
   type AgentRun,
   type LLMStreamEvent,
@@ -213,12 +216,14 @@ export class RoutedLLMProvider implements LLMProvider {
     signal?: AbortSignal
   ): Promise<StructuredResult<T>> {
     let failedUsage: TokenUsage | undefined;
+    const failedScores = new Map<string, FindingScore>();
     const trackedCall = async (provider: LLMProvider): Promise<StructuredResult<T>> => {
       try {
         const result = await call(provider);
         return failedUsage ? { ...result, tokenUsage: mergeTokenUsage(failedUsage, result.tokenUsage) } : result;
       } catch (error) {
         failedUsage = mergeTokenUsage(failedUsage, tokenUsageFromError(error));
+        for (const score of findingScoresFromError(error)) failedScores.set(score.id, score);
         throw error;
       }
     };
@@ -238,6 +243,7 @@ export class RoutedLLMProvider implements LLMProvider {
     } catch (error) {
       // Preserve canonical routing/cancellation error identity and semantics.
       recordTokenUsageOnError(error, failedUsage);
+      recordFindingScoresOnError(error, [...failedScores.values()]);
       throw error;
     }
   }

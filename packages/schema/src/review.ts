@@ -148,6 +148,45 @@ export const findingScoreSchema = z.object({
 }).strict();
 export type FindingScore = z.infer<typeof findingScoreSchema>;
 
+/** Accept the legacy model spelling without weakening the canonical schema. */
+export function normalizeFindingScore(input: unknown): unknown {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return input;
+  const value = input as Record<string, unknown>;
+  if (!("scoreReason" in value)) return input;
+  const { scoreReason, ...rest } = value;
+  return { ...rest, reason: rest.reason ?? scoreReason };
+}
+
+export function recoverFindingScores(input: unknown): FindingScore[] {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap(entry => {
+    const parsed = findingScoreSchema.safeParse(normalizeFindingScore(entry));
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+const errorFindingScores = new WeakMap<object, readonly FindingScore[]>();
+
+export function recordFindingScoresOnError(error: unknown, scores: readonly FindingScore[]): void {
+  if (error !== null && typeof error === "object" && scores.length) errorFindingScores.set(error, scores);
+}
+
+export function findingScoresFromError(error: unknown): FindingScore[] {
+  const seen = new Set<object>();
+  let current = error;
+  while (current !== null && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const recorded = errorFindingScores.get(current);
+    if (recorded) return [...recorded];
+    if ("findingScores" in current) {
+      const scores = recoverFindingScores(current.findingScores);
+      if (scores.length) return scores;
+    }
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return [];
+}
+
 export const tokenUsageSchema = z.object({
   inputTokens: z.number().int().nonnegative().optional(),
   outputTokens: z.number().int().nonnegative().optional(),

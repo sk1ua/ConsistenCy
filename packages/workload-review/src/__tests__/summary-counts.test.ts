@@ -83,6 +83,34 @@ describe("final summary counts", () => {
     expect(result.report.summary).not.toContain("four review findings");
   });
 
+  it("retains low-score filtering and per-file caps after summary parsing fails", async () => {
+    const repo = makeFixtureRepo();
+    const candidates = ["credential", "timer", "parser", "buffer", "lock"].map((topic, index) => ({
+      ...finding(`candidate_${index}`),
+      title: topic,
+      evidence: ["Secret leaks through public output", "Cancellation leaves scheduled callbacks active", "Empty values bypass validation", "Oversized allocation exhausts available memory", "Concurrent writes deadlock waiting threads"][index]!,
+      trigger: topic, tags: [`rule:${topic}`],
+    }));
+    const inner = new TestModelDriver({ findingsByAgent: { Security: candidates.slice(0, 3), Correctness: candidates.slice(3).map(f => ({ ...f, agent: "Correctness" as const })) } });
+    const driver: ModelDriver = {
+      provider: inner.provider, model: inner.model,
+      invokeStructured: request => inner.invokeStructured(request),
+      invokeAgentFindings: request => inner.invokeAgentFindings(request),
+      invokeSummary: async () => {
+        throw Object.assign(new Error("invalid summary scores"), { findingScores: [{ id: "candidate_0", score: 1, reason: "Below floor" }] });
+      },
+    };
+    const result = await new ReviewWorkload({
+      snapshot: repo.snapshot, context: repo.context, modelDriver: driver,
+      deterministic: makeDeterministicStage(), persistence: new TestPersistence(), reportLanguage: "en-US",
+      publicationPolicy: "disabled", accessMode: "local_git",
+    }).run();
+    expect(result.report.coverage?.outcome).toBe("degraded");
+    expect(result.report.findings).toHaveLength(3);
+    expect(result.report.findings.map(f => f.id)).not.toContain("candidate_0");
+    expect(result.report.filteredFindingCount).toBe(2);
+  });
+
   it("does not reuse stale canonical counts on summary failure or imply a clean degraded review", async () => {
     const repo = makeFixtureRepo();
     const inner = new TestModelDriver();

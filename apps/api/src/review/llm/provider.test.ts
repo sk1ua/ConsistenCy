@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { findingScoresFromError } from "@consistency/schema";
 import { BaseLLMProvider } from "./provider";
 import { logger } from "../../config/logger";
 import { z } from "zod";
@@ -7,6 +8,35 @@ import { createLLMProvider } from "./factory";
 import { MockLLMProvider } from "./mockProvider";
 
 describe("LLM providers", () => {
+  it("normalizes legacy scoreReason without repair or degradation", async () => {
+    class LegacyProvider extends BaseLLMProvider {
+      readonly name = "test";
+      calls = 0;
+      protected async complete() {
+        this.calls += 1;
+        return { content: JSON.stringify({ summary: "Concrete regression.", scores: [{ id: "finding_1", score: 2, scoreReason: "No demonstrated impact" }] }) };
+      }
+    }
+    const provider = new LegacyProvider();
+    const result = await provider.generateSummary({ systemPrompt: "test", userPrompt: "test" });
+    expect(result.data).toEqual({ summary: "Concrete regression.", scores: [{ id: "finding_1", score: 2, reason: "No demonstrated impact" }] });
+    expect(provider.calls).toBe(1);
+  });
+
+  it("recovers validated scores when another score fails strict parsing", async () => {
+    class PartialProvider extends BaseLLMProvider {
+      readonly name = "test";
+      protected async complete() {
+        return { content: JSON.stringify({ summary: "Overview", scores: [
+          { id: "low", score: 1, scoreReason: "No concrete impact" },
+          { id: "invalid", score: 99, reason: "Out of range" },
+        ] }) };
+      }
+    }
+    const error = await new PartialProvider().generateSummary({ systemPrompt: "test", userPrompt: "test" }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(findingScoresFromError(error)).toEqual([{ id: "low", score: 1, reason: "No concrete impact" }]);
+  });
   it("counts malformed-response tokens and logs both attempts once", async () => {
     class RetryingProvider extends BaseLLMProvider {
       readonly name = "test";

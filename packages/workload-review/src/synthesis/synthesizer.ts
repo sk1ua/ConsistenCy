@@ -20,7 +20,7 @@ import type {
   ReviewReport,
   TokenUsage,
 } from "@consistency/schema";
-import { tokenUsageFromError, recordTokenUsageOnError } from "@consistency/schema";
+import { tokenUsageFromError, recordTokenUsageOnError, findingScoresFromError } from "@consistency/schema";
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildComposeReviewFileResults } from "./compose.js";
 import { buildReviewReport, deduplicateAndSortFindings } from "./report.js";
@@ -188,6 +188,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
           : canonicalOverview;
         scores = summaryResult.scores ?? [];
       } catch (caught) {
+        scores = findingScoresFromError(caught);
         tokenUsage ??= tokenUsageFromError(caught);
         paidUsage = tokenUsage;
         error = caught instanceof Error ? caught.message : "Unknown synthesizer failure";

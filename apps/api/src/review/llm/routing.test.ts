@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LlmConnectionProfile } from "@consistency/schema";
+import { findingScoresFromError, type LlmConnectionProfile } from "@consistency/schema";
 import { LlmProviderError } from "./errors";
 import { LlmRoutingError, RoutedLLMProvider } from "./routing";
 import type { LLMProvider, StructuredInvocation, StructuredResult } from "./types";
@@ -88,6 +88,14 @@ async function summaryError(provider: RoutedLLMProvider, signal?: AbortSignal): 
 }
 
 describe("RoutedLLMProvider", () => {
+  it("preserves recoverable scores on the canonical routing error", async () => {
+    const scores = [{ id: "low", score: 1, reason: "No concrete impact" }];
+    const underlying = scriptedProvider("deepseek", [Object.assign(new Error("invalid scores"), { findingScores: scores })]);
+    const provider = routed([profile("primary", "deepseek")], new Map([["primary", underlying]]));
+    const error = await summaryError(provider);
+    expect(error).toBeInstanceOf(LlmRoutingError);
+    expect(findingScoresFromError(error)).toEqual(scores);
+  });
   it("walks the configured chain in order and pins the first profile that succeeds", async () => {
     const primary = scriptedProvider("deepseek", [rateLimited()], "deepseek-v4-flash");
     const fallback = scriptedProvider("openai", ["ok"], "gpt-4.1-mini");

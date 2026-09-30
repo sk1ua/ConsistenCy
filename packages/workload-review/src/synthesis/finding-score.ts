@@ -23,7 +23,7 @@ export const DEFAULT_MAX_FINDINGS_PER_FILE = 3;
  * it so the instruction and the thresholds cannot drift apart.
  */
 export const FINDING_SCORE_INSTRUCTION = [
-  "For every supplied finding, set an integer \"score\" from 0 to 10 and a one-sentence \"scoreReason\".",
+  "For every supplied finding, set an integer \"score\" from 0 to 10 and a one-sentence \"reason\".",
   "8-10: the finding names a concrete input or scenario that fails in code this change introduced.",
   "3-7: the failure is plausible but its trigger or its connection to a changed line is not demonstrated; a \"please confirm\" or speculative comment scores at most 6.",
   "0-2: pure style, naming, comment, docstring, or type-annotation preference.",

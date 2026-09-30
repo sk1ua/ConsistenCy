@@ -1,5 +1,8 @@
 import {
   findingScoreSchema,
+  normalizeFindingScore,
+  recoverFindingScores,
+  type FindingScore,
   reviewFindingSchema,
   reviewAgentNameSchema,
   tokenUsageSchema,
@@ -27,7 +30,7 @@ import type {
  */
 const summarySchema = z.object({
   summary: z.string().trim().min(1),
-  scores: z.array(findingScoreSchema).optional()
+  scores: z.array(z.preprocess(normalizeFindingScore, findingScoreSchema)).optional()
 }).strict();
 
 function findingsSchemaForAgent(agent: z.infer<typeof reviewAgentNameSchema>) {
@@ -47,7 +50,7 @@ function findingsSchemaForAgent(agent: z.infer<typeof reviewAgentNameSchema>) {
 }
 
 export class StructuredOutputError extends Error {
-  constructor(message: string, public override readonly cause?: unknown, public readonly tokenUsage?: TokenUsage) {
+  constructor(message: string, public override readonly cause?: unknown, public readonly tokenUsage?: TokenUsage, public readonly findingScores?: readonly FindingScore[]) {
     super(message);
     this.name = "StructuredOutputError";
   }
@@ -89,6 +92,7 @@ export abstract class BaseLLMProvider implements LLMProvider {
     let previousContent = "";
     let lastError: unknown;
     let accumulatedUsage: TokenUsage | undefined;
+    const recoveredScores = new Map<string, FindingScore>();
     const agent = request.agent ?? (request.schemaName === "review-plan" ? "Planner" : request.schemaName === "review-summary" ? "Synthesizer" : request.schemaName);
     for (let attempt = 0; attempt < 2; attempt += 1) {
       // A cancelled run must not spend its repair attempt on a doomed call.
@@ -110,7 +114,11 @@ export abstract class BaseLLMProvider implements LLMProvider {
           throw request.signal.reason ?? new Error("LLM request was cancelled during dispatch");
         }
         previousContent = completion.content;
-        return { data: request.schema.parse(extractJson(completion.content)), tokenUsage: accumulatedUsage };
+        const decoded = extractJson(completion.content);
+        if (request.schemaName === "review-summary" && decoded !== null && typeof decoded === "object" && "scores" in decoded) {
+          for (const entry of recoverFindingScores(decoded.scores)) recoveredScores.set(entry.id, entry);
+        }
+        return { data: request.schema.parse(decoded), tokenUsage: accumulatedUsage };
       } catch (error) {
         attemptError = error;
         lastError = error;
@@ -143,7 +151,8 @@ export abstract class BaseLLMProvider implements LLMProvider {
     throw new StructuredOutputError(
       `Provider ${this.name} failed schema ${request.schemaName} after one repair attempt: ${detail.slice(0, 800)}`,
       lastError,
-      accumulatedUsage
+      accumulatedUsage,
+      [...recoveredScores.values()]
     );
   }
 
