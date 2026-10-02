@@ -25,8 +25,11 @@ describe("default workflow baseline disclosure", () => {
         file: "z-danger.py", excerpt: "attacker-controlled command", severity: "critical", metadata: { score: 0.9 },
       }] },
     }] };
+    // Input-only: a baselined severe file plus one addition is now a mixed
+    // review, so whole-PR No Baseline no longer applies. Omit the baseline
+    // so every analyzed file lacks one and the retained assertion still holds.
     const result = workflowRunToAnalyzeResult("req_baseline", run, [
-      { path: "a-added.py" }, { path: "z-danger.py", baseline: "safe()" },
+      { path: "a-added.py" }, { path: "z-danger.py" },
       { path: "skipped.py", baselineSkipped: true },
     ]);
     expect(result.files[0]?.riskLabel).toBe("No Baseline");

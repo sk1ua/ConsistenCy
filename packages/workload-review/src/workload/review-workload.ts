@@ -614,6 +614,13 @@ export class ReviewWorkload {
           .filter(file => (options.context.skippedBaselinePaths ?? []).includes(file.path)
             || !(file.path in options.context.baseFileContents))
           .map(file => file.path),
+        analyzedPaths: deterministicResult.files
+          .filter(file => file.confidence > 0 || file.findings.length > 0 || !/No Baseline|skipped|unsupported/i.test(file.riskLabel))
+          .map(file => file.path),
+        newFileCount: options.context.changedFiles.filter(file => file.status === "added").length,
+        notAnalyzedReason: deterministicResult.files.length === 0
+          ? "deterministic analysis returned no scored files"
+          : undefined,
         findings,
         preExistingIssues,
         totalCappedBySpecialists,

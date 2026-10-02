@@ -72,8 +72,8 @@ describe("synthesis scoring (step 4)", () => {
   it("preserves both missing and skipped baseline labels in the report", async () => {
     const { workload } = rig(new TestModelDriver(), {
       deterministic: makeDeterministicStage({ analyzeFiles: [
-        { path: "src/index.ts", riskScore: 0, riskLabel: "skipped", riskColor: "GREY", signals: {}, findings: [], confidence: 0 },
-        { path: "other.ts", riskScore: 0, riskLabel: "No Baseline", riskColor: "GREY", signals: {}, findings: [], confidence: 0 }
+        { path: "src/index.ts", riskScore: 0.1, riskLabel: "skipped", riskColor: "GREY", signals: { steps: ["style"] }, findings: ["baseline comparison skipped"], confidence: 1 },
+        { path: "other.ts", riskScore: 0, riskLabel: "No Baseline", riskColor: "GREY", signals: { steps: ["style"] }, findings: [], confidence: 1 }
       ] })
     });
     const result = await workload.run();

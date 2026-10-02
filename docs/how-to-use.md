@@ -96,6 +96,7 @@ npm run review -- --no-memory             # 本次不读写知识记忆
 报告里有两个**互不相同、永不合并**的风险数字，别把它们当成一个：
 
 - **`score` / `riskLevel`**：确定性静态分析给出的分数与档位。
+- **`staticRiskLabel`**：静态标签，不是“没意见 = 一致”。未分析或分析失败显示 `Not Analyzed (原因)`，不会显示 `Consistent`。只有全部被分析文件都没有基线时才显示 `No Baseline`。混合变更按有基线的文件计分，并注明新增文件数（例如 `Moderate Drift / 1 new file`）。
 - **`riskBand`**：最终 findings 的严重度带。
 
 另外有一段**约束块**会一直存在，它不是凑字数：

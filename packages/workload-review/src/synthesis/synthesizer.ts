@@ -46,6 +46,10 @@ export interface SynthesizerBodyOptions {
   readonly deterministicResult: DomainAnalyzeSuccess;
   /** Changed paths whose baseline content was absent or deliberately skipped. */
   readonly missingBaselinePaths?: readonly string[];
+  /** Paths the deterministic stage actually scored, used for the static label. */
+  readonly analyzedPaths?: readonly string[];
+  readonly newFileCount?: number;
+  readonly notAnalyzedReason?: string;
   readonly findings: ReviewFinding[];
   readonly preExistingIssues?: ReviewFinding[];
   readonly totalCappedBySpecialists?: number;
@@ -279,9 +283,21 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const agentRunsForReport = [...options.agentRuns, run];
       persistence.saveAgentRun(run);
 
-      const analyzed = new Set(options.deterministicResult.files.map(file => file.path));
-      const missingBaseline = (options.missingBaselinePaths ?? []).some(path => !analyzed.has(path));
-      const staticRiskLabel = staticRiskLabelForFiles(options.deterministicResult.files, { missingBaseline });
+      const scored = options.analyzedPaths ?? options.deterministicResult.files
+        .filter(file => file.confidence > 0 || file.findings.length > 0 || file.riskLabel.includes("No Baseline"))
+        .map(file => file.path);
+      const labeledMissing = options.deterministicResult.files
+        .filter(file => scored.includes(file.path) && file.riskLabel.includes("No Baseline"))
+        .map(file => file.path);
+      const missing = new Set([...(options.missingBaselinePaths ?? []).filter(path => scored.includes(path)), ...labeledMissing]);
+      const baselined = scored.filter(path => !missing.has(path));
+      const staticRiskLabel = staticRiskLabelForFiles(options.deterministicResult.files, {
+        analyzedPaths: scored,
+        baselinedPaths: baselined,
+        newFileCount: options.newFileCount ?? missing.size,
+        missingBaseline: scored.length > 0 && baselined.length === 0,
+        notAnalyzedReason: scored.length === 0 ? options.notAnalyzedReason ?? "deterministic analysis returned no scored files" : undefined,
+      });
 
       const report = buildReviewReport({
         jobId,

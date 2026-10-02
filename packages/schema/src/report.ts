@@ -230,26 +230,57 @@ export function riskBandForFindings(findings: Array<{ severity: Severity }>): "h
   return "none";
 }
 
+export type StaticRiskCoverage = {
+  /** Changed paths the deterministic stage actually scored. */
+  readonly analyzedPaths?: readonly string[];
+  /** Analyzed paths that had a usable baseline. */
+  readonly baselinedPaths?: readonly string[];
+  /** Added files that were not part of the baseline comparison. */
+  readonly newFileCount?: number;
+  /** Why nothing was analyzed, when the file list is not evidence of a clean review. */
+  readonly notAnalyzedReason?: string;
+  /** Every analyzed file lacked a baseline. A single new file is not enough. */
+  readonly missingBaseline?: boolean;
+};
+
+function usableRiskFiles(files: readonly DomainFileResult[], analyzed?: ReadonlySet<string>): DomainFileResult[] {
+  return files.filter(file => {
+    if (analyzed && !analyzed.has(file.path)) return false;
+    if (file.confidence === 0 && file.findings.length === 0 && Array.isArray(file.signals.steps) && file.signals.steps.length === 0) return false;
+    if (/^(?:skipped|unsupported|failed|not analyzed)$/i.test(file.riskLabel.trim())) return false;
+    return file.riskLabel.trim().length > 0 || file.findings.length > 0 || file.riskScore > 0;
+  });
+}
+
 /**
- * Select the peak file risk without losing any baseline-coverage warnings.
- * Callers that already know baseline coverage is missing should pass
- * `missingBaseline`; an empty file list is not itself proof of a missing
- * baseline. A blank per-file label is never a valid display value.
+ * Select the peak analyzed-file risk without treating an unanalyzed PR as clean.
+ * No Baseline applies only when every analyzed file lacks a baseline. Mixed
+ * additions keep the baselined peak and disclose the new-file count.
  */
 export function staticRiskLabelForFiles(
   files: readonly DomainFileResult[],
-  options?: { missingBaseline?: boolean }
+  options?: StaticRiskCoverage
 ): string {
-  const highest = [...files].sort((left, right) => right.riskScore - left.riskScore || left.path.localeCompare(right.path))[0];
-  if (!highest) return options?.missingBaseline ? "No Baseline" : "Consistent";
-  const peak = highest.riskLabel.trim();
-  const labels = [peak || (options?.missingBaseline ? "No Baseline" : "Consistent")];
-  if ((options?.missingBaseline || files.some(file => file.riskLabel.includes("No Baseline"))) && !labels[0]!.includes("No Baseline")) {
-    labels.push("No Baseline");
+  const analyzed = options?.analyzedPaths ? new Set(options.analyzedPaths) : undefined;
+  const usable = usableRiskFiles(files, analyzed);
+  const placeholderBaseline = files.filter(file => file.riskLabel.includes("No Baseline") && file.findings.length === 0 && file.confidence === 0);
+  if (usable.length === 0) {
+    if (options?.missingBaseline || (files.length > 0 && placeholderBaseline.length === files.length)) return "No Baseline";
+    const reason = options?.notAnalyzedReason ?? "deterministic analysis returned no scored files";
+    return `Not Analyzed (${reason})`;
   }
-  if (files.some(file => /\bskipped\b/i.test(file.riskLabel)) && !/\bskipped\b/i.test(labels[0]!)) {
-    labels.push("skipped");
-  }
+  const baselined = options?.baselinedPaths
+    ? usable.filter(file => options.baselinedPaths!.includes(file.path) && !file.riskLabel.includes("No Baseline"))
+    : usable.filter(file => !file.riskLabel.includes("No Baseline"));
+  const allMissing = options?.missingBaseline === true || (baselined.length === 0 && usable.every(file => file.riskLabel.includes("No Baseline")));
+  const ranked = (allMissing ? usable : baselined.length > 0 ? baselined : usable)
+    .slice()
+    .sort((left, right) => right.riskScore - left.riskScore || left.path.localeCompare(right.path));
+  const peak = ranked[0]!.riskLabel.trim() || (allMissing ? "No Baseline" : "Consistent");
+  const labels = [peak];
+  if (allMissing && !peak.includes("No Baseline")) labels.push("No Baseline");
+  else if (!allMissing && (options?.newFileCount ?? 0) > 0) labels.push(`${options!.newFileCount} new file${options!.newFileCount === 1 ? "" : "s"}`);
+  if (files.some(file => /\bskipped\b/i.test(file.riskLabel)) && !/\bskipped\b/i.test(labels.join(" "))) labels.push("skipped");
   return labels.filter(Boolean).join(" / ");
 }
 
