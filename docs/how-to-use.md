@@ -99,7 +99,7 @@ npm run review -- --no-memory             # 本次不读写知识记忆
 - **`staticRiskLabel`**：静态标签，不是“没意见 = 一致”。未分析或分析失败显示 `Not Analyzed (原因)`，不会显示 `Consistent`。只有全部被分析文件都没有基线时才显示 `No Baseline`。混合变更按有基线的文件计分，并注明新增文件数（例如 `Moderate Drift / 1 new file`）。
 - **`riskBand`**：最终 findings 的严重度带。
 
-`CONSISTENCY_LEAN=1` 是默认关闭的瘦审查：只跑 Correctness 和 Consistency，不调用 Planner。Consistency 的每条意见必须给出已有代码的文件、行号和原文引用，并且该引用要在所给内容的对应行附近原样出现，还不能是被批评的那几行；对不上的意见会被丢掉。未设置、`0` 和其他值都保持原来的六专家审查。
+`CONSISTENCY_LEAN=1` 是默认关闭的瘦审查：只跑 Correctness 和 Consistency，不调用 Planner。Consistency 使用单独的惯例提示，并能看到每个改动文件同目录、同扩展名、本 PR 未改动的最多两个兄弟文件。它的每条意见必须给出已有代码的文件、行号和原文引用，并且该引用要在所给内容（含兄弟文件）的对应行附近原样出现，还不能是被批评的那几行；对不上的意见会被丢掉。未设置、`0` 和其他值都保持原来的六专家审查，提示字节不变。
 
 `CONSISTENCY_SCORE_RUBRIC=1` 是另一个默认关闭的开关。打开后评分请求会看到编号后的改动代码，已核实的惯例偏离给高分，泛泛的测试建议和把预期改动当成破坏的意见会被压低，单文件上限从 3 提到 4。未设置、`0` 和其他值保持原来的评分说明和上限。
 

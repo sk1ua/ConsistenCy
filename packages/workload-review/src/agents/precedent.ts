@@ -2,22 +2,31 @@ import type { PRReviewContext, ReviewFinding } from "@consistency/schema";
 
 export type PrecedentStatus = "verified" | "missing" | "unverified";
 
+export interface PrecedentLookup {
+  readonly siblingFileContents?: Readonly<Record<string, string>>;
+}
+
 function foldWhitespace(text: string): string {
   return text.trim().replace(/\s+/g, " ");
 }
 
 /**
  * Lean Consistency citations must name a supplied line and quote it. A quote
- * that only matches the lines under criticism is not a precedent.
+ * that only matches the lines under criticism is not a precedent. Head content
+ * wins, then baseline content, then an unchanged sibling file.
  */
-export function verifyPrecedent(finding: ReviewFinding, context: PRReviewContext): PrecedentStatus {
+export function verifyPrecedent(
+  finding: ReviewFinding,
+  context: PRReviewContext,
+  lookup: PrecedentLookup = {},
+): PrecedentStatus {
   const precedent = finding.precedent;
   if (precedent === undefined) return "missing";
   const quote = foldWhitespace(precedent.quote);
   if (quote.replace(/\s/g, "").length < 8) return "unverified";
 
   const head = context.fileContents[precedent.file];
-  const source = head ?? context.baseFileContents[precedent.file];
+  const source = head ?? context.baseFileContents[precedent.file] ?? lookup.siblingFileContents?.[precedent.file];
   if (source === undefined) return "unverified";
   const lines = source.split(/\r?\n/);
   const start = Math.max(1, precedent.line - 2);

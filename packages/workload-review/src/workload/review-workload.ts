@@ -551,6 +551,7 @@ export class ReviewWorkload {
           reportLanguage: options.reportLanguage,
           compactContext: options.compactContext,
           citePrecedent: options.lean === true,
+          siblingReader: options.lean === true ? options.snapshot : undefined,
           relevantContext,
           focusAreas: plan.focusAreas,
           maxFindingsPerSpecialist: options.maxFindingsPerSpecialist ?? 3,

@@ -91,8 +91,9 @@ describe("lean Consistency precedent", () => {
     expect(explicit.userPrompt).toBe(plain.userPrompt);
     expect(plain.userPrompt).toContain("existing repository precedent");
     expect(plain.userPrompt).not.toContain("Every finding MUST cite a precedent");
-    const cited = buildAgentPrompt("Consistency", context(), undefined, [], "en-US", undefined, undefined, 3, false, true).userPrompt;
-    expect(cited).toContain("Every finding MUST cite a precedent: set `precedent` to {\"file\", \"line\", \"quote\"}");
+    const cited = buildAgentPrompt("Consistency", context(), undefined, [], "en-US", undefined, undefined, 3, false, true);
+    expect(cited.systemPrompt).toContain("Every finding MUST cite a precedent: set `precedent` to {\"file\", \"line\", \"quote\"}");
+    expect(cited.userPrompt).not.toContain("Every finding MUST cite a precedent");
   });
 
   it("caps an unverified Consistency score at 3 only for the v2 rubric", () => {
@@ -135,8 +136,10 @@ describe("lean Consistency precedent", () => {
     expect(consistency[0]?.tags).toEqual(["convention", "precedent:verified"]);
     expect(persistence.agentRuns.find(run => run.agentName === "Consistency")?.inputSummary)
       .toContain("1 finding(s) rejected: unverifiable precedent");
-    expect(driver.requests.find(request => request.agent === "Consistency")?.userPrompt)
+    expect(driver.requests.find(request => request.agent === "Consistency")?.systemPrompt)
       .toContain("Every finding MUST cite a precedent");
+    expect(driver.requests.find(request => request.agent === "Consistency")?.systemPrompt)
+      .not.toContain("An empty findings list is welcome");
   });
 
   it("runs only Correctness and Consistency and does not call the Planner when lean", async () => {

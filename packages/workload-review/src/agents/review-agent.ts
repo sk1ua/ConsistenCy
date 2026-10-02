@@ -25,6 +25,8 @@ import { buildAgentPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
 import { hasSpecificChangedCoverageTarget, isMissingCoverageFinding } from "./test-coverage.js";
 import { verifyPrecedent } from "./precedent.js";
+import type { SiblingFileReader } from "./sibling-context.js";
+import { readSiblingFileContents } from "./sibling-context.js";
 import type { AgentFacadeSet, ReviewAgentName, ReviewPersistence } from "../workload/types.js";
 
 function errorMessage(error: unknown): string {
@@ -74,6 +76,8 @@ export interface ReviewAgentBodyOptions {
   readonly compactContext?: boolean;
   /** Lean Consistency must cite a file, line, and verbatim quote. */
   readonly citePrecedent?: boolean;
+  /** Head snapshot used only to supply unchanged sibling files to lean Consistency. */
+  readonly siblingReader?: SiblingFileReader;
 }
 
 export interface ReviewAgentBodyResult {
@@ -106,6 +110,10 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
 
   try {
     return await options.fiber.execute(async () => {
+      const leanConsistency = options.citePrecedent === true && agentName === "Consistency";
+      const siblingFileContents = leanConsistency && options.siblingReader
+        ? readSiblingFileContents(options.context, options.siblingReader)
+        : undefined;
       const prompt = buildAgentPrompt(
         agentName,
         options.omitBaselineSnippets ? { ...options.context, baseFileContents: {} } : options.context,
@@ -117,6 +125,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.maxFindingsPerSpecialist ?? 3,
         options.compactContext === true,
         options.citePrecedent === true,
+        siblingFileContents,
       );
 
       // WAIT_LLM: a remote inference operation is being submitted. This
@@ -143,7 +152,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         ? modelResult.findings.filter(finding => !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context))
         : agentName === "Consistency"
           ? modelResult.findings.flatMap(finding => {
-            const status = verifyPrecedent(finding, options.context);
+            const status = verifyPrecedent(finding, options.context, { siblingFileContents });
             if (status !== "verified") {
               precedentRejected += 1;
               return [];
