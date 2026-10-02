@@ -23,6 +23,7 @@ import type {
 import { tokenUsageFromError, recordTokenUsageOnError, findingScoresFromError } from "@consistency/schema";
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildComposeReviewFileResults } from "./compose.js";
+import { modelSummaryProse } from "./summary-prose.js";
 import { buildReviewReport, deduplicateAndSortFindings } from "./report.js";
 import { applyFindingScoreFilter, FINDING_SCORE_INSTRUCTION } from "./finding-score.js";
 import { reportLanguageInstruction } from "../agents/prompts.js";
@@ -185,9 +186,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         } finally {
           scheduler.wake(agentId);
         }
-        summary = summaryResult.text.trim()
-          ? summaryResult.text
-          : canonicalOverview;
+        summary = modelSummaryProse(summaryResult.text) ?? canonicalOverview;
         scores = summaryResult.scores ?? [];
       } catch (caught) {
         scores = findingScoresFromError(caught);
