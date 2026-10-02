@@ -186,7 +186,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
           scheduler.wake(agentId);
         }
         summary = summaryResult.text.trim()
-          ? summaryResult.text.trim()
+          ? summaryResult.text
           : canonicalOverview;
         scores = summaryResult.scores ?? [];
       } catch (caught) {

@@ -152,7 +152,8 @@ export const reviewReportSchema = z.object({
   pullRequestNumber: z.number().int().positive().optional(),
   baseSha: z.string().trim().min(1),
   headSha: z.string().trim().min(1),
-  summary: z.string().trim().min(1),
+  // Validate nonblank summaries without transforming the model's prose.
+  summary: z.string().min(1).refine(value => value.trim().length > 0, "Summary must not be blank"),
   score: z.number().int().min(0).max(100),
   riskLevel: riskLevelSchema,
   /** Deterministic static analysis label (e.g. "No Baseline", "Moderate Drift", "skipped") */

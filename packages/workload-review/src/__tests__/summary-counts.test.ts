@@ -12,9 +12,9 @@ const finding = (id: string, severity: ReviewFinding["severity"] = "high"): Revi
 });
 
 describe("final summary counts", () => {
-  it("replaces stale number-word totals and severity counts while preserving unrelated numbers", () => {
+  it("appends final counts to already-counted prose without losing unrelated numbers", () => {
     const summary = summaryForFinalFindings(
-      "Found five review findings. High: 5. Use a 5-second timeout and Python 3.12.",
+      "Found 3 review findings. High: 0. Use a 5-second timeout and Python 3.12.",
       [finding("critical", "critical"), finding("low", "low"), finding("info", "info")],
       [finding("appendix")],
     );
@@ -25,8 +25,8 @@ describe("final summary counts", () => {
     expect(summary).not.toContain("High: 5");
   });
 
-  it("uses localized counts from final lists, not Chinese candidate counts", () => {
-    const summary = summaryForFinalFindings("发现了十条高危问题。超时设置为5秒。", [finding("main")], [], "zh-CN");
+  it("uses localized final-list counts without altering Chinese prose", () => {
+    const summary = summaryForFinalFindings("发现了1条高危问题。超时设置为5秒。", [finding("main")], [], "zh-CN");
     expect(summary).toContain("主列表 1 条（严重 0、高 1、中 0、低 0、信息 0），附录 0 条");
     expect(summary).toContain("超时设置为5秒。");
     expect(summary).not.toContain("十条高危问题");
@@ -34,8 +34,8 @@ describe("final summary counts", () => {
 
   it("preserves explanations and unrelated numbers in the same count-bearing English sentence", () => {
     const summary = summaryForFinalFindings(
-      "Found five review findings: concatenated SQL permits injection; restore parameter binding and retain the 300-second timeout on Python 3.12.",
-      [finding("main")], [], "zh-CN",
+      "Found 1 review finding: concatenated SQL permits injection; restore parameter binding and retain the 300-second timeout on Python 3.12.",
+      [finding("main")], [], "en-US",
     );
     expect(summary).toContain("Found 1 review finding: concatenated SQL permits injection; restore parameter binding and retain the 300-second timeout on Python 3.12.");
     expect(summary).toContain("1 main-list finding");
@@ -43,10 +43,10 @@ describe("final summary counts", () => {
     expect(summary).not.toContain("five review findings");
   });
 
-  it("preserves Chinese explanation clauses and follows actual prose rather than the language setting", () => {
+  it("preserves Chinese explanation clauses with a requested Chinese footer", () => {
     const summary = summaryForFinalFindings(
-      "发现七条高危问题，参数拼接导致注入，应恢复参数绑定并保留300秒超时和Python 3.12；附录：9条。",
-      [finding("main")], [finding("base")], "en-US",
+      "发现1条高危问题，参数拼接导致注入，应恢复参数绑定并保留300秒超时和Python 3.12；附录：1条。",
+      [finding("main")], [finding("base")], "zh-CN",
     );
     expect(summary).toContain("发现1条高危问题，参数拼接导致注入，应恢复参数绑定并保留300秒超时和Python 3.12；附录：1条。");
     expect(summary).toContain("主列表 1 条");
@@ -66,7 +66,7 @@ describe("final summary counts", () => {
     const first = finding("first");
     const report = buildReviewReport({
       jobId: "job_counts", repositoryFullName: "owner/repo", baseSha: "base", headSha: "head",
-      summary: "Two findings were found.", findings: [first, { ...first, id: "duplicate", agent: "Correctness" }],
+      summary: "A credential was exposed.", findings: [first, { ...first, id: "duplicate", agent: "Correctness" }],
       agentRuns: [], score: 80, riskLevel: "low",
     });
     expect(report.findings).toHaveLength(1);
@@ -93,7 +93,7 @@ describe("final summary counts", () => {
         const candidates = JSON.parse(request.userPrompt).findings as ReviewFinding[];
         expect(JSON.parse(request.userPrompt).findings).toHaveLength(3);
         expect(request.systemPrompt).toContain("Do not state finding counts");
-        return { data: { summary: "There are four review findings. Reject unsafe input.", scores: candidates.map(candidate => ({
+        return { data: { summary: "Reject unsafe input.", scores: candidates.map(candidate => ({
           id: candidate.id, score: candidate.id === "second" ? 1 : candidate.id === "third" ? 8 : 9,
           reason: candidate.id === "second" ? "Below floor" : "Concrete impact",
         })) } };
@@ -181,7 +181,7 @@ describe("final summary counts", () => {
       invokeSummary: async () => { throw new Error("summary unavailable"); },
     };
     const stage = makeDeterministicStage();
-    stage.composeReview = async () => ({ id: "req_counts", ok: true, overallScore: 80, riskLevel: "low", summary: "99 issues were found.", recommendations: ["Reject unsafe input."] });
+    stage.composeReview = async () => ({ id: "req_counts", ok: true, overallScore: 80, riskLevel: "low", summary: "Unsafe input needs validation.", recommendations: ["Reject unsafe input."] });
     const result = await new ReviewWorkload({
       snapshot: repo.snapshot, context: repo.context, modelDriver: driver,
       deterministic: stage, persistence: new TestPersistence(), reportLanguage: "en-US",
