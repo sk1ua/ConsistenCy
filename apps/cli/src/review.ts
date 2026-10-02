@@ -26,6 +26,7 @@ import {
   resolveLeanEnabled,
   resolveCompactContext,
   resolveLeanConsistencyStrict,
+  resolveLeanStrictMerge,
   resolveScoreRubricV2,
   resolveMemoryEnabled,
   resolvePythonPath
@@ -177,6 +178,7 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     scoreRubricV2: resolveScoreRubricV2(io.environment ?? process.env),
     compactContext: resolveCompactContext(io.environment ?? process.env),
     leanConsistencyStrict: resolveLeanConsistencyStrict(io.environment ?? process.env),
+    leanStrictMerge: resolveLeanStrictMerge(io.environment ?? process.env),
     workspaceRoot
   });
 

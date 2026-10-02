@@ -69,6 +69,8 @@ export interface SynthesizerBodyOptions {
   readonly maxFindingsPerFile?: number;
   /** Default-off v2 rubric and per-file cap of 4. Unset keeps the v1 instruction. */
   readonly scoreRubricV2?: boolean;
+  /** Lean-only: different specialists merge only on near-duplicate titles or prose. */
+  readonly strictCrossAgentMerge?: boolean;
   /** Numbered changed lines, supplied only when the v2 rubric is enabled. */
   readonly numberedChangedCode?: string;
   /**
@@ -144,9 +146,11 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         throw new Error("synthesizer lost Scheduler admission after compose");
       }
 
+      const dedupOptions = { strictCrossAgent: options.strictCrossAgentMerge === true };
       const { findings: dedupedFindings, duplicates } = deduplicateAndSortFindings(
         options.scoreRubricV2 === true ? options.findings.filter(finding => !isGenericCoverageFinding(finding)) : options.findings,
-        true
+        true,
+        dedupOptions
       );
       const {
         overallScore: score,
@@ -163,7 +167,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const appendixCandidates = deduplicateAndSortFindings((options.preExistingIssues ?? []).filter(f => {
         const text = `${f.title} ${f.evidence} ${f.recommendation}`;
         return !/no (?:changes?|action) needed/i.test(text);
-      }), true).findings;
+      }), true, dedupOptions).findings;
 
       let summary: string | undefined;
       let tokenUsage: TokenUsage | undefined;
@@ -330,7 +334,8 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         riskLevel,
         staticRiskLabel,
         coverage,
-        retrieval: options.deterministicResult.evidencePack
+        retrieval: options.deterministicResult.evidencePack,
+        strictCrossAgentMerge: options.strictCrossAgentMerge
       });
 
       scheduler.succeedAgent(agentId);

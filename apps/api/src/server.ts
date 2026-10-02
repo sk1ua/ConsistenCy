@@ -307,6 +307,7 @@ export const worker = new ReviewWorker({
     scoreRubricV2: config.CONSISTENCY_SCORE_RUBRIC === "1",
     compactContext: config.CONSISTENCY_COMPACT_CONTEXT === "1",
     leanConsistencyStrict: config.CONSISTENCY_LEAN_CONSISTENCY_STRICT === "1",
+    leanStrictMerge: config.CONSISTENCY_LEAN_STRICT_MERGE === "1",
     reviewWorkflow: config.reviewWorkflow,
     runtimeRegistry,
     reviewWorkflowSpec: () => {

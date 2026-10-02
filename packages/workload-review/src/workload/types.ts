@@ -180,6 +180,10 @@ export interface ReviewWorkloadOptions {
    * prompt, sibling selection, and finding filter byte-for-byte.
    */
   readonly leanConsistencyStrict?: boolean;
+  /**
+   * Default-off lean merge tightening. Unset keeps cross-agent dedup unchanged.
+   */
+  readonly leanStrictMerge?: boolean;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;

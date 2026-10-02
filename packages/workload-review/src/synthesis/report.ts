@@ -170,9 +170,15 @@ function referencedTechnicalTargets(finding: ReviewFinding): Set<string> {
   return targets;
 }
 
+export interface DedupOptions {
+  /** Different specialists merge only when titles or prose are near-duplicates. */
+  readonly strictCrossAgent?: boolean;
+}
+
 /** Nearby findings share prose or a code target/category; overlap needs two targets across experts. */
-function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding): boolean {
+function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding, options: DedupOptions = {}): boolean {
   if (jaccard(topicWords(`${left.title} ${left.evidence}`), topicWords(`${right.title} ${right.evidence}`)) >= 0.35) return true;
+  if (options.strictCrossAgent === true && left.agent !== right.agent) return isNearDuplicate(left, right);
   if (left.agent !== right.agent && hasOverlappingLines(left, right)) {
     const targets = referencedTechnicalTargets(left);
     if ([...referencedTechnicalTargets(right)].filter(target => targets.has(target)).length > 1) return true;
@@ -187,21 +193,21 @@ function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding): boolean {
  * Same file with overlapping line ranges, or ranges at most
  * `FINDING_CLUSTER_DISTANCE` lines apart, AND topic similarity.
  */
-function isLineAndTopicNeighbor(left: ReviewFinding, right: ReviewFinding): boolean {
+function isLineAndTopicNeighbor(left: ReviewFinding, right: ReviewFinding, options: DedupOptions = {}): boolean {
   if (!isLineNeighbor(left, right)) return false;
-  return hasTopicOverlap(left, right);
+  return hasTopicOverlap(left, right, options);
 }
 
 /**
  * True when the pair is joined by line proximity and topic similarity,
  * while wording is different enough that the title rule alone would not merge them.
  */
-function joinsByLineProximity(left: ReviewFinding, right: ReviewFinding): boolean {
-  return !isNearDuplicate(left, right) && isLineAndTopicNeighbor(left, right);
+function joinsByLineProximity(left: ReviewFinding, right: ReviewFinding, options: DedupOptions = {}): boolean {
+  return !isNearDuplicate(left, right) && isLineAndTopicNeighbor(left, right, options);
 }
 
-function belongsTogether(seed: ReviewFinding, finding: ReviewFinding): boolean {
-  if (differentTriggers(seed, finding) || !hasTopicOverlap(seed, finding)) return false;
+function belongsTogether(seed: ReviewFinding, finding: ReviewFinding, options: DedupOptions = {}): boolean {
+  if (differentTriggers(seed, finding) || !hasTopicOverlap(seed, finding, options)) return false;
   if (lineRangeOf(seed) && lineRangeOf(finding)) return isLineNeighbor(seed, finding);
   return isNearDuplicate(seed, finding);
 }
@@ -240,7 +246,7 @@ function prefer(left: ReviewFinding, right: ReviewFinding): ReviewFinding {
  * `alsoReportedBy`, and every merged finding is still returned in `duplicates`
  * so the report can disclose the merge instead of silently dropping it.
  */
-export function deduplicateAndSortFindings(findings: ReviewFinding[], discloseAllMerges = false): {
+export function deduplicateAndSortFindings(findings: ReviewFinding[], discloseAllMerges = false, options: DedupOptions = {}): {
   findings: ReviewFinding[];
   duplicates: ReviewFinding[];
 } {
@@ -255,12 +261,12 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[], discloseAl
 
   for (const finding of findings) {
     // Non-transitive clustering centered on the cluster's seed finding.
-    const host = clusters.find(entry => belongsTogether(entry.seed, finding));
+    const host = clusters.find(entry => belongsTogether(entry.seed, finding, options));
     if (!host) {
       clusters.push({ seed: finding, survivor: finding, merged: [], members: [finding], lineGrouped: false });
       continue;
     }
-    if (joinsByLineProximity(host.seed, finding)) host.lineGrouped = true;
+    if (joinsByLineProximity(host.seed, finding, options)) host.lineGrouped = true;
     host.members.push(finding);
     if (prefer(finding, host.survivor) === finding) {
       host.merged.push(host.survivor);
@@ -340,8 +346,10 @@ export function buildReviewReport(input: {
   coverage?: ReviewCoverage;
   retrieval?: RetrievalTrace;
   createdAt?: string;
+  /** Keep distinct cross-agent claims when lean strict merge is enabled. */
+  strictCrossAgentMerge?: boolean;
 }): ReviewReport {
-  const deduplicated = deduplicateAndSortFindings(input.findings, true);
+  const deduplicated = deduplicateAndSortFindings(input.findings, true, { strictCrossAgent: input.strictCrossAgentMerge === true });
   const findings = deduplicated.findings;
   const duplicates = input.duplicates ?? deduplicated.duplicates;
   const promptTokens = promptTokensForAgentRuns(input.agentRuns);

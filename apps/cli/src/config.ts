@@ -97,6 +97,11 @@ export function resolveLeanConsistencyStrict(environment: NodeJS.ProcessEnv = pr
   return environment.CONSISTENCY_LEAN_CONSISTENCY_STRICT === "1";
 }
 
+/** Exact env value "1" keeps distinct cross-agent claims in lean reviews. */
+export function resolveLeanStrictMerge(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_LEAN_STRICT_MERGE === "1";
+}
+
 export function resolveMemoryEnabled(
   options: Pick<ReviewOptions, "noMemory">,
   environment: NodeJS.ProcessEnv = process.env

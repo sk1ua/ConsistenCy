@@ -99,6 +99,8 @@ export type ReviewWorkflowDependencies = {
   compactContext?: boolean;
   /** Default-off lean Consistency tightening. Requires lean as well. */
   leanConsistencyStrict?: boolean;
+  /** Default-off strict cross-agent merge. Requires lean as well. */
+  leanStrictMerge?: boolean;
   runtimeRegistry?: RuntimeRegistry;
 };
 
@@ -386,6 +388,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         scoreRubricV2: dependencies.scoreRubricV2,
         compactContext: dependencies.compactContext,
         leanConsistencyStrict: dependencies.leanConsistencyStrict,
+        leanStrictMerge: dependencies.leanStrictMerge,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: memoryEnabled

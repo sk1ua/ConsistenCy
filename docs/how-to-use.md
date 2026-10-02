@@ -107,6 +107,8 @@ npm run review -- --no-memory             # 本次不读写知识记忆
 
 `CONSISTENCY_LEAN_CONSISTENCY_STRICT=1` 只在同时打开 `CONSISTENCY_LEAN=1` 时生效。它让 Consistency 不报缺文档、缺样板这类意见，并且同目录参考文件只选同类源码。未设置、`0` 和其他值下，提示和报告都与原来逐字一致。
 
+`CONSISTENCY_LEAN_STRICT_MERGE=1` 也只在同时打开 `CONSISTENCY_LEAN=1` 时生效。不同专项、不同诉求的意见不再因为共享标识符被合并；标题或正文几乎相同的重复意见仍会合并。未设置、`0` 和其他值保持原来的合并。
+
 另外有一段**约束块**会一直存在，它不是凑字数：
 
 - `[!]` = 这部分**本次没检查**（不是检查通过了）。

@@ -652,6 +652,7 @@ export class ReviewWorkload {
         maxReportedFindings: options.maxReportedFindings,
         maxFindingsPerFile: options.maxFindingsPerFile,
         scoreRubricV2: options.scoreRubricV2,
+        strictCrossAgentMerge: options.lean === true && options.leanStrictMerge === true,
         numberedChangedCode: options.scoreRubricV2 === true
           ? numberedChangedLines(options.context.changedFiles, options.context.fileContents)
           : undefined,

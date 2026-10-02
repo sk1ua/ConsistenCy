@@ -82,6 +82,8 @@ export const envSchema = z.object({
   CONSISTENCY_COMPACT_CONTEXT: z.string().optional(),
   /** Exact "1" tightens lean Consistency: boilerplate ban and source-only siblings. */
   CONSISTENCY_LEAN_CONSISTENCY_STRICT: z.string().optional(),
+  /** Exact "1" stops lean reviews from merging different cross-agent claims. */
+  CONSISTENCY_LEAN_STRICT_MERGE: z.string().optional(),
   ANTHROPIC_API_KEY: optionalSecret,
   ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),
