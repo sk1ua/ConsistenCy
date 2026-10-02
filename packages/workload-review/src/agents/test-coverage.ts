@@ -15,12 +15,42 @@ function concreteScenario(trigger: string | undefined): boolean {
   return /\b(?:empty|null|undefined|true|false|invalid|malformed|zero|negative|timeout|failure|exception|error|missing|absent|omits?|unauthenticated|anonymous|cancelled|concurrent|overflow|stale|duplicate|expired)\b|["'`]|\d|为空|空值|异常|失败|超时|无效|负数|零值|取消|并发|溢出|重复|过期/i.test(trigger);
 }
 
-function scopeEnd(lines: readonly string[], index: number): number {
-  const header = lines[index]!;
-  const indent = /^\s*/.exec(header)![0].length;
-  if (header.trimEnd().endsWith(":")) {
-    let end = index;
-    for (let next = index + 1; next < lines.length; next += 1) {
+/** Bounded declaration matching: calls and bodyless declarations are not scopes. */
+function languageFunction(lines: readonly string[], index: number, file: string): { name: string; headerEnd: number; expressionBody: boolean } | undefined {
+  const pattern = /\.go$/i.test(file)
+    ? /^[\t ]*func\s+(?:\([^)]*\)\s*)?([\w$]+)(?:\s*\[[^\]]*\])?\s*\(/
+    : /\.java$/i.test(file)
+      ? /^[\t ]*(?:(?:public|private|protected|static|final|abstract|synchronized|native|strictfp|default)\s+)*(?:<[^;{}()=]+>\s+)?[\w$]+(?:\.[\w$]+)*(?:\s*<[^;{}()=]+>)?(?:\s*\[\s*\])*\s+([\w$]+)\s*\(/
+      : /\.kts?$/i.test(file)
+        ? /^[\t ]*(?:(?:public|private|protected|internal|open|final|override|abstract|suspend|inline|tailrec|operator|infix|external|expect|actual)\s+)*fun\s+(?:<[^;{}()=]+>\s*)?(?:[\w$]+(?:\.[\w$]+)*(?:<[^;{}()=]+>)?\??\s*\.\s*)?([\w$]+)\s*\(/
+        : undefined;
+  if (!pattern) return undefined;
+  const header = lines.slice(index, index + 24).join("\n").replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g,
+    text => text.replace(/[^\r\n]/g, " "));
+  if (/^[\t ]*(?:return|throw|new)\b/.test(header)) return undefined;
+  const match = pattern.exec(header);
+  if (!match) return undefined;
+  let parentheses = 1;
+  for (let offset = match[0].length; offset < header.length; offset += 1) {
+    const char = header[offset];
+    if (char === "(") parentheses += 1;
+    if (char === ")") parentheses -= 1;
+    if (parentheses !== 0) continue;
+    if (char === ";" || char === "}" || (char === "\n" && pattern.test(header.slice(offset + 1)))) return undefined;
+    const expressionBody = /\.kts?$/i.test(file) && char === "=";
+    if (char === "{" || expressionBody) {
+      return { name: match[1]!, headerEnd: index + header.slice(0, offset).split("\n").length - 1, expressionBody };
+    }
+  }
+  return undefined;
+}
+
+function scopeEnd(lines: readonly string[], index: number, headerEnd = index, expressionBody = false): number {
+  const header = lines[headerEnd]!;
+  const indent = /^\s*/.exec(lines[index]!)![0].length;
+  if (header.trimEnd().endsWith(":") || expressionBody) {
+    let end = headerEnd;
+    for (let next = headerEnd + 1; next < lines.length; next += 1) {
       if (lines[next]!.trim() && /^\s*/.exec(lines[next]!)![0].length <= indent) break;
       end = next;
     }
@@ -28,7 +58,7 @@ function scopeEnd(lines: readonly string[], index: number): number {
   }
   let balance = 0;
   let opened = false;
-  for (let next = index; next < lines.length; next += 1) {
+  for (let next = headerEnd; next < lines.length; next += 1) {
     const code = lines[next]!.replace(/\/\/.*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g, "");
     for (const char of code) {
       if (char === "{") { balance += 1; opened = true; }
@@ -56,14 +86,15 @@ export function hasSpecificChangedCoverageTarget(finding: ReviewFinding, context
   const compactProse = prose.replace(/\s|`/g, "");
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]!;
-    const name = /^\s*(?:async\s+)?def\s+([\w$]+)/.exec(line)?.[1]
+    const declaration = languageFunction(lines, index, finding.file);
+    const name = declaration?.name ?? /^\s*(?:async\s+)?def\s+([\w$]+)/.exec(line)?.[1]
       ?? /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([\w$]+)/.exec(line)?.[1]
       ?? /^\s*(?:(?:export|public|private|protected|static|async|const|let|var)\s+)*([\w$]+)\s*(?:=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>|\([^)]*\)(?:\s*:\s*[^={]+)?\s*\{)/.exec(line)?.[1];
     const branch = /^\s*(?:if|elif|else|except|catch|case|switch)\b/.test(line);
     const functionName = name && !/^(?:if|for|while|switch|catch|with)$/.test(name) ? name : undefined;
     if (!functionName && !branch) continue;
     const start = index + 1;
-    const end = scopeEnd(lines, index);
+    const end = scopeEnd(lines, index, declaration?.headerEnd, declaration?.expressionBody);
     if (finding.startLine < start || finding.startLine > end || !changes.some(range => range.start <= end && range.end >= start)) continue;
     if (functionName && new RegExp(`(^|[^\\w$])${functionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w$]|$)`).test(prose)) return true;
     const branchHeader = line.trim().replace(/[{:]\s*$/, "").replace(/\s/g, "");

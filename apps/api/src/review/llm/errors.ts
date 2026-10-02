@@ -51,7 +51,9 @@ export function transportFailureReason(error: unknown): string | undefined {
     const value = current !== null && typeof current === "object" ? current as Record<string, unknown> : undefined;
     const text = (typeof current === "string" ? current : typeof value?.failureReason === "string" ? value.failureReason : typeof value?.message === "string" ? value.message : "").slice(0, 2000);
     if (text === "DNS lookup failed" || text === "network request failed") fallback ??= text;
-    if (/timeout|timed out|etimedout/i.test(text) || value?.name === "TimeoutError") {
+    const code = typeof value?.code === "string" ? value.code : "";
+    const classified = `${code} ${text}`;
+    if (/timeout|timed out|etimedout/i.test(classified) || value?.name === "TimeoutError" || value?.name === "AbortError" && /timeout/i.test(classified)) {
       const duration = /(?:timeout|timed out)[^\r\n]{0,40}?\b(\d+(?:\.\d+)?)\s*(milliseconds?|ms|seconds?|secs?|s)\b/i.exec(text);
       if (duration) {
         const seconds = Number(duration[1]) / (/^(?:ms|milliseconds?)$/i.test(duration[2]!) ? 1000 : 1);
@@ -59,10 +61,10 @@ export function transportFailureReason(error: unknown): string | undefined {
       }
       if (typeof value?.timeoutMs === "number" && value.timeoutMs > 0 && value.timeoutMs <= 86400000) return `timeout after ${value.timeoutMs / 1000}s`;
       fallback = "timeout";
-    } else if (/econnreset|connection reset|socket hang up/i.test(text)) fallback ??= "connection reset";
-    else if (/econnrefused|connection refused/i.test(text)) fallback ??= "connection refused";
-    else if (/enotfound|eai_again|getaddrinfo/i.test(text)) fallback ??= "DNS lookup failed";
-    else if (/fetch failed|network error/i.test(text)) fallback ??= "network request failed";
+    } else if (/econnreset|connection reset|socket hang up/i.test(classified)) fallback ??= "connection reset";
+    else if (/econnrefused|connection refused/i.test(classified)) fallback ??= "connection refused";
+    else if (/enotfound|eai_again|getaddrinfo/i.test(classified)) fallback ??= "DNS lookup failed";
+    else if (/fetch failed|network error/i.test(classified)) fallback ??= "network request failed";
     if (!value || value.cause === current) break;
     current = value.cause;
   }

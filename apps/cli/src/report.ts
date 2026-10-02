@@ -374,7 +374,7 @@ function renderAgents(report: ReviewReport, palette: Palette): string[] {
           : palette.dim("–");
     const facts: string[] = [`${run.findings.length} 项`];
     if (run.tokenUsage?.totalTokens !== undefined) facts.push(`${run.tokenUsage.totalTokens} tokens`);
-    if (run.status === "succeeded" || run.status === "failed") {
+    if ((run.status === "succeeded" || run.status === "failed") && run.agentName !== "DeterministicAnalyzer") {
       const cached = run.tokenUsage?.cachedTokens;
       facts.push(cached === undefined ? "cached tokens: unknown（未报告）" : cached > 0 ? `${cached} cached tokens` : "0 cached tokens (未报告或未命中)");
       const usageStatus = tokenUsageStatus(run.tokenUsage);

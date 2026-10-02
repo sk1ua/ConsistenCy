@@ -63,6 +63,9 @@ describe("transport accounting honesty", () => {
     expect(transportFailureReason(new Error("request timed out after 300000ms"))).toBe("timeout after 300s");
     expect(transportFailureReason(new Error("generic wrapper", { cause: new Error("connect ECONNRESET credential-marker") }))).toBe("connection reset");
     expect(transportFailureReason(new Error("getaddrinfo ENOTFOUND private.example"))).toBe("DNS lookup failed");
+    expect(transportFailureReason(Object.assign(new Error("Pi LLM request failed"), { code: "ECONNRESET" }))).toBe("connection reset");
+    expect(transportFailureReason(new Error("Pi LLM request failed", { cause: Object.assign(new Error("fetch failed"), { code: "ENOTFOUND" }) }))).toBe("DNS lookup failed");
+    expect(transportFailureReason(Object.assign(new Error("Pi LLM request failed"), { code: "ETIMEDOUT", timeoutMs: 30_000 }))).toBe("timeout after 30s");
     expect(transportFailureReason(new Error("Bearer credential-marker HTTP private details"))).toBeUndefined();
     const typed = new LlmProviderError("Pi LLM request failed", { kind: "network" }, { cause: new Error("timeout after 300s private-marker") });
     expect(typed.message).toBe("Pi LLM request failed");

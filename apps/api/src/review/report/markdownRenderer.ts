@@ -42,7 +42,7 @@ export function renderReviewComment(report: ReviewReport, options: {
   const topFindings = report.findings.slice(0, options.maxFindings ?? 8);
   const agentSummary = report.agentRuns
     .map(run => {
-      const status = tokenUsageStatus(run.tokenUsage);
+      const status = run.agentName === "DeterministicAnalyzer" ? "reported" : tokenUsageStatus(run.tokenUsage);
       const usage = status === "unknown" ? ", token usage: unknown" : status === "partial" ? ", token usage: partial" : "";
       const reason = run.status === "failed" && run.error
         ? `; reason: ${sanitizeExecutionError(run.error).replace(/[\r\n]+/g, " ").replace(/[\\`*_<>]/g, "\\$&")}` : "";
