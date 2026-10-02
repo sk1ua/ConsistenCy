@@ -1,6 +1,8 @@
 import {
   LLM_ROUTE_MAX_FALLBACKS,
   mergeTokenUsage,
+  markTokenUsageIncomplete,
+  tokenUsageStatus,
   tokenUsageFromError,
   recordTokenUsageOnError,
   findingScoresFromError,
@@ -73,6 +75,7 @@ function describeEndpoint(endpoint: LlmRouteEndpoint): string {
 function describeAttempt(attempt: LlmRouteAttempt): string {
   let detail = attempt.errorKind;
   if (attempt.httpStatus !== undefined) detail += `(${attempt.httpStatus})`;
+  if (attempt.failureReason) detail += `: ${attempt.failureReason}`;
   // Quota honesty: a rate limit without a provider-provided retry hint means
   // the quota state is UNKNOWN — say so instead of implying a known budget.
   if (attempt.errorKind === "rate_limited" && attempt.retryAfterMs === undefined) detail += "，额度未知";
@@ -216,13 +219,18 @@ export class RoutedLLMProvider implements LLMProvider {
     signal?: AbortSignal
   ): Promise<StructuredResult<T>> {
     let failedUsage: TokenUsage | undefined;
+    let hasUnknownFailedUsage = false;
     const failedScores = new Map<string, FindingScore>();
     const trackedCall = async (provider: LLMProvider): Promise<StructuredResult<T>> => {
       try {
         const result = await call(provider);
-        return failedUsage ? { ...result, tokenUsage: mergeTokenUsage(failedUsage, result.tokenUsage) } : result;
+        const combined = mergeTokenUsage(failedUsage, result.tokenUsage);
+        return { ...result, tokenUsage: hasUnknownFailedUsage || tokenUsageStatus(result.tokenUsage) === "unknown"
+          ? markTokenUsageIncomplete(combined) : combined };
       } catch (error) {
-        failedUsage = mergeTokenUsage(failedUsage, tokenUsageFromError(error));
+        const usage = tokenUsageFromError(error);
+        if (tokenUsageStatus(usage) === "unknown") hasUnknownFailedUsage = true;
+        failedUsage = mergeTokenUsage(failedUsage, usage);
         for (const score of findingScoresFromError(error)) failedScores.set(score.id, score);
         throw error;
       }
@@ -242,7 +250,7 @@ export class RoutedLLMProvider implements LLMProvider {
       return await this.callPinned(trackedCall, signal);
     } catch (error) {
       // Preserve canonical routing/cancellation error identity and semantics.
-      recordTokenUsageOnError(error, failedUsage);
+      recordTokenUsageOnError(error, hasUnknownFailedUsage ? markTokenUsageIncomplete(failedUsage) : failedUsage);
       recordFindingScoresOnError(error, [...failedScores.values()]);
       throw error;
     }
@@ -339,6 +347,7 @@ export class RoutedLLMProvider implements LLMProvider {
       provider: profile.provider,
       ...(profile.model ? { model: profile.model } : {}),
       errorKind: classification.kind,
+      ...(classification.failureReason ? { failureReason: classification.failureReason } : {}),
       ...(classification.httpStatus !== undefined ? { httpStatus: classification.httpStatus } : {}),
       ...(classification.retryAfterMs !== undefined ? { retryAfterMs: classification.retryAfterMs } : {}),
       quota: "unknown",

@@ -1,4 +1,5 @@
-import { riskBandForFindings, staticRiskDisplayLabel, type ReviewFinding, type ReviewReport } from "@consistency/schema";
+import { riskBandForFindings, staticRiskDisplayLabel, tokenUsageNotesForAgentRuns, tokenUsageStatus, type ReviewFinding, type ReviewReport } from "@consistency/schema";
+import { sanitizeExecutionError } from "../../security/redact";
 
 function location(finding: ReviewFinding): string {
   if (finding.startLine === undefined) return finding.file;
@@ -40,7 +41,13 @@ export function renderReviewComment(report: ReviewReport, options: {
 }): string {
   const topFindings = report.findings.slice(0, options.maxFindings ?? 8);
   const agentSummary = report.agentRuns
-    .map(run => `- **${run.agentName}:** ${run.status}, ${run.findings.length} finding(s)`)
+    .map(run => {
+      const status = tokenUsageStatus(run.tokenUsage);
+      const usage = status === "unknown" ? ", token usage: unknown" : status === "partial" ? ", token usage: partial" : "";
+      const reason = run.status === "failed" && run.error
+        ? `; reason: ${sanitizeExecutionError(run.error).replace(/[\r\n]+/g, " ").replace(/[\\`*_<>]/g, "\\$&")}` : "";
+      return `- **${run.agentName}:** ${run.status}, ${run.findings.length} finding(s)${usage}${reason}`;
+    })
     .join("\n");
   const reportUrl = options.webBaseUrl
     ? `${options.webBaseUrl.replace(/\/$/, "")}/?view=report&job=${encodeURIComponent(report.jobId)}`
@@ -64,6 +71,7 @@ export function renderReviewComment(report: ReviewReport, options: {
     "",
     "## Agent Summary",
     agentSummary || "- No agent runs recorded.",
+    ...(report.tokenUsageNotes ?? tokenUsageNotesForAgentRuns(report.agentRuns)).map(note => `> ${note}`),
     "",
     "## Top Findings",
     topFindings.length > 0 ? topFindings.map(findingMarkdown).join("\n\n") : "No findings were reported.",

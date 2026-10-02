@@ -16,7 +16,7 @@
  * apart instead of inventing a combined number.
  */
 
-import { staticRiskDisplayLabel, type ReviewReport, type Severity } from "@consistency/schema";
+import { staticRiskDisplayLabel, tokenUsageNotesForAgentRuns, tokenUsageStatus, type ReviewReport, type Severity } from "@consistency/schema";
 import { indent, oneLine, plural, type Palette } from "./terminal";
 
 export type ConstraintCode =
@@ -375,14 +375,19 @@ function renderAgents(report: ReviewReport, palette: Palette): string[] {
     const facts: string[] = [`${run.findings.length} 项`];
     if (run.tokenUsage?.totalTokens !== undefined) facts.push(`${run.tokenUsage.totalTokens} tokens`);
     if (run.status === "succeeded" || run.status === "failed") {
-      const cached = run.tokenUsage?.cachedTokens ?? 0;
-      facts.push(cached > 0 ? `${cached} cached tokens` : "0 cached tokens (未报告或未命中)");
+      const cached = run.tokenUsage?.cachedTokens;
+      facts.push(cached === undefined ? "cached tokens: unknown（未报告）" : cached > 0 ? `${cached} cached tokens` : "0 cached tokens (未报告或未命中)");
+      const usageStatus = tokenUsageStatus(run.tokenUsage);
+      if (usageStatus !== "reported") facts.push(`token usage: ${usageStatus}`);
     }
     if (run.provider) facts.push(run.model ? `${run.provider}/${run.model}` : run.provider);
     lines.push(`  ${token} ${run.agentName}${palette.dim(`  ${facts.join(" · ")}`)}`);
     if (run.status === "failed" && run.error) {
       lines.push(indent(palette.dim(oneLine(run.error)), "      "));
     }
+  }
+  for (const note of report.tokenUsageNotes ?? tokenUsageNotesForAgentRuns(report.agentRuns, "zh-CN")) {
+    lines.push(indent(palette.dim(note), "  "));
   }
   return lines;
 }

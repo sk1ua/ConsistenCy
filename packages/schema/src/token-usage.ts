@@ -11,7 +11,35 @@ export function mergeTokenUsage(left: TokenUsage | undefined, right: TokenUsage 
   if (left.cacheReadStatus !== undefined || right.cacheReadStatus !== undefined) {
     result.cacheReadStatus = left.cacheReadStatus === "reported" || right.cacheReadStatus === "reported" ? "reported" : "unavailable_or_zero";
   }
+  if (left.usageStatus === "partial" || right.usageStatus === "partial") result.usageStatus = "partial";
   return result;
+}
+
+export function tokenUsageStatus(usage: TokenUsage | undefined): "reported" | "partial" | "unknown" {
+  if (!usage || ![usage.inputTokens, usage.outputTokens, usage.totalTokens, usage.cachedTokens, usage.promptTokens].some(value => value !== undefined)) return "unknown";
+  return usage.usageStatus ?? "reported";
+}
+
+/** Keep known paid counters, but do not imply that unknown attempts cost zero. */
+export function markTokenUsageIncomplete(usage: TokenUsage | undefined): TokenUsage | undefined {
+  return tokenUsageStatus(usage) === "unknown" ? undefined : { ...usage, usageStatus: "partial" };
+}
+
+export function tokenUsageNotesForAgentRuns(
+  runs: readonly Pick<AgentRun, "agentName" | "status" | "tokenUsage">[],
+  language: "zh-CN" | "en-US" = "en-US"
+): string[] {
+  const notes: string[] = [];
+  for (const status of ["unknown", "partial"] as const) {
+    const agents = [...new Set(runs.filter(run => run.agentName !== "DeterministicAnalyzer"
+      && (run.status === "succeeded" || run.status === "failed") && tokenUsageStatus(run.tokenUsage) === status).map(run => run.agentName))].sort();
+    if (agents.length === 0) continue;
+    const names = agents.join(", ");
+    notes.push(language === "zh-CN"
+      ? `${names} 的 token 用量${status === "unknown" ? "未知（unknown）" : "仅部分已知（partial）"}；未报告的用量不按 0 计入总量或缓存比率，总量可能不完整。`
+      : `Token usage ${status} for ${names}; unreported usage is not counted as zero in totals or cache ratios. Totals may be incomplete.`);
+  }
+  return notes;
 }
 
 // Preserve error identity (including frozen cancellation reasons). Each caller

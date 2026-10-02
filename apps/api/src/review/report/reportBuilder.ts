@@ -2,6 +2,7 @@ import { deduplicateAndSortFindings, riskBandForFindings, summaryForFinalFinding
 import {
   reviewReportSchema,
   promptTokensForAgentRuns,
+  tokenUsageNotesForAgentRuns,
   type AgentRun,
   type RetrievalTrace,
   type ReviewFinding,
@@ -28,6 +29,7 @@ export function buildReviewReport(input: {
 }): ReviewReport {
   const { findings, duplicates } = deduplicateAndSortFindings(input.findings, true);
   const promptTokens = promptTokensForAgentRuns(input.agentRuns);
+  const tokenUsageNotes = tokenUsageNotesForAgentRuns(input.agentRuns);
 
   return reviewReportSchema.parse({
     jobId: input.jobId,
@@ -41,6 +43,7 @@ export function buildReviewReport(input: {
     riskBand: riskBandForFindings(findings),
     agentRuns: input.agentRuns,
     ...(promptTokens === undefined ? {} : { promptTokens }),
+    ...(tokenUsageNotes.length > 0 ? { tokenUsageNotes } : {}),
     findings,
     ...(duplicates.length > 0 ? { duplicates } : {}),
     retrieval: input.retrieval,

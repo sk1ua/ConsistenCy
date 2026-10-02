@@ -30,6 +30,45 @@ function runOptions(repo: ReturnType<typeof makeFixtureRepo>, driver: ModelDrive
 }
 
 describe("failed call telemetry", () => {
+  it("annotates an unknown failed call without inventing prompt or cache counters", async () => {
+    const repo = makeFixtureRepo();
+    const inner = new TestModelDriver();
+    const persistence = new TestPersistence();
+    const driver: ModelDriver = {
+      provider: inner.provider, model: inner.model,
+      invokeStructured: request => inner.invokeStructured(request),
+      invokeAgentFindings: request => request.agent === "Security"
+        ? Promise.reject(new Error("request timeout after 300s")) : inner.invokeAgentFindings(request),
+      invokeSummary: request => inner.invokeSummary(request)
+    };
+    const result = await new ReviewWorkload(runOptions(repo, driver, persistence)).run();
+    const failed = persistence.agentRuns.find(run => run.agentName === "Security");
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toContain("timeout after 300s");
+    expect(failed?.tokenUsage).toBeUndefined();
+    expect(result.report.promptTokens).toBeUndefined();
+    expect(result.report.tokenUsageNotes?.join(" ")).toContain("unknown for Security");
+    expect(result.report.tokenUsageNotes?.join(" ")).toContain("not counted as zero");
+  });
+
+  it("persists partial paid usage and a report accounting warning", async () => {
+    const repo = makeFixtureRepo();
+    const inner = new TestModelDriver();
+    const persistence = new TestPersistence();
+    const usage: TokenUsage = { inputTokens: 300, cachedTokens: 100, usageStatus: "partial" };
+    const driver: ModelDriver = {
+      provider: inner.provider, model: inner.model,
+      invokeStructured: request => inner.invokeStructured(request),
+      invokeAgentFindings: request => request.agent === "Security"
+        ? Promise.reject(paidFailure("request timeout after 300s", usage)) : inner.invokeAgentFindings(request),
+      invokeSummary: request => inner.invokeSummary(request)
+    };
+    const result = await new ReviewWorkload(runOptions(repo, driver, persistence)).run();
+    expect(persistence.agentRuns.find(run => run.agentName === "Security")?.tokenUsage).toEqual(usage);
+    expect(result.report.promptTokens).toBe(400);
+    expect(result.report.tokenUsageNotes?.join(" ")).toContain("partial for Security");
+    expect(result.report.tokenUsageNotes?.join(" ")).toContain("Totals may be incomplete");
+  });
   it("persists the paid usage of a failed specialist and counts it in promptTokens", async () => {
     const repo = makeFixtureRepo();
     const inner = new TestModelDriver();

@@ -83,6 +83,25 @@ const DEGRADED_COVERAGE: ReviewCoverage = {
 };
 
 describe("renderReport — the promise this module exists to keep", () => {
+  it("shows unknown failed usage rather than zero cached tokens", () => {
+    const output = renderReport(report({ agentRuns: [{ id: "agent_unknown", jobId: "job_cli_test", agentName: "Security", status: "failed",
+      startedAt: "2026-09-29T12:00:00.000Z", inputSummary: "fixture", findings: [], error: "request timeout after 300s" }] }), OPTIONS);
+    expect(output).toContain("cached tokens: unknown");
+    expect(output).toContain("token usage: unknown");
+    expect(output).toContain("timeout after 300s");
+    expect(output).toContain("未报告的用量不按 0");
+    expect(output).not.toContain("0 cached tokens");
+  });
+
+  it("shows known paid counters alongside partial accounting warnings", () => {
+    const output = renderReport(report({ agentRuns: [{ id: "agent_partial", jobId: "job_cli_test", agentName: "Security", status: "failed",
+      startedAt: "2026-09-29T12:00:00.000Z", inputSummary: "fixture", findings: [], error: "request timeout after 300s",
+      tokenUsage: { cachedTokens: 20, totalTokens: 100, usageStatus: "partial" } }] }), OPTIONS);
+    expect(output).toContain("20 cached tokens");
+    expect(output).toContain("100 tokens");
+    expect(output).toContain("token usage: partial");
+    expect(output).toContain("总量可能不完整");
+  });
   it("discloses mixed missing and skipped baselines without hiding either", () => {
     const output = renderReport(report({ staticRiskLabel: "skipped / No Baseline" }), OPTIONS);
     expect(output).toContain("No Baseline");

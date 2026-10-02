@@ -8,6 +8,7 @@ import {
   reviewReportSchema,
   riskBandForFindings,
   promptTokensForAgentRuns,
+  tokenUsageNotesForAgentRuns,
   type AgentRun,
   type RetrievalTrace,
   type ReviewCoverage,
@@ -313,6 +314,7 @@ export function buildReviewReport(input: {
   const findings = deduplicated.findings;
   const duplicates = input.duplicates ?? deduplicated.duplicates;
   const promptTokens = promptTokensForAgentRuns(input.agentRuns);
+  const tokenUsageNotes = tokenUsageNotesForAgentRuns(input.agentRuns, input.reportLanguage);
 
   return reviewReportSchema.parse({
     jobId: input.jobId,
@@ -329,6 +331,7 @@ export function buildReviewReport(input: {
     llmModel: input.llmModel,
     agentRuns: input.agentRuns,
     ...(promptTokens === undefined ? {} : { promptTokens }),
+    ...(tokenUsageNotes.length > 0 ? { tokenUsageNotes } : {}),
     findings,
     ...(input.preExistingIssues?.length ? { preExistingIssues: input.preExistingIssues } : {}),
     ...(input.filteredFindingCount ? { filteredFindingCount: input.filteredFindingCount } : {}),

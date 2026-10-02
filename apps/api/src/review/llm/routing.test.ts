@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findingScoresFromError, type LlmConnectionProfile } from "@consistency/schema";
+import { findingScoresFromError, tokenUsageFromError, llmRouteRecordSchema, type LlmConnectionProfile } from "@consistency/schema";
 import { LlmProviderError } from "./errors";
 import { LlmRoutingError, RoutedLLMProvider } from "./routing";
 import type { LLMProvider, StructuredInvocation, StructuredResult } from "./types";
@@ -88,6 +88,34 @@ async function summaryError(provider: RoutedLLMProvider, signal?: AbortSignal): 
 }
 
 describe("RoutedLLMProvider", () => {
+  it("marks a paid fallback after unknown failed usage as partial", async () => {
+    const primary = scriptedProvider("deepseek", [networkFailed()]);
+    const fallback = scriptedProvider("openai", ["ok"]);
+    fallback.generateSummary = async () => ({ data: { summary: "complete" }, tokenUsage: { inputTokens: 11, cachedTokens: 2 } });
+    const provider = routed([profile("primary", "deepseek"), profile("fallback", "openai")], new Map([["primary", primary], ["fallback", fallback]]));
+    const result = await provider.generateSummary({ systemPrompt: "test", userPrompt: "test" });
+    expect(result.tokenUsage).toEqual({ inputTokens: 11, cachedTokens: 2, usageStatus: "partial" });
+  });
+
+  it("retains paid failed usage on the canonical error and records only safe failure detail", async () => {
+    const primary = scriptedProvider("deepseek", [new LlmProviderError("Pi LLM request failed", { kind: "network" }, { tokenUsage: { inputTokens: 50, cachedTokens: 5 } })]);
+    const fallback = scriptedProvider("openai", [new LlmProviderError("Pi LLM request failed", { kind: "network" }, { cause: new Error("timeout after 300s upstream-private-marker") })]);
+    const provider = routed([profile("primary", "deepseek"), profile("fallback", "openai")], new Map([["primary", primary], ["fallback", fallback]]));
+    const error = await summaryError(provider);
+    expect(error).toBeInstanceOf(LlmRoutingError);
+    expect(tokenUsageFromError(error)).toEqual({ inputTokens: 50, cachedTokens: 5, usageStatus: "partial" });
+    expect((error as Error).message).toContain("timeout after 300s");
+    expect((error as Error).message).not.toContain("upstream-private-marker");
+    expect(provider.route.attempts[1]?.failureReason).toBe("timeout after 300s");
+    expect(llmRouteRecordSchema.safeParse(provider.route).success).toBe(true);
+  });
+
+  it("leaves entirely unreported failed-route counters undefined", async () => {
+    const provider = routed([profile("primary", "deepseek")], new Map([["primary", scriptedProvider("deepseek", [networkFailed()])]]));
+    const error = await summaryError(provider);
+    expect(error).toBeInstanceOf(LlmRoutingError);
+    expect(tokenUsageFromError(error)).toBeUndefined();
+  });
   it("preserves recoverable scores on the canonical routing error", async () => {
     const scores = [{ id: "low", score: 1, reason: "No concrete impact" }];
     const underlying = scriptedProvider("deepseek", [Object.assign(new Error("invalid scores"), { findingScores: scores })]);

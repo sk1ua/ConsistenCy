@@ -52,7 +52,7 @@ import type {
 import type { ReviewJobStore } from "../jobQueue";
 import type { DeterministicAnalyzer } from "./deterministic";
 import { logger } from "../config/logger";
-import { tokenUsageFromError } from "@consistency/schema";
+import { tokenUsageFromError, tokenUsageStatus } from "@consistency/schema";
 import { sanitizeExecutionError } from "../security/redact";
 import { knowledgeIndexPathFor } from "./knowledgeIndex";
 import type { LLMProvider } from "./llm/types";
@@ -159,14 +159,13 @@ export type ReviewRuntime = {
  * planner, the six specialists, the synthesizer — passes through this log, so
  * the cached-token count is observable per call and not only as a run total.
  *
- * Pi reports cache reads as a number; when a provider supplies no cache usage
- * the two cases are indistinguishable, so the recorded value is 0 and
- * `cacheReadStatus` says the number is missing rather than a real miss.
+ * Missing usage stays null/unknown, including failed transport calls. Known
+ * counters from partial attempts remain available without implying completeness.
  */
 function logModelCall(operation: string, detail: Record<string, string>, usage?: TokenUsage): void {
   const input = usage?.inputTokens ?? null;
-  const cached = usage?.cachedTokens ?? 0;
-  const promptTokens = input !== null ? input + cached : (usage?.promptTokens ?? null);
+  const cached = usage?.cachedTokens ?? null;
+  const promptTokens = input !== null ? input + (cached ?? 0) : (usage?.promptTokens ?? null);
   logger.info(
     {
       operation,
@@ -175,7 +174,8 @@ function logModelCall(operation: string, detail: Record<string, string>, usage?:
       outputTokens: usage?.outputTokens ?? null,
       cachedTokens: cached,
       promptTokens,
-      cacheReadStatus: usage?.cacheReadStatus ?? "unavailable_or_zero"
+      usageStatus: tokenUsageStatus(usage),
+      cacheReadStatus: usage?.cacheReadStatus ?? (cached === null ? "unknown" : cached > 0 ? "reported" : "unavailable_or_zero")
     },
     "llm.result"
   );

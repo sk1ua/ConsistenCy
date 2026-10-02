@@ -32,6 +32,22 @@ const fixtureReport: ReviewReport = {
 };
 
 describe("renderReviewComment", () => {
+  it("discloses unknown and partial accounting and safe specific failure reasons", () => {
+    const report: ReviewReport = { ...fixtureReport, agentRuns: [
+      { id: "unknown", jobId: fixtureReport.jobId, agentName: "Security", status: "failed", startedAt: fixtureReport.createdAt,
+        inputSummary: "fixture", findings: [], error: "request timeout after 300s; Authorization: Bearer secret-marker" },
+      { id: "partial", jobId: fixtureReport.jobId, agentName: "Synthesizer", status: "failed", startedAt: fixtureReport.createdAt,
+        inputSummary: "fixture", findings: [], error: "connection reset", tokenUsage: { inputTokens: 10, usageStatus: "partial" } }
+    ] };
+    const markdown = renderReviewComment(report, { providerName: "deepseek" });
+    expect(markdown).toContain("token usage: unknown");
+    expect(markdown).toContain("token usage: partial");
+    expect(markdown).toContain("timeout after 300s");
+    expect(markdown).toContain("connection reset");
+    expect(markdown).toContain("not counted as zero");
+    expect(markdown).toContain("Totals may be incomplete");
+    expect(markdown).not.toContain("secret-marker");
+  });
   it("shows score, trigger, and corroborating specialists", () => {
     const report: ReviewReport = { ...fixtureReport, findings: [{ ...fixtureReport.findings[0]!, score: 9, trigger: "An expired token is submitted", alsoReportedBy: ["Correctness", "Test"] }] };
     const markdown = renderReviewComment(report, { providerName: "mock" });

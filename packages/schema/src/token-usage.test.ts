@@ -1,12 +1,43 @@
 import { describe, expect, it } from "vitest";
 import {
   mergeTokenUsage,
+  markTokenUsageIncomplete,
+  tokenUsageStatus,
+  tokenUsageNotesForAgentRuns,
   promptTokensForAgentRuns,
   recordTokenUsageOnError,
   tokenUsageFromError
 } from "./token-usage";
 
 describe("token usage accounting", () => {
+  it("marks known counters partial without making wholly unknown usage numeric", () => {
+    expect(markTokenUsageIncomplete(undefined)).toBeUndefined();
+    expect(markTokenUsageIncomplete({})).toBeUndefined();
+    expect(markTokenUsageIncomplete({ cacheReadStatus: "unavailable_or_zero" })).toBeUndefined();
+    expect(markTokenUsageIncomplete({ inputTokens: 10 })).toEqual({ inputTokens: 10, usageStatus: "partial" });
+    expect(mergeTokenUsage({ inputTokens: 10, usageStatus: "partial" }, { cachedTokens: 2 })).toEqual({ inputTokens: 10, cachedTokens: 2, usageStatus: "partial" });
+    expect(tokenUsageStatus(undefined)).toBe("unknown");
+    expect(tokenUsageStatus({ cacheReadStatus: "reported" })).toBe("unknown");
+    expect(tokenUsageStatus({ inputTokens: 0 })).toBe("reported");
+    expect(tokenUsageStatus({ inputTokens: 10, usageStatus: "partial" })).toBe("partial");
+  });
+
+  it("annotates incomplete LLM accounting, excluding deterministic and skipped runs", () => {
+    const notes = tokenUsageNotesForAgentRuns([
+      { agentName: "DeterministicAnalyzer", status: "succeeded" },
+      { agentName: "ArchitectureAuditor", status: "skipped" },
+      { agentName: "Security", status: "failed" },
+      { agentName: "Synthesizer", status: "failed", tokenUsage: { inputTokens: 3, usageStatus: "partial" } },
+      { agentName: "Correctness", status: "succeeded", tokenUsage: { totalTokens: 1 } }
+    ]);
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toContain("unknown for Security");
+    expect(notes[0]).toContain("not counted as zero");
+    expect(notes[1]).toContain("partial for Synthesizer");
+    expect(notes.join(" ")).not.toContain("DeterministicAnalyzer");
+    expect(notes.join(" ")).not.toContain("ArchitectureAuditor");
+    expect(tokenUsageNotesForAgentRuns([{ agentName: "Security", status: "failed" }], "zh-CN")[0]).toContain("未报告的用量不按 0");
+  });
   it("sums only the counters either side actually reported", () => {
     expect(mergeTokenUsage({ inputTokens: 10, cachedTokens: 20 }, { inputTokens: 5 }))
       .toEqual({ inputTokens: 15, cachedTokens: 20 });

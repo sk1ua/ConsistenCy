@@ -1,7 +1,7 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { tokenUsageFromError, recordTokenUsageOnError } from "@consistency/schema";
 import { BaseLLMProvider, parseTokenUsage } from "./provider";
-import { classifyLlmError, classifyLlmText, LlmProviderError } from "./errors";
+import { classifyLlmError, classifyLlmText, LlmProviderError, transportFailureReason } from "./errors";
 import { piRuntime } from "./piCatalog";
 import type { AppConfig } from "../../config/env";
 import type { LLMProvider, LLMStreamRequest } from "./types";
@@ -89,15 +89,54 @@ function textContent(message: PiMessage): string {
 }
 
 function usageFromMessage(message: PiMessage) {
-  const input = message.usage.input;
-  const cached = message.usage.cacheRead ?? 0;
+  // Pi initializes usage with zero counters before contacting the upstream.
+  // An error/abort with that untouched placeholder did not report zero usage.
+  const failed = message.stopReason === "error" || message.stopReason === "aborted";
+  if (failed && ![message.usage.input, message.usage.output, message.usage.cacheRead, message.usage.cacheWrite, message.usage.totalTokens].some(value => value > 0)) return undefined;
+  // Zero fields on a failed SDK message may still be untouched defaults.
+  const input = failed ? message.usage.input || undefined : message.usage.input;
+  const output = failed ? message.usage.output || undefined : message.usage.output;
+  const total = failed ? message.usage.totalTokens || undefined : message.usage.totalTokens;
+  const cached = failed ? message.usage.cacheRead || undefined : message.usage.cacheRead ?? 0;
   return parseTokenUsage({
     inputTokens: input,
-    outputTokens: message.usage.output,
-    totalTokens: message.usage.totalTokens,
+    outputTokens: output,
+    totalTokens: total,
     cachedTokens: cached,
-    cacheReadStatus: message.usage.cacheRead ? "reported" : "unavailable_or_zero"
+    ...(cached !== undefined ? { cacheReadStatus: cached > 0 ? "reported" : "unavailable_or_zero" } : {}),
+    ...(failed && [input, output, total, cached].some(value => value === undefined) ? { usageStatus: "partial" } : {})
   });
+}
+
+function usageFromProviderError(error: unknown) {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    const known = tokenUsageFromError(current);
+    if (known) return known;
+    if (current === null || typeof current !== "object") break;
+    const value = current as Record<string, unknown>;
+    const raw = value.usage;
+    if (raw !== null && typeof raw === "object") {
+      const canonical = parseTokenUsage(raw);
+      if (canonical) return canonical;
+      const usage = raw as Record<string, unknown>;
+      const counter = (input: unknown) => typeof input === "number" && Number.isInteger(input) && input >= 0 ? input : undefined;
+      const details = usage.prompt_tokens_details !== null && typeof usage.prompt_tokens_details === "object" ? usage.prompt_tokens_details as Record<string, unknown> : undefined;
+      const prompt = counter(usage.prompt_tokens);
+      const cached = counter(details?.cached_tokens) ?? counter(usage.cache_read_input_tokens);
+      const normalized = parseTokenUsage({
+        inputTokens: prompt !== undefined ? prompt - (cached ?? 0) : counter(usage.input_tokens),
+        outputTokens: counter(usage.completion_tokens) ?? counter(usage.output_tokens),
+        totalTokens: counter(usage.total_tokens),
+        cachedTokens: cached,
+        ...(cached !== undefined ? { cacheReadStatus: "reported" } : {})
+      });
+      if (normalized) return normalized;
+    }
+    if (value.cause === current) break;
+    current = value.cause;
+  }
+  return undefined;
 }
 
 function errorText(_message: PiMessage): string {
@@ -313,7 +352,9 @@ You must return the answer by calling the ${toolName} tool exactly once. Do not 
         // embedded); the bounded classification rides as structured fields so
         // the router can tell rate limits, auth failures, and missing models
         // apart without leaking provider text.
-        throw new LlmProviderError(errorText(message), classifyLlmText(message.errorMessage ?? ""), { tokenUsage: usageFromMessage(message) });
+        throw new LlmProviderError(errorText(message), classifyLlmText(message.errorMessage ?? ""), {
+          tokenUsage: usageFromMessage(message), failureReason: transportFailureReason(message.errorMessage)
+        });
       }
       const toolCall = message.content.find(
         (part): part is PiContentPart & PiToolCallPart =>
@@ -336,7 +377,9 @@ You must return the answer by calling the ${toolName} tool exactly once. Do not 
       }
       // H08: same fixed public message; the raw error's bounded classification
       // (HTTP status family, bounded message patterns) is attached as fields.
-      throw new LlmProviderError("Pi LLM request failed", classifyLlmError(error), { cause: error });
+      throw new LlmProviderError("Pi LLM request failed", classifyLlmError(error), {
+        cause: error, tokenUsage: usageFromProviderError(error)
+      });
     }
   }
 

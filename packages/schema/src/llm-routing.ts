@@ -75,6 +75,8 @@ export const llmRouteAttemptSchema = z.object({
   provider: z.string().trim().min(1).max(64),
   model: z.string().trim().min(1).max(256).optional(),
   errorKind: llmErrorKindSchema,
+  /** Bounded transport detail, never upstream response text or credentials. */
+  failureReason: z.string().regex(/^(?:timeout(?: after \d+(?:\.\d+)?s)?|connection reset|connection refused|DNS lookup failed|network request failed)$/).optional(),
   /** HTTP status when the failure carried one; otherwise absent. */
   httpStatus: z.number().int().min(400).max(599).optional(),
   /** Provider-provided retry hint only — absent means the provider gave none. */

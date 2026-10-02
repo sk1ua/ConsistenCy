@@ -193,6 +193,8 @@ export const tokenUsageSchema = z.object({
   totalTokens: z.number().int().nonnegative().optional(),
   cachedTokens: z.number().int().nonnegative().optional(),
   cacheReadStatus: z.enum(["reported", "unavailable_or_zero"]).optional(),
+  /** Known counters exclude at least one attempt whose usage was not reported. */
+  usageStatus: z.literal("partial").optional(),
   promptTokens: z.number().int().nonnegative().optional()
 }).strict();
 

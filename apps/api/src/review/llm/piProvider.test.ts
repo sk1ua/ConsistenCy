@@ -3,7 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { tokenUsageFromError } from "@consistency/schema";
 import { z } from "zod";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { PiRuntimeProvider } from "./piProvider";
@@ -100,6 +101,45 @@ function sendSse(response: ServerResponse, content: string): void {
 }
 
 describe("PiRuntimeProvider", () => {
+  it.each([
+    { input: 0, output: 0, cacheRead: 0, totalTokens: 0, expected: undefined },
+    { input: 50, output: 2, cacheRead: 20, totalTokens: 72, expected: { inputTokens: 100, outputTokens: 4, cachedTokens: 40, totalTokens: 144, cacheReadStatus: "reported" } },
+    { input: 50, output: 0, cacheRead: 0, totalTokens: 50, expected: { inputTokens: 100, totalTokens: 100, usageStatus: "partial" } }
+  ] as const)("distinguishes failed SDK placeholders from paid usage ($input/$output/$cacheRead)", async ({ input, output, cacheRead, totalTokens, expected }) => {
+    await withFixture((_request, response) => response.end(), async ({ authPath, modelsPath }) => {
+      const provider = await PiRuntimeProvider.create({ authPath, modelsPath, model: "probe/probe-model" });
+      const complete = vi.spyOn(ModelRuntime.prototype, "completeSimple").mockResolvedValue({
+        role: "assistant", content: [], api: "openai-completions", provider: "probe", model: "probe-model", timestamp: 1,
+        stopReason: "error", errorMessage: "request timeout after 300s upstream-private-marker sk-fixture",
+        usage: { input, output, cacheRead, cacheWrite: 0, totalTokens, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }
+      });
+      try {
+        const error = await provider.invokeWithSchema({ schema: z.object({ answer: z.string() }), schemaName: "pi-failure", systemPrompt: "test", userPrompt: "test" }).catch((caught: unknown) => caught);
+        expect(complete).toHaveBeenCalledTimes(2);
+        expect(tokenUsageFromError(error)).toEqual(expected);
+        expect((error as Error).message).toContain("timeout after 300s");
+        expect((error as Error).message).not.toContain("upstream-private-marker");
+        expect((error as Error).message).not.toContain("sk-fixture");
+      } finally { complete.mockRestore(); }
+    });
+  });
+
+  it("preserves explicit upstream error usage through safe transport wrapping", async () => {
+    await withFixture((_request, response) => response.end(), async ({ authPath, modelsPath }) => {
+      const provider = await PiRuntimeProvider.create({ authPath, modelsPath, model: "probe/probe-model" });
+      const cause = Object.assign(new Error("request timeout after 300s upstream-private-marker"), {
+        usage: { prompt_tokens: 70, completion_tokens: 2, total_tokens: 72, prompt_tokens_details: { cached_tokens: 20 } }
+      });
+      const complete = vi.spyOn(ModelRuntime.prototype, "completeSimple").mockRejectedValue(new Error("private wrapper", { cause }));
+      try {
+        const error = await provider.invokeWithSchema({ schema: z.object({ answer: z.string() }), schemaName: "pi-failure", systemPrompt: "test", userPrompt: "test" }).catch((caught: unknown) => caught);
+        expect(tokenUsageFromError(error)).toEqual({ inputTokens: 100, outputTokens: 4, cachedTokens: 40, totalTokens: 144, cacheReadStatus: "reported" });
+        expect((error as Error).message).toContain("timeout after 300s");
+        expect((error as Error).message).not.toContain("upstream-private-marker");
+        expect((error as Error).message).not.toContain("private wrapper");
+      } finally { complete.mockRestore(); }
+    });
+  });
   it("createManaged injects the provider key in-memory against Pi's built-in catalog", async () => {
     const directory = await mkdtemp(join(tmpdir(), "consistency-pi-managed-"));
     const authPath = join(directory, "runtime-auth.json");
