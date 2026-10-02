@@ -16,6 +16,7 @@ import { loadRuntimeConfig } from "@consistency/api/config/runtime";
 import type { AppConfig } from "@consistency/api/config/env";
 import { SettingsStore, findProjectRoot } from "@consistency/api/config/settings";
 import { defaultPythonPath } from "@consistency/api/config/env";
+import type { ReviewOptions } from "./args";
 
 /** Walk up from this module to the workspace root (`name: consistency-workspace`). */
 export function installRoot(startDirectory?: string): string {
@@ -69,6 +70,18 @@ export function resolvePythonPath(config: AppConfig, root: string): string {
 /** `python -m engine` only resolves with the repo root as CWD. */
 export function resolveEngineRoot(config: AppConfig, root: string): string {
   return config.engineRoot ?? resolve(root);
+}
+
+/**
+ * Opt out before any knowledge path or Python memory hook is handed to the
+ * runtime. The flag always disables memory; only the exact env value "1" does.
+ * This is a CLI policy, not engine environment (which remains allowlisted).
+ */
+export function resolveMemoryEnabled(
+  options: Pick<ReviewOptions, "noMemory">,
+  environment: NodeJS.ProcessEnv = process.env
+): boolean {
+  return options.noMemory !== true && environment.CONSISTENCY_NO_MEMORY !== "1";
 }
 
 /**

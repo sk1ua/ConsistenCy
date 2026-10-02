@@ -16,6 +16,8 @@ export type ReviewOptions = {
   headRef?: string;
   json: boolean;
   verbose: boolean;
+  /** Disable persisted review knowledge for this invocation. */
+  noMemory?: boolean;
   /** `undefined` means "no --limit flag"; `--all` sets this to Infinity. */
   limit?: number;
   color?: boolean;
@@ -49,6 +51,9 @@ export const REVIEW_USAGE = `consistency review — 在本地仓库上运行一�
   --all                打印全部 finding（覆盖 --limit）
   --no-color           关闭颜色（NO_COLOR 与非 TTY 输出同样会关闭）
 
+记忆
+  --no-memory          不读取或写入持久化知识库（CONSISTENCY_NO_MEMORY=1 同效）
+
 模型
   --language <zh-CN|en-US>   报告语言（默认 zh-CN）
   --threshold <severity>     CI 阈值：critical|high|medium|low|info（默认 low）
@@ -81,7 +86,8 @@ export function parseReviewOptions(argv: readonly string[]): ReviewOptions {
   const options: ReviewOptions = {
     repoPath: process.cwd(),
     json: false,
-    verbose: false
+    verbose: false,
+    noMemory: false
   };
   let baseRef: string | undefined;
   let headRef: string | undefined;
@@ -124,6 +130,7 @@ export function parseReviewOptions(argv: readonly string[]): ReviewOptions {
       case "--verbose": options.verbose = true; break;
       case "--all": options.limit = Number.POSITIVE_INFINITY; break;
       case "--no-color": options.color = false; break;
+      case "--no-memory": options.noMemory = true; break;
       case "--color": options.color = true; break;
       case "--help":
       case "-h":

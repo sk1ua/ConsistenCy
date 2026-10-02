@@ -23,6 +23,7 @@ import {
   installRoot,
   loadCliConfig,
   resolveEngineRoot,
+  resolveMemoryEnabled,
   resolvePythonPath
 } from "./config";
 import type { ReviewOptions } from "./args";
@@ -167,6 +168,7 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     maxReportedFindings: config.CONSISTENCY_MAX_REPORTED_FINDINGS,
     maxFindingsPerFile: config.CONSISTENCY_MAX_FINDINGS_PER_FILE,
     deterministicScope: config.CONSISTENCY_DETERMINISTIC_SCOPE,
+    memoryEnabled: resolveMemoryEnabled(options, io.environment ?? process.env),
     workspaceRoot
   });
 

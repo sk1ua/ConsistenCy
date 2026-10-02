@@ -67,6 +67,7 @@ npm run review -- --base v1.2.0 --head v1.3.0
 | `--limit <n>` | 限制审多少个文件 |
 | `--all` | 不按变更集限制 |
 | `--no-color` / `--color` | 关掉/强制彩色（管道里默认关） |
+| `--no-memory` | 本次不读写持久化知识库（等价于 `CONSISTENCY_NO_MEMORY=1`） |
 | `--language <zh-CN\|en-US>` | 报告语言 |
 | `--threshold <critical\|high\|medium\|low\|info>` | 退出码阈值，默认 `low` |
 | `--provider <名>` / `--model <名>` | 临时换 LLM 供应商/模型 |
@@ -74,7 +75,10 @@ npm run review -- --base v1.2.0 --head v1.3.0
 ```powershell
 npm run review -- --json > 报告.json      # 接流程用
 npm run review -- --repo D:\repo --limit 20 --no-color
+npm run review -- --no-memory             # 本次不读写知识记忆
 ```
+
+默认会复用安装根目录下 `.consistency/cli/knowledge/<repo>.sqlite` 的历史记忆，并在完成后记录 findings。`--no-memory` 或环境变量 `CONSISTENCY_NO_MEMORY=1` 会同时关闭历史读取、知识索引更新和 `record_review` 写回；已存在的知识库不会被打开或修改，不存在时也不会创建。只有环境值 `1` 关闭记忆，`0`/未设置保持默认；CLI flag 始终优先关闭。它不删除旧记忆，不关闭正常的确定性分析或报告输出，也不意味着所有 `.consistency/` 产物都不落盘。
 
 ---
 
@@ -137,7 +141,7 @@ npm run dev:api
 
 - 没有网页界面，没有桌面应用——v4 把这些全删了，只剩终端和（无界面的）HTTP daemon。见 [delivery-readiness.md](delivery-readiness.md)。
 - Notebook 只有服务端 API，仓库里不带界面。
-- 一次性 CLI 进程**不写数据库**：它把任务放在内存队列里，所以跑完不留历史记录；要留档请用 `--json > 文件`。需要持久化就用 HTTP daemon。
+- 一次性 CLI 进程**不持久化任务、报告或快照**：任务放在内存队列里，要留完整报告请用 `--json > 文件` 或 HTTP daemon。项目知识记忆默认会另存到 `.consistency/cli/knowledge/<repo>.sqlite`；不想读写它就用 `--no-memory` 或 `CONSISTENCY_NO_MEMORY=1`。
 - CLI 没有"取消"入口：中断它就是杀进程。
 - GitHub App 没配：本地审查和公开 PR 分析能用，webhook 驱动的 PR 与自动评论不能用。配置见 [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md)。
 

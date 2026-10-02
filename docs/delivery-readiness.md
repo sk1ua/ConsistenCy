@@ -27,7 +27,7 @@ v3 时期的逐批交付审计矩阵（批次一～六的逐项现状表、桌�
 ## 三、保留并迁移到终端入口的能力
 
 - 主入口：`npm run consistency` → `tsx apps/cli/src/main.ts`，命令只有 `review` 与 `help`（`--help` / `-h`）；未知命令退出 2。`npm run review` 等价于直接运行 `review`。
-- `consistency review` 选项：`--repo <路径>`（默认当前目录）、`--base <ref>` / `--head <ref>`（只传 `--base` 自动补 `HEAD`；只传 `--head` 报错）、`--json`、`--verbose`、`--limit <n>`、`--all`、`--no-color` / `--color`、`--language <zh-CN|en-US>`、`--threshold <critical|high|medium|low|info>`（默认 `low`）、`--provider <名>`、`--model <名>`。
+- `consistency review` 选项：`--repo <路径>`（默认当前目录）、`--base <ref>` / `--head <ref>`（只传 `--base` 自动补 `HEAD`；只传 `--head` 报错）、`--json`、`--verbose`、`--limit <n>`、`--all`、`--no-color` / `--color`、`--no-memory`（或 `CONSISTENCY_NO_MEMORY=1`，禁止读写持久化知识库）、`--language <zh-CN|en-US>`、`--threshold <critical|high|medium|low|info>`（默认 `low`）、`--provider <名>`、`--model <名>`。
 - 审查实现：终端与 HTTP daemon（`apps/api`）共用同一套 `createReviewRuntime`，终端侧在 `apps/cli/src/review.ts` 复用而不重实现；HTTP/队列/持久化层仍在仓库里，只是没有界面。
 - 渲染纪律：约束块永远存在（`[!]` 表示该部分本次未检查，不代表已检查通过；`[~]` 表示已检查但证据链不完整）；`score`/`riskLevel` 与 `riskBand` 两个风险度量并排且永不合并；没有覆盖记录时不打绿勾，只写「本次审查未记录覆盖范围」。
 - 配置入口：`npm run setup`、`npm run config -- show|doctor|set`。LLM 运行时只允许真实 provider（DeepSeek / OpenAI / Anthropic）。

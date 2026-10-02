@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { UsageError, parseReviewOptions } from "./args";
+import { REVIEW_USAGE, UsageError, parseReviewOptions } from "./args";
 
 describe("parseReviewOptions", () => {
   it("defaults to reviewing the working tree in the current directory", () => {
@@ -9,6 +9,7 @@ describe("parseReviewOptions", () => {
     expect(options.headRef).toBeUndefined();
     expect(options.json).toBe(false);
     expect(options.verbose).toBe(false);
+    expect(options.noMemory).toBe(false);
     expect(options.limit).toBeUndefined();
   });
 
@@ -48,6 +49,16 @@ describe("parseReviewOptions", () => {
   it("records colour intent and lets --no-color win by order-independence", () => {
     expect(parseReviewOptions(["--color"]).color).toBe(true);
     expect(parseReviewOptions(["--no-color"]).color).toBe(false);
+  });
+
+  it("accepts --no-memory as a standalone opt-out", () => {
+    expect(parseReviewOptions(["--no-memory"]).noMemory).toBe(true);
+    expect(parseReviewOptions(["--json", "--no-memory", "--verbose"])).toMatchObject({
+      noMemory: true, json: true, verbose: true
+    });
+    expect(() => parseReviewOptions(["--no-memory=1"])).toThrow(UsageError);
+    expect(REVIEW_USAGE).toContain("--no-memory");
+    expect(REVIEW_USAGE).toContain("CONSISTENCY_NO_MEMORY=1");
   });
 
   it("validates enum-ish flags instead of passing them through", () => {

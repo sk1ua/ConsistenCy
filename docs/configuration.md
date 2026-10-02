@@ -73,11 +73,11 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 
 | Runtime Mode | Default Database Path | Workspaces Directory | Settings Directory |
 |---|---|---|---|
-| **CLI (`consistency review`)** | 不写库：job store 是 `InMemoryJobQueue` | `<ProjectRoot>/.consistency/workspaces` | `<ProjectRoot>/.consistency/` |
+| **CLI (`consistency review`)** | job store 是 `InMemoryJobQueue`；知识记忆默认写入 `.consistency/cli/knowledge/<repo>.sqlite` | `<ProjectRoot>/.consistency/cli/workspaces` | `<ProjectRoot>/.consistency/` |
 | **HTTP daemon (`npm run dev:api`)** | `<ProjectRoot>/.consistency/consistency.db` | `<ProjectRoot>/.consistency/workspaces` | `<ProjectRoot>/.consistency/` |
 | **Explicit Override** | `DATABASE_PATH` env var | `CONSISTENCY_WORKSPACE_ROOT` | `CONSISTENCY_SETTINGS_ROOT` |
 
-只有 daemon 会持久化 job、报告与快照；一次性 CLI 进程不写 SQLite（详见 [capability-matrix.md](capability-matrix.md) 的 cli 列）。
+只有 daemon 会持久化 job、报告与快照；CLI 的这些数据只在内存中（详见 [capability-matrix.md](capability-matrix.md) 的 cli 列）。CLI 的项目知识记忆默认另存于 `<ProjectRoot>/.consistency/cli/knowledge/<repo>.sqlite`，用于下一次审查的历史上下文。`--no-memory` 或 `CONSISTENCY_NO_MEMORY=1` 在 CLI/runtime 边界关闭知识路径、`relevant_context` 和 `record_review`：既不打开既有知识库，也不创建或更新知识库。该 opt-out 不删除历史数据，也不禁用审查本身或其它工作区产物；HTTP daemon 的默认记忆行为不变。
 
 ### Path Resolution Rules
 - If `DATABASE_PATH` is `:memory:`, in-memory SQLite storage is used.
@@ -112,6 +112,7 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `CONSISTENCY_MAX_REPORTED_FINDINGS` | `8` | Maximum findings in the main list after scoring (1–50) |
 | `CONSISTENCY_MAX_FINDINGS_PER_FILE` | `3` | Maximum main-list findings from any single file after scoring (1–20) |
 | `CONSISTENCY_DETERMINISTIC_SCOPE` | `diff` | Scoping of Python-engine (deterministic) findings: `diff` keeps only findings anchored within 5 lines of a changed hunk, `all` keeps the engine's unscoped output. Findings the engine reports without a line reference are kept only for files that are part of the change |
+| `CONSISTENCY_NO_MEMORY` | `0` / unset | CLI only: exact value `1` disables persisted knowledge reads, indexing and review write-back. Equivalent to `--no-memory`; the flag always disables memory even when the environment is `0`. Other values retain default memory |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
 | `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow routes (API layer; the repo ships no login UI) |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the OAuth broker used by the API's `/oauth/desktop/*` routes (`apps/api/src/server.ts:160`) |

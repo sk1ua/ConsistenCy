@@ -89,6 +89,8 @@ export type ReviewWorkflowDependencies = {
   reviewWorkflow?: string | null;
   reviewWorkflowSpec?: (name: string) => WorkflowSpec | undefined;
   workspaceRoot?: string;
+  /** Persisted knowledge enrichment/recording; enabled unless explicitly false. */
+  memoryEnabled?: boolean;
   runtimeRegistry?: RuntimeRegistry;
 };
 
@@ -228,6 +230,7 @@ export function withModelCallLogging(driver: ModelDriver): ModelDriver {
 
 export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): ReviewRuntime {
   const workspaceRoot = dependencies.workspaceRoot ?? ".consistency/workspaces";
+  const memoryEnabled = dependencies.memoryEnabled !== false;
   if (!dependencies.provider) {
     throw new Error("LLM provider is not configured. Configure DeepSeek, OpenAI, or Pi in settings before running reviews.");
   }
@@ -261,17 +264,23 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
                 context.skippedBaselinePaths,
               ),
         composeReview: (files) => dependencies.deterministicAnalyzer.composeReview(files),
-        relevantContext: async (files, targets, indexPath) =>
-          dependencies.deterministicAnalyzer.relevantContext(files, targets, { indexPath }),
-        recordReview: async (record) =>
-          dependencies.deterministicAnalyzer.recordReview({
-            indexPath: record.indexPath,
-            jobId: record.jobId,
-            reference: record.reference,
-            reportedAt: record.reportedAt,
-            coveredFiles: record.coveredFiles,
-            findings: record.findings,
-          }),
+        // No-memory removes both Python entrypoints, not just prompt history:
+        // relevant_context also writes the index, and record_review reads it.
+        relevantContext: memoryEnabled
+          ? async (files, targets, indexPath) =>
+              dependencies.deterministicAnalyzer.relevantContext(files, targets, { indexPath })
+          : undefined,
+        recordReview: memoryEnabled
+          ? async (record) =>
+              dependencies.deterministicAnalyzer.recordReview({
+                indexPath: record.indexPath,
+                jobId: record.jobId,
+                reference: record.reference,
+                reportedAt: record.reportedAt,
+                coveredFiles: record.coveredFiles,
+                findings: record.findings,
+              })
+          : undefined,
       };
 
       // ---------------------------------------------------------------------
@@ -367,7 +376,9 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         deterministicScope: dependencies.deterministicScope,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
-        knowledgeIndexPath: knowledgeIndexPathFor(input.repositoryFullName, workspaceRoot),
+        knowledgeIndexPath: memoryEnabled
+          ? knowledgeIndexPathFor(input.repositoryFullName, workspaceRoot)
+          : undefined,
         onRunCreated: (info) => {
           runId = info.runId;
           dependencies.runtimeRegistry?.registerLiveRun({
