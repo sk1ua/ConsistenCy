@@ -79,16 +79,21 @@ function renderLines(selected: readonly number[], lines: readonly string[]): str
   return parts.join("\n");
 }
 
-function fileSnippet(path: string, content: string, patch: string, budget: number): { text: string; omitted: boolean } {
+function fileSnippet(path: string, content: string, patch: string, budget: number, modelVisible: boolean): { text: string; omitted: boolean } {
+  const truncated = modelVisible ? "[Baseline snippets limited by per-file character budget; judge using the diff and current file content.]" : TRUNCATED;
   const lines = content === "" ? [] : content.split(/\r?\n/);
   const { windows, edits } = hunkRanges(patch, lines.length);
   if (windows.length === 0) {
-    const text = `BASE FILE ${path}\n[Baseline snippets omitted: no usable old-side diff hunk; full file not supplied.]`;
+    const text = `BASE FILE ${path}\n${modelVisible
+      ? "[Baseline snippets: no old-side hunk; judge using the diff and current file content.]"
+      : "[Baseline snippets omitted: no usable old-side diff hunk; full file not supplied.]"}`;
     return { text: text.length <= budget ? text : "", omitted: true };
   }
-  const prefix = `BASE FILE ${path}\n[Only old-side hunk neighborhoods (±40 lines); other baseline lines omitted.]`;
+  const prefix = `BASE FILE ${path}\n${modelVisible
+    ? "[Baseline includes old-side hunk neighborhoods (±40 lines); judge changed behavior using the diff and current file content.]"
+    : "[Only old-side hunk neighborhoods (±40 lines); other baseline lines omitted.]"}`;
   // Reserve the truncation notice BEFORE admitting code. Whole lines only.
-  const bodyBudget = budget - prefix.length - TRUNCATED.length - 2;
+  const bodyBudget = budget - prefix.length - truncated.length - 2;
   if (bodyBudget < 0) return { text: "", omitted: true };
   const candidates = new Set<number>();
   for (const window of windows) {
@@ -107,25 +112,28 @@ function fileSnippet(path: string, content: string, patch: string, budget: numbe
     }
   }
   const omitted = selected.length < candidates.size;
-  return { text: [prefix, body, ...(omitted ? [TRUNCATED] : [])].filter(Boolean).join("\n"), omitted };
+  return { text: [prefix, body, ...(omitted ? [truncated] : [])].filter(Boolean).join("\n"), omitted };
 }
 
-export function buildBaselineSnippets(context: PRReviewContext, maxChars = BASELINE_SNIPPETS_MAX_CHARS): string {
+/** Diagnostic mode preserves internal omission metadata; model mode is neutral. */
+export function buildBaselineSnippets(context: PRReviewContext, maxChars = BASELINE_SNIPPETS_MAX_CHARS, guidance: "diagnostic" | "model" = "diagnostic"): string {
+  const modelVisible = guidance === "model";
+  const globalOmission = modelVisible ? "[Baseline snippets limited by global character budget; judge using the diff and current file content.]" : GLOBAL_OMISSION;
   const files = context.changedFiles.filter(file => context.baseFileContents?.[file.path] !== undefined)
     .sort((a, b) => a.path.localeCompare(b.path));
   if (files.length === 0) return "";
   const limit = Number.isFinite(maxChars) ? Math.max(0, Math.min(BASELINE_SNIPPETS_MAX_CHARS, Math.floor(maxChars))) : BASELINE_SNIPPETS_MAX_CHARS;
-  if (limit < GLOBAL_OMISSION.length) return "";
+  if (limit < globalOmission.length) return "";
   // Equal shares prevent an early large file from hiding later files. All
   // overhead is charged against the GLOBAL limit, including the final notice.
-  const perFileBudget = Math.floor((limit - GLOBAL_OMISSION.length - 2) / files.length) - 2;
+  const perFileBudget = Math.floor((limit - globalOmission.length - 2) / files.length) - 2;
   const parts: string[] = [];
   let omitted = false;
   for (const file of files) {
-    const snippet = fileSnippet(file.path, context.baseFileContents![file.path]!, file.patch ?? "", perFileBudget);
+    const snippet = fileSnippet(file.path, context.baseFileContents![file.path]!, file.patch ?? "", perFileBudget, modelVisible);
     if (snippet.text) parts.push(snippet.text);
     omitted ||= snippet.omitted;
   }
-  if (omitted) parts.push(GLOBAL_OMISSION);
+  if (omitted) parts.push(globalOmission);
   return parts.join("\n\n");
 }

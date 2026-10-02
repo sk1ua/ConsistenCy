@@ -140,6 +140,17 @@ export class ReviewCancelledError extends Error {
   }
 }
 
+/** A recovery pass is for changed behavior, never docs-only or metadata-only diffs. */
+function hasActualCodeChanges(context: PRReviewContext): boolean {
+  return context.changedFiles.some(file => {
+    if (/\.(?:md|mdx|txt|rst|lock)$/i.test(file.path)) return false;
+    const section = context.diff.split(/(?=^diff --git )/m)
+      .find(part => part.startsWith(`diff --git a/${file.path} b/${file.path}\n`));
+    return `${file.patch ?? ""}\n${section ?? ""}`.split(/\r?\n/).some(line =>
+      /^[+-](?![+-])\s*\S/.test(line) && !/^[+-]\s*(?:\/\/|#|\/\*|\*|<!--)/.test(line));
+  });
+}
+
 interface AgentRuntime {
   readonly acbId: ReturnType<typeof asAgentId>;
   readonly name: string;
@@ -441,9 +452,20 @@ export class ReviewWorkload {
       const agentFacades = new Map<string, AgentFacadeSet>();
       const agentCapabilities = new Map<string, AgentCapabilityRefs>();
 
-      for (const agentName of REVIEW_AGENTS) {
+      let rawFindingsCount = 0;
+      let completedSpecialists = 0;
+      const enabledAgents = [...plan.enabledAgents];
+      // One additional pass at most, with a fresh ACB/capability budget. It
+      // cannot resurrect a terminal ACB or bypass Scheduler admission.
+      for (const [index, agentName] of [...REVIEW_AGENTS, "Correctness" as const].entries()) {
         if (scheduler.getRun(runId)?.state !== "ACTIVE") break; // cancelled run
-        const acbKey = `review-${agentName.toLowerCase()}`;
+        const isRecovery = index === REVIEW_AGENTS.length;
+        if (isRecovery) {
+          if (rawFindingsCount !== 0 || completedSpecialists === 0 || failedAgents.length > 0
+            || !hasActualCodeChanges(agentContext)) break;
+          if (!enabledAgents.includes("Correctness")) enabledAgents.push("Correctness");
+        }
+        const acbKey = `review-${agentName.toLowerCase()}${isRecovery ? "-retry" : ""}`;
         const profile: AgentCapabilityProfile = agentName === "Security" ? "security" : "specialized";
         // Real COW fork per agent (AC-REV-3): private overlay over the base.
         const agentImage = contextManager.fork(baseImage);
@@ -473,7 +495,7 @@ export class ReviewWorkload {
           evidenceWrite: runtime.handles.evidenceWrite ? { handle: runtime.handles.evidenceWrite } : undefined,
         });
 
-        if (!plan.enabledAgents.includes(agentName)) {
+        if (!isRecovery && !plan.enabledAgents.includes(agentName)) {
           scheduler.cancelAgent(runtime.acbId); // skipped: never scheduled
           const skipped: AgentRun = {
             id: `agent_${randomUUID()}`,
@@ -517,11 +539,14 @@ export class ReviewWorkload {
           relevantContext,
           focusAreas: plan.focusAreas,
           maxFindingsPerSpecialist: options.maxFindingsPerSpecialist ?? 3,
+          omitBaselineSnippets: isRecovery,
           facades: runtime.facades,
           persistence,
           providerName: options.modelDriver.provider,
           model: options.modelDriver.model,
         });
+        rawFindingsCount += result.rawFindingsCount;
+        if (!result.error) completedSpecialists += 1;
         findings.push(...result.findings);
         preExistingIssues.push(...result.preExistingIssues);
         totalCappedBySpecialists += result.cappedFindingsCount;
@@ -605,7 +630,7 @@ export class ReviewWorkload {
         // Coverage facts as of synthesis start (audit P1-05): the
         // synthesizer adds its own status and derives the final outcome.
         coverage: {
-          enabledAgents: [...plan.enabledAgents],
+          enabledAgents,
           failedAgents: [...failedAgents],
           plannerFailed: Boolean(supervisorResult.error),
           deterministicFailed: workflowStepsIncomplete(deterministicResult),

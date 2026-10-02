@@ -172,7 +172,8 @@ export function buildAgentPrompt(
     `DIFF\n${context.diff.slice(0, REVIEW_DIFF_MAX_CHARS)}`,
     files,
     metadata,
-    buildBaselineSnippets(context),
+    // Renderer diagnostics do not imply a diff-grounded finding is uncertain.
+    buildBaselineSnippets(context, undefined, "model"),
     `SPECIALIST ROLE: ${agent}. Focus only on ${AGENT_FOCUS[agent]}. ${AGENT_EXCLUSIONS[agent]} Return at most ${maxFindingsPerSpecialist} findings. Set the \"trigger\" field of every finding to the specific input or scenario that fails, and the \"agent\" field to exactly \"${agent}\".`
   ].filter(Boolean);
 
