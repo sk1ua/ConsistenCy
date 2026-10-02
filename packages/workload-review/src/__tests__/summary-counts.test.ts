@@ -32,6 +32,36 @@ describe("final summary counts", () => {
     expect(summary).not.toContain("十条高危问题");
   });
 
+  it("preserves explanations and unrelated numbers in the same count-bearing English sentence", () => {
+    const summary = summaryForFinalFindings(
+      "Found five review findings: concatenated SQL permits injection; restore parameter binding and retain the 300-second timeout on Python 3.12.",
+      [finding("main")], [], "zh-CN",
+    );
+    expect(summary).toContain("Found 1 review finding: concatenated SQL permits injection; restore parameter binding and retain the 300-second timeout on Python 3.12.");
+    expect(summary).toContain("1 main-list finding");
+    expect(summary).not.toContain("去重和过滤后");
+    expect(summary).not.toContain("five review findings");
+  });
+
+  it("preserves Chinese explanation clauses and follows actual prose rather than the language setting", () => {
+    const summary = summaryForFinalFindings(
+      "发现七条高危问题，参数拼接导致注入，应恢复参数绑定并保留300秒超时和Python 3.12；附录：9条。",
+      [finding("main")], [finding("base")], "en-US",
+    );
+    expect(summary).toContain("发现1条高危问题，参数拼接导致注入，应恢复参数绑定并保留300秒超时和Python 3.12；附录：1条。");
+    expect(summary).toContain("主列表 1 条");
+    expect(summary).not.toContain("After deduplication and filtering");
+  });
+
+  it("replaces only generated footers on repeat processing and leaves non-count risks and timing prose intact", () => {
+    const source = "There is a risk of command execution; keep the 5-second timeout. 发现5秒延迟时应重试。";
+    const once = summaryForFinalFindings(source, [finding("main")], [], "en-US");
+    const twice = summaryForFinalFindings(once, [finding("main")], [], "en-US");
+    expect(twice).toBe(once);
+    expect(twice).toContain(source);
+    expect(twice.match(/After deduplication and filtering/g)).toHaveLength(1);
+  });
+
   it("derives counts after the report builder's last deduplication pass", () => {
     const first = finding("first");
     const report = buildReviewReport({
