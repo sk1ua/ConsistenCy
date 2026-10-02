@@ -44,7 +44,7 @@ export const REVIEW_AGENTS = [
 /** Lean mode only. Not part of the default six-agent catalog. */
 export const LEAN_AGENTS = ["Correctness", "Consistency"] as const;
 
-export type ReviewAgentName = (typeof REVIEW_AGENTS)[number];
+export type ReviewAgentName = (typeof REVIEW_AGENTS)[number] | (typeof LEAN_AGENTS)[number];
 
 export interface DeterministicFileInput {
   path: string;

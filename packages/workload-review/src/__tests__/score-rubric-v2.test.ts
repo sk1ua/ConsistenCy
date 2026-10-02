@@ -14,10 +14,10 @@ afterEach(cleanupTmpDirs);
 
 function finding(id: string, extra: Partial<ReviewFinding> = {}): ReviewFinding {
   return {
-    id, agent: "Test", title: "Add tests", severity: "low", confidence: "likely",
+    id, agent: "Test", title: extra.title ?? "Add tests", severity: "low", confidence: "likely",
     file: "src/index.ts", startLine: 1, endLine: 1,
-    evidence: "Add tests for this module.", reasoning: "Coverage would be higher.",
-    recommendation: "Add a test.", ...extra,
+    evidence: extra.evidence ?? "Add tests for this module.", reasoning: extra.reasoning ?? "Coverage would be higher.",
+    recommendation: extra.recommendation ?? "Add a test.", trigger: extra.trigger,
   };
 }
 

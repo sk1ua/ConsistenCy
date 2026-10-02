@@ -439,11 +439,11 @@ export class ReviewWorkload {
       const supervisorResult = leanPlan ? { plan: leanPlan } : await runSupervisorBody({
         fiber: supervisor!.fiber,
         scheduler,
-        agentId: supervisor.acbId,
+        agentId: supervisor!.acbId,
         jobId,
         context: agentContext,
         deterministicResult,
-        facades: supervisor.facades,
+        facades: supervisor!.facades,
         persistence,
         providerName: options.modelDriver.provider,
         model: options.modelDriver.model,
