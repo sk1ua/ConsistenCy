@@ -43,6 +43,8 @@ export interface SynthesizerBodyOptions {
   readonly baseSha: string;
   readonly headSha: string;
   readonly deterministicResult: DomainAnalyzeSuccess;
+  /** Changed paths whose baseline content was absent or deliberately skipped. */
+  readonly missingBaselinePaths?: readonly string[];
   readonly findings: ReviewFinding[];
   readonly preExistingIssues?: ReviewFinding[];
   readonly totalCappedBySpecialists?: number;
@@ -278,7 +280,9 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const agentRunsForReport = [...options.agentRuns, run];
       persistence.saveAgentRun(run);
 
-      const staticRiskLabel = staticRiskLabelForFiles(options.deterministicResult.files);
+      const analyzed = new Set(options.deterministicResult.files.map(file => file.path));
+      const missingBaseline = (options.missingBaselinePaths ?? []).some(path => !analyzed.has(path));
+      const staticRiskLabel = staticRiskLabelForFiles(options.deterministicResult.files, { missingBaseline });
 
       const report = buildReviewReport({
         jobId,

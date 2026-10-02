@@ -584,6 +584,11 @@ export class ReviewWorkload {
         baseSha: options.context.baseSha,
         headSha: options.context.headSha,
         deterministicResult,
+        missingBaselinePaths: options.context.changedFiles
+          .filter(file => file.status !== "removed")
+          .filter(file => (options.context.skippedBaselinePaths ?? []).includes(file.path)
+            || !(file.path in options.context.baseFileContents))
+          .map(file => file.path),
         findings,
         preExistingIssues,
         totalCappedBySpecialists,

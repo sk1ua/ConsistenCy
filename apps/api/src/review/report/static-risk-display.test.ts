@@ -12,3 +12,12 @@ it("uses the same peak-file static label as the terminal, including baseline war
   expect(markdown).toContain(`**Static risk:** ${staticRiskDisplayLabel(report.riskLevel, report.staticRiskLabel)}`);
   expect(markdown).not.toContain("**Static risk:** LOW");
 });
+
+it("shows No Baseline when synthesis recorded a missing baseline", () => {
+  const report: ReviewReport = {
+    jobId: "job_static", repositoryFullName: "owner/repo", baseSha: "base", headSha: "head",
+    summary: "Review complete", score: 88, riskLevel: "low", findings: [], agentRuns: [],
+    staticRiskLabel: "No Baseline", createdAt: "2026-09-30T12:00:00.000Z",
+  };
+  expect(renderReviewComment(report, { providerName: "mock" })).toContain("**Static risk:** No Baseline");
+});

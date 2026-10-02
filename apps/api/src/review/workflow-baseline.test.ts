@@ -33,4 +33,11 @@ describe("default workflow baseline disclosure", () => {
     expect(staticRiskLabelForFiles(result.files)).toBe("Severe Drift / No Baseline / skipped");
     expect(staticRiskLabelForFiles([...result.files].reverse())).toBe(staticRiskLabelForFiles(result.files));
   });
+
+  it("names a missing baseline when the returned file label is blank", () => {
+    const blank = { path: "added.py", riskScore: 0, riskLabel: " ", riskColor: "GREY", signals: {}, findings: [], confidence: 0 };
+    expect(staticRiskLabelForFiles([blank], { missingBaseline: true })).toBe("No Baseline");
+    expect(staticRiskLabelForFiles([{ ...blank, riskScore: 0.9, riskLabel: "Severe Drift" }], { missingBaseline: true }))
+      .toBe("Severe Drift / No Baseline");
+  });
 });

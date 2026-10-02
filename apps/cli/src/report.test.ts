@@ -107,6 +107,14 @@ describe("renderReport — the promise this module exists to keep", () => {
     expect(output).toContain("No Baseline");
     expect(output).toContain("Skipped");
   });
+  it("keeps a risk label visible when the run header is omitted", () => {
+    const quiet = renderReport(report({ staticRiskLabel: undefined, riskLevel: "low" }), { ...OPTIONS, header: false });
+    expect(quiet).toContain("风险");
+    expect(quiet).toContain("低");
+    const labeled = renderReport(report({ staticRiskLabel: "Significant Drift" }), { ...OPTIONS, header: false });
+    expect(labeled).toContain("Significant Drift");
+    expect(labeled).toContain("结论风险带");
+  });
   it("shows score, trigger, and corroborating specialists in default text output", () => {
     const output = renderReport(report({ findings: [finding({ score: 8, trigger: "An expired token is submitted", alsoReportedBy: ["Correctness", "Test"] })] }), OPTIONS);
     expect(output).toContain("评分 8/10");

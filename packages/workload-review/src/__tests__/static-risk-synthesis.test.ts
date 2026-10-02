@@ -22,3 +22,33 @@ it("synthesizes the highest-risk file label and retains baseline warnings from o
   }).run();
   expect(result.report.staticRiskLabel).toBe("Severe Drift / No Baseline / skipped");
 });
+
+it("names No Baseline when changed files have no baseline and analysis returns no files", async () => {
+  const repo = makeFixtureRepo();
+  const stage = makeDeterministicStage();
+  stage.analyze = async () => ({ id: "req_static", ok: true, files: [] });
+  const context = {
+    ...repo.context,
+    baseFileContents: {},
+    changedFiles: repo.context.changedFiles.filter(file => file.status !== "removed"),
+  };
+  const result = await new ReviewWorkload({
+    context, snapshot: repo.snapshot, deterministic: stage,
+    modelDriver: new TestModelDriver(), persistence: new TestPersistence(), reportLanguage: "en-US",
+    publicationPolicy: "disabled", accessMode: "local_git",
+  }).run();
+  expect(result.report.staticRiskLabel).toBe("No Baseline");
+});
+
+it("does not invent No Baseline for an empty analysis when every changed file has a baseline", async () => {
+  const repo = makeFixtureRepo();
+  const stage = makeDeterministicStage();
+  stage.analyze = async () => ({ id: "req_static", ok: true, files: [] });
+  const result = await new ReviewWorkload({
+    context: repo.context, snapshot: repo.snapshot, deterministic: stage,
+    modelDriver: new TestModelDriver(), persistence: new TestPersistence(), reportLanguage: "en-US",
+    publicationPolicy: "disabled", accessMode: "local_git",
+  }).run();
+  expect(result.report.staticRiskLabel).toBe("Consistent");
+  expect(result.report.staticRiskLabel).not.toContain("No Baseline");
+});

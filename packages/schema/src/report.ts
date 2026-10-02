@@ -229,18 +229,27 @@ export function riskBandForFindings(findings: Array<{ severity: Severity }>): "h
   return "none";
 }
 
-/** Select the peak file risk without losing any baseline-coverage warnings. */
-export function staticRiskLabelForFiles(files: readonly DomainFileResult[]): string | undefined {
+/**
+ * Select the peak file risk without losing any baseline-coverage warnings.
+ * Callers that already know baseline coverage is missing should pass
+ * `missingBaseline`; an empty file list is not itself proof of a missing
+ * baseline. A blank per-file label is never a valid display value.
+ */
+export function staticRiskLabelForFiles(
+  files: readonly DomainFileResult[],
+  options?: { missingBaseline?: boolean }
+): string {
   const highest = [...files].sort((left, right) => right.riskScore - left.riskScore || left.path.localeCompare(right.path))[0];
-  if (!highest) return undefined;
-  const labels = [highest.riskLabel];
-  if (files.some(file => file.riskLabel.includes("No Baseline")) && !highest.riskLabel.includes("No Baseline")) {
+  if (!highest) return options?.missingBaseline ? "No Baseline" : "Consistent";
+  const peak = highest.riskLabel.trim();
+  const labels = [peak || (options?.missingBaseline ? "No Baseline" : "Consistent")];
+  if ((options?.missingBaseline || files.some(file => file.riskLabel.includes("No Baseline"))) && !labels[0]!.includes("No Baseline")) {
     labels.push("No Baseline");
   }
-  if (files.some(file => /\bskipped\b/i.test(file.riskLabel)) && !/\bskipped\b/i.test(highest.riskLabel)) {
+  if (files.some(file => /\bskipped\b/i.test(file.riskLabel)) && !/\bskipped\b/i.test(labels[0]!)) {
     labels.push("skipped");
   }
-  return labels.filter(Boolean).join(" / ") || undefined;
+  return labels.filter(Boolean).join(" / ");
 }
 
 /** Both terminal and Markdown render the same static label, not a different band. */

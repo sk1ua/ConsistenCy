@@ -415,6 +415,9 @@ export function renderReport(report: ReviewReport, options: RenderOptions): stri
   const constraints = collectConstraints(report);
   const lines: string[] = [];
 
+  const riskLine =
+    `  ${palette.bold(String(report.score).padStart(3, " "))} 静态分析评分 · 风险 ${riskLevelLabel(report.riskLevel, report.staticRiskLabel)}` +
+    `    结论风险带 ${riskBandLabel(report.riskBand)}`;
   if (header) {
     const width = 64;
     lines.push(palette.dim("─".repeat(width)));
@@ -423,14 +426,12 @@ export function renderReport(report: ReviewReport, options: RenderOptions): stri
     );
     lines.push(palette.dim("─".repeat(width)));
     lines.push("");
-    lines.push(
-      `  ${palette.bold(String(report.score).padStart(3, " "))} 静态分析评分 · 风险 ${riskLevelLabel(report.riskLevel, report.staticRiskLabel)}` +
-      `    结论风险带 ${riskBandLabel(report.riskBand)}`
-    );
+    lines.push(riskLine);
     lines.push(palette.dim("      （两者独立：评分来自确定性静态分析，风险带来自最终 findings 的严重度分布）"));
     lines.push("");
     lines.push(headline(report, constraints, palette));
   } else {
+    lines.push(riskLine);
     lines.push(headline(report, constraints, palette));
   }
 
