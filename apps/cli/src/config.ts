@@ -82,6 +82,11 @@ export function resolveLeanEnabled(environment: NodeJS.ProcessEnv = process.env)
   return environment.CONSISTENCY_LEAN === "1";
 }
 
+/** Exact env value "1" enables the v2 scoring rubric. */
+export function resolveScoreRubricV2(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_SCORE_RUBRIC === "1";
+}
+
 export function resolveMemoryEnabled(
   options: Pick<ReviewOptions, "noMemory">,
   environment: NodeJS.ProcessEnv = process.env

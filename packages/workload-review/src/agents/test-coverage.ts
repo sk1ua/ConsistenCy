@@ -2,6 +2,11 @@ import type { PRReviewContext, ReviewFinding } from "@consistency/schema";
 import { changedLineRanges } from "./grounding.js";
 
 /** Only coverage suggestions are gated here; defective tests remain findings. */
+/** A coverage suggestion with no explicit input or failure scenario. */
+export function isGenericCoverageFinding(finding: ReviewFinding): boolean {
+  return isMissingCoverageFinding(finding) && !concreteScenario(finding.trigger);
+}
+
 export function isMissingCoverageFinding(finding: ReviewFinding): boolean {
   const prose = `${finding.title} ${finding.evidence} ${finding.reasoning}`;
   return /\b(?:coverage|uncovered|untested)\b|\b(?:missing|lacks?|without|no|absent)\b[^.\n]{0,60}\btests?\b|\b(?:add|write)\b[^.\n]{0,30}\btests?\b|未覆盖|缺[少乏].{0,20}测试|没有.{0,12}测试|补充.{0,12}测试|增加.{0,12}测试/i.test(prose);

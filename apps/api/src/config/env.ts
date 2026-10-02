@@ -76,6 +76,8 @@ export const envSchema = z.object({
   CONSISTENCY_DETERMINISTIC_SCOPE: z.enum(["diff", "all"]).default("diff"),
   /** Exact "1" enables lean review. Unset, "0", and every other value stay full. */
   CONSISTENCY_LEAN: z.string().optional(),
+  /** Exact "1" enables the v2 scoring rubric. Every other value keeps v1. */
+  CONSISTENCY_SCORE_RUBRIC: z.string().optional(),
   ANTHROPIC_API_KEY: optionalSecret,
   ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),

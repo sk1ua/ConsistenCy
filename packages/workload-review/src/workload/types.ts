@@ -166,6 +166,11 @@ export interface ReviewWorkloadOptions {
    * Planner is not called. Unset is the full six-agent review.
    */
   readonly lean?: boolean;
+  /**
+   * Default-off scoring rubric. When set, the synthesizer sees the v2
+   * instruction and the per-file cap rises from 3 to 4 unless explicitly set.
+   */
+  readonly scoreRubricV2?: boolean;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;

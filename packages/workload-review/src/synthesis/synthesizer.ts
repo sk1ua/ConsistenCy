@@ -25,7 +25,8 @@ import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildComposeReviewFileResults } from "./compose.js";
 import { modelSummaryProse } from "./summary-prose.js";
 import { buildReviewReport, deduplicateAndSortFindings } from "./report.js";
-import { applyFindingScoreFilter, FINDING_SCORE_INSTRUCTION } from "./finding-score.js";
+import { isGenericCoverageFinding } from "../agents/test-coverage.js";
+import { applyFindingScoreFilter, FINDING_SCORE_INSTRUCTION, FINDING_SCORE_INSTRUCTION_V2 } from "./finding-score.js";
 import { reportLanguageInstruction } from "../agents/prompts.js";
 import { redactModelVisibleText } from "../context/content-policy.js";
 import type {
@@ -66,6 +67,10 @@ export interface SynthesizerBodyOptions {
   readonly maxReportedFindings?: number;
   /** Per-file cap on the main list, applied after scoring. */
   readonly maxFindingsPerFile?: number;
+  /** Default-off v2 rubric and per-file cap of 4. Unset keeps the v1 instruction. */
+  readonly scoreRubricV2?: boolean;
+  /** Numbered changed lines, supplied only when the v2 rubric is enabled. */
+  readonly numberedChangedCode?: string;
   /**
    * Coverage facts known before synthesis (planner + specialist outcomes).
    * The synthesizer adds its own status and derives the final outcome.
@@ -139,7 +144,10 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         throw new Error("synthesizer lost Scheduler admission after compose");
       }
 
-      const { findings: dedupedFindings, duplicates } = deduplicateAndSortFindings(options.findings, true);
+      const { findings: dedupedFindings, duplicates } = deduplicateAndSortFindings(
+        options.scoreRubricV2 === true ? options.findings.filter(finding => !isGenericCoverageFinding(finding)) : options.findings,
+        true
+      );
       const {
         overallScore: score,
         riskLevel,
@@ -173,7 +181,7 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
             schemaName: "review-summary",
             systemPrompt: [
               "Summarize a multi-agent pull request review in two concise sentences. Incorporate the canonical summary and recommendations into the overview without omitting critical recommendations. Do not add findings or claims that are absent from the supplied data. Do not state finding counts or severity totals: supplied findings are candidates before score filtering and caps, and final counts will be added deterministically after filtering.",
-              FINDING_SCORE_INSTRUCTION,
+              options.scoreRubricV2 === true ? `${FINDING_SCORE_INSTRUCTION} ${FINDING_SCORE_INSTRUCTION_V2}` : FINDING_SCORE_INSTRUCTION,
               reportLanguageInstruction(options.reportLanguage)
             ].join(" "),
             userPrompt: redactModelVisibleText(JSON.stringify({
@@ -182,7 +190,8 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
               canonicalSummary,
               recommendations,
               findings: dedupedFindings,
-              preExistingIssues: appendixCandidates
+              preExistingIssues: appendixCandidates,
+              ...(options.scoreRubricV2 === true ? { changedCode: options.numberedChangedCode ?? "" } : {})
             }))
           });
           tokenUsage = summaryResult.tokenUsage;
@@ -211,13 +220,13 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const { findings, filteredCount, breakdown } = applyFindingScoreFilter(dedupedFindings, scores, {
         minScore: options.minFindingScore,
         maxReported: options.maxReportedFindings,
-        maxPerFile: options.maxFindingsPerFile
+        maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined)
       });
 
       const appendixFilter = applyFindingScoreFilter(appendixCandidates, scores, {
         minScore: options.minFindingScore,
         maxReported: options.maxReportedFindings,
-        maxPerFile: options.maxFindingsPerFile
+        maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined)
       });
       const totalFiltered = filteredCount + appendixFilter.filteredCount + (options.totalCappedBySpecialists ?? 0);
       const filteredBreakdown = {

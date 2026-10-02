@@ -93,6 +93,8 @@ export type ReviewWorkflowDependencies = {
   memoryEnabled?: boolean;
   /** Default-off lean review. Unset keeps the six-agent Planner path. */
   lean?: boolean;
+  /** Default-off v2 scoring rubric. Unset keeps the v1 instruction and cap. */
+  scoreRubricV2?: boolean;
   runtimeRegistry?: RuntimeRegistry;
 };
 
@@ -377,6 +379,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         maxFindingsPerFile: dependencies.maxFindingsPerFile,
         deterministicScope: dependencies.deterministicScope,
         lean: dependencies.lean,
+        scoreRubricV2: dependencies.scoreRubricV2,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: memoryEnabled

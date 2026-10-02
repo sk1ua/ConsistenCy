@@ -10,6 +10,7 @@
  */
 
 import type { FindingScore, ReviewFinding } from "@consistency/schema";
+import { changedLineRanges } from "../agents/grounding.js";
 
 /** Findings scoring below this are withheld from the main list. */
 export const DEFAULT_MIN_FINDING_SCORE = 5;
@@ -22,6 +23,36 @@ export const DEFAULT_MAX_FINDINGS_PER_FILE = 3;
  * The rubric handed to the synthesizer. Kept next to the filter that enforces
  * it so the instruction and the thresholds cannot drift apart.
  */
+/**
+ * Default-off v2 rubric. It is appended only when the caller opts in, so the
+ * default instruction stays byte-identical.
+ */
+/** Numbered changed lines for the v2 rubric. Omitted entirely when v2 is off. */
+export function numberedChangedLines(
+  files: readonly { path: string; status: string; patch?: string }[],
+  contents: Readonly<Record<string, string>>,
+  maxChars = 12_000
+): string {
+  const blocks: string[] = [];
+  for (const file of [...files].sort((left, right) => left.path.localeCompare(right.path))) {
+    const content = contents[file.path];
+    if (!content) continue;
+    const lines = content.split(/\r?\n/);
+    const ranges = file.status === "added" ? [{ start: 1, end: lines.length }] : changedLineRanges(file.patch);
+    const selected = ranges.flatMap(range => lines
+      .slice(Math.max(0, range.start - 1), range.end)
+      .map((line, offset) => `${range.start + offset}: ${line}`));
+    if (selected.length > 0) blocks.push(`FILE ${file.path}\n${selected.join("\n")}`);
+  }
+  return blocks.join("\n\n").slice(0, maxChars);
+}
+
+export const FINDING_SCORE_INSTRUCTION_V2 = [
+  "Also score verified deviations from an existing repository convention at 8-10 when the finding cites that precedent and the changed code breaks it.",
+  "Score a generic test suggestion, or a finding that treats an expected change as breakage, at most 4.",
+  "The numbered changed-code listing is the code under review; do not score a comment about unchanged code as an introduced defect."
+].join(" ");
+
 export const FINDING_SCORE_INSTRUCTION = [
   "For every supplied finding, set an integer \"score\" from 0 to 10 and a one-sentence \"reason\".",
   "8-10: the finding names a concrete input or scenario that fails in code this change introduced.",

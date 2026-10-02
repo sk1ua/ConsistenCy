@@ -24,6 +24,7 @@ import {
   loadCliConfig,
   resolveEngineRoot,
   resolveLeanEnabled,
+  resolveScoreRubricV2,
   resolveMemoryEnabled,
   resolvePythonPath
 } from "./config";
@@ -171,6 +172,7 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     deterministicScope: config.CONSISTENCY_DETERMINISTIC_SCOPE,
     memoryEnabled: resolveMemoryEnabled(options, io.environment ?? process.env),
     lean: resolveLeanEnabled(io.environment ?? process.env),
+    scoreRubricV2: resolveScoreRubricV2(io.environment ?? process.env),
     workspaceRoot
   });
 

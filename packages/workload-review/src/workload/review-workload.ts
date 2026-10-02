@@ -64,6 +64,7 @@ import { scopeDeterministicFindings, scopeEvidenceInputs } from "../context/dete
 import { changedLineRanges, type LineRange } from "../agents/grounding.js";
 import { runSupervisorBody } from "../supervisor/supervisor.js";
 import { runReviewAgentBody } from "../agents/review-agent.js";
+import { numberedChangedLines } from "../synthesis/finding-score.js";
 import { runSynthesizerBody } from "../synthesis/synthesizer.js";
 import {
   AGENT_CAPABILITY_PROFILES,
@@ -646,6 +647,10 @@ export class ReviewWorkload {
         minFindingScore: options.minFindingScore,
         maxReportedFindings: options.maxReportedFindings,
         maxFindingsPerFile: options.maxFindingsPerFile,
+        scoreRubricV2: options.scoreRubricV2,
+        numberedChangedCode: options.scoreRubricV2 === true
+          ? numberedChangedLines(options.context.changedFiles, options.context.fileContents)
+          : undefined,
         // Coverage facts as of synthesis start (audit P1-05): the
         // synthesizer adds its own status and derives the final outcome.
         coverage: {
