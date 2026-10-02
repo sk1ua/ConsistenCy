@@ -58,6 +58,15 @@ export const CONSISTENCY_SYSTEM_PROMPT = [
   "Example: {\"findings\":[{\"id\":\"consistency-1\",\"agent\":\"Consistency\",\"title\":\"New call uses a different helper than this module\",\"severity\":\"medium\",\"confidence\":\"likely\",\"file\":\"src/new.ts\",\"startLine\":4,\"endLine\":4,\"evidence\":\"Line 4 calls fetchJson while the sibling parses with parseJson.\",\"reasoning\":\"The repository already centralizes this parse, so a second helper will drift.\",\"recommendation\":\"Call parseJson, as the sibling file does.\",\"trigger\":\"when this module parses a response\",\"precedent\":{\"file\":\"src/old.ts\",\"line\":2,\"quote\":\"return parseJson(input);\"}}]}",
 ].join(" ");
 
+/**
+ * Extra lean Consistency instruction. It bans absence-of-boilerplate reports
+ * and stops an older pattern from counting as a precedent.
+ */
+export const CONSISTENCY_STRICT_ADDENDUM = [
+  "Do not report the absence of documentation, docstrings, doc comments, comments, license or copyright headers, annotations, decorators, test markers, or type hints, and do not report entries missing from data, environment, or dependency lists. Report only a positive pattern: the same kind of code that this change writes differently from how the supplied existing code writes it.",
+  "An older pattern that this change is replacing is not a precedent, even if unchanged files still use it; cite only a pattern that this change should have followed and did not.",
+].join(" ");
+
 export function reportLanguageInstruction(language: "zh-CN" | "en-US"): string {
   return language === "zh-CN"
     ? "Write all prose (finding titles, evidence, reasoning, recommendations) in Simplified Chinese (简体中文). Keep code identifiers, file paths, technical terms, and severity labels in English."
@@ -137,6 +146,7 @@ export function buildAgentPrompt(
   compactContext = false,
   citePrecedent = false,
   siblingFileContents?: Readonly<Record<string, string>>,
+  consistencyStrict = false,
 ): { systemPrompt: string; userPrompt: string } {
   const files = compactContext
     ? compactFileContext(context, REVIEW_FILE_CONTENTS_MAX_CHARS)
@@ -226,9 +236,11 @@ export function buildAgentPrompt(
   ].join(" ");
 
   return {
-    systemPrompt: citePrecedent && agent === "Consistency"
-      ? `${CONSISTENCY_SYSTEM_PROMPT} ${reportLanguageInstruction(reportLanguage)}`
-      : sharedSystemPrompt,
+    systemPrompt: citePrecedent && agent === "Consistency" && consistencyStrict
+      ? `${CONSISTENCY_SYSTEM_PROMPT} ${CONSISTENCY_STRICT_ADDENDUM} ${reportLanguageInstruction(reportLanguage)}`
+      : citePrecedent && agent === "Consistency"
+        ? `${CONSISTENCY_SYSTEM_PROMPT} ${reportLanguageInstruction(reportLanguage)}`
+        : sharedSystemPrompt,
     // Final content-policy pass: whatever produced these strings (context
     // builder, snapshot read, analyzer output), nothing credential-shaped
     // leaves for the model.

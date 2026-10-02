@@ -92,6 +92,11 @@ export function resolveCompactContext(environment: NodeJS.ProcessEnv = process.e
   return environment.CONSISTENCY_COMPACT_CONTEXT === "1";
 }
 
+/** Exact env value "1" tightens lean Consistency. Every other value stays unchanged. */
+export function resolveLeanConsistencyStrict(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_LEAN_CONSISTENCY_STRICT === "1";
+}
+
 export function resolveMemoryEnabled(
   options: Pick<ReviewOptions, "noMemory">,
   environment: NodeJS.ProcessEnv = process.env

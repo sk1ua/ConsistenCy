@@ -9,6 +9,10 @@ export const SIBLING_CANDIDATE_READ_LIMIT = 24;
 /** Combined sibling blocks stay under this token budget. One token is estimated as 4 characters. */
 export const SIBLING_CONTEXT_MAX_TOKENS = 12_000;
 export const SIBLING_CONTEXT_MAX_CHARS = SIBLING_CONTEXT_MAX_TOKENS * 4;
+/** Source extensions admitted as siblings only when strict lean Consistency is on. */
+export const SIBLING_SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".java", ".kt", ".kts", ".go", ".rs", ".rb", ".php", ".cs", ".c", ".cc", ".cpp", ".h", ".hpp", ".swift", ".scala", ".vue", ".svelte"]);
+/** Path segments that are not product source when strict sibling selection is on. */
+export const SIBLING_EXCLUDED_SEGMENTS = new Set(["benchmarks", "benchmark", "bench", "examples", "example", "docs", "doc", "vendor", "third_party", "node_modules", "dist", "build", "generated", "__snapshots__", "fixtures", "testdata"]);
 
 export interface SiblingFileReader {
   listFiles(): readonly string[];
@@ -34,6 +38,38 @@ function stemOf(filePath: string): string {
   const name = filePath.slice(filePath.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
   return (dot <= 0 ? name : name.slice(0, dot)).toLowerCase();
+}
+
+function pathSegments(filePath: string): string[] {
+  return filePath.split(/[\\/]/).filter(Boolean);
+}
+
+function fileNameOf(filePath: string): string {
+  const segments = pathSegments(filePath);
+  return segments[segments.length - 1] ?? "";
+}
+
+function isTestPath(filePath: string): boolean {
+  const segments = pathSegments(filePath).map(segment => segment.toLowerCase());
+  const name = segments[segments.length - 1] ?? "";
+  return segments.some(segment => segment === "test" || segment === "tests" || segment === "__tests__" || segment === "spec")
+    || /^test_/.test(name)
+    || /_test\./.test(name)
+    || /\.test\./.test(name)
+    || /\.spec\./.test(name)
+    || /tests?\.(?:java|kt)$/.test(name);
+}
+
+function isStrictSiblingCandidate(changedPath: string, candidatePath: string): boolean {
+  const changedSegments = pathSegments(changedPath).map(segment => segment.toLowerCase());
+  if (!SIBLING_SOURCE_EXTENSIONS.has(extensionOf(changedPath))) return false;
+  if (changedSegments.some(segment => SIBLING_EXCLUDED_SEGMENTS.has(segment))) return false;
+  const name = fileNameOf(candidatePath);
+  if (name.startsWith(".")) return false;
+  if (!SIBLING_SOURCE_EXTENSIONS.has(extensionOf(candidatePath))) return false;
+  const candidateSegments = pathSegments(candidatePath).map(segment => segment.toLowerCase());
+  if (candidateSegments.some(segment => SIBLING_EXCLUDED_SEGMENTS.has(segment))) return false;
+  return isTestPath(candidatePath) === isTestPath(changedPath);
 }
 
 function numbered(content: string, maxLines: number): string {
@@ -70,12 +106,13 @@ function sharesPrefix(left: string, right: string): boolean {
   return shared >= 3;
 }
 
-function eligibleSiblings(context: PRReviewContext, filePath: string, candidates: readonly string[]): string[] {
+function eligibleSiblings(context: PRReviewContext, filePath: string, candidates: readonly string[], strict = false): string[] {
   const changed = new Set(context.changedFiles.map(file => file.path));
   const directory = directoryOf(filePath);
   const extension = extensionOf(filePath);
   if (!extension) return [];
-  return candidates.filter(path => !changed.has(path) && !isSecretPath(path) && directoryOf(path) === directory && extensionOf(path) === extension);
+  return candidates.filter(path => !changed.has(path) && !isSecretPath(path) && directoryOf(path) === directory && extensionOf(path) === extension
+    && (!strict || isStrictSiblingCandidate(filePath, path)));
 }
 
 /**
@@ -87,12 +124,13 @@ export function selectSiblingFiles(
   context: PRReviewContext,
   candidates: readonly string[],
   limit = SIBLING_FILES_PER_CHANGED,
+  options: { strict?: boolean } = {},
 ): string[] {
   const selected: string[] = [];
   const seen = new Set<string>();
   for (const file of [...context.changedFiles].sort((left, right) => left.path.localeCompare(right.path))) {
     if (file.status === "removed") continue;
-    const pool = eligibleSiblings(context, file.path, candidates);
+    const pool = eligibleSiblings(context, file.path, candidates, options.strict === true);
     const imports = importTargets(context.fileContents[file.path] ?? "");
     const stem = stemOf(file.path);
     const byName = (left: string, right: string) => left.localeCompare(right);
@@ -118,6 +156,7 @@ export function selectSiblingFiles(
 export function readSiblingFileContents(
   context: PRReviewContext,
   reader: SiblingFileReader,
+  options: { strict?: boolean } = {},
 ): Record<string, string> {
   let listed: readonly string[] = [];
   try {
@@ -127,7 +166,7 @@ export function readSiblingFileContents(
   }
   const loaded: Record<string, string> = {};
   for (const file of context.changedFiles) {
-    const pool = eligibleSiblings(context, file.path, listed);
+    const pool = eligibleSiblings(context, file.path, listed, options.strict === true);
     const prefix = pool.filter(path => sharesPrefix(stemOf(file.path), stemOf(path)));
     const rest = pool.filter(path => !prefix.includes(path)).sort((left, right) => left.localeCompare(right));
     for (const path of [...prefix, ...rest].slice(0, SIBLING_CANDIDATE_READ_LIMIT)) {
@@ -144,7 +183,7 @@ export function readSiblingFileContents(
       }
     }
   }
-  const selected = selectSiblingFiles({ ...context, fileContents: { ...context.fileContents, ...loaded } }, Object.keys(loaded));
+  const selected = selectSiblingFiles({ ...context, fileContents: { ...context.fileContents, ...loaded } }, Object.keys(loaded), SIBLING_FILES_PER_CHANGED, options);
   const contents: Record<string, string> = {};
   for (const path of selected) {
     if (path in context.fileContents || path in context.baseFileContents || loaded[path] === undefined) continue;

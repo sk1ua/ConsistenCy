@@ -97,6 +97,8 @@ export type ReviewWorkflowDependencies = {
   scoreRubricV2?: boolean;
   /** Default-off compact file context. Unset keeps full numbered files. */
   compactContext?: boolean;
+  /** Default-off lean Consistency tightening. Requires lean as well. */
+  leanConsistencyStrict?: boolean;
   runtimeRegistry?: RuntimeRegistry;
 };
 
@@ -383,6 +385,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         lean: dependencies.lean,
         scoreRubricV2: dependencies.scoreRubricV2,
         compactContext: dependencies.compactContext,
+        leanConsistencyStrict: dependencies.leanConsistencyStrict,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: memoryEnabled

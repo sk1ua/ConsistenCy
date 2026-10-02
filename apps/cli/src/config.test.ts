@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCompactContext, resolveLeanEnabled, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
+import { resolveCompactContext, resolveLeanConsistencyStrict, resolveLeanEnabled, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
 
 describe("CLI persisted memory resolution", () => {
   it("preserves memory by default", () => {
@@ -30,6 +30,12 @@ describe("CLI persisted memory resolution", () => {
     expect(resolveCompactContext({})).toBe(false);
     expect(resolveCompactContext({ CONSISTENCY_COMPACT_CONTEXT: "0" })).toBe(false);
     expect(resolveCompactContext({ CONSISTENCY_COMPACT_CONTEXT: "1" })).toBe(true);
+  });
+
+  it("enables strict lean Consistency only for the exact env value 1", () => {
+    expect(resolveLeanConsistencyStrict({})).toBe(false);
+    expect(resolveLeanConsistencyStrict({ CONSISTENCY_LEAN_CONSISTENCY_STRICT: "0" })).toBe(false);
+    expect(resolveLeanConsistencyStrict({ CONSISTENCY_LEAN_CONSISTENCY_STRICT: "1" })).toBe(true);
   });
 
   it("enables the v2 scoring rubric only for the exact env value 1", () => {

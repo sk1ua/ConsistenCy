@@ -24,6 +24,7 @@ import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
 import { hasSpecificChangedCoverageTarget, isMissingCoverageFinding } from "./test-coverage.js";
+import { filterConsistencyNoise } from "./consistency-filter.js";
 import { verifyPrecedent } from "./precedent.js";
 import type { SiblingFileReader } from "./sibling-context.js";
 import { readSiblingFileContents } from "./sibling-context.js";
@@ -76,6 +77,8 @@ export interface ReviewAgentBodyOptions {
   readonly compactContext?: boolean;
   /** Lean Consistency must cite a file, line, and verbatim quote. */
   readonly citePrecedent?: boolean;
+  /** Lean Consistency tightening: boilerplate ban and source-only siblings. */
+  readonly consistencyStrict?: boolean;
   /** Head snapshot used only to supply unchanged sibling files to lean Consistency. */
   readonly siblingReader?: SiblingFileReader;
 }
@@ -112,7 +115,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
     return await options.fiber.execute(async () => {
       const leanConsistency = options.citePrecedent === true && agentName === "Consistency";
       const siblingFileContents = leanConsistency && options.siblingReader
-        ? readSiblingFileContents(options.context, options.siblingReader)
+        ? readSiblingFileContents(options.context, options.siblingReader, { strict: options.consistencyStrict === true })
         : undefined;
       const prompt = buildAgentPrompt(
         agentName,
@@ -126,6 +129,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.compactContext === true,
         options.citePrecedent === true,
         siblingFileContents,
+        options.consistencyStrict === true,
       );
 
       // WAIT_LLM: a remote inference operation is being submitted. This
@@ -148,6 +152,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       }
 
       let precedentRejected = 0;
+      let noiseRejected = 0;
       const eligible = agentName === "Test"
         ? modelResult.findings.filter(finding => !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context))
         : agentName === "Consistency"
@@ -160,10 +165,15 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
             return [{ ...finding, tags: [...new Set([...(finding.tags ?? []), "precedent:verified"])] }];
           })
           : modelResult.findings;
+      const precedentChecked = agentName === "Consistency" && options.consistencyStrict === true
+        ? filterConsistencyNoise(eligible, options.context, siblingFileContents ?? {})
+        : { kept: eligible, rejected: 0 };
+      noiseRejected = precedentChecked.rejected;
+      const groundedInput = precedentChecked.kept;
       const coverageRejected = modelResult.findings.length - eligible.length;
       const grounding = buildGroundingContext(options.context, options.deterministicResult);
       const grounded = groundReviewFindings(
-        eligible,
+        groundedInput,
         grounding,
         options.evidenceStore,
         options.headSha,
@@ -187,6 +197,9 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       }
       if (precedentRejected > 0) {
         summaryParts.push(`${precedentRejected} finding(s) rejected: unverifiable precedent`);
+      }
+      if (noiseRejected > 0) {
+        summaryParts.push(`${noiseRejected} finding(s) rejected: boilerplate or unsupported absence`);
       }
 
       const run: AgentRun = {

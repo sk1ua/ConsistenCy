@@ -175,6 +175,11 @@ export interface ReviewWorkloadOptions {
    * Default-off compact file context. Unset keeps full numbered file contents.
    */
   readonly compactContext?: boolean;
+  /**
+   * Default-off lean Consistency tightening. Unset keeps the lean convention
+   * prompt, sibling selection, and finding filter byte-for-byte.
+   */
+  readonly leanConsistencyStrict?: boolean;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;

@@ -551,6 +551,7 @@ export class ReviewWorkload {
           reportLanguage: options.reportLanguage,
           compactContext: options.compactContext,
           citePrecedent: options.lean === true,
+          consistencyStrict: options.lean === true && options.leanConsistencyStrict === true,
           siblingReader: options.lean === true ? options.snapshot : undefined,
           relevantContext,
           focusAreas: plan.focusAreas,

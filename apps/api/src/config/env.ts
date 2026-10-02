@@ -80,6 +80,8 @@ export const envSchema = z.object({
   CONSISTENCY_SCORE_RUBRIC: z.string().optional(),
   /** Exact "1" replaces full file context with numbered hunks and units. */
   CONSISTENCY_COMPACT_CONTEXT: z.string().optional(),
+  /** Exact "1" tightens lean Consistency: boilerplate ban and source-only siblings. */
+  CONSISTENCY_LEAN_CONSISTENCY_STRICT: z.string().optional(),
   ANTHROPIC_API_KEY: optionalSecret,
   ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),
