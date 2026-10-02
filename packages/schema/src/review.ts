@@ -54,6 +54,15 @@ const findingBase = z.object({
    * findings whose trigger is already spelled out in `evidence` stay valid.
    */
   trigger: nonEmpty.optional(),
+  /**
+   * Cited convention location. Optional on the wire; lean Consistency keeps a
+   * finding only after this citation verifies against supplied code.
+   */
+  precedent: z.object({
+    file: nonEmpty,
+    line: positiveLine,
+    quote: nonEmpty
+  }).strict().optional(),
   /** Exact baseline proof, or an explicit causal explanation of an indirect regression. */
   baselineAssessment: z.discriminatedUnion("behaviorUnchanged", [
     z.object({

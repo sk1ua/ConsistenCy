@@ -550,6 +550,7 @@ export class ReviewWorkload {
           headSha: options.context.headSha,
           reportLanguage: options.reportLanguage,
           compactContext: options.compactContext,
+          citePrecedent: options.lean === true,
           relevantContext,
           focusAreas: plan.focusAreas,
           maxFindingsPerSpecialist: options.maxFindingsPerSpecialist ?? 3,

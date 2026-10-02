@@ -114,7 +114,8 @@ export function buildAgentPrompt(
   relevantContext?: Record<string, RelevantContext>,
   focusAreas?: ReadonlyArray<{ pathPattern: string; guidance: string }>,
   maxFindingsPerSpecialist = 3,
-  compactContext = false
+  compactContext = false,
+  citePrecedent = false
 ): { systemPrompt: string; userPrompt: string } {
   const files = compactContext
     ? compactFileContext(context, REVIEW_FILE_CONTENTS_MAX_CHARS)
@@ -180,7 +181,7 @@ export function buildAgentPrompt(
     metadata,
     // Renderer diagnostics do not imply a diff-grounded finding is uncertain.
     buildBaselineSnippets(context, undefined, "model"),
-    `SPECIALIST ROLE: ${agent}. Focus only on ${AGENT_FOCUS[agent]}. ${AGENT_EXCLUSIONS[agent]} Return at most ${maxFindingsPerSpecialist} findings. Set the \"trigger\" field of every finding to the specific input or scenario that fails, and the \"agent\" field to exactly \"${agent}\".`
+    `SPECIALIST ROLE: ${agent}. Focus only on ${AGENT_FOCUS[agent]}. ${AGENT_EXCLUSIONS[agent]}${citePrecedent && agent === "Consistency" ? " Every finding MUST cite a precedent: set `precedent` to {\"file\", \"line\", \"quote\"} where file and line point to an EXISTING line in the supplied content (another part of the same file, another changed file, or a BASE FILE snippet) that demonstrates the convention, and quote is that line's code copied verbatim (at most 160 characters). The precedent must not be one of the lines you criticize. Do not report generic best practices, personal style preferences, or lint-level formatting without such a precedent. Do not report behavioral bugs (Correctness covers them) or generic 'add tests' requests; a test finding is allowed only when sibling functions in the same module have tests in a supplied test file and the new function has none, citing that sibling test as the precedent. If the change applies a new pattern consistently everywhere it touches, that is intentional, not a deviation." : ""} Return at most ${maxFindingsPerSpecialist} findings. Set the \"trigger\" field of every finding to the specific input or scenario that fails, and the \"agent\" field to exactly \"${agent}\".`
   ].filter(Boolean);
 
   return {

@@ -44,7 +44,7 @@ const summarySchema = z.object({
   scores: z.array(z.preprocess(normalizeFindingScore, findingScoreSchema)).optional()
 }).strict();
 
-function findingsSchemaForAgent(agent: z.infer<typeof reviewAgentNameSchema>) {
+export function findingsSchemaForAgent(agent: z.infer<typeof reviewAgentNameSchema>) {
   return z.object({
     findings: z.array(reviewFindingSchema)
   }).strict().superRefine((value, context) => {

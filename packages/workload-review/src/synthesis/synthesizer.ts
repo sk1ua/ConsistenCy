@@ -220,13 +220,15 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       const { findings, filteredCount, breakdown } = applyFindingScoreFilter(dedupedFindings, scores, {
         minScore: options.minFindingScore,
         maxReported: options.maxReportedFindings,
-        maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined)
+        maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined),
+        capUnverifiedConsistency: options.scoreRubricV2 === true
       });
 
       const appendixFilter = applyFindingScoreFilter(appendixCandidates, scores, {
         minScore: options.minFindingScore,
         maxReported: options.maxReportedFindings,
-        maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined)
+        maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined),
+        capUnverifiedConsistency: options.scoreRubricV2 === true
       });
       const totalFiltered = filteredCount + appendixFilter.filteredCount + (options.totalCappedBySpecialists ?? 0);
       const filteredBreakdown = {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { findingScoresFromError } from "@consistency/schema";
-import { BaseLLMProvider } from "./provider";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { BaseLLMProvider, findingsSchemaForAgent } from "./provider";
 import { logger } from "../../config/logger";
 import { z } from "zod";
 import { loadEnv } from "../../config/env";
@@ -8,6 +9,13 @@ import { createLLMProvider } from "./factory";
 import { MockLLMProvider } from "./mockProvider";
 
 describe("LLM providers", () => {
+  it("includes precedent in the Consistency findings tool schema", () => {
+    const schema = JSON.stringify(zodToJsonSchema(findingsSchemaForAgent("Consistency"), "review-findings"));
+    expect(schema).toContain("\"precedent\"");
+    expect(schema).toContain("\"quote\"");
+    expect(schema).toContain("\"line\"");
+  });
+
   it("normalizes legacy scoreReason without repair or degradation", async () => {
     class LegacyProvider extends BaseLLMProvider {
       readonly name = "test";

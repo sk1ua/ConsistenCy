@@ -70,6 +70,11 @@ export interface FindingScoreFilterOptions {
   readonly maxReported?: number;
   /** Cap on the main list from one file. */
   readonly maxPerFile?: number;
+  /**
+   * v2 only. A Consistency finding without `precedent:verified` cannot score
+   * above 3. Unset leaves every assigned score unchanged.
+   */
+  readonly capUnverifiedConsistency?: boolean;
 }
 
 export interface FindingScoreFilterBreakdown {
@@ -112,9 +117,12 @@ export function applyFindingScoreFilter(
 
   const scored: ReviewFinding[] = findings.map(finding => {
     const assigned = scoresById.get(finding.id);
-    return assigned === undefined
-      ? finding
-      : { ...finding, score: assigned.score, scoreReason: assigned.reason };
+    if (assigned === undefined) return finding;
+    const verified = finding.tags?.includes("precedent:verified") === true;
+    const score = options.capUnverifiedConsistency === true && finding.agent === "Consistency" && !verified
+      ? Math.min(assigned.score, 3)
+      : assigned.score;
+    return { ...finding, score, scoreReason: assigned.reason };
   });
 
   // A provider that ignored the scoring instruction must not empty the report:

@@ -24,7 +24,7 @@ import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
 import { hasSpecificChangedCoverageTarget, isMissingCoverageFinding } from "./test-coverage.js";
-import { hasRepositoryPrecedent } from "./precedent.js";
+import { verifyPrecedent } from "./precedent.js";
 import type { AgentFacadeSet, ReviewAgentName, ReviewPersistence } from "../workload/types.js";
 
 function errorMessage(error: unknown): string {
@@ -72,6 +72,8 @@ export interface ReviewAgentBodyOptions {
   readonly omitBaselineSnippets?: boolean;
   /** Default-off compact file context. Unset keeps the full numbered files. */
   readonly compactContext?: boolean;
+  /** Lean Consistency must cite a file, line, and verbatim quote. */
+  readonly citePrecedent?: boolean;
 }
 
 export interface ReviewAgentBodyResult {
@@ -114,6 +116,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.focusAreas,
         options.maxFindingsPerSpecialist ?? 3,
         options.compactContext === true,
+        options.citePrecedent === true,
       );
 
       // WAIT_LLM: a remote inference operation is being submitted. This
@@ -135,10 +138,18 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         throw new Error("agent lost Scheduler admission after model invocation");
       }
 
+      let precedentRejected = 0;
       const eligible = agentName === "Test"
         ? modelResult.findings.filter(finding => !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context))
         : agentName === "Consistency"
-          ? modelResult.findings.filter(finding => hasRepositoryPrecedent(finding, options.context))
+          ? modelResult.findings.flatMap(finding => {
+            const status = verifyPrecedent(finding, options.context);
+            if (status !== "verified") {
+              precedentRejected += 1;
+              return [];
+            }
+            return [{ ...finding, tags: [...new Set([...(finding.tags ?? []), "precedent:verified"])] }];
+          })
           : modelResult.findings;
       const coverageRejected = modelResult.findings.length - eligible.length;
       const grounding = buildGroundingContext(options.context, options.deterministicResult);
@@ -164,6 +175,9 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       ];
       if (cappedCount > 0) {
         summaryParts.push(`${cappedCount} finding(s) capped by specialist limit`);
+      }
+      if (precedentRejected > 0) {
+        summaryParts.push(`${precedentRejected} finding(s) rejected: unverifiable precedent`);
       }
 
       const run: AgentRun = {
