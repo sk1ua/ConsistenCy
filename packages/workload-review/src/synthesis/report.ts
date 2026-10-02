@@ -112,16 +112,44 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 function differentTriggers(left: ReviewFinding, right: ReviewFinding): boolean {
   if (!left.trigger || !right.trigger) return false;
-  const a = topicWords(left.trigger);
-  const b = topicWords(right.trigger);
-  return a.size >= 3 && b.size >= 3 && jaccard(a, b) < 0.2;
+  // Low lexical overlap is not proof of different scenarios. Only veto an
+  // explicit incompatible condition on the same dimension.
+  const dimensions = [
+    [/\b(?:amazon|amzn)\b/i, /\brocky\b/i, /\bubuntu\b/i, /\bdebian\b/i, /\balpine\b/i],
+    [/\bwindows\b/i, /\b(?:linux|unix)\b/i, /\b(?:macos|darwin)\b/i],
+    [/\b(?:unauthenticated|anonymous)\b|未认证|未登录/i, /\b(?:authenticated|logged[- ]in)\b|已认证|已登录/i],
+    [/\b(?:empty|zero[- ]length)\b|空输入/i, /\b(?:non[- ]?empty|populated)\b|非空输入/i],
+  ];
+  return dimensions.some(conditions => {
+    const normalize = (text: string) => text.replace(/\bnon[- ]?empty\b/gi, "populated").replace(/非空输入/g, "populated");
+    const a = conditions.flatMap((condition, index) => condition.test(normalize(left.trigger!)) ? [index] : []);
+    const b = conditions.flatMap((condition, index) => condition.test(normalize(right.trigger!)) ? [index] : []);
+    return a.length === 1 && b.length === 1 && a[0] !== b[0];
+  });
 }
 
-/** Explicit rule/category tags or at least 50% overlap of title/description keywords. */
+function categoryTags(finding: ReviewFinding): Set<string> {
+  return new Set((finding.tags ?? []).filter(tag => /^(?:rule(?:id)?|category):\S+/i.test(tag)).map(tag => tag.toLowerCase()));
+}
+
+/** Only explicit code references count; ordinary shared prose is not an identifier. */
+function referencedIdentifiers(finding: ReviewFinding): Set<string> {
+  const text = `${finding.title} ${finding.evidence}`.replace(/(?:[\w.-]+[\\/])+[\w.-]+|\b[\w.-]+\.(?:py|ts|tsx|js|json|yml|yaml|sh)\b/gi, " ");
+  const identifiers = new Set<string>();
+  for (const match of text.matchAll(/`([^`\n]+)`/g)) {
+    for (const identifier of match[1]!.matchAll(/\b[A-Za-z_$][\w$]*\b/g)) identifiers.add(identifier[0]);
+  }
+  for (const match of text.matchAll(/\b(?:[a-zA-Z_$][\w$]*\s*(?=\()|\w*[a-z][A-Z]\w*|\w+_\w+)\b/g)) identifiers.add(match[0].trim());
+  return identifiers;
+}
+
+/** Nearby findings share either prose or a named code target and category. */
 function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding): boolean {
-  const categories = new Set((left.tags ?? []).filter(tag => /^(?:rule(?:id)?|category):\S+/i.test(tag)).map(tag => tag.toLowerCase()));
-  if ((right.tags ?? []).some(tag => categories.has(tag.toLowerCase()))) return true;
-  return jaccard(topicWords(`${left.title} ${left.evidence}`), topicWords(`${right.title} ${right.evidence}`)) >= 0.5;
+  if (jaccard(topicWords(`${left.title} ${left.evidence}`), topicWords(`${right.title} ${right.evidence}`)) >= 0.35) return true;
+  const categories = categoryTags(left);
+  if (![...categoryTags(right)].some(tag => categories.has(tag))) return false;
+  const identifiers = referencedIdentifiers(left);
+  return [...referencedIdentifiers(right)].some(identifier => identifiers.has(identifier));
 }
 
 /**
@@ -143,7 +171,8 @@ function joinsByLineProximity(left: ReviewFinding, right: ReviewFinding): boolea
 
 function belongsTogether(seed: ReviewFinding, finding: ReviewFinding): boolean {
   if (differentTriggers(seed, finding) || !hasTopicOverlap(seed, finding)) return false;
-  return isNearDuplicate(seed, finding) || isLineNeighbor(seed, finding);
+  if (lineRangeOf(seed) && lineRangeOf(finding)) return isLineNeighbor(seed, finding);
+  return isNearDuplicate(seed, finding);
 }
 
 /**
@@ -170,10 +199,11 @@ function prefer(left: ReviewFinding, right: ReviewFinding): ReviewFinding {
 /**
  * Deterministic cross-agent deduplication.
  *
- * Two findings on the same file collapse when their titles match closely
- * (legacy rule, wording-agnostic for Chinese) OR when their line ranges
- * overlap or sit within `FINDING_CLUSTER_DISTANCE` lines of each other. The
- * survivor is the highest-severity, then most-specific, then highest-
+ * Two findings with line numbers collapse only when their ranges overlap or
+ * sit within `FINDING_CLUSTER_DISTANCE` lines and their topics match. Shared
+ * code identifiers require an explicit matching category; contradictory
+ * trigger conditions veto the merge. Unlocated legacy findings use titles.
+ * The survivor is the highest-severity, then most-specific, then highest-
  * confidence one; the specialists it stands in for are recorded in
  * `alsoReportedBy`, and every merged finding is still returned in `duplicates`
  * so the report can disclose the merge instead of silently dropping it.

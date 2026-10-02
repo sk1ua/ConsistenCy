@@ -250,7 +250,7 @@ describe("reportBuilder", () => {
       ...confirmedHigh,
       id: "f-sql",
       title: "SQL injection in query builder",
-      evidence: "Raw string concatenation in SQL statement",
+      evidence: "Raw string concatenation in SQL statement inside `buildQuery`",
       tags: ["rule:sql-injection"],
       startLine: 10,
       endLine: 12
@@ -268,7 +268,7 @@ describe("reportBuilder", () => {
       id: "f-sql-duplicate",
       agent: "Correctness",
       title: "Unescaped user parameter in database query",
-      evidence: "User parameter passed directly to database without sanitization",
+      evidence: "User parameter passed directly to database without sanitization inside `buildQuery`",
       tags: ["rule:sql-injection"],
       startLine: 11,
       endLine: 13
@@ -279,7 +279,7 @@ describe("reportBuilder", () => {
     expect(resDifferent.findings).toHaveLength(2);
     expect(resDifferent.findings.map(f => f.id)).toEqual(["f-sql", "f-style"]);
 
-    // f1 and f3 have topic overlap (database, query, sql) -> should merge into 1 finding
+    // f1 and f3 cite the same buildQuery identifier and SQL injection rule.
     const resSameTopic = deduplicateAndSortFindings([f1, f3]);
     expect(resSameTopic.findings).toHaveLength(1);
     expect(resSameTopic.findings[0]!.mergedFindings).toBeDefined();

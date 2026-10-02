@@ -83,6 +83,36 @@ describe("final summary counts", () => {
     expect(result.report.summary).not.toContain("four review findings");
   });
 
+  it("deduplicates before the three-per-file cap so a duplicate cannot displace another issue", async () => {
+    const repo = makeFixtureRepo();
+    const first = finding("first");
+    const timer = { ...finding("timer"), title: "Cancellation leaves scheduled callbacks", evidence: "Timer callbacks remain active after cancellation" };
+    const parser = { ...finding("parser"), title: "Empty values bypass validation", evidence: "Empty input takes an unsupported parser branch" };
+    const inner = new TestModelDriver({ findingsByAgent: {
+      Security: [first, { ...first, id: "duplicate" }],
+      Correctness: [timer, parser].map(f => ({ ...f, agent: "Correctness" as const })),
+    } });
+    const driver: ModelDriver = {
+      provider: inner.provider, model: inner.model,
+      invokeStructured: request => inner.invokeStructured(request),
+      invokeAgentFindings: request => inner.invokeAgentFindings(request),
+      invokeSummary: async request => {
+        const candidates = JSON.parse(request.userPrompt).findings as ReviewFinding[];
+        expect(candidates).toHaveLength(3);
+        return { data: { summary: "Reject unsafe input.", scores: candidates.map(f => ({ id: f.id, score: 9, reason: "Concrete regression" })) } };
+      },
+    };
+    const result = await new ReviewWorkload({
+      snapshot: repo.snapshot, context: repo.context, modelDriver: driver,
+      deterministic: makeDeterministicStage(), persistence: new TestPersistence(),
+      reportLanguage: "en-US", publicationPolicy: "disabled", accessMode: "local_git",
+    }).run();
+    expect(result.report.findings).toHaveLength(3);
+    expect(result.report.findings.map(f => f.id)).toEqual(expect.arrayContaining(["timer", "parser"]));
+    expect(result.report.duplicates).toHaveLength(1);
+    expect(result.report.filteredFindingCount).toBeUndefined();
+  });
+
   it("retains low-score filtering and per-file caps after summary parsing fails", async () => {
     const repo = makeFixtureRepo();
     const candidates = ["credential", "timer", "parser", "buffer", "lock"].map((topic, index) => ({

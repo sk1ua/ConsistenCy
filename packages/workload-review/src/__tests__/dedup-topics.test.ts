@@ -8,6 +8,43 @@ function finding(id: string, title: string, evidence: string, trigger?: string):
 }
 
 describe("prose topic deduplication", () => {
+  it("merges differently worded duplicates at 3/7 keyword overlap despite paraphrased triggers", () => {
+    const a = finding("a", "Unchecked query injection permits attackers", "Unchecked query injection permits attackers", "Remote clients submit malicious SQL fragments");
+    const b = finding("b", "Unchecked query injection allows exploits", "Unchecked query injection allows exploits", "Untrusted parameters reach concatenated database statements");
+    const result = deduplicateAndSortFindings([a, b], true);
+    expect(result.findings).toHaveLength(1);
+    expect(result.duplicates).toHaveLength(1);
+  });
+
+  it("merges a shared identifier only with the same explicit category", () => {
+    const a = { ...finding("a", "SQL concatenation", "`executeQuery` accepts unsafe query fragments"), tags: ["category:injection"] };
+    const b = { ...finding("b", "Parameter escaping absent", "Attacker controlled arguments reach `executeQuery`"), tags: ["category:injection"], startLine: 252, endLine: 252 };
+    expect(deduplicateAndSortFindings([a, b], true).findings).toHaveLength(1);
+    expect(deduplicateAndSortFindings([a, { ...b, tags: ["category:resource-leak"] }], true).findings).toHaveLength(2);
+  });
+
+  it("does not treat a shared quoted path as a code identifier", () => {
+    const a = { ...finding("a", "Authentication bypass", "`src/shared.py` permits anonymous requests"), tags: ["category:security"] };
+    const b = { ...finding("b", "Credential disclosure", "`src/shared.py` writes secret tokens to logs"), tags: ["category:security"] };
+    expect(deduplicateAndSortFindings([a, b], true).findings).toHaveLength(2);
+  });
+
+  it("does not merge the same prose at remote line ranges", () => {
+    const a = finding("a", "Unchecked query injection", "Unchecked query injection");
+    expect(deduplicateAndSortFindings([a, { ...a, id: "b", startLine: 300, endLine: 302 }], true).findings).toHaveLength(2);
+  });
+
+  it("does not merge adjacent lines describing unrelated failures", () => {
+    const a = finding("a", "Credential disclosed", "Public logs contain secret access tokens");
+    const b = { ...finding("b", "Timer survives cancellation", "Pending callbacks fire after the caller cancels"), startLine: 250, endLine: 250 };
+    expect(deduplicateAndSortFindings([a, b], true).findings).toHaveLength(2);
+  });
+  it("vetoes explicitly opposite input conditions", () => {
+    const a = finding("a", "Parser rejects payload", "Parser rejects payload", "An empty input reaches the parser");
+    const b = { ...a, id: "b", trigger: "A non-empty input reaches the parser" };
+    expect(deduplicateAndSortFindings([a, b], true).findings).toHaveLength(2);
+  });
+
   it("does not merge failed dnf search with unavailable Rocky Python packages", () => {
     const search = finding("search", "dnf search will fail the prepare job", "An unsuccessful search aborts the prepare.sh job before installation.", "Amazon package search returns an unsuccessful exit status");
     const python = finding("python", "Python package unavailable on Rocky", "Rocky repositories lack the requested package; prepare.sh cannot install it.", "Rocky installation requests an unavailable Python package");
