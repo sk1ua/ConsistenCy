@@ -87,6 +87,13 @@ function isLineNeighbor(left: ReviewFinding, right: ReviewFinding): boolean {
   return a.start <= b.end + FINDING_CLUSTER_DISTANCE && b.start <= a.end + FINDING_CLUSTER_DISTANCE;
 }
 
+function hasOverlappingLines(left: ReviewFinding, right: ReviewFinding): boolean {
+  if (left.file.toLowerCase() !== right.file.toLowerCase()) return false;
+  const a = lineRangeOf(left);
+  const b = lineRangeOf(right);
+  return a !== undefined && b !== undefined && a.start <= b.end && b.start <= a.end;
+}
+
 const STOP_WORDS = new Set([
   "a", "an", "the", "in", "on", "at", "to", "for", "of", "with", "by", "from",
   "and", "or", "not", "is", "are", "was", "were", "be", "been", "being",
@@ -113,13 +120,14 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 function differentTriggers(left: ReviewFinding, right: ReviewFinding): boolean {
   if (!left.trigger || !right.trigger) return false;
-  // Low lexical overlap is not proof of different scenarios. Only veto an
-  // explicit incompatible condition on the same dimension.
+  // Low lexical overlap is not proof of different scenarios. Only veto
+  // explicit distinct conditions on a recognized dimension.
   const dimensions = [
-    [/\b(?:amazon|amzn)\b/i, /\brocky\b/i, /\bubuntu\b/i, /\bdebian\b/i, /\balpine\b/i],
+    [/\b(?:amazon|amzn)\b/i, /\brocky(?:linux)?\b/i, /\bubuntu\b/i, /\bdebian\b/i, /\balpine\b/i],
     [/\bwindows\b/i, /\b(?:linux|unix)\b/i, /\b(?:macos|darwin)\b/i],
     [/\b(?:unauthenticated|anonymous)\b|未认证|未登录/i, /\b(?:authenticated|logged[- ]in)\b|已认证|已登录/i],
     [/\b(?:empty|zero[- ]length)\b|空输入/i, /\b(?:non[- ]?empty|populated)\b|非空输入/i],
+    [/\b(?:empty|zero[- ]length)\b|空输入|空字符串/i, /\b(?:invalid|malformed)\b|无效值|非法值/i],
   ];
   return dimensions.some(conditions => {
     const normalize = (text: string) => text.replace(/\bnon[- ]?empty\b/gi, "populated").replace(/非空输入/g, "populated");
@@ -144,9 +152,31 @@ function referencedIdentifiers(finding: ReviewFinding): Set<string> {
   return identifiers;
 }
 
-/** Nearby findings share either prose or a named code target and category. */
+/** Technical names, not ordinary shared words; keep runtime versions whole. */
+function referencedTechnicalTargets(finding: ReviewFinding): Set<string> {
+  const text = `${finding.title} ${finding.evidence}`.replace(/(?:[\w.-]+[\\/])+[\w.-]+|\b[\w.-]+\.(?:py|ts|tsx|js|json|yml|yaml|sh)\b/gi, " ");
+  const targets = new Set<string>();
+  const add = (target: string) => {
+    const normalized = target.toLowerCase();
+    if (normalized.length > 1 && !STOP_WORDS.has(normalized)) targets.add(normalized);
+  };
+  for (const match of text.matchAll(/`([^`\n]+)`/g)) {
+    for (const identifier of match[1]!.matchAll(/\b[A-Za-z_$][\w$]*(?:[.-]\d+)*\b/g)) add(identifier[0]);
+  }
+  // Recognize bare code names, versioned runtimes, Linux distribution names,
+  // and acronyms without treating sentence capitalization as a proper noun.
+  const prose = text.replace(/`[^`\n]*`/g, " ");
+  for (const match of prose.matchAll(/\b(?:[A-Za-z_$][\w$]*\d+(?:[.-]\d+)*|[a-zA-Z_$][\w$]*\s*(?=\()|\w*[a-z][A-Z]\w*|\w+_\w+|[A-Za-z][A-Za-z0-9]*linux|[A-Z][A-Z\d]{1,})\b/g)) add(match[0].trim());
+  return targets;
+}
+
+/** Nearby findings share prose or a code target/category; overlap needs two targets across experts. */
 function hasTopicOverlap(left: ReviewFinding, right: ReviewFinding): boolean {
   if (jaccard(topicWords(`${left.title} ${left.evidence}`), topicWords(`${right.title} ${right.evidence}`)) >= 0.35) return true;
+  if (left.agent !== right.agent && hasOverlappingLines(left, right)) {
+    const targets = referencedTechnicalTargets(left);
+    if ([...referencedTechnicalTargets(right)].filter(target => targets.has(target)).length > 1) return true;
+  }
   const categories = categoryTags(left);
   if (![...categoryTags(right)].some(tag => categories.has(tag))) return false;
   const identifiers = referencedIdentifiers(left);
@@ -201,9 +231,10 @@ function prefer(left: ReviewFinding, right: ReviewFinding): ReviewFinding {
  * Deterministic cross-agent deduplication.
  *
  * Two findings with line numbers collapse only when their ranges overlap or
- * sit within `FINDING_CLUSTER_DISTANCE` lines and their topics match. Shared
- * code identifiers require an explicit matching category; contradictory
- * trigger conditions veto the merge. Unlocated legacy findings use titles.
+ * sit within `FINDING_CLUSTER_DISTANCE` lines and their topics match. One code
+ * identifier requires a matching category; overlapping reports from different
+ * experts can instead share two technical targets without matching categories.
+ * Distinct trigger conditions veto the merge. Unlocated legacy findings use titles.
  * The survivor is the highest-severity, then most-specific, then highest-
  * confidence one; the specialists it stands in for are recorded in
  * `alsoReportedBy`, and every merged finding is still returned in `duplicates`
