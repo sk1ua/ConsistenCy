@@ -23,6 +23,7 @@ import { tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRR
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
+import { hasSpecificChangedCoverageTarget, isMissingCoverageFinding } from "./test-coverage.js";
 import type { AgentFacadeSet, ReviewAgentName, ReviewPersistence } from "../workload/types.js";
 
 function errorMessage(error: unknown): string {
@@ -38,10 +39,13 @@ function summariseGrounding(changedFileCount: number, rejected: number, downgrad
 
 const severityRank = { critical: 5, high: 4, medium: 3, low: 2, info: 1 } as const;
 
-function capFindings(findings: ReviewFinding[], limit: number): ReviewFinding[] {
+function capFindings(findings: ReviewFinding[], limit: number, maxCoverage = Infinity): ReviewFinding[] {
+  let coverageCount = 0;
   return [...findings].sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
     || (right.evidence.length + right.reasoning.length) - (left.evidence.length + left.reasoning.length)
-    || left.id.localeCompare(right.id)).slice(0, limit);
+    || left.id.localeCompare(right.id))
+    .filter(finding => !isMissingCoverageFinding(finding) || ++coverageCount <= maxCoverage)
+    .slice(0, limit);
 }
 
 export interface ReviewAgentBodyOptions {
@@ -123,20 +127,28 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         throw new Error("agent lost Scheduler admission after model invocation");
       }
 
+      const eligible = agentName === "Test"
+        ? modelResult.findings.filter(finding => !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context))
+        : modelResult.findings;
+      const coverageRejected = modelResult.findings.length - eligible.length;
       const grounding = buildGroundingContext(options.context, options.deterministicResult);
       const grounded = groundReviewFindings(
-        modelResult.findings,
+        eligible,
         grounding,
         options.evidenceStore,
         options.headSha,
       );
-      const capped = capFindings(grounded.findings, options.maxFindingsPerSpecialist ?? 3);
+      const capped = capFindings(grounded.findings, options.maxFindingsPerSpecialist ?? 3, agentName === "Test" ? 1 : Infinity);
       const cappedCount = grounded.findings.length - capped.length;
+      // Missing-coverage comments on out-of-scope/baseline behavior are not
+      // actionable PR coverage gaps and must not reappear through the appendix.
+      const preExisting = grounded.preExisting.filter(decision => agentName !== "Test" || !isMissingCoverageFinding(decision.finding));
+      const rejectedCount = grounded.rejected.length + coverageRejected + grounded.preExisting.length - preExisting.length;
 
       const summaryParts = [
         summariseGrounding(
           options.context.changedFiles.length,
-          grounded.rejected.length,
+          rejectedCount,
           grounded.downgraded.length,
         )
       ];
@@ -162,10 +174,10 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
 
       return {
         findings: capped,
-        preExistingIssues: grounded.preExisting.map(decision => decision.finding),
+        preExistingIssues: preExisting.map(decision => decision.finding),
         cappedFindingsCount: cappedCount,
         tokenUsage: modelResult.tokenUsage,
-        rejectedCount: grounded.rejected.length,
+        rejectedCount,
         downgradedCount: grounded.downgraded.length,
       };
     });
