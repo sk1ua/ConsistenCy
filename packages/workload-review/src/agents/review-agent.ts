@@ -24,6 +24,7 @@ import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
 import { hasSpecificChangedCoverageTarget, isMissingCoverageFinding } from "./test-coverage.js";
+import { hasRepositoryPrecedent } from "./precedent.js";
 import type { AgentFacadeSet, ReviewAgentName, ReviewPersistence } from "../workload/types.js";
 
 function errorMessage(error: unknown): string {
@@ -133,7 +134,9 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
 
       const eligible = agentName === "Test"
         ? modelResult.findings.filter(finding => !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context))
-        : modelResult.findings;
+        : agentName === "Consistency"
+          ? modelResult.findings.filter(finding => hasRepositoryPrecedent(finding, options.context))
+          : modelResult.findings;
       const coverageRejected = modelResult.findings.length - eligible.length;
       const grounding = buildGroundingContext(options.context, options.deterministicResult);
       const grounded = groundReviewFindings(

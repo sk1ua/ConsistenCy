@@ -99,6 +99,8 @@ npm run review -- --no-memory             # 本次不读写知识记忆
 - **`staticRiskLabel`**：静态标签，不是“没意见 = 一致”。未分析或分析失败显示 `Not Analyzed (原因)`，不会显示 `Consistent`。只有全部被分析文件都没有基线时才显示 `No Baseline`。混合变更按有基线的文件计分，并注明新增文件数（例如 `Moderate Drift / 1 new file`）。
 - **`riskBand`**：最终 findings 的严重度带。
 
+`CONSISTENCY_LEAN=1` 是默认关闭的瘦审查：只跑 Correctness 和 Consistency，不调用 Planner。Consistency 的每条意见必须引用仓库里已经存在的先例，并通过确定性代码校验；对不上的意见会被丢掉。未设置、`0` 和其他值都保持原来的六专家审查。
+
 另外有一段**约束块**会一直存在，它不是凑字数：
 
 - `[!]` = 这部分**本次没检查**（不是检查通过了）。

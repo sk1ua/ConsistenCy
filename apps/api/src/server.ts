@@ -303,6 +303,7 @@ export const worker = new ReviewWorker({
     maxReportedFindings: config.CONSISTENCY_MAX_REPORTED_FINDINGS,
     maxFindingsPerFile: config.CONSISTENCY_MAX_FINDINGS_PER_FILE,
     deterministicScope: config.CONSISTENCY_DETERMINISTIC_SCOPE,
+    lean: config.CONSISTENCY_LEAN === "1",
     reviewWorkflow: config.reviewWorkflow,
     runtimeRegistry,
     reviewWorkflowSpec: () => {

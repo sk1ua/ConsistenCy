@@ -91,6 +91,8 @@ export type ReviewWorkflowDependencies = {
   workspaceRoot?: string;
   /** Persisted knowledge enrichment/recording; enabled unless explicitly false. */
   memoryEnabled?: boolean;
+  /** Default-off lean review. Unset keeps the six-agent Planner path. */
+  lean?: boolean;
   runtimeRegistry?: RuntimeRegistry;
 };
 
@@ -374,6 +376,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         maxReportedFindings: dependencies.maxReportedFindings,
         maxFindingsPerFile: dependencies.maxFindingsPerFile,
         deterministicScope: dependencies.deterministicScope,
+        lean: dependencies.lean,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: memoryEnabled

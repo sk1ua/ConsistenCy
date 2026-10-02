@@ -113,6 +113,7 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `CONSISTENCY_MAX_FINDINGS_PER_FILE` | `3` | Maximum main-list findings from any single file after scoring (1–20) |
 | `CONSISTENCY_DETERMINISTIC_SCOPE` | `diff` | Scoping of Python-engine (deterministic) findings: `diff` keeps only findings anchored within 5 lines of a changed hunk, `all` keeps the engine's unscoped output. Findings the engine reports without a line reference are kept only for files that are part of the change |
 | `CONSISTENCY_NO_MEMORY` | `0` / unset | CLI only: exact value `1` disables persisted knowledge reads, indexing and review write-back. Equivalent to `--no-memory`; the flag always disables memory even when the environment is `0`. Other values retain default memory |
+| `CONSISTENCY_LEAN` | unset | Exact value `1` runs only Correctness and Consistency and does not call the Planner. Every other value keeps the full six-agent review. Consistency findings must cite an existing repository precedent and pass deterministic code verification |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
 | `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow routes (API layer; the repo ships no login UI) |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the OAuth broker used by the API's `/oauth/desktop/*` routes (`apps/api/src/server.ts:160`) |

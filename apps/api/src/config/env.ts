@@ -74,6 +74,8 @@ export const envSchema = z.object({
   CONSISTENCY_MAX_REPORTED_FINDINGS: z.coerce.number().int().min(1).max(50).default(8),
   CONSISTENCY_MAX_FINDINGS_PER_FILE: z.coerce.number().int().min(1).max(20).default(3),
   CONSISTENCY_DETERMINISTIC_SCOPE: z.enum(["diff", "all"]).default("diff"),
+  /** Exact "1" enables lean review. Unset, "0", and every other value stay full. */
+  CONSISTENCY_LEAN: z.string().optional(),
   ANTHROPIC_API_KEY: optionalSecret,
   ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),

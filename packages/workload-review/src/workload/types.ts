@@ -41,6 +41,9 @@ export const REVIEW_AGENTS = [
   "ArchitectureAuditor",
 ] as const;
 
+/** Lean mode only. Not part of the default six-agent catalog. */
+export const LEAN_AGENTS = ["Correctness", "Consistency"] as const;
+
 export type ReviewAgentName = (typeof REVIEW_AGENTS)[number];
 
 export interface DeterministicFileInput {
@@ -158,6 +161,11 @@ export interface ReviewWorkloadOptions {
    * five lines of the change; "all" keeps the engine's unscoped output.
    */
   readonly deterministicScope?: DeterministicScope;
+  /**
+   * Default-off lean review: only Correctness and Consistency run, and the
+   * Planner is not called. Unset is the full six-agent review.
+   */
+  readonly lean?: boolean;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;

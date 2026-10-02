@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveMemoryEnabled } from "./config";
+import { resolveLeanEnabled, resolveMemoryEnabled } from "./config";
 
 describe("CLI persisted memory resolution", () => {
   it("preserves memory by default", () => {
@@ -15,6 +15,15 @@ describe("CLI persisted memory resolution", () => {
   it("disables memory for CONSISTENCY_NO_MEMORY=1 without a CLI flag", () => {
     expect(resolveMemoryEnabled({}, { CONSISTENCY_NO_MEMORY: "1" })).toBe(false);
     expect(resolveMemoryEnabled({ noMemory: false }, { CONSISTENCY_NO_MEMORY: "1" })).toBe(false);
+  });
+
+  it.each(["0", "", "true", "false", "01"])("keeps the full review for lean env value %j", value => {
+    expect(resolveLeanEnabled({ CONSISTENCY_LEAN: value })).toBe(false);
+  });
+
+  it("enables lean review only for the exact env value 1", () => {
+    expect(resolveLeanEnabled({})).toBe(false);
+    expect(resolveLeanEnabled({ CONSISTENCY_LEAN: "1" })).toBe(true);
   });
 
   it.each(["0", "", "true", "false", "01"])("keeps memory enabled for env value %j", value => {

@@ -67,6 +67,7 @@ import { runReviewAgentBody } from "../agents/review-agent.js";
 import { runSynthesizerBody } from "../synthesis/synthesizer.js";
 import {
   AGENT_CAPABILITY_PROFILES,
+  LEAN_AGENTS,
   REVIEW_AGENTS,
   type AgentCapabilityProfile,
   type AgentCapabilityRefs,
@@ -399,8 +400,16 @@ export class ReviewWorkload {
 
       // -------------------------------------------------------------------
       // 7. Supervisor (planner) — chooses work; Scheduler admits.
+      //    Lean mode selects Correctness + Consistency without a Planner call.
       // -------------------------------------------------------------------
-      const supervisor = this.#registerAgent({
+      const leanPlan = options.lean === true ? {
+        enabledAgents: [...LEAN_AGENTS],
+        skippedAgents: REVIEW_AGENTS.filter(agent => agent !== "Correctness"),
+        riskAreas: ["changed code"],
+        reason: "Lean review runs only Correctness and Consistency.",
+        focusAreas: [],
+      } : undefined;
+      const supervisor = leanPlan ? undefined : this.#registerAgent({
         scheduler,
         bridge,
         broker,
@@ -416,16 +425,18 @@ export class ReviewWorkload {
         providerName: options.modelDriver.provider,
         contextImage: baseImage,
       });
-      scheduler.ready(supervisor.acbId);
-      const supervisorAdmitted = scheduler.admit();
-      if (!supervisorAdmitted || supervisorAdmitted.id !== supervisor.acbId) {
-        throw new Error("supervisor was never admitted");
+      if (supervisor) {
+        scheduler.ready(supervisor.acbId);
+        const supervisorAdmitted = scheduler.admit();
+        if (!supervisorAdmitted || supervisorAdmitted.id !== supervisor.acbId) {
+          throw new Error("supervisor was never admitted");
+        }
+        await bridge.flush();
+        await this.#fireHook(supervisor, options);
       }
-      await bridge.flush();
-      await this.#fireHook(supervisor, options);
 
-      const supervisorResult = await runSupervisorBody({
-        fiber: supervisor.fiber,
+      const supervisorResult = leanPlan ? { plan: leanPlan } : await runSupervisorBody({
+        fiber: supervisor!.fiber,
         scheduler,
         agentId: supervisor.acbId,
         jobId,
@@ -457,9 +468,10 @@ export class ReviewWorkload {
       const enabledAgents = [...plan.enabledAgents];
       // One additional pass at most, with a fresh ACB/capability budget. It
       // cannot resurrect a terminal ACB or bypass Scheduler admission.
-      for (const [index, agentName] of [...REVIEW_AGENTS, "Correctness" as const].entries()) {
+      const scheduledAgents = options.lean === true ? LEAN_AGENTS : REVIEW_AGENTS;
+      for (const [index, agentName] of [...scheduledAgents, "Correctness" as const].entries()) {
         if (scheduler.getRun(runId)?.state !== "ACTIVE") break; // cancelled run
-        const isRecovery = index === REVIEW_AGENTS.length;
+        const isRecovery = index === scheduledAgents.length;
         if (isRecovery) {
           if (rawFindingsCount !== 0 || completedSpecialists === 0 || failedAgents.length > 0
             || !hasActualCodeChanges(agentContext)) break;
@@ -483,7 +495,7 @@ export class ReviewWorkload {
           evidenceStore,
           backend: this.#backend(),
           providerName: options.modelDriver.provider,
-          parent: supervisor.acbId,
+          parent: supervisor?.acbId,
           contextImage: agentImage,
         });
         agentContextImages.set(runtime.acbId, agentImage);
@@ -579,7 +591,7 @@ export class ReviewWorkload {
         evidenceStore,
         backend: this.#backend(),
         providerName: options.modelDriver.provider,
-        parent: supervisor.acbId,
+        parent: supervisor?.acbId,
         contextImage: synthesizerImage,
       });
       agentContextImages.set(synthesizerRuntime.acbId, synthesizerImage);

@@ -23,7 +23,8 @@ const AGENT_FOCUS: Record<ReviewAgentName, string> = {
   Maintainability: "ownership and coupling of changed modules, duplicated logic, unclear interfaces, and divergence from existing shared abstractions",
   Test: "missing or inadequate tests for the changed behavior and its important failure paths, using the target repository's actual test conventions",
   Style: "readability and consistency of changed code with the target repository's conventions, including naming, diagnostics, and organization where applicable",
-  ArchitectureAuditor: "the change's effects on public contracts, dependencies, data compatibility, module boundaries, and consumers of shared types"
+  ArchitectureAuditor: "the change's effects on public contracts, dependencies, data compatibility, module boundaries, and consumers of shared types",
+  Consistency: "deviations from a convention that already exists in this repository, citing the existing precedent by file and identifier"
 };
 
 const AGENT_EXCLUSIONS: Record<ReviewAgentName, string> = {
@@ -32,7 +33,8 @@ const AGENT_EXCLUSIONS: Record<ReviewAgentName, string> = {
   Maintainability: "Do not report cosmetic refactors, comments, or speculative future complexity without a concrete change-induced cost.",
   Test: "A missing-coverage finding MUST name a specific PR-new or PR-modified function or quote the exact changed branch condition visible in the source, locate it in that scope, and set trigger to the explicit input or failure scenario with no corresponding test. Return at most ONE missing-coverage finding for the entire PR. Do not emit generic 'add tests', 'add integration tests', or 'improve coverage' suggestions, and do not duplicate another specialist's defect as a test recommendation.",
   Style: "Do not report security, behavior, architecture, or test coverage as style findings. A style finding must cite a concrete repository convention.",
-  ArchitectureAuditor: "Do not report naming, comments, tests, or local implementation details without a concrete contract or module-boundary impact."
+  ArchitectureAuditor: "Do not report naming, comments, tests, or local implementation details without a concrete contract or module-boundary impact.",
+  Consistency: "Every finding must quote an existing repository precedent (file and identifier) that the change diverges from. Do not report a new pattern, a preference, or a convention that appears only in the changed lines."
 };
 
 export function reportLanguageInstruction(language: "zh-CN" | "en-US"): string {

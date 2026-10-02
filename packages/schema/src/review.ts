@@ -11,6 +11,7 @@ export const reviewAgentNameSchema = z.enum([
   "Maintainability",
   "Style",
   "ArchitectureAuditor",
+  "Consistency",
   "Synthesizer",
   "PythonCompatibilityAdapter",
   "DeterministicAnalyzer"

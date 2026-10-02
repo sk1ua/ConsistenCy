@@ -77,6 +77,11 @@ export function resolveEngineRoot(config: AppConfig, root: string): string {
  * runtime. The flag always disables memory; only the exact env value "1" does.
  * This is a CLI policy, not engine environment (which remains allowlisted).
  */
+/** Exact env value "1" enables lean review. Every other value stays full. */
+export function resolveLeanEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_LEAN === "1";
+}
+
 export function resolveMemoryEnabled(
   options: Pick<ReviewOptions, "noMemory">,
   environment: NodeJS.ProcessEnv = process.env
