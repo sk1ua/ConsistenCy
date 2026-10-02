@@ -549,6 +549,7 @@ export class ReviewWorkload {
           evidenceStore,
           headSha: options.context.headSha,
           reportLanguage: options.reportLanguage,
+          compactContext: options.compactContext,
           relevantContext,
           focusAreas: plan.focusAreas,
           maxFindingsPerSpecialist: options.maxFindingsPerSpecialist ?? 3,

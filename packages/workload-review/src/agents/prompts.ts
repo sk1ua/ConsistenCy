@@ -9,6 +9,7 @@ import { REVIEW_DIFF_MAX_CHARS } from "../context/review-context.js";
 import { redactModelVisibleText } from "../context/content-policy.js";
 import type { ReviewAgentName } from "../workload/types.js";
 import { buildBaselineSnippets } from "./baseline-snippets.js";
+import { compactFileContext } from "./compact-context.js";
 
 /** Max Kernel evidence lines rendered into the additive evidence section. */
 export const REVIEW_KERNEL_EVIDENCE_MAX_ENTRIES = 40;
@@ -112,12 +113,15 @@ export function buildAgentPrompt(
   reportLanguage: "zh-CN" | "en-US" = "zh-CN",
   relevantContext?: Record<string, RelevantContext>,
   focusAreas?: ReadonlyArray<{ pathPattern: string; guidance: string }>,
-  maxFindingsPerSpecialist = 3
+  maxFindingsPerSpecialist = 3,
+  compactContext = false
 ): { systemPrompt: string; userPrompt: string } {
-  const files = Object.entries(context.fileContents).sort(([left], [right]) => left.localeCompare(right))
-    .map(([path, content]) => `FILE ${path}\n${numbered(content)}`)
-    .join("\n\n")
-    .slice(0, REVIEW_FILE_CONTENTS_MAX_CHARS);
+  const files = compactContext
+    ? compactFileContext(context, REVIEW_FILE_CONTENTS_MAX_CHARS)
+    : Object.entries(context.fileContents).sort(([left], [right]) => left.localeCompare(right))
+      .map(([path, content]) => `FILE ${path}\n${numbered(content)}`)
+      .join("\n\n")
+      .slice(0, REVIEW_FILE_CONTENTS_MAX_CHARS);
   const metadata = Object.entries(context.projectMetadata).sort(([left], [right]) => left.localeCompare(right))
     .map(([path, content]) => `METADATA ${path}\n${content}`)
     .join("\n\n")

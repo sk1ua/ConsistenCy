@@ -95,6 +95,8 @@ export type ReviewWorkflowDependencies = {
   lean?: boolean;
   /** Default-off v2 scoring rubric. Unset keeps the v1 instruction and cap. */
   scoreRubricV2?: boolean;
+  /** Default-off compact file context. Unset keeps full numbered files. */
+  compactContext?: boolean;
   runtimeRegistry?: RuntimeRegistry;
 };
 
@@ -380,6 +382,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         deterministicScope: dependencies.deterministicScope,
         lean: dependencies.lean,
         scoreRubricV2: dependencies.scoreRubricV2,
+        compactContext: dependencies.compactContext,
         publicationPolicy: input.publicationPolicy,
         accessMode: input.accessMode ?? "github_app",
         knowledgeIndexPath: memoryEnabled

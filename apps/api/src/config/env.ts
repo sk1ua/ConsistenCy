@@ -78,6 +78,8 @@ export const envSchema = z.object({
   CONSISTENCY_LEAN: z.string().optional(),
   /** Exact "1" enables the v2 scoring rubric. Every other value keeps v1. */
   CONSISTENCY_SCORE_RUBRIC: z.string().optional(),
+  /** Exact "1" replaces full file context with numbered hunks and units. */
+  CONSISTENCY_COMPACT_CONTEXT: z.string().optional(),
   ANTHROPIC_API_KEY: optionalSecret,
   ANTHROPIC_MODEL: emptyAsUnset(z.string().trim().min(1).optional()),
   CONSISTENCY_PI_CONFIG_DIR: emptyAsUnset(z.string().trim().min(1).optional()),

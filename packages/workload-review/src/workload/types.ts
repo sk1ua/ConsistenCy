@@ -171,6 +171,10 @@ export interface ReviewWorkloadOptions {
    * instruction and the per-file cap rises from 3 to 4 unless explicitly set.
    */
   readonly scoreRubricV2?: boolean;
+  /**
+   * Default-off compact file context. Unset keeps full numbered file contents.
+   */
+  readonly compactContext?: boolean;
   /** Job-level metadata (publication enforcement stays in the host store). */
   readonly publicationPolicy: PublicationPolicy;
   readonly accessMode: ReviewAccessMode;

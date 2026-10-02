@@ -87,6 +87,11 @@ export function resolveScoreRubricV2(environment: NodeJS.ProcessEnv = process.en
   return environment.CONSISTENCY_SCORE_RUBRIC === "1";
 }
 
+/** Exact env value "1" replaces full file context with numbered hunks and units. */
+export function resolveCompactContext(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_COMPACT_CONTEXT === "1";
+}
+
 export function resolveMemoryEnabled(
   options: Pick<ReviewOptions, "noMemory">,
   environment: NodeJS.ProcessEnv = process.env

@@ -70,6 +70,8 @@ export interface ReviewAgentBodyOptions {
   readonly maxFindingsPerSpecialist?: number;
   /** A single workload-level empty-result recovery pass; grounding stays intact. */
   readonly omitBaselineSnippets?: boolean;
+  /** Default-off compact file context. Unset keeps the full numbered files. */
+  readonly compactContext?: boolean;
 }
 
 export interface ReviewAgentBodyResult {
@@ -111,6 +113,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.relevantContext,
         options.focusAreas,
         options.maxFindingsPerSpecialist ?? 3,
+        options.compactContext === true,
       );
 
       // WAIT_LLM: a remote inference operation is being submitted. This

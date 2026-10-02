@@ -107,3 +107,26 @@ export function hasSpecificChangedCoverageTarget(finding: ReviewFinding, context
   }
   return false;
 }
+
+/** Smallest function, method, or branch that contains the line, when one is visible. */
+export function enclosingUnitRange(
+  lines: readonly string[],
+  file: string,
+  lineNumber: number
+): { start: number; end: number } | undefined {
+  let match: { start: number; end: number } | undefined;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    const declaration = languageFunction(lines, index, file);
+    const name = declaration?.name
+      ?? /^\s*(?:async\s+)?def\s+([\w$]+)/.exec(line)?.[1]
+      ?? /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([\w$]+)/.exec(line)?.[1]
+      ?? /^\s*(?:class|struct|interface|trait)\s+([\w$]+)/.exec(line)?.[1];
+    if (!name || /^(?:if|for|while|switch|catch|with)$/.test(name)) continue;
+    const start = index + 1;
+    const end = scopeEnd(lines, index, declaration?.headerEnd, declaration?.expressionBody);
+    if (lineNumber < start || lineNumber > end) continue;
+    if (!match || end - start < match.end - match.start) match = { start, end };
+  }
+  return match;
+}

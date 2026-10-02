@@ -115,6 +115,7 @@ When configuration changes are saved (`npm run config -- set <key> <value>`, or 
 | `CONSISTENCY_NO_MEMORY` | `0` / unset | CLI only: exact value `1` disables persisted knowledge reads, indexing and review write-back. Equivalent to `--no-memory`; the flag always disables memory even when the environment is `0`. Other values retain default memory |
 | `CONSISTENCY_LEAN` | unset | Exact value `1` runs only Correctness and Consistency and does not call the Planner. Every other value keeps the full six-agent review. Consistency findings must cite an existing repository precedent and pass deterministic code verification |
 | `CONSISTENCY_SCORE_RUBRIC` | unset | Exact value `1` shows the synthesizer numbered changed lines, scores verified convention deviations highly, suppresses generic test suggestions, and raises the per-file cap from 3 to 4. Every other value keeps the v1 rubric and cap |
+| `CONSISTENCY_COMPACT_CONTEXT` | unset | Exact value `1` replaces full file context with numbered changed hunks and the whole unit containing them. Every other value keeps the full numbered file context byte-for-byte |
 | `GITHUB_APP_ID` | *empty* | GitHub App ID for webhook-driven reviews |
 | `GITHUB_OAUTH_CLIENT_ID` | *empty* | Public OAuth App client id for the Device Flow routes (API layer; the repo ships no login UI) |
 | `CONSISTENCY_DESKTOP_OAUTH_BROKER_URL` | *empty* | HTTPS origin of the OAuth broker used by the API's `/oauth/desktop/*` routes (`apps/api/src/server.ts:160`) |
