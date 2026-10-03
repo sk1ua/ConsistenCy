@@ -69,6 +69,7 @@ import { runSynthesizerBody } from "../synthesis/synthesizer.js";
 import {
   AGENT_CAPABILITY_PROFILES,
   LEAN_AGENTS,
+  LEAN_REVIEWER_AGENTS,
   REVIEW_AGENTS,
   type AgentCapabilityProfile,
   type AgentCapabilityRefs,
@@ -401,13 +402,19 @@ export class ReviewWorkload {
 
       // -------------------------------------------------------------------
       // 7. Supervisor (planner) — chooses work; Scheduler admits.
-      //    Lean mode selects Correctness + Consistency without a Planner call.
+      //    Lean mode skips the Planner; the third specialist is opt-in.
       // -------------------------------------------------------------------
+      const leanReviewer = options.lean === true && options.leanReviewer === true;
+      const leanAgents = leanReviewer ? LEAN_REVIEWER_AGENTS : LEAN_AGENTS;
       const leanPlan = options.lean === true ? {
-        enabledAgents: [...LEAN_AGENTS],
-        skippedAgents: REVIEW_AGENTS.filter(agent => agent !== "Correctness"),
+        enabledAgents: [...leanAgents],
+        skippedAgents: leanReviewer
+          ? REVIEW_AGENTS.filter(agent => agent !== "Correctness" && agent !== "Maintainability")
+          : REVIEW_AGENTS.filter(agent => agent !== "Correctness"),
         riskAreas: ["changed code"],
-        reason: "Lean review runs only Correctness and Consistency.",
+        reason: leanReviewer
+          ? "Lean review runs Correctness, Consistency, and a maintainer-review pass."
+          : "Lean review runs only Correctness and Consistency.",
         focusAreas: [],
       } : undefined;
       const supervisor = leanPlan ? undefined : this.#registerAgent({
@@ -469,7 +476,7 @@ export class ReviewWorkload {
       const enabledAgents = [...plan.enabledAgents];
       // One additional pass at most, with a fresh ACB/capability budget. It
       // cannot resurrect a terminal ACB or bypass Scheduler admission.
-      const scheduledAgents = options.lean === true ? LEAN_AGENTS : REVIEW_AGENTS;
+      const scheduledAgents = options.lean === true ? leanAgents : REVIEW_AGENTS;
       for (const [index, agentName] of [...scheduledAgents, "Correctness" as const].entries()) {
         if (scheduler.getRun(runId)?.state !== "ACTIVE") break; // cancelled run
         const isRecovery = index === scheduledAgents.length;
@@ -550,6 +557,7 @@ export class ReviewWorkload {
           headSha: options.context.headSha,
           reportLanguage: options.reportLanguage,
           compactContext: options.compactContext,
+          leanReviewer,
           citePrecedent: options.lean === true,
           consistencyStrict: options.lean === true && options.leanConsistencyStrict === true,
           siblingReader: options.lean === true ? options.snapshot : undefined,

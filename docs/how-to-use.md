@@ -84,6 +84,8 @@ npm run review -- --no-memory             # 本次不读写知识记忆
 
 ## 3. 它靠什么工作（第一次跑之前要知道的两件事）
 
+实验性精简评审：`CONSISTENCY_LEAN=1` 默认只调用 Correctness 和 Consistency，不调用 Planner。再设置 `CONSISTENCY_LEAN_REVIEWER=1`，才增加一个署名 Maintainability 的维护者视角专项，关注简化、局部模式遗漏和代码与说明不一致；它沿用 grounding、打分和数量限制。两个开关都只接受精确的 `1`，默认关闭，完整模式不受维护者开关影响。质量和成本收益仍需评测确认，详见[配置说明](configuration.md)。
+
 1. **要配一个真 LLM**。没配的话会在开跑前停下，并告诉你去敲 `npm run setup` 或 `npm run config -- set llm.provider deepseek`。产品运行时**不允许 mock**，这是仓库的硬规矩。
 2. **要有 Python 3.12 + 本仓库的 `.venv`**（确定性证据层）。上面第 0 步的 `CONSISTENCY_PYTHON_PATH` 就是给它指路；没设的话 CLI 会去 `<仓库根>/.venv` 找。
 

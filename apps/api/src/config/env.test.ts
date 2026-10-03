@@ -24,6 +24,13 @@ describe("loadEnv", () => {
     expect(config.GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
   });
 
+  it("preserves the opt-in lean reviewer environment value without enabling it by default", () => {
+    expect(loadEnv({}).CONSISTENCY_LEAN_REVIEWER).toBeUndefined();
+    for (const value of ["1", "0", "true", "01", ""]) {
+      expect(loadEnv({ CONSISTENCY_LEAN_REVIEWER: value }).CONSISTENCY_LEAN_REVIEWER).toBe(value);
+    }
+  });
+
   it("enables the heartbeat by default in development and stays opt-in in production", () => {
     expect(loadEnv({}).heartbeatEnabled).toBe(true);
     expect(loadEnv({ NODE_ENV: "test" }).heartbeatEnabled).toBe(true);

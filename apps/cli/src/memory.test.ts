@@ -166,6 +166,18 @@ describe("CLI persisted knowledge opt-out", { timeout: 20_000 }, () => {
     });
   }
 
+  it.each(["1", "0", "true"])("threads lean reviewer value %j from the CLI through the runtime", async value => {
+    vi.stubEnv("CONSISTENCY_LEAN", "1");
+    vi.stubEnv("CONSISTENCY_LEAN_REVIEWER", value);
+    const report = await review(["--no-memory"]);
+    expect(observed.workloads).toHaveLength(1);
+    expect(observed.workloads[0]?.lean).toBe(true);
+    expect(observed.workloads[0]?.leanReviewer).toBe(value === "1");
+    expect(report.coverage?.enabledAgents).toEqual(value === "1"
+      ? ["Correctness", "Consistency", "Maintainability"]
+      : ["Correctness", "Consistency"]);
+  });
+
   it("retains default Python history reads and record_review resolution writes", async () => {
     await seedMemory();
     const relevantContext = vi.spyOn(DeterministicAnalyzer.prototype, "relevantContext");

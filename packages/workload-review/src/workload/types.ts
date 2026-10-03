@@ -44,6 +44,9 @@ export const REVIEW_AGENTS = [
 /** Lean mode only. Not part of the default six-agent catalog. */
 export const LEAN_AGENTS = ["Correctness", "Consistency"] as const;
 
+/** Opt-in lean variant; reuses the full-mode Maintainability identity. */
+export const LEAN_REVIEWER_AGENTS = ["Correctness", "Consistency", "Maintainability"] as const;
+
 export type ReviewAgentName = (typeof REVIEW_AGENTS)[number] | (typeof LEAN_AGENTS)[number];
 
 export interface DeterministicFileInput {
@@ -166,6 +169,8 @@ export interface ReviewWorkloadOptions {
    * Planner is not called. Unset is the full six-agent review.
    */
   readonly lean?: boolean;
+  /** Default-off third lean specialist, signed as Maintainability; requires lean. */
+  readonly leanReviewer?: boolean;
   /**
    * Default-off scoring rubric. When set, the synthesizer sees the v2
    * instruction and the per-file cap rises from 3 to 4 unless explicitly set.

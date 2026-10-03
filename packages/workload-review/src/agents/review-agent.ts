@@ -21,7 +21,7 @@ import {
 } from "@consistency/kernel";
 import { tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type RelevantContext, type ReviewFinding, type TokenUsage } from "@consistency/schema";
 import type { AgentFiberHandle } from "@consistency/harness-core";
-import { buildAgentPrompt } from "./prompts.js";
+import { buildAgentPrompt, buildMaintainerReviewPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
 import { hasSpecificChangedCoverageTarget, isMissingCoverageFinding } from "./test-coverage.js";
 import { filterConsistencyNoise } from "./consistency-filter.js";
@@ -75,6 +75,8 @@ export interface ReviewAgentBodyOptions {
   readonly omitBaselineSnippets?: boolean;
   /** Default-off compact file context. Unset keeps the full numbered files. */
   readonly compactContext?: boolean;
+  /** Use the maintainer-review prompt only for lean Maintainability. */
+  readonly leanReviewer?: boolean;
   /** Lean Consistency must cite a file, line, and verbatim quote. */
   readonly citePrecedent?: boolean;
   /** Lean Consistency tightening: boilerplate ban and source-only siblings. */
@@ -117,20 +119,22 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       const siblingFileContents = leanConsistency && options.siblingReader
         ? readSiblingFileContents(options.context, options.siblingReader, { strict: options.consistencyStrict === true })
         : undefined;
-      const prompt = buildAgentPrompt(
-        agentName,
-        options.omitBaselineSnippets ? { ...options.context, baseFileContents: {} } : options.context,
-        options.deterministicResult,
-        options.evidence,
-        options.reportLanguage,
-        options.relevantContext,
-        options.focusAreas,
-        options.maxFindingsPerSpecialist ?? 3,
-        options.compactContext === true,
-        options.citePrecedent === true,
-        siblingFileContents,
-        options.consistencyStrict === true,
-      );
+      const prompt = options.leanReviewer === true && agentName === "Maintainability"
+        ? buildMaintainerReviewPrompt(options.context, options.reportLanguage, options.maxFindingsPerSpecialist ?? 3)
+        : buildAgentPrompt(
+          agentName,
+          options.omitBaselineSnippets ? { ...options.context, baseFileContents: {} } : options.context,
+          options.deterministicResult,
+          options.evidence,
+          options.reportLanguage,
+          options.relevantContext,
+          options.focusAreas,
+          options.maxFindingsPerSpecialist ?? 3,
+          options.compactContext === true,
+          options.citePrecedent === true,
+          siblingFileContents,
+          options.consistencyStrict === true,
+        );
 
       // WAIT_LLM: a remote inference operation is being submitted. This
       // releases local execution capacity; it does NOT preempt the provider.

@@ -6,7 +6,7 @@
 import type { DomainAnalyzeSuccess, PRReviewContext, RelevantContext } from "@consistency/schema";
 import type { EvidenceSnapshot } from "@consistency/kernel";
 import { REVIEW_DIFF_MAX_CHARS } from "../context/review-context.js";
-import { redactModelVisibleText } from "../context/content-policy.js";
+import { applyModelContentPolicy, redactModelVisibleText } from "../context/content-policy.js";
 import type { ReviewAgentName } from "../workload/types.js";
 import { buildBaselineSnippets } from "./baseline-snippets.js";
 import { compactFileContext } from "./compact-context.js";
@@ -18,6 +18,19 @@ export const REVIEW_KERNEL_EVIDENCE_MAX_ENTRIES = 40;
 export const REVIEW_FILE_CONTENTS_MAX_CHARS = 140_000;
 /** Max characters of project metadata admitted into the agent prompt. */
 export const REVIEW_PROJECT_METADATA_MAX_CHARS = 30_000;
+/** Independent input limits for the opt-in patch-focused maintainer reviewer. */
+export const MAINTAINER_REVIEW_DIFF_MAX_CHARS = 24_000;
+export const MAINTAINER_REVIEW_CONTEXT_MAX_CHARS = 40_000;
+
+export const MAINTAINER_REVIEW_SYSTEM_PROMPT = [
+  "You are a senior maintainer of this repository reviewing one pull request. List the changes you would ask the author to make before merging.",
+  "Look at the changed hunks and report what a maintainer would request, for example: logic that could be simpler or done once in a single place; duplicated or redundant handling; a pattern this change applies in some places but misses in an equivalent place it also touches or that is visible in the supplied content; documentation, comments, defaults, or configuration text that disagree with the code; error, log, or user-facing messages that are misleading or inconsistent; hidden mutable or global state that makes the code hard to test; an API or option shape that is confusing to callers; behavior that silently ignores invalid input or configuration.",
+  "Treat the evident purpose of the change as intended. Do not report the requested change itself as a defect, and do not ask to revert it.",
+  "Do not report formatting, import order, personal style preferences, generic requests to add tests or documentation, or speculative bugs; another specialist covers concrete failures.",
+  "Each finding must point to exact head line numbers visible in the supplied numbered content, say what the code does now, and say concretely what the maintainer would ask for instead.",
+  "Return at most 3 findings, most important first. Return an empty list only if there is truly nothing a maintainer would ask to change.",
+  "Use the findings array exactly. Each item needs id, agent set to \"Maintainability\", title, severity, confidence, file, startLine, endLine, evidence, reasoning, recommendation, and trigger. Set trigger to the situation in which the problem matters (a caller, a configuration, a reader of the docs), not to a crash scenario.",
+].join(" ");
 
 const AGENT_FOCUS: Record<ReviewAgentName, string> = {
   Security: "security consequences of the changed behavior, including trust boundaries, access control, secrets, injection, unsafe deserialization, unsafe paths, and data exposure where applicable",
@@ -71,6 +84,29 @@ export function reportLanguageInstruction(language: "zh-CN" | "en-US"): string {
   return language === "zh-CN"
     ? "Write all prose (finding titles, evidence, reasoning, recommendations) in Simplified Chinese (简体中文). Keep code identifiers, file paths, technical terms, and severity labels in English."
     : "Write all prose in English.";
+}
+
+/** Patch-focused context for the opt-in reviewer; the legacy prompt stays untouched. */
+export function buildMaintainerReviewPrompt(
+  context: PRReviewContext,
+  reportLanguage: "zh-CN" | "en-US",
+  maxFindings = 3,
+): { systemPrompt: string; userPrompt: string } {
+  // Redact before truncating so a credential straddling a budget boundary
+  // cannot leak as an unrecognizable fragment. The policy preserves lines.
+  const modelContext = applyModelContentPolicy(context);
+  const parts = [
+    `Repository: ${modelContext.repositoryFullName}`,
+    `Base/head: ${modelContext.baseSha}..${modelContext.headSha}`,
+    `Changed files: ${[...modelContext.changedFiles].sort((a, b) => a.path.localeCompare(b.path)).map(file => `${file.path} (${file.status})`).join(", ")}`,
+    `DIFF\n${modelContext.diff.slice(0, MAINTAINER_REVIEW_DIFF_MAX_CHARS)}`,
+    `CHANGED CODE (numbered head lines)\n${compactFileContext(modelContext, MAINTAINER_REVIEW_CONTEXT_MAX_CHARS)}`,
+    `SPECIALIST ROLE: Maintainer review. Return at most ${maxFindings} findings. Set the "agent" field to exactly "Maintainability".`,
+  ];
+  return {
+    systemPrompt: `${MAINTAINER_REVIEW_SYSTEM_PROMPT} ${reportLanguageInstruction(reportLanguage)}`,
+    userPrompt: redactModelVisibleText(parts.join("\n\n")),
+  };
 }
 
 function numbered(content: string): string {
