@@ -87,6 +87,11 @@ export function resolveLeanReviewer(environment: NodeJS.ProcessEnv = process.env
   return environment.CONSISTENCY_LEAN_REVIEWER === "1";
 }
 
+/** Exact env value "1" records withheld findings. Every other value omits the field. */
+export function resolveReportWithheld(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_REPORT_WITHHELD === "1";
+}
+
 /** Exact env value "1" enables the v2 scoring rubric. */
 export function resolveScoreRubricV2(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment.CONSISTENCY_SCORE_RUBRIC === "1";

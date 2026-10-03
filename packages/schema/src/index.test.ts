@@ -22,6 +22,7 @@ import {
   createAttemptTrace,
   toExecutionLifecycleState
 } from "./index";
+import { reviewReportFromWire, reviewReportToWire } from "./protocol";
 
 const sampleReport = {
   jobId: "job-sample-1",
@@ -161,6 +162,15 @@ describe("@consistency/schema", () => {
     }).enabledAgents).toHaveLength(2);
     expect(agentRunSchema.parse(sampleReport.agentRuns[0]).status).toBe("succeeded");
     expect(reviewReportSchema.parse(sampleReport).score).toBe(74);
+    const withheld = reviewReportSchema.parse({ ...sampleReport, withheldFindings: [{
+      stage: "low-score", agent: "Correctness", score: 3, scoreReason: "weak",
+      finding: sampleReport.findings[0],
+    }] });
+    expect(withheld.withheldFindings).toHaveLength(1);
+    expect(JSON.parse(JSON.stringify(withheld)).withheldFindings[0].score).toBe(3);
+    const roundTrip = reviewReportFromWire(reviewReportToWire(withheld));
+    expect(roundTrip.withheldFindings).toEqual(withheld.withheldFindings);
+    expect(reviewReportToWire(reviewReportSchema.parse(sampleReport))).not.toHaveProperty("withheldFindings");
     expect(errorResponseSchema.parse({ error: { code: "NOT_FOUND", message: "Missing" } }).error.code).toBe("NOT_FOUND");
   });
 

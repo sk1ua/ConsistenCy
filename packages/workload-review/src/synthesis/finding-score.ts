@@ -75,6 +75,13 @@ export interface FindingScoreFilterOptions {
    * above 3. Unset leaves every assigned score unchanged.
    */
   readonly capUnverifiedConsistency?: boolean;
+  /** Record withheld findings. Unset omits the key entirely. */
+  readonly recordWithheld?: boolean;
+}
+
+export interface ScoreWithheldRecord {
+  readonly stage: "low-score" | "cap-per-file" | "cap-total";
+  readonly finding: ReviewFinding;
 }
 
 export interface FindingScoreFilterBreakdown {
@@ -89,6 +96,7 @@ export interface FindingScoreFilterResult {
   /** How many findings were withheld. Their content is never re-published. */
   readonly filteredCount: number;
   readonly breakdown?: FindingScoreFilterBreakdown;
+  readonly withheld?: readonly ScoreWithheldRecord[];
 }
 
 const severityRank = { critical: 5, high: 4, medium: 3, low: 2, info: 1 } as const;
@@ -136,17 +144,26 @@ export function applyFindingScoreFilter(
 
   const perFileCounts = new Map<string, number>();
   const kept: ReviewFinding[] = [];
+  const withheld: ScoreWithheldRecord[] = [];
+  const record = (stage: ScoreWithheldRecord["stage"], finding: ReviewFinding): void => {
+    if (options.recordWithheld === true) withheld.push({ stage, finding });
+  };
   let capPerFileCount = 0;
   let capTotalCount = 0;
+  for (const finding of scored) {
+    if (finding.score !== undefined && finding.score < minScore) record("low-score", finding);
+  }
   for (const finding of ranked) {
     const fileKey = finding.file.toLowerCase();
     const fileCount = perFileCounts.get(fileKey) ?? 0;
     if (fileCount >= maxPerFile) {
       capPerFileCount += 1;
+      record("cap-per-file", finding);
       continue;
     }
     if (kept.length >= maxReported) {
       capTotalCount += 1;
+      record("cap-total", finding);
       continue;
     }
     perFileCounts.set(fileKey, fileCount + 1);
@@ -168,6 +185,7 @@ export function applyFindingScoreFilter(
       lowScore: lowScoreCount,
       capPerFile: capPerFileCount,
       capTotal: capTotalCount
-    }
+    },
+    ...(options.recordWithheld === true ? { withheld } : {})
   };
 }

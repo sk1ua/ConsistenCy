@@ -24,6 +24,12 @@ describe("loadEnv", () => {
     expect(config.GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
   });
 
+  it("preserves the withheld-findings diagnostic value without enabling it by default", () => {
+    expect(loadEnv({}).CONSISTENCY_REPORT_WITHHELD).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_REPORT_WITHHELD: "1" }).CONSISTENCY_REPORT_WITHHELD).toBe("1");
+    expect(loadEnv({ CONSISTENCY_REPORT_WITHHELD: "0" }).CONSISTENCY_REPORT_WITHHELD).toBe("0");
+  });
+
   it("preserves the opt-in lean reviewer environment value without enabling it by default", () => {
     expect(loadEnv({}).CONSISTENCY_LEAN_REVIEWER).toBeUndefined();
     for (const value of ["1", "0", "true", "01", ""]) {

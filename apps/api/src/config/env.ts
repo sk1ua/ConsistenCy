@@ -78,6 +78,8 @@ export const envSchema = z.object({
   CONSISTENCY_LEAN: z.string().optional(),
   /** Exact "1" adds a maintainer-review pass only when lean is also enabled. */
   CONSISTENCY_LEAN_REVIEWER: z.string().optional(),
+  /** Exact "1" records withheld findings for diagnostics. Every other value omits them. */
+  CONSISTENCY_REPORT_WITHHELD: z.string().optional(),
   /** Exact "1" enables the v2 scoring rubric. Every other value keeps v1. */
   CONSISTENCY_SCORE_RUBRIC: z.string().optional(),
   /** Exact "1" replaces full file context with numbered hunks and units. */

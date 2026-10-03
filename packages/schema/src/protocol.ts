@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { workflowSpecSchema } from "./workflow";
-import { retrievalTraceSchema, riskLevelSchema, type RetrievalTrace, type RiskLevel } from "./report";
+import { retrievalTraceSchema, reviewReportSchema, riskLevelSchema, type RetrievalTrace, type ReviewReport, type RiskLevel } from "./report";
 import { workflowRunSchema } from "./workflow";
 import { relevantContextSchema } from "./heartbeat";
 
@@ -297,4 +297,16 @@ export function parseWireAnalyzeResponse(data: unknown): DomainAnalyzeResponse {
 export function parseWireComposeReviewResponse(data: unknown): DomainComposeReviewResponse {
   const parsed = wireComposeReviewResponseSchema.parse(data);
   return transformComposeReviewResponse(parsed);
+}
+
+/**
+ * Report diagnostics have no snake_case engine mapping. Present fields pass
+ * through unchanged; an absent withheldFindings field stays absent.
+ */
+export function reviewReportToWire(report: ReviewReport): ReviewReport {
+  return reviewReportSchema.parse(report);
+}
+
+export function reviewReportFromWire(wire: unknown): ReviewReport {
+  return reviewReportSchema.parse(wire);
 }

@@ -73,11 +73,15 @@ export interface SynthesizerBodyOptions {
   readonly strictCrossAgentMerge?: boolean;
   /** Numbered changed lines, supplied only when the v2 rubric is enabled. */
   readonly numberedChangedCode?: string;
+  /** Record withheld findings. Unset changes no decision or report field. */
+  readonly recordWithheld?: boolean;
   /**
    * Coverage facts known before synthesis (planner + specialist outcomes).
    * The synthesizer adds its own status and derives the final outcome.
    */
   readonly coverage: Omit<ReviewCoverage, "outcome" | "synthesizerFailed">;
+  /** Withheld records collected by specialists. Only used when recording is on. */
+  readonly agentWithheld?: readonly { stage: "precedent" | "noise" | "maint-filter" | "coverage" | "grounding-rejected" | "grounding-preexisting-dropped" | "specialist-cap"; agent: string; finding: ReviewFinding }[];
 }
 
 export interface SynthesizerBodyResult {
@@ -221,18 +225,20 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
       // Step 4 runs whether or not the model call succeeded: with no scores
       // nothing is dropped on score, but the per-file and total caps still
       // bound the main list. A withheld finding is counted, never re-shown.
-      const { findings, filteredCount, breakdown } = applyFindingScoreFilter(dedupedFindings, scores, {
+      const { findings, filteredCount, breakdown, withheld: mainWithheld } = applyFindingScoreFilter(dedupedFindings, scores, {
         minScore: options.minFindingScore,
         maxReported: options.maxReportedFindings,
         maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined),
-        capUnverifiedConsistency: options.scoreRubricV2 === true
+        capUnverifiedConsistency: options.scoreRubricV2 === true,
+        recordWithheld: options.recordWithheld
       });
 
       const appendixFilter = applyFindingScoreFilter(appendixCandidates, scores, {
         minScore: options.minFindingScore,
         maxReported: options.maxReportedFindings,
         maxPerFile: options.maxFindingsPerFile ?? (options.scoreRubricV2 === true ? 4 : undefined),
-        capUnverifiedConsistency: options.scoreRubricV2 === true
+        capUnverifiedConsistency: options.scoreRubricV2 === true,
+        recordWithheld: options.recordWithheld
       });
       const totalFiltered = filteredCount + appendixFilter.filteredCount + (options.totalCappedBySpecialists ?? 0);
       const filteredBreakdown = {
@@ -335,7 +341,16 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
         staticRiskLabel,
         coverage,
         retrieval: options.deterministicResult.evidencePack,
-        strictCrossAgentMerge: options.strictCrossAgentMerge
+        strictCrossAgentMerge: options.strictCrossAgentMerge,
+        withheldFindings: options.recordWithheld === true ? [
+          ...(options.agentWithheld ?? []),
+          ...(mainWithheld ?? []).map(entry => ({ stage: entry.stage, agent: entry.finding.agent, score: entry.finding.score, scoreReason: entry.finding.scoreReason, finding: entry.finding })),
+          ...(appendixFilter.withheld ?? []).map(entry => ({ stage: entry.stage, agent: entry.finding.agent, score: entry.finding.score, scoreReason: entry.finding.scoreReason, finding: entry.finding })),
+          ...duplicates.map(finding => ({ stage: "merged" as const, agent: finding.agent, finding })),
+        ].sort((left, right) => left.stage.localeCompare(right.stage)
+          || left.agent.localeCompare(right.agent)
+          || left.finding.file.localeCompare(right.finding.file)
+          || (left.finding.startLine ?? 0) - (right.finding.startLine ?? 0)) : undefined
       });
 
       scheduler.succeedAgent(agentId);

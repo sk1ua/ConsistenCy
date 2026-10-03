@@ -171,6 +171,8 @@ export interface ReviewWorkloadOptions {
   readonly lean?: boolean;
   /** Default-off third lean specialist, signed as Maintainability; requires lean. */
   readonly leanReviewer?: boolean;
+  /** Default-off diagnostic recording of withheld findings. Unset omits the field. */
+  readonly reportWithheld?: boolean;
   /**
    * Default-off scoring rubric. When set, the synthesizer sees the v2
    * instruction and the per-file cap rises from 3 to 4 unless explicitly set.

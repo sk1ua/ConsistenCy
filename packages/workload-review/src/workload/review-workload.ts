@@ -472,6 +472,7 @@ export class ReviewWorkload {
       const agentCapabilities = new Map<string, AgentCapabilityRefs>();
 
       let rawFindingsCount = 0;
+      const agentWithheld: Array<NonNullable<Parameters<typeof runSynthesizerBody>[0]["agentWithheld"]>[number]> = [];
       let completedSpecialists = 0;
       const enabledAgents = [...plan.enabledAgents];
       // One additional pass at most, with a fresh ACB/capability budget. It
@@ -565,12 +566,14 @@ export class ReviewWorkload {
           focusAreas: plan.focusAreas,
           maxFindingsPerSpecialist: options.maxFindingsPerSpecialist ?? 3,
           omitBaselineSnippets: isRecovery,
+          recordWithheld: options.reportWithheld === true,
           facades: runtime.facades,
           persistence,
           providerName: options.modelDriver.provider,
           model: options.modelDriver.model,
         });
         rawFindingsCount += result.rawFindingsCount;
+        if (result.withheld) agentWithheld.push(...result.withheld);
         if (!result.error) completedSpecialists += 1;
         findings.push(...result.findings);
         preExistingIssues.push(...result.preExistingIssues);
@@ -664,6 +667,8 @@ export class ReviewWorkload {
         numberedChangedCode: options.scoreRubricV2 === true
           ? numberedChangedLines(options.context.changedFiles, options.context.fileContents)
           : undefined,
+        recordWithheld: options.reportWithheld === true,
+        agentWithheld,
         // Coverage facts as of synthesis start (audit P1-05): the
         // synthesizer adds its own status and derives the final outcome.
         coverage: {

@@ -83,6 +83,14 @@ export interface ReviewAgentBodyOptions {
   readonly consistencyStrict?: boolean;
   /** Head snapshot used only to supply unchanged sibling files to lean Consistency. */
   readonly siblingReader?: SiblingFileReader;
+  /** Record withheld findings for diagnostics. Unset changes no decision. */
+  readonly recordWithheld?: boolean;
+}
+
+export interface WithheldFindingRecord {
+  readonly stage: "precedent" | "noise" | "maint-filter" | "coverage" | "grounding-rejected" | "grounding-preexisting-dropped" | "specialist-cap";
+  readonly agent: string;
+  readonly finding: ReviewFinding;
 }
 
 export interface ReviewAgentBodyResult {
@@ -94,6 +102,7 @@ export interface ReviewAgentBodyResult {
   readonly tokenUsage?: TokenUsage;
   readonly rejectedCount: number;
   readonly downgradedCount: number;
+  readonly withheld?: readonly WithheldFindingRecord[];
   readonly error?: string;
 }
 
@@ -157,13 +166,22 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
 
       let precedentRejected = 0;
       let noiseRejected = 0;
+      const withheld: WithheldFindingRecord[] = [];
+      const record = (stage: WithheldFindingRecord["stage"], finding: ReviewFinding): void => {
+        if (options.recordWithheld === true) withheld.push({ stage, agent: finding.agent, finding });
+      };
       const eligible = agentName === "Test"
-        ? modelResult.findings.filter(finding => !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context))
+        ? modelResult.findings.filter(finding => {
+          const keep = !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context);
+          if (!keep) record("coverage", finding);
+          return keep;
+        })
         : agentName === "Consistency"
           ? modelResult.findings.flatMap(finding => {
             const status = verifyPrecedent(finding, options.context, { siblingFileContents });
             if (status !== "verified") {
               precedentRejected += 1;
+              record("precedent", finding);
               return [];
             }
             return [{ ...finding, tags: [...new Set([...(finding.tags ?? []), "precedent:verified"])] }];
@@ -173,6 +191,10 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         ? filterConsistencyNoise(eligible, options.context, siblingFileContents ?? {})
         : { kept: eligible, rejected: 0 };
       noiseRejected = precedentChecked.rejected;
+      if (options.recordWithheld === true) {
+        const keptIds = new Set(precedentChecked.kept.map(finding => finding.id));
+        for (const finding of eligible) if (!keptIds.has(finding.id)) record("noise", finding);
+      }
       const groundedInput = precedentChecked.kept;
       const coverageRejected = modelResult.findings.length - eligible.length;
       const grounding = buildGroundingContext(options.context, options.deterministicResult);
@@ -184,9 +206,16 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       );
       const capped = capFindings(grounded.findings, options.maxFindingsPerSpecialist ?? 3, agentName === "Test" ? 1 : Infinity);
       const cappedCount = grounded.findings.length - capped.length;
+      const cappedIds = new Set(capped.map(finding => finding.id));
+      for (const finding of grounded.findings) if (!cappedIds.has(finding.id)) record("specialist-cap", finding);
+      for (const decision of grounded.rejected) record("grounding-rejected", decision.finding);
       // Missing-coverage comments on out-of-scope/baseline behavior are not
       // actionable PR coverage gaps and must not reappear through the appendix.
-      const preExisting = grounded.preExisting.filter(decision => agentName !== "Test" || !isMissingCoverageFinding(decision.finding));
+      const preExisting = grounded.preExisting.filter(decision => {
+        const keep = agentName !== "Test" || !isMissingCoverageFinding(decision.finding);
+        if (!keep) record("grounding-preexisting-dropped", decision.finding);
+        return keep;
+      });
       const rejectedCount = grounded.rejected.length + coverageRejected + grounded.preExisting.length - preExisting.length;
 
       const summaryParts = [
@@ -230,6 +259,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         tokenUsage: modelResult.tokenUsage,
         rejectedCount,
         downgradedCount: grounded.downgraded.length,
+        ...(options.recordWithheld === true ? { withheld } : {}),
       };
     });
   } catch (error) {

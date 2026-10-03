@@ -348,6 +348,7 @@ export function buildReviewReport(input: {
   createdAt?: string;
   /** Keep distinct cross-agent claims when lean strict merge is enabled. */
   strictCrossAgentMerge?: boolean;
+  withheldFindings?: ReviewReport["withheldFindings"];
 }): ReviewReport {
   const deduplicated = deduplicateAndSortFindings(input.findings, true, { strictCrossAgent: input.strictCrossAgentMerge === true });
   const findings = deduplicated.findings;
@@ -377,6 +378,7 @@ export function buildReviewReport(input: {
     ...(input.filteredBreakdown ? { filteredBreakdown: input.filteredBreakdown } : {}),
     ruleVersion: "v2",
     ...(duplicates.length > 0 ? { duplicates } : {}),
+    ...(input.withheldFindings && input.withheldFindings.length > 0 ? { withheldFindings: input.withheldFindings } : {}),
     ...(input.coverage ? { coverage: input.coverage } : {}),
     retrieval: input.retrieval,
     createdAt: input.createdAt ?? new Date().toISOString()

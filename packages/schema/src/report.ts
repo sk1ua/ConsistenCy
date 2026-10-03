@@ -198,6 +198,21 @@ export const reviewReportSchema = z.object({
    */
   duplicates: z.array(reviewFindingSchema).optional(),
   /**
+   * Diagnostic copies of findings a filter withheld. Present only when the
+   * caller opts in; absent means the report is byte-identical to the count-only form.
+   */
+  withheldFindings: z.array(z.object({
+    stage: z.enum([
+      "precedent", "noise", "maint-filter", "coverage", "grounding-rejected",
+      "grounding-preexisting-dropped", "specialist-cap", "low-score", "cap-per-file",
+      "cap-total", "merged",
+    ]),
+    agent: z.string(),
+    score: z.number().int().optional(),
+    scoreReason: z.string().optional(),
+    finding: reviewFindingSchema,
+  }).strict()).optional(),
+  /**
    * Agent execution coverage. Optional so persisted reports from before this
    * field existed keep parsing (legacy reports read as coverage-unknown).
    */
