@@ -305,6 +305,7 @@ export const worker = new ReviewWorker({
     deterministicScope: config.CONSISTENCY_DETERMINISTIC_SCOPE,
     lean: config.CONSISTENCY_LEAN === "1",
     leanReviewer: config.CONSISTENCY_LEAN_REVIEWER === "1",
+    leanMaintFilter: config.CONSISTENCY_LEAN_MAINT_FILTER === "1",
     reportWithheld: config.CONSISTENCY_REPORT_WITHHELD === "1",
     scoreRubricV2: config.CONSISTENCY_SCORE_RUBRIC === "1",
     compactContext: config.CONSISTENCY_COMPACT_CONTEXT === "1",

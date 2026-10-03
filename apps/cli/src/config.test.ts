@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCompactContext, resolveLeanConsistencyStrict, resolveLeanEnabled, resolveLeanReviewer, resolveLeanStrictMerge, resolveReportWithheld, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
+import { resolveCompactContext, resolveLeanConsistencyStrict, resolveLeanEnabled, resolveLeanReviewer, resolveLeanMaintFilter, resolveLeanStrictMerge, resolveReportWithheld, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
 
 describe("CLI persisted memory resolution", () => {
   it("preserves memory by default", () => {
@@ -29,6 +29,12 @@ describe("CLI persisted memory resolution", () => {
   it("enables the lean maintainer reviewer only for the exact env value 1", () => {
     expect(resolveLeanReviewer({})).toBe(false);
     expect(resolveLeanReviewer({ CONSISTENCY_LEAN_REVIEWER: "1" })).toBe(true);
+  });
+
+  it("enables the lean Maintainability filter only for the exact env value 1", () => {
+    expect(resolveLeanMaintFilter({})).toBe(false);
+    expect(resolveLeanMaintFilter({ CONSISTENCY_LEAN_MAINT_FILTER: "1" })).toBe(true);
+    expect(resolveLeanMaintFilter({ CONSISTENCY_LEAN_MAINT_FILTER: "true" })).toBe(false);
   });
 
   it("records withheld findings only for the exact env value 1", () => {

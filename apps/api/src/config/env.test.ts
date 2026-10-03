@@ -24,6 +24,11 @@ describe("loadEnv", () => {
     expect(config.GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
   });
 
+  it("preserves the Maintainability filter value without enabling it by default", () => {
+    expect(loadEnv({}).CONSISTENCY_LEAN_MAINT_FILTER).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_LEAN_MAINT_FILTER: "1" }).CONSISTENCY_LEAN_MAINT_FILTER).toBe("1");
+  });
+
   it("preserves the withheld-findings diagnostic value without enabling it by default", () => {
     expect(loadEnv({}).CONSISTENCY_REPORT_WITHHELD).toBeUndefined();
     expect(loadEnv({ CONSISTENCY_REPORT_WITHHELD: "1" }).CONSISTENCY_REPORT_WITHHELD).toBe("1");

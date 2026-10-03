@@ -87,6 +87,11 @@ export function resolveLeanReviewer(environment: NodeJS.ProcessEnv = process.env
   return environment.CONSISTENCY_LEAN_REVIEWER === "1";
 }
 
+/** Exact env value "1" opts into Maintainability title filtering; the workload also requires lean reviewer. */
+export function resolveLeanMaintFilter(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_LEAN_MAINT_FILTER === "1";
+}
+
 /** Exact env value "1" records withheld findings. Every other value omits the field. */
 export function resolveReportWithheld(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment.CONSISTENCY_REPORT_WITHHELD === "1";

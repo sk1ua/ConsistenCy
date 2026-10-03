@@ -23,6 +23,7 @@ import { tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRR
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt, buildMaintainerReviewPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
+import { filterMaintainabilityNoise } from "./maintainability-filter.js";
 import { hasSpecificChangedCoverageTarget, isMissingCoverageFinding } from "./test-coverage.js";
 import { filterConsistencyNoise } from "./consistency-filter.js";
 import { verifyPrecedent } from "./precedent.js";
@@ -85,6 +86,8 @@ export interface ReviewAgentBodyOptions {
   readonly siblingReader?: SiblingFileReader;
   /** Record withheld findings for diagnostics. Unset changes no decision. */
   readonly recordWithheld?: boolean;
+  /** Drop Maintainability doc/refactor titles before grounding. */
+  readonly maintFilter?: boolean;
 }
 
 export interface WithheldFindingRecord {
@@ -195,7 +198,14 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         const keptIds = new Set(precedentChecked.kept.map(finding => finding.id));
         for (const finding of eligible) if (!keptIds.has(finding.id)) record("noise", finding);
       }
-      const groundedInput = precedentChecked.kept;
+      const maintChecked = agentName === "Maintainability" && options.maintFilter === true
+        ? filterMaintainabilityNoise(precedentChecked.kept)
+        : { kept: precedentChecked.kept, rejected: 0 };
+      if (options.recordWithheld === true) {
+        const keptIds = new Set(maintChecked.kept.map(finding => finding.id));
+        for (const finding of precedentChecked.kept) if (!keptIds.has(finding.id)) record("maint-filter", finding);
+      }
+      const groundedInput = maintChecked.kept;
       const coverageRejected = modelResult.findings.length - eligible.length;
       const grounding = buildGroundingContext(options.context, options.deterministicResult);
       const grounded = groundReviewFindings(
@@ -233,6 +243,9 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       }
       if (noiseRejected > 0) {
         summaryParts.push(`${noiseRejected} finding(s) rejected: boilerplate or unsupported absence`);
+      }
+      if (maintChecked.rejected > 0) {
+        summaryParts.push(`${maintChecked.rejected} finding(s) rejected: maintainability doc/refactor noise`);
       }
 
       const run: AgentRun = {

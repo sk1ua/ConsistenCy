@@ -171,6 +171,8 @@ export interface ReviewWorkloadOptions {
   readonly lean?: boolean;
   /** Default-off third lean specialist, signed as Maintainability; requires lean. */
   readonly leanReviewer?: boolean;
+  /** Default-off Maintainability title filter. Requires lean and lean reviewer. */
+  readonly leanMaintFilter?: boolean;
   /** Default-off diagnostic recording of withheld findings. Unset omits the field. */
   readonly reportWithheld?: boolean;
   /**
