@@ -58,6 +58,9 @@ jobs:
       - name: Install TypeScript workspace dependencies
         run: npm ci
 
+      - name: Patch shrinkwrapped dependencies
+        run: node scripts/patch-shrinkwrap-deps.mjs
+
       - name: Audit Node dependencies
         run: npm run audit:deps
 
