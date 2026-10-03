@@ -87,6 +87,29 @@ export function resolveLeanReviewer(environment: NodeJS.ProcessEnv = process.env
   return environment.CONSISTENCY_LEAN_REVIEWER === "1";
 }
 
+const LEAN_SECOND_SAMPLE_AGENTS = ["Correctness", "Consistency", "Maintainability"] as const;
+export type LeanSecondSampleAgent = typeof LEAN_SECOND_SAMPLE_AGENTS[number];
+
+/** Comma-separated lean specialists sampled twice. Unknown names are ignored with one warning. */
+export function resolveLeanSecondSample(environment: NodeJS.ProcessEnv = process.env): readonly LeanSecondSampleAgent[] {
+  const value = environment.CONSISTENCY_LEAN_SECOND_SAMPLE;
+  if (!value) return [];
+  const accepted = new Set<string>(LEAN_SECOND_SAMPLE_AGENTS);
+  const ignored: string[] = [];
+  const agents: LeanSecondSampleAgent[] = [];
+  for (const part of value.split(",")) {
+    const name = part.trim();
+    if (!name) continue;
+    if (!accepted.has(name)) {
+      ignored.push(name);
+      continue;
+    }
+    if (!agents.includes(name as LeanSecondSampleAgent)) agents.push(name as LeanSecondSampleAgent);
+  }
+  if (ignored.length > 0) console.warn(`Ignoring unknown CONSISTENCY_LEAN_SECOND_SAMPLE agent(s): ${ignored.join(", ")}`);
+  return agents;
+}
+
 /** Exact env value "1" opts into Maintainability title filtering; the workload also requires lean reviewer. */
 export function resolveLeanMaintFilter(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment.CONSISTENCY_LEAN_MAINT_FILTER === "1";

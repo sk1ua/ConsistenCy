@@ -19,7 +19,8 @@ import {
   type AgentSnapshot,
   type EvidenceSnapshot,
 } from "@consistency/kernel";
-import { tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type RelevantContext, type ReviewFinding, type TokenUsage } from "@consistency/schema";
+import { mergeTokenUsage, recordTokenUsageOnError, tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type RelevantContext, type ReviewFinding, type TokenUsage } from "@consistency/schema";
+import { mergeSampleFindings } from "./second-sample.js";
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt, buildMaintainerReviewPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
@@ -88,6 +89,8 @@ export interface ReviewAgentBodyOptions {
   readonly recordWithheld?: boolean;
   /** Drop Maintainability doc/refactor titles before grounding. */
   readonly maintFilter?: boolean;
+  /** Sample this specialist twice with the same prompt and union the findings. */
+  readonly secondSample?: boolean;
 }
 
 export interface WithheldFindingRecord {
@@ -152,9 +155,26 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       // releases local execution capacity; it does NOT preempt the provider.
       scheduler.wait(agentId, { kind: "llm", provider: providerName });
       let modelResult: { findings: ReviewFinding[]; tokenUsage?: TokenUsage };
+      let secondSampleFailed = false;
+      let secondSampleAdded = 0;
       try {
         modelResult = await options.facades.llm.invokeAgentFindings({ agent: agentName, ...prompt });
         paidUsage = modelResult.tokenUsage;
+        if (options.secondSample === true) {
+          try {
+            const second = await options.facades.llm.invokeAgentFindings({ agent: agentName, ...prompt });
+            paidUsage = mergeTokenUsage(paidUsage, second.tokenUsage);
+            const merged = mergeSampleFindings(modelResult.findings, second.findings);
+            secondSampleAdded = merged.length - modelResult.findings.length;
+            modelResult = { findings: merged, tokenUsage: paidUsage };
+          } catch (secondError) {
+            const secondUsage = tokenUsageFromError(secondError);
+            recordTokenUsageOnError(secondError, secondUsage);
+            paidUsage = mergeTokenUsage(paidUsage, secondUsage);
+            modelResult = { ...modelResult, tokenUsage: paidUsage };
+            secondSampleFailed = true;
+          }
+        }
       } finally {
         scheduler.wake(agentId);
       }
@@ -173,14 +193,15 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       const record = (stage: WithheldFindingRecord["stage"], finding: ReviewFinding): void => {
         if (options.recordWithheld === true) withheld.push({ stage, agent: finding.agent, finding });
       };
+      const sampledFindings = modelResult.findings;
       const eligible = agentName === "Test"
-        ? modelResult.findings.filter(finding => {
+        ? sampledFindings.filter(finding => {
           const keep = !isMissingCoverageFinding(finding) || hasSpecificChangedCoverageTarget(finding, options.context);
           if (!keep) record("coverage", finding);
           return keep;
         })
         : agentName === "Consistency"
-          ? modelResult.findings.flatMap(finding => {
+          ? sampledFindings.flatMap(finding => {
             const status = verifyPrecedent(finding, options.context, { siblingFileContents });
             if (status !== "verified") {
               precedentRejected += 1;
@@ -189,7 +210,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
             }
             return [{ ...finding, tags: [...new Set([...(finding.tags ?? []), "precedent:verified"])] }];
           })
-          : modelResult.findings;
+          : sampledFindings;
       const precedentChecked = agentName === "Consistency" && options.consistencyStrict === true
         ? filterConsistencyNoise(eligible, options.context, siblingFileContents ?? {})
         : { kept: eligible, rejected: 0 };
@@ -206,7 +227,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         for (const finding of precedentChecked.kept) if (!keptIds.has(finding.id)) record("maint-filter", finding);
       }
       const groundedInput = maintChecked.kept;
-      const coverageRejected = modelResult.findings.length - eligible.length;
+      const coverageRejected = sampledFindings.length - eligible.length;
       const grounding = buildGroundingContext(options.context, options.deterministicResult);
       const grounded = groundReviewFindings(
         groundedInput,
@@ -214,7 +235,10 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.evidenceStore,
         options.headSha,
       );
-      const capped = capFindings(grounded.findings, options.maxFindingsPerSpecialist ?? 3, agentName === "Test" ? 1 : Infinity);
+      const specialistLimit = options.secondSample === true
+        ? 2 * (options.maxFindingsPerSpecialist ?? 3)
+        : options.maxFindingsPerSpecialist ?? 3;
+      const capped = capFindings(grounded.findings, specialistLimit, agentName === "Test" ? 1 : Infinity);
       const cappedCount = grounded.findings.length - capped.length;
       const cappedIds = new Set(capped.map(finding => finding.id));
       for (const finding of grounded.findings) if (!cappedIds.has(finding.id)) record("specialist-cap", finding);
@@ -247,6 +271,8 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       if (maintChecked.rejected > 0) {
         summaryParts.push(`${maintChecked.rejected} finding(s) rejected: maintainability doc/refactor noise`);
       }
+      if (secondSampleFailed) summaryParts.push("second sample failed");
+      else if (options.secondSample === true) summaryParts.push(`second sample: +${secondSampleAdded} finding(s)`);
 
       const run: AgentRun = {
         id: `agent_${randomUUID()}`,
@@ -257,7 +283,7 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         finishedAt: new Date().toISOString(),
         inputSummary: [...summaryParts, ...(options.omitBaselineSnippets ? ["Empty-result recovery: Correctness retry without baseline snippets"] : [])].join("; "),
         findings: capped,
-        tokenUsage: modelResult.tokenUsage,
+        tokenUsage: paidUsage ?? modelResult.tokenUsage,
         provider: providerName as AgentRun["provider"],
         model,
       };
@@ -268,8 +294,8 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         findings: capped,
         preExistingIssues: preExisting.map(decision => decision.finding),
         cappedFindingsCount: cappedCount,
-        rawFindingsCount: modelResult.findings.length,
-        tokenUsage: modelResult.tokenUsage,
+        rawFindingsCount: sampledFindings.length,
+        tokenUsage: paidUsage ?? modelResult.tokenUsage,
         rejectedCount,
         downgradedCount: grounded.downgraded.length,
         ...(options.recordWithheld === true ? { withheld } : {}),

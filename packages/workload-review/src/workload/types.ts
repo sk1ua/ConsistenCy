@@ -173,6 +173,8 @@ export interface ReviewWorkloadOptions {
   readonly leanReviewer?: boolean;
   /** Default-off Maintainability title filter. Requires lean and lean reviewer. */
   readonly leanMaintFilter?: boolean;
+  /** Lean specialists sampled twice. Empty or unset samples once. Requires lean. */
+  readonly leanSecondSample?: readonly string[];
   /** Default-off diagnostic recording of withheld findings. Unset omits the field. */
   readonly reportWithheld?: boolean;
   /**

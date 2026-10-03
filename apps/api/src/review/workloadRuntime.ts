@@ -97,6 +97,8 @@ export type ReviewWorkflowDependencies = {
   leanReviewer?: boolean;
   /** Default-off Maintainability title filter. Requires lean reviewer as well. */
   leanMaintFilter?: boolean;
+  /** Lean specialists sampled twice. Empty or unset samples once. Requires lean. */
+  leanSecondSample?: readonly string[];
   /** Default-off diagnostic recording of withheld findings. */
   reportWithheld?: boolean;
   /** Default-off v2 scoring rubric. Unset keeps the v1 instruction and cap. */
@@ -393,6 +395,7 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         lean: dependencies.lean,
         leanReviewer: dependencies.leanReviewer,
         leanMaintFilter: dependencies.leanMaintFilter,
+        leanSecondSample: dependencies.leanSecondSample,
         reportWithheld: dependencies.reportWithheld,
         scoreRubricV2: dependencies.scoreRubricV2,
         compactContext: dependencies.compactContext,

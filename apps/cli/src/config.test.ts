@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { resolveCompactContext, resolveLeanConsistencyStrict, resolveLeanEnabled, resolveLeanReviewer, resolveLeanMaintFilter, resolveLeanStrictMerge, resolveReportWithheld, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
+import { describe, expect, it, vi } from "vitest";
+import { resolveCompactContext, resolveLeanConsistencyStrict, resolveLeanEnabled, resolveLeanReviewer, resolveLeanMaintFilter, resolveLeanSecondSample, resolveLeanStrictMerge, resolveReportWithheld, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
 
 describe("CLI persisted memory resolution", () => {
   it("preserves memory by default", () => {
@@ -29,6 +29,16 @@ describe("CLI persisted memory resolution", () => {
   it("enables the lean maintainer reviewer only for the exact env value 1", () => {
     expect(resolveLeanReviewer({})).toBe(false);
     expect(resolveLeanReviewer({ CONSISTENCY_LEAN_REVIEWER: "1" })).toBe(true);
+  });
+
+  it("parses the lean second-sample list and warns once for unknown names", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(resolveLeanSecondSample({})).toEqual([]);
+    expect(resolveLeanSecondSample({ CONSISTENCY_LEAN_SECOND_SAMPLE: "" })).toEqual([]);
+    expect(resolveLeanSecondSample({ CONSISTENCY_LEAN_SECOND_SAMPLE: "Maintainability,Correctness" })).toEqual(["Maintainability", "Correctness"]);
+    expect(resolveLeanSecondSample({ CONSISTENCY_LEAN_SECOND_SAMPLE: "Maintainability, Style, Maintainability,Correctness" })).toEqual(["Maintainability", "Correctness"]);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 
   it("enables the lean Maintainability filter only for the exact env value 1", () => {

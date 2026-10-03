@@ -568,6 +568,7 @@ export class ReviewWorkload {
           omitBaselineSnippets: isRecovery,
           recordWithheld: options.reportWithheld === true,
           maintFilter: options.lean === true && options.leanReviewer === true && options.leanMaintFilter === true,
+          secondSample: options.lean === true && (options.leanSecondSample ?? []).includes(agentName),
           facades: runtime.facades,
           persistence,
           providerName: options.modelDriver.provider,

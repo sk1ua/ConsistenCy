@@ -4,6 +4,7 @@ import { findProjectRoot, toEffectiveSettingsView } from "./config/settings";
 import { testLlmConnection } from "./config/llmConnectionTest";
 import { loadRuntimeConfig } from "./config/runtime";
 import { logger } from "./config/logger";
+import { parseLeanSecondSample } from "./config/leanSecondSample";
 import { openDatabase } from "./db/connection";
 import { runMigrations } from "./db/migrations";
 import { SQLiteJobStore } from "./jobs/sqliteJobStore";
@@ -306,6 +307,7 @@ export const worker = new ReviewWorker({
     lean: config.CONSISTENCY_LEAN === "1",
     leanReviewer: config.CONSISTENCY_LEAN_REVIEWER === "1",
     leanMaintFilter: config.CONSISTENCY_LEAN_MAINT_FILTER === "1",
+    leanSecondSample: parseLeanSecondSample(config.CONSISTENCY_LEAN_SECOND_SAMPLE),
     reportWithheld: config.CONSISTENCY_REPORT_WITHHELD === "1",
     scoreRubricV2: config.CONSISTENCY_SCORE_RUBRIC === "1",
     compactContext: config.CONSISTENCY_COMPACT_CONTEXT === "1",

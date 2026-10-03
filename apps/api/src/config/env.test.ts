@@ -24,6 +24,11 @@ describe("loadEnv", () => {
     expect(config.GITHUB_PUBLIC_READ_TOKEN).toBeUndefined();
   });
 
+  it("preserves the second-sample list without enabling it by default", () => {
+    expect(loadEnv({}).CONSISTENCY_LEAN_SECOND_SAMPLE).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_LEAN_SECOND_SAMPLE: "Maintainability,Correctness" }).CONSISTENCY_LEAN_SECOND_SAMPLE).toBe("Maintainability,Correctness");
+  });
+
   it("preserves the Maintainability filter value without enabling it by default", () => {
     expect(loadEnv({}).CONSISTENCY_LEAN_MAINT_FILTER).toBeUndefined();
     expect(loadEnv({ CONSISTENCY_LEAN_MAINT_FILTER: "1" }).CONSISTENCY_LEAN_MAINT_FILTER).toBe("1");

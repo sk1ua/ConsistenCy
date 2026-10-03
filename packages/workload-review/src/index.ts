@@ -48,6 +48,7 @@ export { DeterministicEvidenceRunner } from "./context/evidence-runner.js";
 export { buildReviewBaseContext, REVIEW_DIFF_MAX_CHARS } from "./context/review-context.js";
 export { applyModelContentPolicy, redactModelVisibleText } from "./context/content-policy.js";
 export { groundReviewFindings, buildGroundingContext, changedLineRanges } from "./agents/grounding.js";
+export { mergeSampleFindings } from "./agents/second-sample.js";
 export type { GroundingContext, GroundingResult } from "./agents/grounding.js";
 export {
   scopeDeterministicFindings,
