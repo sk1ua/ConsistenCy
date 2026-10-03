@@ -45,6 +45,15 @@ export interface TrustedLLMBackend {
     schemaName: string;
     signal?: AbortSignal;
   }): Promise<{ text: string; tokenUsage?: TokenUsage; scores?: readonly FindingScore[] }>;
+  /**
+   * Raw completion for the opt-in generalist. Absent unless the driver
+   * implements it, so a closed switch never reaches this path.
+   */
+  invokeRaw?(request: {
+    systemPrompt: string;
+    userPrompt: string;
+    signal?: AbortSignal;
+  }): Promise<{ content: string; tokenUsage?: TokenUsage }>;
 }
 
 export interface CapabilityBoundLLMFacadeOptions {
@@ -141,6 +150,31 @@ export class CapabilityBoundLLMFacade {
         const outcome = await this.#backend.invokeText(request);
         return {
           value: { text: outcome.text, tokenUsage: outcome.tokenUsage, scores: outcome.scores },
+          usage: { tokens: outcome.tokenUsage?.totalTokens ?? 0 },
+        };
+      },
+    );
+  }
+
+  /** Agent-facing raw completion. Used only by the opt-in generalist. */
+  invokeRaw(request: {
+    systemPrompt: string;
+    userPrompt: string;
+  }): Promise<{ content: string; tokenUsage?: TokenUsage }> {
+    if (!this.#backend.invokeRaw) {
+      return Promise.reject(new Error("generalist raw completion is unavailable"));
+    }
+    return this.#gateway.invoke(
+      {
+        principal: this.#principal,
+        handle: this.#handle,
+        action: "llm.invoke",
+        resource: this.#resource,
+      },
+      async () => {
+        const outcome = await this.#backend.invokeRaw!(request);
+        return {
+          value: { content: outcome.content, tokenUsage: outcome.tokenUsage },
           usage: { tokens: outcome.tokenUsage?.totalTokens ?? 0 },
         };
       },

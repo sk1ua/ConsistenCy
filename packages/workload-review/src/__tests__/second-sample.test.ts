@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ReviewFinding, TokenUsage } from "@consistency/schema";
 import { ReviewWorkload, type ModelDriver, type ReviewWorkloadOptions } from "../index.js";
-import { mergeSampleFindings } from "../agents/second-sample.js";
+import { computeSampleSupport, mergeSampleFindings } from "../agents/second-sample.js";
 import {
   cleanupTmpDirs, makeDeterministicStage, makeFixtureRepo, TestModelDriver, TestPersistence,
   type FixtureRepo,
@@ -55,6 +55,48 @@ function unlined(id: string, title: string, agent: ReviewFinding["agent"] = "Mai
   };
 }
 
+describe("computeSampleSupport", () => {
+  const first = finding({ id: "first", title: "Changed return loses the request", startLine: 10, endLine: 12 });
+
+  it("marks an overlapping range and the three-line boundary as support 2", () => {
+    const boundary = finding({ id: "near", title: "Different title", startLine: 15, endLine: 15 });
+    const far = finding({ id: "far", title: "Far title", startLine: 16, endLine: 16 });
+    const voted = computeSampleSupport([first], [boundary, far]);
+    expect(voted.findings.map(item => [item.id, item.support])).toEqual([["first", 2], ["far-s2", 1]]);
+    expect(voted).toMatchObject({ n1: 1, n2: 2, agreed: 1, fallback: false });
+    expect(voted.jaccard).toBeCloseTo(1 / 2);
+  });
+
+  it("uses the title only when both findings have no line numbers", () => {
+    const unlined = (id: string, title: string): ReviewFinding => ({
+      ...finding({ id, title }),
+      confidence: "hypothesis",
+      uncertainty: "The samples name the same issue without a line."
+    });
+    const untitled = unlined("none", "No lines");
+    const sameTitle = unlined("copy", "No lines");
+    const other = unlined("other", "Different title");
+    const lined = finding({ id: "lined", title: "No lines", confidence: "likely", startLine: 9, endLine: 9 });
+    expect(computeSampleSupport([untitled, other], [sameTitle]).findings[0]?.support).toBe(2);
+    expect(computeSampleSupport([untitled], [lined]).findings.map(item => item.id)).toEqual(["none", "lined-s2"]);
+  });
+
+  it("matches each second finding once and suffixes a colliding id", () => {
+    const shared = finding({ id: "shared", title: "Shared", startLine: 10, endLine: 12 });
+    const voted = computeSampleSupport([first, finding({ id: "second", title: "Also nearby", startLine: 11, endLine: 11 })], [shared, finding({ id: "first", title: "Fresh", startLine: 40, endLine: 40 })]);
+    expect(voted.findings.map(item => [item.id, item.support])).toEqual([["first", 2], ["second", 1], ["first-s2", 1]]);
+    expect(voted.agreed).toBe(1);
+  });
+
+  it("falls back to support 1 when the samples are nearly identical", () => {
+    const twin = finding({ id: "twin", title: "Same range", startLine: 10, endLine: 12 });
+    const voted = computeSampleSupport([first], [twin]);
+    expect(voted.jaccard).toBe(1);
+    expect(voted.fallback).toBe(true);
+    expect(voted.findings.map(item => item.support)).toEqual([1]);
+  });
+});
+
 describe("mergeSampleFindings", () => {
   const first = finding({ id: "first", title: "Changed return loses the request", startLine: 10, endLine: 12 });
   it("treats a same-file range within three lines as a duplicate and keeps first order", () => {
@@ -80,6 +122,77 @@ describe("mergeSampleFindings", () => {
     const existing = finding({ id: "dup-s2", title: "Existing suffix" });
     const incoming = finding({ id: "dup", title: "Incoming title", startLine: 30, endLine: 30 });
     expect(mergeSampleFindings([existing], [incoming]).map(item => item.id)).toEqual(["dup-s2", "dup-s2-2"]);
+  });
+});
+
+describe("lean vote", () => {
+  it("samples every lean specialist twice with identical requests", async () => {
+    const repo = makeFixtureRepo();
+    const inner = new TestModelDriver();
+    const driver: ModelDriver = {
+      provider: inner.provider, model: inner.model,
+      invokeStructured: request => inner.invokeStructured(request),
+      invokeAgentFindings: async request => {
+        inner.requests.push({ schemaName: "findings", agent: request.agent, systemPrompt: request.systemPrompt, userPrompt: request.userPrompt });
+        const agreed = finding({ id: `${request.agent}-agreed`, title: "Changed return loses the request", agent: request.agent as ReviewFinding["agent"] });
+        const extra = finding({ id: `${request.agent}-extra`, title: "Second-only title", agent: request.agent as ReviewFinding["agent"], startLine: 40, endLine: 40 });
+        const seen = inner.requests.filter(item => item.agent === request.agent).length;
+        return { data: seen === 1 ? [agreed] : [agreed, extra], tokenUsage: { totalTokens: 3 } };
+      },
+      invokeSummary: request => inner.invokeSummary(request),
+    };
+    const result = await new ReviewWorkload(workload(repo, inner, { lean: true, leanVote: true, modelDriver: driver })).run();
+    for (const agent of ["Correctness", "Consistency"]) {
+      const calls = inner.requests.filter(request => request.agent === agent);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.systemPrompt).toBe(calls[1]?.systemPrompt);
+      expect(calls[0]?.userPrompt).toBe(calls[1]?.userPrompt);
+      expect(result.report.agentRuns.find(run => run.agentName === agent)?.inputSummary).toContain("vote: n1=1, n2=2, agreed=1, J=0.50");
+    }
+    expect(inner.requests.filter(request => request.schemaName === "findings")).toHaveLength(4);
+    expect(result.report.coverage?.outcome).toBe("complete");
+  });
+
+  it("records the Jaccard fallback in the specialist summary", async () => {
+    const repo = makeFixtureRepo();
+    const inner = new TestModelDriver();
+    const driver: ModelDriver = {
+      provider: inner.provider, model: inner.model,
+      invokeStructured: request => inner.invokeStructured(request),
+      invokeAgentFindings: request => {
+        inner.requests.push({ schemaName: "findings", agent: request.agent, systemPrompt: request.systemPrompt, userPrompt: request.userPrompt });
+        return Promise.resolve({
+          data: [finding({ id: `${request.agent}-same`, title: "Changed return loses the request", agent: request.agent as ReviewFinding["agent"] })],
+          tokenUsage: { totalTokens: 3 }
+        });
+      },
+      invokeSummary: request => inner.invokeSummary(request),
+    };
+    const result = await new ReviewWorkload(workload(repo, inner, { lean: true, leanVote: true, modelDriver: driver })).run();
+    expect(result.report.agentRuns.find(run => run.agentName === "Correctness")?.inputSummary).toContain("vote: n1=1, n2=1, agreed=1, J=1.00, fallback (J=1.00)");
+  });
+
+  it("keeps the first sample and records the failure when the second vote call fails", async () => {
+    const repo = makeFixtureRepo();
+    const inner = new TestModelDriver({ findingsByAgent: { Correctness: [finding({ id: "kept", title: "Changed return loses the request" })] } });
+    const calls = new Map<string, number>();
+    const driver: ModelDriver = {
+      provider: inner.provider, model: inner.model,
+      invokeStructured: request => inner.invokeStructured(request),
+      invokeAgentFindings: request => {
+        const seen = (calls.get(request.agent) ?? 0) + 1;
+        calls.set(request.agent, seen);
+        if (seen === 2) return Promise.reject(new Error("vote transport failed"));
+        return inner.invokeAgentFindings(request);
+      },
+      invokeSummary: request => inner.invokeSummary(request),
+    };
+    const result = await new ReviewWorkload(workload(repo, inner, { lean: true, leanVote: true, modelDriver: driver })).run();
+    const run = result.report.agentRuns.find(item => item.agentName === "Correctness");
+    expect(run?.status).toBe("succeeded");
+    expect(run?.inputSummary).toContain("vote sample failed");
+    expect(run?.findings.map(item => item.id)).toEqual(["kept"]);
+    expect(result.report.coverage?.outcome).toBe("complete");
   });
 });
 

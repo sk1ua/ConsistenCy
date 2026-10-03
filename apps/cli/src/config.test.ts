@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveCompactContext, resolveLeanConsistencyStrict, resolveLeanEnabled, resolveLeanReviewer, resolveLeanMaintFilter, resolveLeanSecondSample, resolveLeanStrictMerge, resolveReportWithheld, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
+import { resolveCompactContext, resolveLeanConsistencyStrict, resolveLeanEnabled, resolveLeanGeneralist, resolveLeanReviewer, resolveLeanMaintFilter, resolveLeanSecondSample, resolveLeanStrictMerge, resolveLeanVote, resolveRangeReadFromGit, resolveReportWithheld, resolveMemoryEnabled, resolveScoreRubricV2 } from "./config";
 
 describe("CLI persisted memory resolution", () => {
   it("preserves memory by default", () => {
@@ -45,6 +45,27 @@ describe("CLI persisted memory resolution", () => {
     expect(resolveLeanMaintFilter({})).toBe(false);
     expect(resolveLeanMaintFilter({ CONSISTENCY_LEAN_MAINT_FILTER: "1" })).toBe(true);
     expect(resolveLeanMaintFilter({ CONSISTENCY_LEAN_MAINT_FILTER: "true" })).toBe(false);
+  });
+
+  it("enables the lean generalist and vote only for the exact env value 1", () => {
+    expect(resolveLeanGeneralist({})).toBe(false);
+    expect(resolveLeanGeneralist({ CONSISTENCY_LEAN_GENERALIST: "1" })).toBe(true);
+    expect(resolveLeanGeneralist({ CONSISTENCY_LEAN_GENERALIST: "true" })).toBe(false);
+    expect(resolveLeanGeneralist({ CONSISTENCY_LEAN_GENERALIST: "0" })).toBe(false);
+    expect(resolveLeanGeneralist({ CONSISTENCY_LEAN_GENERALIST: "" })).toBe(false);
+    expect(resolveLeanVote({})).toBe(false);
+    expect(resolveLeanVote({ CONSISTENCY_LEAN_VOTE: "1" })).toBe(true);
+    expect(resolveLeanVote({ CONSISTENCY_LEAN_VOTE: "true" })).toBe(false);
+    expect(resolveLeanVote({ CONSISTENCY_LEAN_VOTE: "0" })).toBe(false);
+    expect(resolveLeanVote({ CONSISTENCY_LEAN_VOTE: "" })).toBe(false);
+  });
+
+  it("reads range head files from git only for the exact env value 1", () => {
+    expect(resolveRangeReadFromGit({})).toBe(false);
+    expect(resolveRangeReadFromGit({ CONSISTENCY_RANGE_READ_FROM_GIT: "1" })).toBe(true);
+    expect(resolveRangeReadFromGit({ CONSISTENCY_RANGE_READ_FROM_GIT: "true" })).toBe(false);
+    expect(resolveRangeReadFromGit({ CONSISTENCY_RANGE_READ_FROM_GIT: "0" })).toBe(false);
+    expect(resolveRangeReadFromGit({ CONSISTENCY_RANGE_READ_FROM_GIT: "" })).toBe(false);
   });
 
   it("records withheld findings only for the exact env value 1", () => {

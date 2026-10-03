@@ -20,7 +20,7 @@ import type {
   ReviewReport,
   TokenUsage,
 } from "@consistency/schema";
-import { tokenUsageFromError, recordTokenUsageOnError, findingScoresFromError } from "@consistency/schema";
+import { tokenUsageFromError, recordTokenUsageOnError, findingScoresFromError, findingForModel } from "@consistency/schema";
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildComposeReviewFileResults } from "./compose.js";
 import { modelSummaryProse } from "./summary-prose.js";
@@ -197,8 +197,8 @@ export async function runSynthesizerBody(options: SynthesizerBodyOptions): Promi
               canonicalRiskLevel: riskLevel,
               canonicalSummary,
               recommendations,
-              findings: dedupedFindings,
-              preExistingIssues: appendixCandidates,
+              findings: dedupedFindings.map(findingForModel),
+              preExistingIssues: appendixCandidates.map(findingForModel),
               ...(options.scoreRubricV2 === true ? { changedCode: options.numberedChangedCode ?? "" } : {})
             }))
           });

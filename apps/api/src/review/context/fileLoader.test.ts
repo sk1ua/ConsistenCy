@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { isSecretPath, loadWorkspaceFiles, resolveWorkspaceFile } from "./fileLoader";
+import { isSecretPath, loadRevisionFiles, loadWorkspaceFiles, resolveWorkspaceFile } from "./fileLoader";
 
 const directories: string[] = [];
 
@@ -49,5 +49,37 @@ describe("secure workspace file loading", () => {
     expect(isSecretPath("config/.env.production")).toBe(true);
     expect(isSecretPath("keys/app.pem")).toBe(true);
     expect(isSecretPath(".npmrc")).toBe(true);
+  });
+});
+
+describe("loadRevisionFiles", () => {
+  it("applies the same secret, binary, size, and missing-path rules as the workspace loader", async () => {
+    const shown = new Map<string, string | Error>([
+      ["src/small.ts", "export const ok = true;"],
+      ["src/token.ts", "const token = 'github_pat_abcdefghijklmnopqrstuvwxyz123456';"],
+      ["src/large.ts", "x".repeat(100)],
+      ["src/binary.dat", "ok\0bin"],
+      ["src/missing.ts", new Error("exists on disk, but not in 'rev'")],
+    ]);
+    const loaded = await loadRevisionFiles({
+      repoPath: "unused",
+      sha: "abc",
+      paths: ["src/small.ts", "src/token.ts", "src/large.ts", ".env", "src/binary.dat", "src/missing.ts", "src/small.ts"],
+      maxFileBytes: 100,
+      maxTotalBytes: 140,
+      runGit: async (args) => {
+        const spec = String(args[1]);
+        const path = spec.slice(spec.indexOf(":") + 1);
+        const value = shown.get(path);
+        if (value instanceof Error) throw value;
+        if (value === undefined) throw new Error("missing");
+        return { stdout: value, stderr: "", exitCode: 0 };
+      }
+    });
+
+    expect(loaded).toEqual({
+      "src/small.ts": "export const ok = true;",
+      "src/token.ts": "const token=[REDACTED];"
+    });
   });
 });

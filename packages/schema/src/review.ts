@@ -3,7 +3,7 @@ import { z } from "zod";
 export const severitySchema = z.enum(["critical", "high", "medium", "low", "info"]);
 export const confidenceSchema = z.enum(["confirmed", "likely", "hypothesis"]);
 export const agentStatusSchema = z.enum(["skipped", "running", "succeeded", "failed"]);
-export const reviewAgentNameSchema = z.enum([
+const reviewAgentNames = [
   "Planner",
   "Security",
   "Correctness",
@@ -15,7 +15,17 @@ export const reviewAgentNameSchema = z.enum([
   "Synthesizer",
   "PythonCompatibilityAdapter",
   "DeterministicAnalyzer"
-]);
+] as const;
+
+/**
+ * Default tool-schema enum. `Generalist` is absent so a closed switch cannot
+ * change a specialist request. Report parsing accepts it only when asked.
+ */
+export const reviewAgentNameSchema = z.enum(reviewAgentNames);
+export const reportAgentNameSchema = z.enum([...reviewAgentNames, "Generalist"]);
+export function isReviewAgentName(agent: string): agent is z.infer<typeof reviewAgentNameSchema> {
+  return (reviewAgentNames as readonly string[]).includes(agent);
+}
 
 const nonEmpty = z.string().trim().min(1);
 const positiveLine = z.number().int().positive();
@@ -124,6 +134,11 @@ const hypothesisFindingSchema = findingBase.extend({
   uncertainty: nonEmpty.default("Hypothesis; the triggering scenario has not been verified.")
 }).strict();
 
+/**
+ * Wire schema sent to specialists and the synthesizer. `source` and `support`
+ * are host annotations, never model outputs, so they stay off this schema:
+ * adding them here would change the tool schema of every request.
+ */
 export const reviewFindingSchema = z
   .discriminatedUnion("confidence", [confirmedFindingSchema, likelyFindingSchema, hypothesisFindingSchema])
   .superRefine((finding, context) => {
@@ -256,7 +271,88 @@ export type Severity = z.infer<typeof severitySchema>;
 export type Confidence = z.infer<typeof confidenceSchema>;
 export type AgentStatus = z.infer<typeof agentStatusSchema>;
 export type ReviewAgentName = z.infer<typeof reviewAgentNameSchema>;
-export type ReviewFinding = z.infer<typeof reviewFindingSchema>;
+export type ReportAgentName = z.infer<typeof reportAgentNameSchema>;
+/**
+ * Host annotations written only when a lean opt-in produced them. They stay
+ * off `reviewFindingSchema` so a closed switch cannot change a tool schema.
+ * Zod omits an unset optional key, so a finding that never received them
+ * stringifies exactly as before.
+ */
+export type ReviewFindingAttribution = {
+  source?: "specialist" | "generalist";
+  support?: number;
+};
+
+type WireFinding = z.infer<typeof reviewFindingSchema>;
+type WidenAgent<T> = T extends unknown
+  ? Omit<T, "agent"> & ReviewFindingAttribution & {
+    agent: T extends { agent: infer Agent } ? Agent | "Generalist" : never;
+  }
+  : never;
+
+export type ReviewFinding = WidenAgent<WireFinding>;
+
+/** Drops host annotations so a model prompt cannot see sample support or source. */
+export function findingForModel(finding: ReviewFinding): WireFinding {
+  if (finding.source === undefined && finding.support === undefined && finding.agent !== "Generalist") {
+    return finding as WireFinding;
+  }
+  const { source: _source, support: _support, agent, ...wire } = finding;
+  return { ...wire, agent: agent === "Generalist" ? "Maintainability" : agent } as WireFinding;
+}
+
+const findingAttributionSchema = z.object({
+  source: z.enum(["specialist", "generalist"]).optional(),
+  support: z.number().int().positive().optional()
+}).strict();
+
+/**
+ * Report persistence parser. `Generalist` is accepted only here; the tool
+ * schema sent to specialists stays on `reviewAgentNameSchema`. Closed-switch
+ * findings never carry source, support, or that agent, so their parsed shape
+ * is unchanged.
+ */
+function withoutAttribution(value: Record<string, unknown>, agent: unknown): Record<string, unknown> {
+  const { source: _source, support: _support, ...wire } = value;
+  return agent === "Generalist" ? { ...wire, agent: "Maintainability" } : wire;
+}
+
+export function parseReportFinding(input: unknown): ReviewFinding {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    return reviewFindingSchema.parse(input);
+  }
+  const value = input as Record<string, unknown>;
+  const parsed = reviewFindingSchema.parse(withoutAttribution(value, value.agent));
+  const attribution = findingAttributionSchema.parse({
+    ...(value.source === undefined ? {} : { source: value.source }),
+    ...(value.support === undefined ? {} : { support: value.support })
+  });
+  const restored = value.agent === "Generalist" ? { ...parsed, agent: "Generalist" as const } : parsed;
+  if (attribution.source === undefined && attribution.support === undefined) return restored;
+  return { ...restored, ...attribution };
+}
+
+export const reportFindingSchema: z.ZodType<ReviewFinding, z.ZodTypeDef, unknown> = z.unknown().transform((value, context) => {
+  try {
+    return parseReportFinding(value);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      error.issues.forEach(issue => context.addIssue(issue));
+      return z.NEVER;
+    }
+    throw error;
+  }
+});
+
+export const reportAgentRunSchema = agentRunSchema.extend({
+  agentName: z.union([reviewAgentNameSchema, z.literal("Generalist")]),
+  findings: z.array(reportFindingSchema)
+}).strict();
+
 export type TokenUsage = z.infer<typeof tokenUsageSchema>;
-export type AgentRun = z.infer<typeof agentRunSchema>;
+type WireAgentRun = z.infer<typeof agentRunSchema>;
+export type AgentRun = Omit<WireAgentRun, "agentName" | "findings"> & {
+  agentName: WireAgentRun["agentName"] | "Generalist";
+  findings: ReviewFinding[];
+};
 export type ReviewPlan = z.infer<typeof reviewPlanSchema>;

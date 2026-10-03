@@ -14,6 +14,7 @@ import {
   type ReviewCoverage,
   type ReviewFinding,
   type ReviewReport,
+  isReviewAgentName,
   type RiskLevel
 } from "@consistency/schema";
 import { summaryForFinalFindings } from "./summary.js";
@@ -206,7 +207,12 @@ function joinsByLineProximity(left: ReviewFinding, right: ReviewFinding, options
   return !isNearDuplicate(left, right) && isLineAndTopicNeighbor(left, right, options);
 }
 
+function isGeneralist(finding: ReviewFinding): boolean {
+  return finding.source === "generalist" || finding.agent === "Generalist";
+}
+
 function belongsTogether(seed: ReviewFinding, finding: ReviewFinding, options: DedupOptions = {}): boolean {
+  if (isGeneralist(seed) !== isGeneralist(finding) && isLineNeighbor(seed, finding)) return true;
   if (differentTriggers(seed, finding) || !hasTopicOverlap(seed, finding, options)) return false;
   if (lineRangeOf(seed) && lineRangeOf(finding)) return isLineNeighbor(seed, finding);
   return isNearDuplicate(seed, finding);
@@ -225,12 +231,21 @@ function evidenceSpecificity(finding: ReviewFinding): number {
 }
 
 function prefer(left: ReviewFinding, right: ReviewFinding): ReviewFinding {
+  const generalistRank = (finding: ReviewFinding): number => finding.source === "generalist" || finding.agent === "Generalist" ? 0 : 1;
   const score =
-    severityRank[left.severity] - severityRank[right.severity]
+    generalistRank(left) - generalistRank(right)
+    || severityRank[left.severity] - severityRank[right.severity]
     || evidenceSpecificity(left) - evidenceSpecificity(right)
     || confidenceRank[left.confidence] - confidenceRank[right.confidence];
   if (score !== 0) return score > 0 ? left : right;
   return left.id.localeCompare(right.id) <= 0 ? left : right;
+}
+
+function withMaxSupport(survivor: ReviewFinding, members: readonly ReviewFinding[]): ReviewFinding {
+  const supports = members.flatMap(member => member.support === undefined ? [] : [member.support]);
+  if (supports.length === 0) return survivor;
+  const support = Math.max(...supports);
+  return survivor.support === support ? survivor : { ...survivor, support };
 }
 
 /**
@@ -277,10 +292,10 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[], discloseAl
   }
 
   const survivorOf = (entry: (typeof clusters)[number]): ReviewFinding => {
-    let result = entry.survivor;
+    let result = withMaxSupport(entry.survivor, entry.members);
     if (entry.lineGrouped || (discloseAllMerges && entry.merged.length > 0)) {
       const alsoReportedBy = [...new Set(entry.members.flatMap(member => [member.agent, ...(member.alsoReportedBy ?? [])]))]
-        .filter(agent => agent !== entry.survivor.agent)
+        .flatMap(agent => agent !== entry.survivor.agent && isReviewAgentName(agent) ? [agent] : [])
         .sort();
       if (alsoReportedBy.length > 0) {
         result = { ...result, alsoReportedBy };
@@ -289,7 +304,7 @@ export function deduplicateAndSortFindings(findings: ReviewFinding[], discloseAl
         const mergedFindings = [
           ...(result.mergedFindings ?? []),
           ...entry.merged.flatMap(m => [{
-            agent: m.agent,
+            ...(m.agent === "Generalist" ? {} : { agent: m.agent }),
             title: m.title,
             summary: (m.evidence || m.reasoning || m.recommendation || m.title).replace(/\s+/g, " ").trim().slice(0, 300)
           }, ...(m.mergedFindings ?? [])])

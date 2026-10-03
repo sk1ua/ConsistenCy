@@ -304,7 +304,7 @@ export function parseWireComposeReviewResponse(data: unknown): DomainComposeRevi
  * through unchanged; an absent withheldFindings field stays absent.
  */
 export function reviewReportToWire(report: ReviewReport): ReviewReport {
-  return reviewReportSchema.parse(report);
+  return reviewReportSchema.parse(JSON.parse(JSON.stringify(report)));
 }
 
 export function reviewReportFromWire(wire: unknown): ReviewReport {

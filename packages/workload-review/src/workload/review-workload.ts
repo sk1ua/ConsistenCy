@@ -64,6 +64,8 @@ import { scopeDeterministicFindings, scopeEvidenceInputs } from "../context/dete
 import { changedLineRanges, type LineRange } from "../agents/grounding.js";
 import { runSupervisorBody } from "../supervisor/supervisor.js";
 import { runReviewAgentBody } from "../agents/review-agent.js";
+import { runGeneralistAgreement } from "../agents/generalist.js";
+import { buildGroundingContext, groundReviewFindings } from "../agents/grounding.js";
 import { numberedChangedLines } from "../synthesis/finding-score.js";
 import { runSynthesizerBody } from "../synthesis/synthesizer.js";
 import {
@@ -405,6 +407,11 @@ export class ReviewWorkload {
       //    Lean mode skips the Planner; the third specialist is opt-in.
       // -------------------------------------------------------------------
       const leanReviewer = options.lean === true && options.leanReviewer === true;
+      const leanGeneralist = options.lean === true && options.leanGeneralist === true;
+      const leanVote = options.lean === true && options.leanVote === true;
+      if (leanVote && (options.leanSecondSample ?? []).length > 0) {
+        console.warn("CONSISTENCY_LEAN_VOTE supersedes CONSISTENCY_LEAN_SECOND_SAMPLE; the second-sample union is ignored");
+      }
       const leanAgents = leanReviewer ? LEAN_REVIEWER_AGENTS : LEAN_AGENTS;
       const leanPlan = options.lean === true ? {
         enabledAgents: [...leanAgents],
@@ -475,6 +482,15 @@ export class ReviewWorkload {
       const agentWithheld: Array<NonNullable<Parameters<typeof runSynthesizerBody>[0]["agentWithheld"]>[number]> = [];
       let completedSpecialists = 0;
       const enabledAgents = [...plan.enabledAgents];
+      const generalistTask = leanGeneralist
+        ? runGeneralistAgreement(agentContext.diff, (request) => {
+          if (!this.#options.modelDriver.invokeRaw) return Promise.reject(new Error("generalist raw completion is unavailable"));
+          return this.#options.modelDriver.invokeRaw({ ...request, signal: this.#abort.signal }).then(result => ({
+            content: result.data,
+            tokenUsage: result.tokenUsage
+          }));
+        }, this.#abort.signal)
+        : undefined;
       // One additional pass at most, with a fresh ACB/capability budget. It
       // cannot resurrect a terminal ACB or bypass Scheduler admission.
       const scheduledAgents = options.lean === true ? leanAgents : REVIEW_AGENTS;
@@ -568,7 +584,8 @@ export class ReviewWorkload {
           omitBaselineSnippets: isRecovery,
           recordWithheld: options.reportWithheld === true,
           maintFilter: options.lean === true && options.leanReviewer === true && options.leanMaintFilter === true,
-          secondSample: options.lean === true && (options.leanSecondSample ?? []).includes(agentName),
+          secondSample: options.lean === true && !isRecovery && !leanVote && (options.leanSecondSample ?? []).includes(agentName),
+          vote: leanVote && !isRecovery,
           facades: runtime.facades,
           persistence,
           providerName: options.modelDriver.provider,
@@ -584,6 +601,47 @@ export class ReviewWorkload {
           errors.push(`${agentName}: ${result.error}`);
           failedAgents.push(agentName);
         }
+      }
+
+      if (generalistTask && scheduler.getRun(runId)?.state !== "CANCELLED") {
+        const generalist = await generalistTask;
+        const grounding = buildGroundingContext(agentContext, deterministicResult);
+        const grounded = groundReviewFindings(generalist.findings, grounding, evidenceStore, options.context.headSha);
+        const specialistLimit = options.maxFindingsPerSpecialist ?? 3;
+        const ranked = grounded.findings
+          .map((finding, index) => ({ finding, index }))
+          .sort((left, right) => (right.finding.support ?? 0) - (left.finding.support ?? 0) || left.index - right.index)
+          .map(entry => entry.finding);
+        const kept = ranked.slice(0, specialistLimit);
+        const cappedCount = ranked.length - kept.length;
+        if (options.reportWithheld === true) {
+          for (const finding of ranked.slice(specialistLimit)) {
+            agentWithheld.push({ stage: "specialist-cap", agent: finding.agent, finding });
+          }
+          for (const decision of grounded.rejected) {
+            agentWithheld.push({ stage: "grounding-rejected", agent: decision.finding.agent, finding: decision.finding });
+          }
+        }
+        findings.push(...kept);
+        preExistingIssues.push(...grounded.preExisting.map(decision => decision.finding));
+        totalCappedBySpecialists += cappedCount;
+        const startedAt = new Date().toISOString();
+        persistence.saveAgentRun({
+          id: `agent_${randomUUID()}`,
+          jobId,
+          agentName: "Generalist",
+          status: generalist.failed ? "failed" : "succeeded",
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          inputSummary: [
+            generalist.summary,
+            ...(cappedCount > 0 ? [`${cappedCount} finding(s) capped by specialist limit`] : [])
+          ].join("; "),
+          findings: kept,
+          tokenUsage: generalist.tokenUsage,
+          provider: options.modelDriver.provider,
+          model: options.modelDriver.model,
+        });
       }
 
       // -------------------------------------------------------------------
@@ -799,6 +857,12 @@ export class ReviewWorkload {
         });
         return { text: result.data.summary, tokenUsage: result.tokenUsage, scores: result.data.scores };
       },
+      ...(modelDriver.invokeRaw ? {
+        invokeRaw: async (request: { systemPrompt: string; userPrompt: string; signal?: AbortSignal }) => {
+          const result = await modelDriver.invokeRaw!({ ...request, signal });
+          return { content: result.data, tokenUsage: result.tokenUsage };
+        }
+      } : {})
     };
   }
 

@@ -4,6 +4,10 @@ import { basename, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WORKING_TREE_REV, prReviewContextSchema } from "@consistency/schema";
 import { execGit } from "@consistency/vcs-core";
+import { InMemoryJobQueue } from "../../jobQueue";
+import { DeterministicAnalyzer } from "../deterministic";
+import { MockLLMProvider } from "../llm/mockProvider";
+import { createReviewRuntime } from "../workloadRuntime";
 import { buildLocalContext } from "./buildLocalContext";
 
 let root: string;
@@ -121,6 +125,189 @@ describe("buildLocalContext", { timeout: 30_000 }, () => {
   it("rejects a half-specified range", async () => {
     await expect(buildLocalContext({ jobId: "job_local_5", repoPath: root, baseRef: "main" }))
       .rejects.toThrow(/must be supplied together/);
+  });
+});
+
+describe("buildLocalContext range head read", { timeout: 30_000 }, () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const directory of roots) rmSync(directory, { recursive: true, force: true });
+  });
+
+  async function commitRange(): Promise<{ root: string; git: (args: string[]) => ReturnType<typeof execGit> }> {
+    const root = mkdtempSync(join(tmpdir(), "consistency-range-read-"));
+    roots.push(root);
+    const git = (args: string[]) => execGit(args, { cwd: root });
+    const write = (name: string, content: string) => {
+      const full = join(root, name);
+      mkdirSync(join(full, ".."), { recursive: true });
+      writeFileSync(full, content);
+    };
+    await git(["init"]);
+    await git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    await git(["config", "user.name", "Test Runner"]);
+    await git(["config", "user.email", "test@example.com"]);
+    await git(["config", "commit.gpgsign", "false"]);
+    write("package.json", JSON.stringify({ name: "at-a" }));
+    write("keep.ts", "export const keep = \"A\";\n");
+    write("drop.ts", "export const drop = 1;\n");
+    write("old-name.ts", "export const moved = \"A\";\n");
+    write(".env", "TOKEN=secret\n");
+    await git(["add", "."]);
+    await git(["commit", "-m", "A"]);
+    await git(["checkout", "-B", "feature", "main"]);
+    write("keep.ts", "export const keep = \"B\";\n");
+    write("package.json", JSON.stringify({ name: "at-b" }));
+    write(".env", "TOKEN=still-secret\n");
+    write("huge.ts", "x".repeat(64));
+    await git(["add", "."]);
+    await git(["mv", "old-name.ts", "new-name.ts"]);
+    write("new-name.ts", "export const moved = \"B\";\n");
+    await git(["add", "new-name.ts"]);
+    await git(["rm", "drop.ts"]);
+    await git(["commit", "-m", "B"]);
+    await git(["checkout", "--detach"]);
+    write("keep.ts", "export const keep = \"C\";\n");
+    write("renamed.ts", "export const renamed = \"C\";\n");
+    write("package.json", JSON.stringify({ name: "at-c" }));
+    await git(["add", "."]);
+    await git(["commit", "-m", "C"]);
+    return { root, git };
+  }
+
+  it("keeps workspace head contents when the switch is off, even for a range", async () => {
+    const { root } = await commitRange();
+    const { context } = await buildLocalContext({
+      jobId: "job_range_off",
+      repoPath: root,
+      baseRef: "main",
+      headRef: "feature"
+    });
+    expect(context.fileContents["keep.ts"]).toBe("export const keep = \"C\";\n");
+    expect(context.projectMetadata["package.json"]).toContain("at-c");
+  });
+
+  it("reads head file contents and metadata from the head revision when the switch is on", async () => {
+    const { root, git } = await commitRange();
+    const readHead = () => buildLocalContext({
+      jobId: "job_range_on",
+      repoPath: root,
+      baseRef: "main",
+      headRef: "feature",
+      rangeReadFromGit: true
+    }, { maxFileBytes: 32 });
+    const atLaterCommit = await readHead();
+    await git(["checkout", "feature"]);
+    const atHead = await readHead();
+    expect(atHead.context.fileContents).toEqual(atLaterCommit.context.fileContents);
+    expect(atHead.context.projectMetadata).toEqual(atLaterCommit.context.projectMetadata);
+    const { context } = atLaterCommit;
+    expect(context.fileContents["keep.ts"]).toBe("export const keep = \"B\";\n");
+    expect(context.fileContents["new-name.ts"]).toBe("export const moved = \"B\";\n");
+    expect(context.fileContents["old-name.ts"]).toBeUndefined();
+    expect(context.fileContents["drop.ts"]).toBeUndefined();
+    expect(context.fileContents["huge.ts"]).toBeUndefined();
+    expect(context.fileContents[".env"]).toBeUndefined();
+    expect(context.projectMetadata["package.json"]).toContain("at-b");
+    expect(context.projectMetadata["package.json"]).not.toContain("at-c");
+  });
+
+  it("matches the workspace read when the checkout is already at head", async () => {
+    const { root, git } = await commitRange();
+    await git(["checkout", "feature"]);
+    const off = await buildLocalContext({
+      jobId: "job_range_at_head_off",
+      repoPath: root,
+      baseRef: "main",
+      headRef: "feature"
+    });
+    const on = await buildLocalContext({
+      jobId: "job_range_at_head_on",
+      repoPath: root,
+      baseRef: "main",
+      headRef: "feature",
+      rangeReadFromGit: true
+    });
+    expect(on.context.fileContents).toEqual(off.context.fileContents);
+    expect(on.context.projectMetadata).toEqual(off.context.projectMetadata);
+    expect(on.context.baseFileContents).toEqual(off.context.baseFileContents);
+    expect(on.context.diff).toBe(off.context.diff);
+  });
+
+  it("keeps model requests byte-identical when the checkout is already at head", async () => {
+    const { root, git } = await commitRange();
+    await git(["checkout", "feature"]);
+    const captured: Array<{ schemaName: string; systemPrompt: string; userPrompt: string; jsonSchema: unknown }> = [];
+    const provider = new class extends MockLLMProvider {
+      protected override async complete(input: { schemaName: string; systemPrompt: string; userPrompt: string; jsonSchema: unknown }) {
+        captured.push({
+          schemaName: input.schemaName,
+          systemPrompt: input.systemPrompt,
+          userPrompt: input.userPrompt,
+          jsonSchema: input.jsonSchema
+        });
+        return super.complete(input);
+      }
+    }();
+    const analyzer = new DeterministicAnalyzer();
+    const run = async (rangeReadFromGit: boolean) => {
+      const before = captured.length;
+      const store = new InMemoryJobQueue();
+      const job = store.acceptWebhookJob({
+        delivery: { deliveryId: `range-${rangeReadFromGit}`, event: "pull_request", action: "opened" },
+        job: {
+          kind: "pull_request",
+          repository: "test/example",
+          pullRequestNumber: 1,
+          installationId: 1,
+          baseSha: "a".repeat(40),
+          headSha: "b".repeat(40),
+          senderLogin: "octocat",
+          action: "opened",
+          accessMode: "local_git"
+        }
+      }).job!;
+      store.markRunning(job.id);
+      await createReviewRuntime({
+        contextBuilder: async input => {
+          const built = await buildLocalContext({
+            jobId: input.jobId,
+            repoPath: root,
+            baseRef: "main",
+            headRef: "feature",
+            ...(rangeReadFromGit ? { rangeReadFromGit: true } : {})
+          });
+          return { ...built.context, repositoryFullName: "test/example", pullRequestNumber: 1 };
+        },
+        provider,
+        jobStore: store,
+        deterministicAnalyzer: analyzer,
+        reportLanguage: "en-US",
+        reviewWorkflow: null
+      }).run({
+        jobId: job.id,
+        repositoryFullName: "test/example",
+        pullRequestNumber: 1,
+        accessMode: "local_git",
+        baseSha: "a".repeat(40),
+        headSha: "b".repeat(40),
+        publicationPolicy: "disabled"
+      });
+      return captured.slice(before);
+    };
+    const off = await run(false);
+    const on = await run(true);
+    expect(on).toEqual(off);
+    expect(off.length).toBeGreaterThan(0);
+  });
+
+  it("ignores the switch outside range mode", async () => {
+    const { root } = await commitRange();
+    writeFileSync(join(root, "keep.ts"), "export const keep = \"dirty\";\n");
+    const off = await buildLocalContext({ jobId: "job_tree", repoPath: root });
+    const on = await buildLocalContext({ jobId: "job_tree", repoPath: root, rangeReadFromGit: true });
+    expect(on.context).toEqual(off.context);
+    expect(on.changedSurface).toEqual(off.changedSurface);
   });
 });
 

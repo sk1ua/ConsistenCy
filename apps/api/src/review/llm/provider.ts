@@ -193,6 +193,35 @@ export abstract class BaseLLMProvider implements LLMProvider {
     return this.invokeWithSchema({ ...request, schema: summarySchema, schemaName: "review-summary" });
   }
 
+  /**
+   * Same transport, temperature, and cancellation as a specialist call. The
+   * generalist prompt already requires JSON, so this path adds no tool schema
+   * and no repair attempt: a bad sample contributes nothing.
+   */
+  async completeRaw(request: { systemPrompt: string; userPrompt: string; signal?: AbortSignal }): Promise<{ content: string; tokenUsage?: TokenUsage }> {
+    if (request.signal?.aborted) {
+      throw request.signal.reason ?? new Error("LLM request was cancelled before dispatch");
+    }
+    try {
+      const completion = await this.complete({
+        systemPrompt: request.systemPrompt,
+        userPrompt: request.userPrompt,
+        schemaName: "generalist-findings",
+        jsonSchema: undefined,
+        signal: request.signal
+      });
+      return { content: completion.content, tokenUsage: parseTokenUsage(completion.tokenUsage) };
+    } catch (error) {
+      if (request.signal?.aborted) {
+        const reason = request.signal.reason ?? error;
+        recordTokenUsageOnError(reason, tokenUsageFromError(error));
+        throw reason;
+      }
+      recordTokenUsageOnError(error, tokenUsageFromError(error));
+      throw error;
+    }
+  }
+
   async *stream(request: LLMStreamRequest): AsyncIterable<LLMStreamEvent> {
     try {
       const completion = await this.complete({

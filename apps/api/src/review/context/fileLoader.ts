@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { isSecretPath } from "@consistency/schema";
+import { execGit, type GitExec } from "@consistency/vcs-core";
 import { redactSensitiveText } from "../../security/redact";
 
 export { isSecretPath };
@@ -70,6 +71,53 @@ export function loadWorkspaceFiles(options: {
     ) {
       continue;
     }
+
+    contents[path] = content;
+    totalBytes += outputSize;
+    if (options.budget) options.budget.used = totalBytes;
+  }
+  return contents;
+}
+
+/**
+ * Same admission rules as {@link loadWorkspaceFiles}, but the bytes come from
+ * `git show <sha>:<path>` instead of the working tree. A missing path is
+ * skipped the way a missing workspace file is skipped.
+ */
+export async function loadRevisionFiles(options: {
+  repoPath: string;
+  sha: string;
+  paths: string[];
+  maxFileBytes?: number;
+  maxTotalBytes?: number;
+  budget?: ByteBudget;
+  runGit?: GitExec;
+}): Promise<Record<string, string>> {
+  const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  const maxTotalBytes = options.budget?.limit ?? options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  let totalBytes = options.budget?.used ?? 0;
+  const contents: Record<string, string> = {};
+  const runGit = options.runGit ?? execGit;
+
+  for (const path of [...new Set(options.paths)]) {
+    if (isSecretPath(path)) continue;
+    let stdout: string;
+    try {
+      ({ stdout } = await runGit(["show", `${options.sha}:${path}`], {
+        cwd: options.repoPath,
+        maxBytes: maxFileBytes
+      }));
+    } catch {
+      // Missing at this revision, or larger than the same per-file cap the
+      // workspace loader applies before reading. Either way the path is skipped,
+      // matching loadWorkspaceFiles on a file it cannot read.
+      continue;
+    }
+    if (stdout.includes("\0")) continue;
+
+    const content = redactSensitiveText(stdout);
+    const outputSize = Buffer.byteLength(content, "utf8");
+    if (outputSize > maxFileBytes || totalBytes + outputSize > maxTotalBytes) continue;
 
     contents[path] = content;
     totalBytes += outputSize;

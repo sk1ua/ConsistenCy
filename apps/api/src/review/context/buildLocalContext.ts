@@ -9,7 +9,7 @@ import {
   type VcsChangedFile
 } from "@consistency/schema";
 import { LocalGitAdapter, execGit, type GitExec } from "@consistency/vcs-core";
-import { loadWorkspaceFiles, isSecretPath } from "./fileLoader";
+import { loadRevisionFiles, loadWorkspaceFiles, isSecretPath } from "./fileLoader";
 import { createLocalReviewExcludeFilter } from "../localReviewExclude";
 
 const PROJECT_METADATA_FILES = [
@@ -192,6 +192,12 @@ export type BuildLocalContextInput = {
    */
   baseRef?: string;
   headRef?: string;
+  /**
+   * When true and a committed range is under review, head file contents and
+   * project metadata come from `git show <headSha>` instead of the working
+   * tree. Default off: the workspace path is unchanged.
+   */
+  rangeReadFromGit?: boolean;
 };
 
 export type BuildLocalContextDependencies = {
@@ -278,14 +284,32 @@ export async function buildLocalContext(
     budget
   };
 
-  const fileContents = loadWorkspaceFiles({
-    ...loaderOptions,
-    paths: changedFiles.filter((file) => file.status !== "removed").map((file) => file.path)
-  });
-  const projectMetadata = loadWorkspaceFiles({
-    ...loaderOptions,
-    paths: PROJECT_METADATA_FILES
-  });
+  const headPaths = changedFiles.filter((file) => file.status !== "removed").map((file) => file.path);
+  const readHeadFromGit = input.rangeReadFromGit === true && reviewingRange;
+  const fileContents = readHeadFromGit
+    ? await loadRevisionFiles({
+      ...loaderOptions,
+      repoPath,
+      sha: headSha,
+      paths: headPaths,
+      runGit
+    })
+    : loadWorkspaceFiles({
+      ...loaderOptions,
+      paths: headPaths
+    });
+  const projectMetadata = readHeadFromGit
+    ? await loadRevisionFiles({
+      ...loaderOptions,
+      repoPath,
+      sha: headSha,
+      paths: PROJECT_METADATA_FILES,
+      runGit
+    })
+    : loadWorkspaceFiles({
+      ...loaderOptions,
+      paths: PROJECT_METADATA_FILES
+    });
 
   const maxFileBytes = dependencies.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const baseFileContents: Record<string, string> = {};

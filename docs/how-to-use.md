@@ -111,6 +111,12 @@ npm run review -- --no-memory             # 本次不读写知识记忆
 
 `CONSISTENCY_LEAN_STRICT_MERGE=1` 也只在同时打开 `CONSISTENCY_LEAN=1` 时生效。不同专项、不同诉求的意见不再因为共享标识符被合并；标题或正文几乎相同的重复意见仍会合并。未设置、`0` 和其他值保持原来的合并。
 
+`CONSISTENCY_RANGE_READ_FROM_GIT=1` 只在区间评审（同时给了 base 和 head）时生效。打开后，head 侧的文件内容和项目元数据从 `git show <headSha>` 读取，不再读工作区。区间评测应设置它，这样结果只取决于仓库和两个 ref。未设置、`0` 和其他值，以及非区间评审，都保持原来的工作区读取。
+
+`CONSISTENCY_LEAN_GENERALIST=1` 只在同时打开 `CONSISTENCY_LEAN=1` 时生效。它额外用同一请求调用两次通才，只保留两次都出现的意见，署名为 Generalist。一次失败只贡献 0 条，不把整次评审标成降级。未设置、`0` 和其他值不增加调用，请求和报告 JSON 不变。
+
+`CONSISTENCY_LEAN_VOTE=1` 也只在同时打开 `CONSISTENCY_LEAN=1` 时生效。三个 lean 专项各采样两次，两次都出现的意见带 `support=2`，可以绕过分数线，但不能绕过数量上限；明确打 0 分仍会扣下。它优先于 `CONSISTENCY_LEAN_SECOND_SAMPLE`。第二次失败时保留第一次，并在摘要写明。未设置、`0` 和其他值保持单次采样。
+
 另外有一段**约束块**会一直存在，它不是凑字数：
 
 - `[!]` = 这部分**本次没检查**（不是检查通过了）。

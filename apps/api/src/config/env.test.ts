@@ -34,6 +34,21 @@ describe("loadEnv", () => {
     expect(loadEnv({ CONSISTENCY_LEAN_MAINT_FILTER: "1" }).CONSISTENCY_LEAN_MAINT_FILTER).toBe("1");
   });
 
+  it("preserves the lean generalist and vote values without enabling them by default", () => {
+    expect(loadEnv({}).CONSISTENCY_LEAN_GENERALIST).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_LEAN_GENERALIST: "1" }).CONSISTENCY_LEAN_GENERALIST).toBe("1");
+    expect(loadEnv({ CONSISTENCY_LEAN_GENERALIST: "true" }).CONSISTENCY_LEAN_GENERALIST).toBe("true");
+    expect(loadEnv({}).CONSISTENCY_LEAN_VOTE).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_LEAN_VOTE: "1" }).CONSISTENCY_LEAN_VOTE).toBe("1");
+    expect(loadEnv({ CONSISTENCY_LEAN_VOTE: "0" }).CONSISTENCY_LEAN_VOTE).toBe("0");
+  });
+
+  it("preserves the range git-read value without enabling it by default", () => {
+    expect(loadEnv({}).CONSISTENCY_RANGE_READ_FROM_GIT).toBeUndefined();
+    expect(loadEnv({ CONSISTENCY_RANGE_READ_FROM_GIT: "1" }).CONSISTENCY_RANGE_READ_FROM_GIT).toBe("1");
+    expect(loadEnv({ CONSISTENCY_RANGE_READ_FROM_GIT: "true" }).CONSISTENCY_RANGE_READ_FROM_GIT).toBe("true");
+  });
+
   it("preserves the withheld-findings diagnostic value without enabling it by default", () => {
     expect(loadEnv({}).CONSISTENCY_REPORT_WITHHELD).toBeUndefined();
     expect(loadEnv({ CONSISTENCY_REPORT_WITHHELD: "1" }).CONSISTENCY_REPORT_WITHHELD).toBe("1");

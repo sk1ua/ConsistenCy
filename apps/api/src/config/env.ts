@@ -82,8 +82,14 @@ export const envSchema = z.object({
   CONSISTENCY_LEAN_MAINT_FILTER: z.string().optional(),
   /** Comma-separated lean specialists to sample twice. Empty or unset samples once. */
   CONSISTENCY_LEAN_SECOND_SAMPLE: z.string().optional(),
+  /** Exact "1" adds a lean generalist candidate source. Requires lean. */
+  CONSISTENCY_LEAN_GENERALIST: z.string().optional(),
+  /** Exact "1" votes lean specialist samples. Requires lean and supersedes second sample. */
+  CONSISTENCY_LEAN_VOTE: z.string().optional(),
   /** Exact "1" records withheld findings for diagnostics. Every other value omits them. */
   CONSISTENCY_REPORT_WITHHELD: z.string().optional(),
+  /** Exact "1" reads range-review head files from git. Every other value reads the workspace. */
+  CONSISTENCY_RANGE_READ_FROM_GIT: z.string().optional(),
   /** Exact "1" enables the v2 scoring rubric. Every other value keeps v1. */
   CONSISTENCY_SCORE_RUBRIC: z.string().optional(),
   /** Exact "1" replaces full file context with numbered hunks and units. */

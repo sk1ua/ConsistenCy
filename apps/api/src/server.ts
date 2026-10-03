@@ -308,6 +308,8 @@ export const worker = new ReviewWorker({
     leanReviewer: config.CONSISTENCY_LEAN_REVIEWER === "1",
     leanMaintFilter: config.CONSISTENCY_LEAN_MAINT_FILTER === "1",
     leanSecondSample: parseLeanSecondSample(config.CONSISTENCY_LEAN_SECOND_SAMPLE),
+    ...(config.CONSISTENCY_LEAN_GENERALIST === "1" ? { leanGeneralist: true } : {}),
+    ...(config.CONSISTENCY_LEAN_VOTE === "1" ? { leanVote: true } : {}),
     reportWithheld: config.CONSISTENCY_REPORT_WITHHELD === "1",
     scoreRubricV2: config.CONSISTENCY_SCORE_RUBRIC === "1",
     compactContext: config.CONSISTENCY_COMPACT_CONTEXT === "1",
@@ -323,6 +325,7 @@ export const worker = new ReviewWorker({
     },
     workspaceRoot: config.workspaceRoot,
     contextBuilder: createContextBuilder({
+      ...(config.CONSISTENCY_RANGE_READ_FROM_GIT === "1" ? { rangeReadFromGit: true } : {}),
       github: {
         authenticator,
         publicReadToken: config.GITHUB_PUBLIC_READ_TOKEN,

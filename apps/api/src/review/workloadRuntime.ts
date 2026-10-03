@@ -99,6 +99,10 @@ export type ReviewWorkflowDependencies = {
   leanMaintFilter?: boolean;
   /** Lean specialists sampled twice. Empty or unset samples once. Requires lean. */
   leanSecondSample?: readonly string[];
+  /** Default-off generalist candidate source. Requires lean. */
+  leanGeneralist?: boolean;
+  /** Default-off two-sample vote. Requires lean and supersedes leanSecondSample. */
+  leanVote?: boolean;
   /** Default-off diagnostic recording of withheld findings. */
   reportWithheld?: boolean;
   /** Default-off v2 scoring rubric. Unset keeps the v1 instruction and cap. */
@@ -109,6 +113,11 @@ export type ReviewWorkflowDependencies = {
   leanConsistencyStrict?: boolean;
   /** Default-off strict cross-agent merge. Requires lean as well. */
   leanStrictMerge?: boolean;
+  /**
+   * Range reviews read head files from git. The context builder consumes this;
+   * it is not a workload option and must not change agent requests.
+   */
+  rangeReadFromGit?: boolean;
   runtimeRegistry?: RuntimeRegistry;
 };
 
@@ -396,6 +405,8 @@ export function createReviewRuntime(dependencies: ReviewWorkflowDependencies): R
         leanReviewer: dependencies.leanReviewer,
         leanMaintFilter: dependencies.leanMaintFilter,
         leanSecondSample: dependencies.leanSecondSample,
+        ...(dependencies.leanGeneralist === true ? { leanGeneralist: true } : {}),
+        ...(dependencies.leanVote === true ? { leanVote: true } : {}),
         reportWithheld: dependencies.reportWithheld,
         scoreRubricV2: dependencies.scoreRubricV2,
         compactContext: dependencies.compactContext,

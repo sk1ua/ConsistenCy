@@ -44,5 +44,10 @@ export interface LLMProvider {
   generateStructuredFinding(request: FindingGenerationRequest): Promise<StructuredResult<ReviewFinding[]>>;
   generateAgentRun(request: FindingGenerationRequest): Promise<StructuredResult<Pick<AgentRun, "findings">>>;
   generateSummary(request: { systemPrompt: string; userPrompt: string; signal?: AbortSignal }): Promise<StructuredResult<{ summary: string }>>;
+  /**
+   * Optional raw completion. Absent providers keep the previous surface; only
+   * the opt-in lean generalist asks for it, using the same model settings.
+   */
+  completeRaw?(request: { systemPrompt: string; userPrompt: string; signal?: AbortSignal }): Promise<{ content: string; tokenUsage?: TokenUsage }>;
   stream?(request: LLMStreamRequest): AsyncIterable<LLMStreamEvent>;
 }

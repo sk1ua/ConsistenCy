@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agentRunSchema, reviewAgentNameSchema, reviewFindingSchema, type Severity } from "./review";
+import { reportAgentRunSchema, reportFindingSchema, reviewAgentNameSchema, type Severity } from "./review";
 import type { DomainFileResult } from "./protocol";
 
 export const riskLevelSchema = z.enum(["critical", "high", "medium", "low"]);
@@ -169,14 +169,14 @@ export const reviewReportSchema = z.object({
   riskBand: z.enum(["high", "medium", "low", "none"]).optional(),
   llmProvider: z.string().trim().min(1).optional(),
   llmModel: z.string().trim().min(1).optional(),
-  agentRuns: z.array(agentRunSchema),
+  agentRuns: z.array(reportAgentRunSchema),
   /** Known prompt input + cached input across all runs, including failed calls. */
   promptTokens: z.number().int().nonnegative().optional(),
   /** Usage missing on failed/partial calls is unknown, not a zero-cost call. */
   tokenUsageNotes: z.array(z.string().trim().min(1)).optional(),
-  findings: z.array(reviewFindingSchema),
+  findings: z.array(reportFindingSchema),
   /** Findings outside the changed-line scope; excluded from the main verdict and score. */
-  preExistingIssues: z.array(reviewFindingSchema).optional(),
+  preExistingIssues: z.array(reportFindingSchema).optional(),
   /**
    * How many grounded findings were withheld from the main list after scoring
    * (below the score floor, past the per-file cap, or past the total cap).
@@ -196,7 +196,7 @@ export const reviewReportSchema = z.object({
    * (same file, near-identical title). Kept for honesty instead of being
    * silently dropped. Optional for backward compatibility.
    */
-  duplicates: z.array(reviewFindingSchema).optional(),
+  duplicates: z.array(reportFindingSchema).optional(),
   /**
    * Diagnostic copies of findings a filter withheld. Present only when the
    * caller opts in; absent means the report is byte-identical to the count-only form.
@@ -210,7 +210,7 @@ export const reviewReportSchema = z.object({
     agent: z.string(),
     score: z.number().int().optional(),
     scoreReason: z.string().optional(),
-    finding: reviewFindingSchema,
+    finding: reportFindingSchema,
   }).strict()).optional(),
   /**
    * Agent execution coverage. Optional so persisted reports from before this

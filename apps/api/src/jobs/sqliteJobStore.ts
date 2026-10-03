@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  agentRunSchema,
+  reportAgentRunSchema,
   publishOutboxItemSchema,
   reviewReportSchema,
   reviewSnapshotSchema,
@@ -571,7 +571,7 @@ export class SQLiteJobStore implements ReviewJobStore {
   }
 
   saveAgentRun(agentRun: AgentRun): void {
-    const validated = agentRunSchema.parse(agentRun);
+    const validated = reportAgentRunSchema.parse(agentRun);
     this.database.prepare(`
       INSERT INTO agent_runs (
         id, job_id, agent_name, status, started_at, finished_at,
@@ -603,7 +603,7 @@ export class SQLiteJobStore implements ReviewJobStore {
 
   listAgentRuns(jobId: string): AgentRun[] {
     const rows = this.database.prepare("SELECT * FROM agent_runs WHERE job_id = ? ORDER BY started_at ASC").all(jobId) as any[];
-    return rows.map(row => agentRunSchema.parse({
+    return rows.map(row => reportAgentRunSchema.parse({
       id: row.id,
       jobId: row.job_id,
       agentName: row.agent_name,

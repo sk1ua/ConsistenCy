@@ -120,6 +120,21 @@ export function resolveReportWithheld(environment: NodeJS.ProcessEnv = process.e
   return environment.CONSISTENCY_REPORT_WITHHELD === "1";
 }
 
+/** Exact env value "1" reads range head files from git. Every other value reads the workspace. */
+export function resolveRangeReadFromGit(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_RANGE_READ_FROM_GIT === "1";
+}
+
+/** Exact env value "1" adds the lean generalist. The workload also requires lean. */
+export function resolveLeanGeneralist(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_LEAN_GENERALIST === "1";
+}
+
+/** Exact env value "1" votes lean specialists. The workload also requires lean. */
+export function resolveLeanVote(environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment.CONSISTENCY_LEAN_VOTE === "1";
+}
+
 /** Exact env value "1" enables the v2 scoring rubric. */
 export function resolveScoreRubricV2(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment.CONSISTENCY_SCORE_RUBRIC === "1";

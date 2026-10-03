@@ -108,6 +108,16 @@ function rankScore(finding: ReviewFinding): number {
 }
 
 /**
+ * Agreed samples outrank the absolute floor, except a synthesizer score of
+ * exactly 0. Unset support keeps the historical floor.
+ */
+function belowFloor(finding: ReviewFinding, minScore: number): boolean {
+  if (finding.score === undefined) return false;
+  if ((finding.support ?? 0) >= 2) return finding.score === 0;
+  return finding.score < minScore;
+}
+
+/**
  * Attach the synthesizer's scores, then apply the score floor, the per-file
  * cap, and the total cap. Caps are applied highest-score-first, so the most
  * valuable findings survive; the surviving list is returned in the report's
@@ -135,11 +145,14 @@ export function applyFindingScoreFilter(
 
   // A provider that ignored the scoring instruction must not empty the report:
   // only a finding carrying a real score below the floor is withheld.
-  const aboveFloor = scored.filter(finding => finding.score === undefined || finding.score >= minScore);
+  // support >= 2 is withheld on score only when the synthesizer scored it 0.
+  const aboveFloor = scored.filter(finding => !belowFloor(finding, minScore));
   const lowScoreCount = scored.length - aboveFloor.length;
   const ranked = aboveFloor
     .map((finding, index) => ({ finding, index }))
-    .sort((left, right) => rankScore(right.finding) - rankScore(left.finding) || left.index - right.index)
+    .sort((left, right) => rankScore(right.finding) - rankScore(left.finding)
+      || (rankScore(left.finding) === rankScore(right.finding) ? (right.finding.support ?? 0) - (left.finding.support ?? 0) : 0)
+      || left.index - right.index)
     .map(entry => entry.finding);
 
   const perFileCounts = new Map<string, number>();
@@ -151,7 +164,7 @@ export function applyFindingScoreFilter(
   let capPerFileCount = 0;
   let capTotalCount = 0;
   for (const finding of scored) {
-    if (finding.score !== undefined && finding.score < minScore) record("low-score", finding);
+    if (belowFloor(finding, minScore)) record("low-score", finding);
   }
   for (const finding of ranked) {
     const fileKey = finding.file.toLowerCase();

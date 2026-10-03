@@ -59,6 +59,11 @@ export interface ModelDriver {
   invokeStructured<T>(request: ModelStructuredRequest<T>): Promise<ModelResult<T>>;
   invokeAgentFindings(request: ModelAgentFindingsRequest): Promise<ModelResult<ReviewFinding[]>>;
   invokeSummary(request: ModelTextRequest): Promise<ModelResult<SummaryResult>>;
+  /**
+   * Optional raw completion. Used only by the opt-in lean generalist, whose
+   * JSON is not a review-finding tool schema. Unset drivers never see the call.
+   */
+  invokeRaw?(request: ModelTextRequest): Promise<ModelResult<string>>;
 }
 
 /**
@@ -86,6 +91,15 @@ export interface LegacyProviderLike {
     userPrompt: string;
     signal?: AbortSignal;
   }): Promise<{ data: SummaryResult; tokenUsage?: TokenUsage }>;
+  /**
+   * Optional raw completion. Absent providers keep the previous adapter
+   * surface; only the opt-in generalist asks for it.
+   */
+  completeRaw?(request: {
+    systemPrompt: string;
+    userPrompt: string;
+    signal?: AbortSignal;
+  }): Promise<{ content: string; tokenUsage?: TokenUsage }>;
 }
 
 /**
@@ -103,5 +117,11 @@ export function legacyProviderModelDriver(provider: LegacyProviderLike): ModelDr
       return { data: result.data.findings, tokenUsage: result.tokenUsage };
     },
     invokeSummary: (request) => provider.generateSummary(request),
+    ...(provider.completeRaw ? {
+      invokeRaw: async (request: ModelTextRequest) => {
+        const result = await provider.completeRaw!(request);
+        return { data: result.content, tokenUsage: result.tokenUsage };
+      }
+    } : {})
   };
 }

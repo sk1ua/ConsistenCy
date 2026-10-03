@@ -91,6 +91,48 @@ describe("applyFindingScoreFilter", () => {
     expect(relaxed.filteredCount).toBe(0);
   });
 
+  it("keeps an agreed finding below the floor unless the synthesizer scored it zero", () => {
+    const agreed = finding({ id: "agreed", source: "generalist", support: 2, agent: "Generalist" });
+    const specialist = finding({ id: "specialist", support: 1, file: "mycli/other.py" });
+    const kept = applyFindingScoreFilter(
+      [agreed, specialist],
+      [{ id: "agreed", score: 3, reason: "reproduced" }, { id: "specialist", score: 4, reason: "below floor" }]
+    );
+    expect(kept.findings.map(entry => entry.id)).toEqual(["agreed"]);
+    expect(kept.breakdown).toMatchObject({ lowScore: 1 });
+
+    const zero = applyFindingScoreFilter(
+      [agreed],
+      [{ id: "agreed", score: 0, reason: "not a defect" }],
+      { recordWithheld: true }
+    );
+    expect(zero.findings).toEqual([]);
+    expect(zero.withheld).toEqual([{ stage: "low-score", finding: expect.objectContaining({ source: "generalist", support: 2, score: 0 }) }]);
+  });
+
+  it("still applies per-file and total caps to agreed findings and prefers higher support on a tie", () => {
+    const agreed = [0, 1, 2].map(index => finding({
+      id: `agreed-${index}`, source: "generalist", support: 2, agent: "Generalist", startLine: 10 + index, endLine: 10 + index,
+    }));
+    const cappedFile = applyFindingScoreFilter(agreed, scoresFor(agreed, () => 9), { maxPerFile: 2, maxReported: 8 });
+    expect(cappedFile.findings.map(entry => entry.id)).toEqual(["agreed-0", "agreed-1"]);
+    expect(cappedFile.breakdown).toMatchObject({ capPerFile: 1 });
+
+    const many = Array.from({ length: 4 }, (_, index) => finding({
+      id: `total-${index}`, source: "generalist", support: 2, agent: "Generalist", file: `mycli/f${index}.py`,
+    }));
+    const cappedTotal = applyFindingScoreFilter(many, scoresFor(many, () => 9), { maxReported: 2, maxPerFile: 4 });
+    expect(cappedTotal.findings).toHaveLength(2);
+    expect(cappedTotal.breakdown).toMatchObject({ capTotal: 2 });
+
+    const tied = [
+      finding({ id: "low-support", support: 1 }),
+      finding({ id: "high-support", support: 2, file: "mycli/other.py" }),
+    ];
+    const tie = applyFindingScoreFilter(tied, scoresFor(tied, () => 8), { maxReported: 1, maxPerFile: 4 });
+    expect(tie.findings.map(entry => entry.id)).toEqual(["high-support"]);
+  });
+
   it("still bounds the main list when the provider returns no scores at all", () => {
     const findings = Array.from({ length: 10 }, (_, index) =>
       finding({ id: `h-${index}`, file: `mycli/g${index}.py` })

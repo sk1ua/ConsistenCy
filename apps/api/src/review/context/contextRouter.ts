@@ -22,6 +22,11 @@ export type ContextRouterDependencies = {
   github: Parameters<typeof buildPRContext>[1];
   local?: BuildLocalContextDependencies;
   /**
+   * Range reviews read head file contents from git instead of the working
+   * tree. Unset keeps the workspace read. Working-tree reviews ignore it.
+   */
+  rangeReadFromGit?: boolean;
+  /**
    * Fired when a WORKING-TREE review's change surface is captured (audit
    * P1-01). Working-tree reviews have no head commit, so the host persists
    * this surface here — before review execution proceeds — making the
@@ -50,7 +55,12 @@ export function createContextBuilder(dependencies: ContextRouterDependencies): C
         ? {}
         : { baseRef: input.baseSha, headRef: input.headSha };
       const { context, changedSurface } = await buildLocalContext(
-        { jobId: input.jobId, repoPath: input.repoPath, ...range },
+        {
+          jobId: input.jobId,
+          repoPath: input.repoPath,
+          ...range,
+          ...(dependencies.rangeReadFromGit === true ? { rangeReadFromGit: true } : {})
+        },
         dependencies.local
       );
       dependencies.onWorkingTreeSurface?.({

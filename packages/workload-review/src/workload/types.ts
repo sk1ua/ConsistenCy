@@ -175,6 +175,10 @@ export interface ReviewWorkloadOptions {
   readonly leanMaintFilter?: boolean;
   /** Lean specialists sampled twice. Empty or unset samples once. Requires lean. */
   readonly leanSecondSample?: readonly string[];
+  /** Default-off generalist candidate source. Requires lean. */
+  readonly leanGeneralist?: boolean;
+  /** Default-off two-sample vote. Requires lean and supersedes leanSecondSample. */
+  readonly leanVote?: boolean;
   /** Default-off diagnostic recording of withheld findings. Unset omits the field. */
   readonly reportWithheld?: boolean;
   /**

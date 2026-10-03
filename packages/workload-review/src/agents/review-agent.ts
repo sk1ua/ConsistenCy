@@ -20,7 +20,7 @@ import {
   type EvidenceSnapshot,
 } from "@consistency/kernel";
 import { mergeTokenUsage, recordTokenUsageOnError, tokenUsageFromError, type AgentRun, type DomainAnalyzeSuccess, type PRReviewContext, type RelevantContext, type ReviewFinding, type TokenUsage } from "@consistency/schema";
-import { mergeSampleFindings } from "./second-sample.js";
+import { computeSampleSupport, mergeSampleFindings } from "./second-sample.js";
 import type { AgentFiberHandle } from "@consistency/harness-core";
 import { buildAgentPrompt, buildMaintainerReviewPrompt } from "./prompts.js";
 import { buildGroundingContext, groundReviewFindings } from "./grounding.js";
@@ -45,11 +45,15 @@ function summariseGrounding(changedFileCount: number, rejected: number, downgrad
 
 const severityRank = { critical: 5, high: 4, medium: 3, low: 2, info: 1 } as const;
 
-function capFindings(findings: ReviewFinding[], limit: number, maxCoverage = Infinity): ReviewFinding[] {
+function capFindings(findings: ReviewFinding[], limit: number, maxCoverage = Infinity, bySupport = false): ReviewFinding[] {
   let coverageCount = 0;
-  return [...findings].sort((left, right) => severityRank[right.severity] - severityRank[left.severity]
-    || (right.evidence.length + right.reasoning.length) - (left.evidence.length + left.reasoning.length)
-    || left.id.localeCompare(right.id))
+  const ordered = findings.map((finding, index) => ({ finding, index }));
+  ordered.sort((left, right) => bySupport
+    ? (right.finding.support ?? 0) - (left.finding.support ?? 0) || left.index - right.index
+    : severityRank[right.finding.severity] - severityRank[left.finding.severity]
+      || (right.finding.evidence.length + right.finding.reasoning.length) - (left.finding.evidence.length + left.finding.reasoning.length)
+      || left.finding.id.localeCompare(right.finding.id));
+  return ordered.map(entry => entry.finding)
     .filter(finding => !isMissingCoverageFinding(finding) || ++coverageCount <= maxCoverage)
     .slice(0, limit);
 }
@@ -91,6 +95,8 @@ export interface ReviewAgentBodyOptions {
   readonly maintFilter?: boolean;
   /** Sample this specialist twice with the same prompt and union the findings. */
   readonly secondSample?: boolean;
+  /** Sample this specialist twice and record agreement. Requires lean. */
+  readonly vote?: boolean;
 }
 
 export interface WithheldFindingRecord {
@@ -157,22 +163,31 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       let modelResult: { findings: ReviewFinding[]; tokenUsage?: TokenUsage };
       let secondSampleFailed = false;
       let secondSampleAdded = 0;
+      let voteSummary: string | undefined;
+      const resample = options.secondSample === true || options.vote === true;
       try {
         modelResult = await options.facades.llm.invokeAgentFindings({ agent: agentName, ...prompt });
         paidUsage = modelResult.tokenUsage;
-        if (options.secondSample === true) {
+        if (resample) {
           try {
             const second = await options.facades.llm.invokeAgentFindings({ agent: agentName, ...prompt });
             paidUsage = mergeTokenUsage(paidUsage, second.tokenUsage);
-            const merged = mergeSampleFindings(modelResult.findings, second.findings);
-            secondSampleAdded = merged.length - modelResult.findings.length;
-            modelResult = { findings: merged, tokenUsage: paidUsage };
+            if (options.vote === true) {
+              const voted = computeSampleSupport(modelResult.findings, second.findings);
+              voteSummary = `vote: n1=${voted.n1}, n2=${voted.n2}, agreed=${voted.agreed}, J=${voted.jaccard.toFixed(2)}${voted.fallback ? `, fallback (J=${voted.jaccard.toFixed(2)})` : ""}`;
+              modelResult = { findings: voted.findings, tokenUsage: paidUsage };
+            } else {
+              const merged = mergeSampleFindings(modelResult.findings, second.findings);
+              secondSampleAdded = merged.length - modelResult.findings.length;
+              modelResult = { findings: merged, tokenUsage: paidUsage };
+            }
           } catch (secondError) {
             const secondUsage = tokenUsageFromError(secondError);
             recordTokenUsageOnError(secondError, secondUsage);
             paidUsage = mergeTokenUsage(paidUsage, secondUsage);
             modelResult = { ...modelResult, tokenUsage: paidUsage };
             secondSampleFailed = true;
+            if (options.vote === true) voteSummary = "vote sample failed";
           }
         }
       } finally {
@@ -235,10 +250,10 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
         options.evidenceStore,
         options.headSha,
       );
-      const specialistLimit = options.secondSample === true
+      const specialistLimit = options.secondSample === true && options.vote !== true
         ? 2 * (options.maxFindingsPerSpecialist ?? 3)
         : options.maxFindingsPerSpecialist ?? 3;
-      const capped = capFindings(grounded.findings, specialistLimit, agentName === "Test" ? 1 : Infinity);
+      const capped = capFindings(grounded.findings, specialistLimit, agentName === "Test" ? 1 : Infinity, options.vote === true);
       const cappedCount = grounded.findings.length - capped.length;
       const cappedIds = new Set(capped.map(finding => finding.id));
       for (const finding of grounded.findings) if (!cappedIds.has(finding.id)) record("specialist-cap", finding);
@@ -271,7 +286,8 @@ export async function runReviewAgentBody(options: ReviewAgentBodyOptions): Promi
       if (maintChecked.rejected > 0) {
         summaryParts.push(`${maintChecked.rejected} finding(s) rejected: maintainability doc/refactor noise`);
       }
-      if (secondSampleFailed) summaryParts.push("second sample failed");
+      if (voteSummary) summaryParts.push(voteSummary);
+      else if (secondSampleFailed) summaryParts.push("second sample failed");
       else if (options.secondSample === true) summaryParts.push(`second sample: +${secondSampleAdded} finding(s)`);
 
       const run: AgentRun = {

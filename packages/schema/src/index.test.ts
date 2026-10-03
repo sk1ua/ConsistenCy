@@ -8,6 +8,7 @@ import {
   repositoryCommitsResponseSchema,
   repositoryPullRequestsResponseSchema,
   repositoryReviewsResponseSchema,
+  parseReportFinding,
   reviewFindingSchema,
   reviewPlanSchema,
   reviewReportSchema,
@@ -143,6 +144,18 @@ describe("@consistency/schema", () => {
       uncertainty: "Confirmed from the supplied diff only."
     });
     expect(confirmed.uncertainty).toBe("Confirmed from the supplied diff only.");
+  });
+
+  it("omits unset source and support when a closed-switch finding is parsed for the report", () => {
+    const parsed = parseReportFinding({
+      ...findingBase,
+      confidence: "likely",
+      startLine: 10,
+      endLine: 12
+    });
+    expect(parsed).not.toHaveProperty("source");
+    expect(parsed).not.toHaveProperty("support");
+    expect(JSON.parse(JSON.stringify(parsed))).not.toHaveProperty("source");
   });
 
   it("still rejects keys the finding schema does not declare", () => {

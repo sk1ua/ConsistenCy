@@ -27,7 +27,10 @@ import {
   resolveLeanReviewer,
   resolveLeanMaintFilter,
   resolveLeanSecondSample,
+  resolveLeanGeneralist,
+  resolveLeanVote,
   resolveReportWithheld,
+  resolveRangeReadFromGit,
   resolveCompactContext,
   resolveLeanConsistencyStrict,
   resolveLeanStrictMerge,
@@ -167,7 +170,10 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
   );
 
   const runtime = createReviewRuntime({
-    contextBuilder: createContextBuilder({ github: {} as never }),
+    contextBuilder: createContextBuilder({
+      github: {} as never,
+      ...(resolveRangeReadFromGit(io.environment ?? process.env) ? { rangeReadFromGit: true } : {})
+    }),
     provider,
     jobStore,
     deterministicAnalyzer: analyzer,
@@ -182,6 +188,8 @@ export async function runReview(options: ReviewOptions, io: CommandIO): Promise<
     leanReviewer: resolveLeanReviewer(io.environment ?? process.env),
     leanMaintFilter: resolveLeanMaintFilter(io.environment ?? process.env),
     leanSecondSample: resolveLeanSecondSample(io.environment ?? process.env),
+    ...(resolveLeanGeneralist(io.environment ?? process.env) ? { leanGeneralist: true } : {}),
+    ...(resolveLeanVote(io.environment ?? process.env) ? { leanVote: true } : {}),
     reportWithheld: resolveReportWithheld(io.environment ?? process.env),
     scoreRubricV2: resolveScoreRubricV2(io.environment ?? process.env),
     compactContext: resolveCompactContext(io.environment ?? process.env),

@@ -177,6 +177,8 @@ export interface TestModelDriverOptions {
    * cannot silently pass.
    */
   readonly hangOn?: readonly string[];
+  /** Opt-in raw completion. Absent unless a test turns the generalist on. */
+  readonly generalist?: { readonly content?: string; readonly fail?: boolean };
 }
 
 /** One captured model request: schema + the exact strings submitted. */
@@ -196,7 +198,19 @@ export class TestModelDriver implements ModelDriver {
   /** Full request payloads, for content-policy regression assertions. */
   readonly requests: CapturedModelRequest[] = [];
 
-  constructor(private readonly options: TestModelDriverOptions = {}) {}
+  invokeRaw?(request: { systemPrompt?: string; userPrompt?: string; signal?: AbortSignal }): Promise<{ data: string; tokenUsage?: TokenUsage }>;
+
+  constructor(private readonly options: TestModelDriverOptions = {}) {
+    if (options.generalist) this.invokeRaw = this.#invokeRaw;
+  }
+
+  #invokeRaw(request: { systemPrompt?: string; userPrompt?: string; signal?: AbortSignal }): Promise<{ data: string; tokenUsage?: TokenUsage }> {
+    this.#probe("generalist-findings");
+    this.requests.push({ schemaName: "generalist-findings", systemPrompt: request.systemPrompt, userPrompt: request.userPrompt, signal: request.signal });
+    const content = this.options.generalist?.content ?? "{\"findings\":[]}";
+    if (this.options.generalist?.fail === true) return Promise.reject(new Error("generalist sample failed"));
+    return this.#dispatch("generalist-findings", request.signal, () => ({ data: content, tokenUsage: { totalTokens: 8 } }));
+  }
 
   invokeStructured<T>(request: {
     schemaName: string;
